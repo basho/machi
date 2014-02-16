@@ -135,6 +135,9 @@ init({Dir, ExpPageSize, ExpMaxMem}) ->
     self() ! finish_init,                       % TODO
     {ok, State}.
 
+handle_call(Call, From, #state{max_logical_page=unknown} = State) ->
+    {noreply, NewState} = handle_info(finish_init, State),
+    handle_call(Call, From, NewState);
 handle_call({write, ClientEpoch, _LogicalPN, _PageBin}, _From,
             #state{min_epoch=MinEpoch} = State)
   when ClientEpoch < MinEpoch ->

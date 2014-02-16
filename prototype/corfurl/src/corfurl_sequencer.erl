@@ -50,7 +50,6 @@ get(Pid, NumPages) ->
 
 init({FLUs}) ->
     MLP = get_max_logical_page(FLUs),
-    io:format(user, "~s:init: MLP = ~p\n", [?MODULE, MLP]),
     {ok, MLP + 1}.
 
 handle_call({get, NumPages}, _From, MLP) ->
