@@ -158,7 +158,7 @@ prop_pulse(LocalOrSlave) ->
           {_H, S, Res, Trace, Schedule, Errors} ->
               CheckTrace = check_trace(Trace, Cmds, Seed),
               ?WHENFAIL(
-                 ?QC_FMT("\nState: ~p\n", [S]),
+                 S = S, % ?QC_FMT("\nState: ~p\n", [S]),
                  measure(schedule, length(Schedule),
                  conjunction(
                    [{simple_result, equals(Res, ok)},
@@ -197,7 +197,8 @@ check_trace(Trace, Cmds, _Seed) ->
     %% If you want to see PULSE causing crazy scheduling, then
     %% use this commented conjunction() instead of the real one:
     %% conjunction(
-    %%   [{bogus_order_check_do_not_use_me, equals(Results, lists:usort(Results))}]).
+    %%   [{identity, equals(NaiveAppends, NaiveAppends)},
+    %%    {bogus_order_check_do_not_use_me, equals(Results, lists:usort(Results))}]).
 
     conjunction(
       [{hackkkkk_NumResults_match_NumAppends, equals(length(NaiveAppends), length(Results))},

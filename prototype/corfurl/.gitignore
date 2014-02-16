@@ -1,4 +1,6 @@
 .eunit
+.eqc-info
+current_counterexample.eqc
 deps
 ebin/*.beam
 ebin/*.app
