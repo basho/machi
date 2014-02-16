@@ -24,7 +24,7 @@
          new_range/3,
          read_projection/2,
          save_projection/2]).
--export([append_page/3, read_page/2]).
+-export([append_page/3, read_page/2, scan_forward/3]).
 
 -include("corfurl.hrl").
 
@@ -134,7 +134,32 @@ read_page(#proj{epoch=Epoch} = P, LPN) ->
             error({impossible, ?MODULE, ?LINE, overwritten_reply_to_read});
         error_unwritten ->
             %% TODO: Check head for possible read-repair
-            read_page_tail_unwritten_todo
+            error_unwritten
+    end.
+
+scan_forward(P, LPN, MaxPages) ->
+    scan_forward(P, LPN, MaxPages, ok, true, []).
+
+scan_forward(_P, LPN, 0, Status, MoreP, Acc) ->
+    {Status, LPN, MoreP, lists:reverse(Acc)};
+scan_forward(P, LPN, MaxPages, _Status, _MoreP, Acc) ->
+    case read_page(P, LPN) of
+        {ok, Page} ->
+            Res = {LPN, Page},
+            scan_forward(P, LPN + 1, MaxPages - 1, ok, true, [Res|Acc]);
+        error_badepoch ->
+            %% Halt, allow recursion to create our return value.
+            scan_forward(P, LPN, 0, error_badepoch, false, Acc);
+        error_trimmed ->
+            %% TODO: API question, do we add a 'trimmed' indicator
+            %%       in the Acc?  Or should the client assume that if
+            %%       scan_forward() doesn't mention a page that
+            scan_forward(P, LPN + 1, MaxPages - 1, ok, true, Acc);
+        error_overwritten ->
+            error({impossible, ?MODULE, ?LINE, overwritten_reply_to_read});
+        error_unwritten ->
+            %% Halt, allow recursion to create our return value.
+            scan_forward(P, LPN, 0, ok, false, Acc)
     end.
 
 flu_pid(X) when is_pid(X) ->
@@ -243,7 +268,19 @@ smoke1_test() ->
     try
         P1 = new_simple_projection(1, 1, 1*100, [[F1, F2], [F3, F4]]),
         [begin {ok, LPN} = append_page(Seq, P1, Pg) end || {LPN, Pg} <- LPN_Pgs],
+
         [begin {ok, Pg} = read_page(P1, LPN) end || {LPN, Pg} <- LPN_Pgs],
+
+        [begin
+             LPNplus = LPN + 1,
+             {ok, LPNplus, true, [{LPN, Pg}]} = scan_forward(P1, LPN, 1)
+         end || {LPN, Pg} <- LPN_Pgs],
+        {ok, 6, false, []} = scan_forward(P1, 6, 1),
+        {ok, 6, false, []} = scan_forward(P1, 6, 10),
+        [{LPN1,Pg1}, {LPN2,Pg2}, {LPN3,Pg3}, {LPN4,Pg4}, {LPN5,Pg5}] = LPN_Pgs,
+        {ok, 4, true, [{LPN2,Pg2}, {LPN3,Pg3}]} = scan_forward(P1, 2, 2),
+        {ok, 6, false, [{LPN3,Pg3}, {LPN4,Pg4}, {LPN5,Pg5}]} = scan_forward(P1, 3, 10),
+
         ok
     after
         corfurl_sequencer:stop(Seq),
