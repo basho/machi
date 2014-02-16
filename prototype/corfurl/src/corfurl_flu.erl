@@ -36,8 +36,10 @@
 -include("corfurl.hrl").
 
 -ifdef(TEST).
--include_lib("eunit/include/eunit.hrl").
 -export([get__mlp/1, get__min_epoch/1, get__trim_watermark/1]).
+-ifdef(PULSE).
+-compile({parse_transform, pulse_instrument}).
+-endif.
 -endif.
 
 -include_lib("kernel/include/file.hrl").
@@ -117,8 +119,14 @@ init({Dir, ExpPageSize, ExpMaxMem}) ->
             end
         catch
             X:Y ->
-                io:format("init: caught ~p ~p @ ~p\n",
-                          [X, Y, erlang:get_stacktrace()]),
+                if X == error,
+                   Y == {case_clause,{error,enoent}} ->
+                        ok;
+                   true ->
+                        %% TODO: log-ify this
+                        io:format("init: caught ~p ~p @ ~p\n",
+                                  [X, Y, erlang:get_stacktrace()])
+                end,
                 {no_version_number, 0, ExpPageSize, ExpMaxMem, 0}
         end,
     State = #state{dir=Dir, mem_fh=FH, min_epoch=MinEpoch, page_size=PageSize,
@@ -368,107 +376,3 @@ trim_page(Op, LogicalPN, #state{max_mem=MaxMem, mem_fh=FH} = S) ->
        true ->
             badarg
     end.
-
-%%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%%
-
--ifdef(TEST).
-
-startstop_test() ->
-    Dir = "/tmp/flu." ++ os:getpid(),
-    {ok, P1} = start_link(Dir),
-    try
-        {ok, _} = status(P1),
-        ok = stop(P1),
-        {'EXIT', _} = (catch stop(P1)),
-
-        {ok, P2} = start_link(Dir),
-        0 = get__mlp(P2),
-        0 = get__min_epoch(P2),
-        ok = stop(P2),
-
-        ok
-    after
-        ok = corfurl_util:delete_dir(Dir)
-    end.
-
-basic_test() ->
-    Dir = "/tmp/flu." ++ os:getpid(),
-    {ok, P1} = start_link(Dir),
-    try
-        Epoch1 = 1,
-        Epoch2 = 2,
-        LPN = 1,
-        Bin1 = <<42:64>>,
-        Bin2 = <<42042:64>>,
-
-        error_unwritten = read(P1, Epoch1, LPN),
-        error_unwritten = trim(P1, Epoch1, LPN),
-        error_unwritten = trim(P1, Epoch1, LPN+77),
-
-        ok = write(P1, Epoch1, LPN, Bin1),
-        error_overwritten = write(P1, Epoch1, LPN, Bin1),
-        error_overwritten = fill(P1, Epoch1, LPN),
-        LPN = get__mlp(P1),
-        0 = get__min_epoch(P1),
-        0 = get__trim_watermark(P1),
-        {ok, LPN} = seal(P1, Epoch1),
-        1 = get__min_epoch(P1),
-
-        error_overwritten = write(P1, Epoch2, LPN, Bin1),
-        ok = write(P1, Epoch2, LPN+1, Bin2),
-        Epoch1 = get__min_epoch(P1),
-
-        {ok, Bin1} = read(P1, Epoch1, LPN),
-        {ok, Bin2} = read(P1, Epoch2, LPN+1),
-        error_unwritten = read(P1, Epoch2, LPN+2),
-        badarg = read(P1, Epoch2, 1 bsl 2982),
-
-        error_badepoch = seal(P1, Epoch1),
-        {ok, _} = seal(P1, Epoch2),
-        error_badepoch = seal(P1, Epoch2),
-
-        error_badepoch = read(P1, Epoch1, LPN),
-        error_badepoch = read(P1, Epoch1, LPN+1),
-        {ok, Bin1} = read(P1, Epoch2, LPN),
-        {ok, Bin2} = read(P1, Epoch2, LPN+1),
-
-        error_badepoch = trim(P1, Epoch1, LPN+1),
-        ok = trim(P1, Epoch2, LPN+1),
-        error_trimmed = trim(P1, Epoch2, LPN+1),
-        %% Current watermark processing is broken.  But we'll test what's
-        %% there now.
-        ExpectedWaterFixMe = LPN+1,
-        ExpectedWaterFixMe = get__trim_watermark(P1),
-
-        ok = fill(P1, Epoch2, LPN+3),
-        error_trimmed = read(P1, Epoch2, LPN+3),
-        error_trimmed = fill(P1, Epoch2, LPN+3),
-        error_trimmed = trim(P1, Epoch2, LPN+3),
-
-        Epoch2 = get__min_epoch(P1),
-        ok = stop(P1),
-        ok
-    after
-        ok = corfurl_util:delete_dir(Dir)
-    end.
-
-seal_persistence_test() ->
-    Dir = "/tmp/flu." ++ os:getpid(),
-    {ok, P1} = start_link(Dir),
-    try
-        0 = get__min_epoch(P1),
-        Epoch = 665,
-        {ok, LPN} = seal(P1, Epoch),
-        Epoch = get__min_epoch(P1),
-        ok = stop(P1),
-
-        {ok, P2} = start_link(Dir),
-        Epoch = get__min_epoch(P2),
-
-        ok = stop(P2),
-        ok
-    after
-        ok = corfurl_util:delete_dir(Dir)
-    end.
-
--endif. % TEST

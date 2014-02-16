@@ -30,6 +30,9 @@
 
 -ifdef(TEST).
 -compile(export_all).
+-ifdef(PULSE).
+-compile({parse_transform, pulse_instrument}).
+-endif.
 -endif.
 
 append_page(Sequencer, P, Page) ->

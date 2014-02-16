@@ -29,12 +29,16 @@
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+-ifdef(PULSE).
+-compile({parse_transform, pulse_instrument}).
+-endif.
 -endif.
 
 -define(SERVER, ?MODULE).
 
 start_link(FLUs) ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, {FLUs}, []).
+    %% gen_server:start_link({local, ?SERVER}, ?MODULE, {FLUs}, []).
+    gen_server:start_link(?MODULE, {FLUs}, []).
 
 stop(Pid) ->
     gen_server:call(Pid, stop, infinity).
@@ -46,6 +50,7 @@ get(Pid, NumPages) ->
 
 init({FLUs}) ->
     MLP = get_max_logical_page(FLUs),
+    io:format(user, "~s:init: MLP = ~p\n", [?MODULE, MLP]),
     {ok, MLP + 1}.
 
 handle_call({get, NumPages}, _From, MLP) ->
@@ -78,6 +83,7 @@ get_max_logical_page(FLUs) ->
 %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%%
 
 -ifdef(TEST).
+-ifndef(PULSE).
 
 smoke_test() ->
     BaseDir = "/tmp/" ++ atom_to_list(?MODULE) ++ ".",
@@ -120,4 +126,5 @@ smoke_test() ->
         Del()
     end.
 
+-endif. % not PULSE
 -endif. % TEST

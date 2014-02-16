@@ -23,15 +23,33 @@
 -include("corfurl.hrl").
 
 -ifdef(TEST).
+
 -include_lib("eunit/include/eunit.hrl").
 -compile(export_all).
--endif.
 
 -define(M, corfurl).
 
 %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%%
 
--ifdef(TEST).
+
+setup_flu_basedir() ->
+    "/tmp/" ++ atom_to_list(?MODULE) ++ ".".    
+
+setup_flu_dir(N) ->
+    setup_flu_basedir() ++ integer_to_list(N).
+
+setup_del_all(NumFLUs) ->
+    [ok = corfurl_util:delete_dir(setup_flu_dir(N)) ||
+        N <- lists:seq(1, NumFLUs)].
+
+setup_basic_flus(NumFLUs, PageSize, NumPages) ->
+    setup_del_all(NumFLUs),
+    [begin
+         element(2, corfurl_flu:start_link(setup_flu_dir(X),
+                                   PageSize, NumPages * (PageSize * ?PAGE_OVERHEAD)))
+     end || X <- lists:seq(1, NumFLUs)].
+
+-ifndef(PULSE).
 
 save_read_test() ->
     Dir = "/tmp/" ++ atom_to_list(?MODULE) ++".save-read",
@@ -50,23 +68,6 @@ save_read_test() ->
     after
         ok = corfurl_util:delete_dir(Dir)
     end.
-
-setup_flu_basedir() ->
-    "/tmp/" ++ atom_to_list(?MODULE) ++ ".".    
-
-setup_flu_dir(N) ->
-    setup_flu_basedir() ++ integer_to_list(N).
-
-setup_del_all(NumFLUs) ->
-    [ok = corfurl_util:delete_dir(setup_flu_dir(N)) ||
-        N <- lists:seq(1, NumFLUs)].
-
-setup_basic_flus(NumFLUs, PageSize, NumPages) ->
-    setup_del_all(NumFLUs),
-    [begin
-         element(2, corfurl_flu:start_link(setup_flu_dir(X),
-                                   PageSize, NumPages * (PageSize * ?PAGE_OVERHEAD)))
-     end || X <- lists:seq(1, NumFLUs)].
 
 smoke1_test() ->
     NumFLUs = 6,
@@ -211,5 +212,5 @@ forfun(NumProcs) ->
     end.
 
 -endif. % TIMING_TEST
-
+-endif. % not PULSE
 -endif. % TEST
