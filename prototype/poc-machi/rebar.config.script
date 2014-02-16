@@ -1,0 +1,55 @@
+PulseBuild = case os:getenv("USE_PULSE") of
+                 false ->
+                     false;
+                 _ ->
+                     true
+             end,
+case PulseBuild of
+    true ->
+        PulseOpts =
+            [{pulse_no_side_effect,
+              [{erlang,display,1}
+               ]},
+             {pulse_side_effect,
+              [ {corfurl_sequencer, get, '_'}
+              , {corfurl_flu, write, '_'}
+              , {corfurl_flu, read, '_'}
+              , {corfurl_flu, seal, '_'}
+              , {corfurl_flu, trim, '_'}
+              , {corfurl_flu, fill, '_'}
+
+              , {corfurl, read_projection, '_'}
+              , {corfurl, save_projection, '_'}
+
+              , {prim_file, '_', '_'}
+              , {file, '_', '_'}
+              , {filelib, '_', '_'}
+              , {os, '_', '_'} ]},
+
+             {pulse_replace_module,
+              [ {gen_server, pulse_gen_server}
+              , {application, pulse_application}
+              , {supervisor, pulse_supervisor} ]}
+            ],
+        PulseCFlags = [{"CFLAGS", "$CFLAGS -DPULSE"}],
+        UpdConfig = case lists:keysearch(eunit_compile_opts, 1, CONFIG) of
+                        {value, {eunit_compile_opts, Opts}} ->
+                            lists:keyreplace(eunit_compile_opts,
+                                             1,
+                                             CONFIG,
+                                             {eunit_compile_opts, Opts ++ PulseOpts});
+                        _ ->
+                            [{eunit_compile_opts, PulseOpts} | CONFIG]
+                    end,
+        case lists:keysearch(port_env, 1, UpdConfig) of
+            {value, {port_env, PortEnv}} ->
+                lists:keyreplace(port_env,
+                                 1,
+                                 UpdConfig,
+                                 {port_env, PortEnv ++ PulseCFlags});
+            _ ->
+                [{port_env, PulseCFlags} | UpdConfig]
+        end;
+    false ->
+        CONFIG
+end.
