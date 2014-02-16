@@ -109,13 +109,9 @@ write_single_page_to_chain([FLU|Rest], Epoch, LPN, Page, Nth) ->
                 error_badepoch ->
                     %% TODO: same TODO as the above error_badepoch case.
                     error_badepoch;
-                error_overwritten ->
-                    error({impossible, ?MODULE, ?LINE, left_off_here})
-            end;
-        Else ->
-            %% TODO: corner case
-            io:format(user, "WTF? Else = ~p\n", [Else]),
-            Else
+                Else ->
+                    error({left_off_here, ?MODULE, ?LINE, Else})
+            end
     end.
 
 read_page(#proj{epoch=Epoch} = P, LPN) ->
@@ -130,55 +126,62 @@ read_page(#proj{epoch=Epoch} = P, LPN) ->
             %% TODO: A sanity/should-never-happen check would be to
             %%       see if everyone else in the chain are also trimmed.
             error_trimmed;
-        error_overwritten ->
-            error({impossible, ?MODULE, ?LINE, overwritten_reply_to_read});
         error_unwritten ->
             %% TODO: During scan_forward(), this pestering of the upstream
             %%       nodes in the chain is possibly-excessive-work.
             %%       For now, we'll assume that we always want to repair.
-            case read_repair(Epoch, LPN, Tail, hd(Chain)) of
-                {ok, _} = OK2 ->
-                    OK2;
-                Else ->
-                    Else
-            end
+            read_repair_chain(Epoch, LPN, Chain)
+        %% Let it crash: error_overwritten
     end.
 
-read_repair(_Epoch, _LPN, RepairFLU, RepairFLU) ->
-    error_unwritten;
-read_repair(Epoch, LPN, RepairFLU, Head) ->
+read_repair_chain(Epoch, LPN, [Head|Rest] = Chain) ->
     case corfurl_flu:read(flu_pid(Head), Epoch, LPN) of
         {ok, Page} ->
-            case corfurl_flu:write(flu_pid(RepairFLU), Epoch, LPN, Page) of
-                ok ->
-                    ok;
-                error_badepoch ->
-                    error_badepoch;
-                error_trimmed ->
-                    error_trimmed;
-                error_overwritten ->
-                    case corfurl_flu:read(flu_pid(RepairFLU), Epoch, LPN) of
-                        {ok, Page2} when Page2 =:= Page ->
-                            {ok, Page};
-                        {ok, Oops} ->
-                            error({impossible, ?MODULE, ?LINE, LPN, head_said, Page, repairee_now_says, Oops});
-                        error_trimmed ->
-                            %% Wow, we have lost at least 3 races in a row.
-                            read_repair_trim(RepairFLU, LPN);
-                        Else ->
-                            Else
-                    end;
-                error_unwritten ->
-                    error({impossible, ?MODULE, ?LINE, written_then_unwritten})
-            end;
+            read_repair_chain2(Rest, Epoch, LPN, Page, Chain);
         error_badepoch ->
             error_badepoch;
         error_trimmed ->
-            read_repair_trim(RepairFLU, LPN);
-        error_overwritten ->
-            error({impossible, ?MODULE, ?LINE, overwritten_reply_to_read});
+            %% TODO: robustify
+            [ok = case corfurl_flu:fill(flu_pid(X), Epoch, LPN) of
+                      ok ->            ok;
+                      error_trimmed -> ok;
+                      Else          -> Else
+                  end || X <- Rest],
+            error_trimmed;
         error_unwritten ->
             error_unwritten
+        %% Let it crash: error_overwritten
+    end.
+
+read_repair_chain2([] = _Repairees, _Epoch, _LPN, Page, _OriginalChain) ->
+    {ok, Page};
+read_repair_chain2([RepairFLU|Rest], Epoch, LPN, Page, OriginalChain) ->
+    case corfurl_flu:write(flu_pid(RepairFLU), Epoch, LPN, Page) of
+        ok ->
+            read_repair_chain2(Rest, Epoch, LPN, Page, OriginalChain);
+        error_badepoch ->
+            error_badepoch;
+        error_trimmed ->
+            error_trimmed;
+        error_overwritten ->
+            %% We're going to do an optional sanity check here.
+            %% TODO: make the sanity check configurable?
+            case corfurl_flu:read(flu_pid(RepairFLU), Epoch, LPN) of
+                {ok, Page2} when Page2 =:= Page ->
+                    %% TODO: is there a need to continue working upstream
+                    %%       to fix problems?
+                    {ok, Page2};
+                {ok, _Page2} ->
+                    error({bummerbummer, ?MODULE, ?LINE, sanity_check_failure,
+                           lpn, LPN, epoch, Epoch});
+                error_badepoch ->
+                    error_badepoch;
+                error_trimmed ->
+                    %% Start repair at the beginning to handle this case
+                    read_repair_chain(Epoch, LPN, OriginalChain)
+                %% Let it crash: error_overwritten, error_unwritten
+            end
+        %% Let it crash: error_unwritten
     end.
 
 read_repair_trim(RepairFLU, LPN) ->
@@ -207,11 +210,15 @@ scan_forward(P, LPN, MaxPages, _Status, _MoreP, Acc) ->
             %%       in the Acc?  Or should the client assume that if
             %%       scan_forward() doesn't mention a page that
             scan_forward(P, LPN + 1, MaxPages - 1, ok, true, Acc);
-        error_overwritten ->
-            error({impossible, ?MODULE, ?LINE, overwritten_reply_to_read});
         error_unwritten ->
             %% Halt, allow recursion to create our return value.
+            %% TODO: It's possible that we're stuck here because a client
+            %%       crashed and that we see an unwritten page at LPN.
+            %%       We ought to ask the sequencer always/sometime?? what
+            %%       tail LPN is, and if there's a hole, start a timer to
+            %%       allow us to fill the hole.
             scan_forward(P, LPN, 0, ok, false, Acc)
+        %% Let it crash: error_overwritten
     end.
 
 flu_pid(X) when is_pid(X) ->
@@ -307,18 +314,19 @@ setup_basic_flus(NumFLUs, PageSize, NumPages) ->
      end || X <- lists:seq(1, NumFLUs)].
 
 smoke1_test() ->
-    NumFLUs = 4,
+    NumFLUs = 6,
     PageSize = 8,
     NumPages = 10,
-    FLUs = [F1, F2, F3, F4] = setup_basic_flus(NumFLUs, PageSize, NumPages),
+    FLUs = [F1, F2, F3, F4, F5, F6] =
+        setup_basic_flus(NumFLUs, PageSize, NumPages),
     {ok, Seq} = corfurl_sequencer:start_link(FLUs),
 
-    %% We know that the first LSN will be 1.
+    %% We know that the first LPN will be 1.
     LPN_Pgs = [{X, list_to_binary(
                      lists:flatten(io_lib:format("~8..0w", [X])))} ||
                   X <- lists:seq(1, 5)],
     try
-        P1 = new_simple_projection(1, 1, 1*100, [[F1, F2], [F3, F4]]),
+        P1 = new_simple_projection(1, 1, 1*100, [[F1, F2, F3], [F4, F5, F6]]),
         [begin {ok, LPN} = append_page(Seq, P1, Pg) end || {LPN, Pg} <- LPN_Pgs],
 
         [begin {ok, Pg} = read_page(P1, LPN) end || {LPN, Pg} <- LPN_Pgs],
@@ -332,6 +340,39 @@ smoke1_test() ->
         [{LPN1,Pg1}, {LPN2,Pg2}, {LPN3,Pg3}, {LPN4,Pg4}, {LPN5,Pg5}] = LPN_Pgs,
         {ok, 4, true, [{LPN2,Pg2}, {LPN3,Pg3}]} = scan_forward(P1, 2, 2),
         {ok, 6, false, [{LPN3,Pg3}, {LPN4,Pg4}, {LPN5,Pg5}]} = scan_forward(P1, 3, 10),
+
+        %% Let's smoke read-repair: regular write failure
+        Epoch = P1#proj.epoch,
+        Pg6 = <<424242:(PageSize*8)>>,
+
+        %% Simulate a failed write to the chain.
+        [F6a, F6b, F6c] = Chain6 = project_to_chain(6, P1),
+        NotHead6 = [F6b, F6c],
+        ok = write_single_page_to_chain([F6a], Epoch, 6, Pg6, 1),
+
+        %% Does the chain look as expected?
+        {ok, Pg6} = corfurl_flu:read(flu_pid(F6a), Epoch, 6),
+        [error_unwritten = corfurl_flu:read(flu_pid(X), Epoch, 6) ||
+            X <- NotHead6],
+
+        %% Read repair should fix it.
+        {ok, Pg6} = read_page(P1, 6),
+        [{ok, Pg6} = corfurl_flu:read(flu_pid(X), Epoch, 6) || X <- Chain6],
+
+        %% Let's smoke read-repair: failed fill
+        [F7a, F7b, F7c] = Chain7 = project_to_chain(7, P1),
+        NotHead7 = [F7b, F7c],
+        ok = corfurl_flu:fill(flu_pid(F7a), Epoch, 7),
+
+        %% Does the chain look as expected?
+        error_trimmed = corfurl_flu:read(flu_pid(F7a), Epoch, 7),
+        [error_unwritten = corfurl_flu:read(flu_pid(X), Epoch, 7) ||
+            X <- NotHead7],
+
+        %% Read repair should fix it.
+        error_trimmed = read_page(P1, 7),
+        [error_trimmed = corfurl_flu:read(flu_pid(X), Epoch, 7) || X <- Chain7],
+
 
         ok
     after
