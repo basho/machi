@@ -372,7 +372,14 @@ smoke1_test() ->
         %% Read repair should fix it.
         error_trimmed = read_page(P1, 7),
         [error_trimmed = corfurl_flu:read(flu_pid(X), Epoch, 7) || X <- Chain7],
+        %% scan_forward shouldn't see it either
+        {ok, 8, false, [{6,Pg6}]} = scan_forward(P1, 6, 10),
 
+        [F8a|_] = Chain8 = project_to_chain(8, P1),
+        ok = corfurl_flu:fill(flu_pid(F8a), Epoch, 8),
+        %% No read before scan, scan_forward shouldn't see 8 either,
+        %% but the next seq should be 9
+        {ok, 9, false, [{6,Pg6}]} = scan_forward(P1, 6, 10),
 
         ok
     after
