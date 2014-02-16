@@ -133,8 +133,60 @@ read_page(#proj{epoch=Epoch} = P, LPN) ->
         error_overwritten ->
             error({impossible, ?MODULE, ?LINE, overwritten_reply_to_read});
         error_unwritten ->
-            %% TODO: Check head for possible read-repair
+            %% TODO: During scan_forward(), this pestering of the upstream
+            %%       nodes in the chain is possibly-excessive-work.
+            %%       For now, we'll assume that we always want to repair.
+            case read_repair(Epoch, LPN, Tail, hd(Chain)) of
+                {ok, _} = OK2 ->
+                    OK2;
+                Else ->
+                    Else
+            end
+    end.
+
+read_repair(_Epoch, _LPN, RepairFLU, RepairFLU) ->
+    error_unwritten;
+read_repair(Epoch, LPN, RepairFLU, Head) ->
+    case corfurl_flu:read(flu_pid(Head), Epoch, LPN) of
+        {ok, Page} ->
+            case corfurl_flu:write(flu_pid(RepairFLU), Epoch, LPN, Page) of
+                ok ->
+                    ok;
+                error_badepoch ->
+                    error_badepoch;
+                error_trimmed ->
+                    error_trimmed;
+                error_overwritten ->
+                    case corfurl_flu:read(flu_pid(RepairFLU), Epoch, LPN) of
+                        {ok, Page2} when Page2 =:= Page ->
+                            {ok, Page};
+                        {ok, Oops} ->
+                            error({impossible, ?MODULE, ?LINE, LPN, head_said, Page, repairee_now_says, Oops});
+                        error_trimmed ->
+                            %% Wow, we have lost at least 3 races in a row.
+                            read_repair_trim(RepairFLU, LPN);
+                        Else ->
+                            Else
+                    end;
+                error_unwritten ->
+                    error({impossible, ?MODULE, ?LINE, written_then_unwritten})
+            end;
+        error_badepoch ->
+            error_badepoch;
+        error_trimmed ->
+            read_repair_trim(RepairFLU, LPN);
+        error_overwritten ->
+            error({impossible, ?MODULE, ?LINE, overwritten_reply_to_read});
+        error_unwritten ->
             error_unwritten
+    end.
+
+read_repair_trim(RepairFLU, LPN) ->
+    case corfurl_flu:trim(flu_pid(RepairFLU), LPN) of
+        ok ->
+            error_trimmed;
+        Else ->
+            Else
     end.
 
 scan_forward(P, LPN, MaxPages) ->
