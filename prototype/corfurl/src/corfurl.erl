@@ -1,0 +1,311 @@
+%% -------------------------------------------------------------------
+%%
+%% Copyright (c) 2014 Basho Technologies, Inc.  All Rights Reserved.
+%%
+%% This file is provided to you under the Apache License,
+%% Version 2.0 (the "License"); you may not use this file
+%% except in compliance with the License.  You may obtain
+%% a copy of the License at
+%%
+%%   http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing,
+%% software distributed under the License is distributed on an
+%% "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+%% KIND, either express or implied.  See the License for the
+%% specific language governing permissions and limitations
+%% under the License.
+%%
+%% -------------------------------------------------------------------
+
+-module(corfurl).
+
+-export([new_simple_projection/4,
+         new_range/3,
+         read_projection/2,
+         save_projection/2]).
+-export([append_page/3]).
+
+-include("corfurl.hrl").
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-compile(export_all).
+-endif.
+
+-type flu_name() :: atom().
+-type flu() :: pid() | flu_name().
+-type flu_chain() :: [flu()].
+
+-record(range, {
+          pn_start :: non_neg_integer(),            % start page number
+          pn_end :: non_neg_integer(),              % end page number
+          chains :: [flu_chain()]
+         }).
+
+-record(proj, {                                 % Projection
+          epoch :: non_neg_integer(),
+          r :: [#range{}]
+         }).
+
+%% append_page(Sequencer, P, Page) ->
+%%     append_page(Sequencer, P, 1, [Page]).
+
+%% append_page(Sequencer, P, NumPages, PageList) ->
+%%     FirstPN = corfurl_sequencer:get(Sequencer, NumPages),
+%%     [append_single_page(P, LPN, Page) ||
+%%         {LPN, Page} <- lists:zip(lists:seq(FirstPN, FirstPN+NumPages-1),
+%%                                  PageList)].
+
+append_page(Sequencer, P, Page) ->
+    append_page(Sequencer, P, Page, 1).
+
+append_page(Sequencer, P, Page, Retries) when Retries < 50 ->
+    case corfurl_sequencer:get(Sequencer, 1) of
+        LPN when is_integer(LPN) ->
+            case append_single_page(P, LPN, Page) of
+                ok ->
+                    ok;
+                X when X == error_written; X == error_trimmed ->
+                    io:format(user, "LPN ~p race lost: ~p\n", [LPN, X]),
+                    append_page(Sequencer, P, Page);
+                Else ->
+                    exit({todo, ?MODULE, line, ?LINE, Else})
+            end;
+        _ ->
+            timer:sleep(Retries),               % TODO naive
+            append_page(Sequencer, P, Page, Retries * 2)
+    end.
+
+append_single_page(#proj{epoch=Epoch} = P, LPN, Page) ->
+    Chain = project_to_chain(LPN, P),
+    append_single_page_to_chain(Chain, Epoch, LPN, Page, 1).
+
+append_single_page_to_chain([], _Epoch, _LPN, _Page, _Nth) ->
+    ok;
+append_single_page_to_chain([FLU|Rest], Epoch, LPN, Page, Nth) ->
+    case corfurl_flu:write(flu_pid(FLU), Epoch, LPN, Page) of
+        ok ->
+            append_single_page_to_chain(Rest, Epoch, LPN, Page, Nth+1);
+        error_badepoch ->
+            %% TODO: Interesting case: there may be cases where retrying with
+            %%       a new epoch & that epoch's projection is just fine (and
+            %%       we'll succeed) and cases where retrying will fail.
+            %%       Figure out what those cases are, then for the
+            %%       destined-to-fail case, try to clean up (via trim?)?
+            error_badepoch;
+        error_trimmed ->
+            %% Whoa, partner, you're movin' kinda fast for a trim.
+            %% This might've been due to us being too slow and someone
+            %% else junked us.
+            %% TODO We should go trim our previously successful writes?
+            error_trimmed;
+        error_written when Nth == 1 ->
+            %% The sequencer lied, or we didn't use the sequencer and
+            %% guessed and guessed poorly, or someone is accidentally
+            %% trying to take our page.  Shouganai, these things happen.
+            error_written;
+        error_written when Nth > 1 ->
+            %% The likely cause is that another reader has noticed that
+            %% we haven't finished writing this page in this chain and
+            %% has repaired the remainder of the chain while we were
+            %% drinking coffee.  Let's double-check.
+            case corfurl_flu:read(flu_pid(FLU), Epoch, LPN) of
+                {ok, AlreadyThere} when AlreadyThere =:= Page ->
+                    %% Alright, well, let's go continue the repair/writing,
+                    %% since we agree on the page's value.
+                    append_single_page_to_chain(Rest, Epoch, LPN, Page, Nth+1);
+                error_badepoch ->
+                    %% TODO: same TODO as the above error_badepoch case.
+                    error_badepoch;
+                error_overwritten ->
+                    error({impossible, ?MODULE, ?LINE, left_off_here})
+            end;
+        Else ->
+            %% TODO: corner case
+io:format(user, "WTF? Else = ~p\n", [Else]),
+            Else
+    end.
+
+flu_pid(X) when is_pid(X) ->
+    X;
+flu_pid(X) when is_atom(X) ->
+    ets:lookup_element(flu_pid_tab, X, 1).
+
+%%%% %%%% %%%%    projection utilities    %%%% %%%% %%%%
+
+new_range(Start, End, ChainList) ->
+    %% TODO: sanity checking of ChainList, Start < End, yadda
+    #range{pn_start=Start, pn_end=End, chains=list_to_tuple(ChainList)}.
+
+new_simple_projection(Epoch, Start, End, ChainList) ->
+    #proj{epoch=Epoch, r=[new_range(Start, End, ChainList)]}.
+
+make_projection_path(Dir, Epoch) ->
+    lists:flatten(io_lib:format("~s/~12..0w.proj", [Dir, Epoch])).
+
+read_projection(Dir, Epoch) ->
+    case file:read_file(make_projection_path(Dir, Epoch)) of
+        {ok, Bin} ->
+            {ok, binary_to_term(Bin)};          % TODO if corrupted?
+        {error, enoent} ->
+            error_unwritten;
+        Else ->
+            Else                                % TODO API corner case
+    end.
+
+save_projection(Dir, #proj{epoch=Epoch} = P) ->
+    Path = make_projection_path(Dir, Epoch),
+    ok = filelib:ensure_dir(Dir ++ "/ignored"),
+    {_, B, C} = now(),
+    TmpPath = Path ++ lists:flatten(io_lib:format(".~w.~w.~w", [B, C, node()])),
+    %% TODO: don't be lazy, do a flush before link when training wheels come off
+    ok = file:write_file(TmpPath, term_to_binary(P)),
+    case file:make_link(TmpPath, Path) of
+        ok ->
+            file:delete(TmpPath),
+            ok;
+        {error, eexist} ->
+            error_overwritten;
+        Else ->
+            Else                                % TODO API corner case
+    end.
+
+project_to_chain(LPN, P) ->
+    %% TODO fixme
+    %% TODO something other than round-robin?
+    [#range{pn_start=Start, pn_end=End, chains=Chains}] = P#proj.r,
+    if Start =< LPN, LPN =< End ->
+            I = ((LPN - Start) rem tuple_size(Chains)) + 1,
+            element(I, Chains)
+    end.
+
+%%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%%
+
+-ifdef(TEST).
+
+save_read_test() ->
+    Dir = "/tmp/" ++ atom_to_list(?MODULE) ++".save-read",
+    Chain = [a,b],
+    P1 = new_simple_projection(1, 1, 1*100, [Chain]),
+
+    try
+        filelib:ensure_dir(Dir ++ "/ignored"),
+        ok = save_projection(Dir, P1),
+        error_overwritten = save_projection(Dir, P1),
+
+        {ok, P1} = read_projection(Dir, 1),
+        error_unwritten = read_projection(Dir, 2),
+
+        ok
+    after
+        ok = corfurl_util:delete_dir(Dir)
+    end.
+
+setup_flu_basedir() ->
+    "/tmp/" ++ atom_to_list(?MODULE) ++ ".".    
+
+setup_flu_dir(N) ->
+    setup_flu_basedir() ++ integer_to_list(N).
+
+setup_del_all(NumFLUs) ->
+    [ok = corfurl_util:delete_dir(setup_flu_dir(N)) ||
+        N <- lists:seq(1, NumFLUs)].
+
+setup_basic_flus(NumFLUs, PageSize, NumPages) ->
+    setup_del_all(NumFLUs),
+    [begin
+         element(2, corfurl_flu:start_link(setup_flu_dir(X),
+                                   PageSize, NumPages * (PageSize * ?PAGE_OVERHEAD)))
+     end || X <- lists:seq(1, NumFLUs)].
+
+append_test() ->
+    NumFLUs = 4,
+    PageSize = 8,
+    NumPages = 10,
+    FLUs = [F1, F2, F3, F4] = setup_basic_flus(NumFLUs, PageSize, NumPages),
+    {ok, Seq} = corfurl_sequencer:start_link(FLUs),
+
+    try
+        P1 = new_simple_projection(1, 1, 1*100, [[F1, F2], [F3, F4]]),
+        [begin
+             Pg = lists:flatten(io_lib:format("~8..0w", [X])),
+             ok = append_page(Seq, P1, list_to_binary(Pg))
+         end || X <- lists:seq(1, 5)],
+
+        ok
+    after
+        corfurl_sequencer:stop(Seq),
+        [corfurl_flu:stop(F) || F <- FLUs],
+        setup_del_all(NumFLUs)
+    end.
+
+forfun_append(0, _Seq, _P, _Page) ->
+    ok;
+forfun_append(N, Seq, P, Page) ->
+    ok = append_page(Seq, P, Page),
+    forfun_append(N - 1, Seq, P, Page).
+
+-ifdef(TIMING_TEST).
+
+forfun_test_() ->
+    {timeout, 99999, fun() ->
+                             [forfun(Procs) || Procs <- [10,100,1000,5000]]
+                     end}.
+
+%%% My MBP, SSD
+%%% The 1K and 5K procs shows full-mailbox-scan ickiness
+%%% when getting replies from prim_file.  :-(
+
+%%% forfun: 10 procs writing 200000 pages of 8 bytes/page to 2 chains of 4 total FLUs in 10.016815 sec
+%%% forfun: 100 procs writing 200000 pages of 8 bytes/page to 2 chains of 4 total FLUs in 10.547976 sec
+%%% forfun: 1000 procs writing 200000 pages of 8 bytes/page to 2 chains of 4 total FLUs in 13.706686 sec
+%%% forfun: 5000 procs writing 200000 pages of 8 bytes/page to 2 chains of 4 total FLUs in 33.516312 sec
+
+%%% forfun: 10 procs writing 200000 pages of 8 bytes/page to 4 chains of 4 total FLUs in 5.350147 sec
+%%% forfun: 100 procs writing 200000 pages of 8 bytes/page to 4 chains of 4 total FLUs in 5.429485 sec
+%%% forfun: 1000 procs writing 200000 pages of 8 bytes/page to 4 chains of 4 total FLUs in 5.643233 sec
+%%% forfun: 5000 procs writing 200000 pages of 8 bytes/page to 4 chains of 4 total FLUs in 15.686058 sec
+
+%%%% forfun: 10 procs writing 200000 pages of 4096 bytes/page to 2 chains of 4 total FLUs in 13.479458 sec
+%%%% forfun: 100 procs writing 200000 pages of 4096 bytes/page to 2 chains of 4 total FLUs in 14.752565 sec
+%%%% forfun: 1000 procs writing 200000 pages of 4096 bytes/page to 2 chains of 4 total FLUs in 25.012306 sec
+%%%% forfun: 5000 procs writing 200000 pages of 4096 bytes/page to 2 chains of 4 total FLUs in 38.972076 sec
+
+forfun(NumProcs) ->
+    io:format(user, "\n", []),
+    NumFLUs = 4,
+    PageSize = 8,
+    %%PageSize = 4096,
+    NumPages = 200*1000,
+    PagesPerProc = NumPages div NumProcs,
+    FLUs = [F1, F2, F3, F4] = setup_basic_flus(NumFLUs, PageSize, NumPages),
+    {ok, Seq} = corfurl_sequencer:start_link(FLUs),
+
+    try
+        Chains = [[F1, F2], [F3, F4]],
+        %%Chains = [[F1], [F2], [F3], [F4]],
+        P = new_simple_projection(1, 1, NumPages*2, Chains),
+        Me = self(),
+        Start = now(),
+        Ws = [begin
+                  Page = <<X:(PageSize*8)>>,
+                  spawn_link(fun() ->
+                                     forfun_append(PagesPerProc, Seq, P, Page),
+                                     Me ! {done, self()}
+                             end)
+              end || X <- lists:seq(1, NumProcs)],
+        [receive {done, W} -> ok end || W <- Ws],
+        End = now(),
+        io:format(user, "forfun: ~p procs writing ~p pages of ~p bytes/page to ~p chains of ~p total FLUs in ~p sec\n",
+                  [NumProcs, NumPages, PageSize, length(Chains), length(lists:flatten(Chains)), timer:now_diff(End, Start) / 1000000]),
+        ok
+    after
+        corfurl_sequencer:stop(Seq),
+        [corfurl_flu:stop(F) || F <- FLUs],
+        setup_del_all(NumFLUs)
+    end.
+
+-endif. % TIMING_TEST
+
+-endif. % TEST
