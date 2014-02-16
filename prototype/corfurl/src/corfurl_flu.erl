@@ -307,6 +307,8 @@ read_page(LogicalPN, #state{max_mem=MaxMem, mem_fh=FH,
                     io:format("BUMMER: ~s line ~w: incomplete write at ~p\n",
                               [?MODULE, ?LINE, LogicalPN]),
                     error_unwritten;
+                {ok, <<2:8>>} ->
+                    error_trimmed;
                 {ok, _} ->
                     error_unwritten;
                 eof ->
@@ -439,6 +441,7 @@ basic_test() ->
         ExpectedWaterFixMe = get__trim_watermark(P1),
 
         ok = fill(P1, Epoch2, LPN+3),
+        error_trimmed = read(P1, Epoch2, LPN+3),
         error_trimmed = fill(P1, Epoch2, LPN+3),
         error_trimmed = trim(P1, Epoch2, LPN+3),
 
