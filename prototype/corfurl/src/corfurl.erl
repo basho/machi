@@ -24,7 +24,7 @@
          new_range/3,
          read_projection/2,
          save_projection/2]).
--export([append_page/3]).
+-export([append_page/3, read_page/2]).
 
 -include("corfurl.hrl").
 
@@ -48,25 +48,16 @@
           r :: [#range{}]
          }).
 
-%% append_page(Sequencer, P, Page) ->
-%%     append_page(Sequencer, P, 1, [Page]).
-
-%% append_page(Sequencer, P, NumPages, PageList) ->
-%%     FirstPN = corfurl_sequencer:get(Sequencer, NumPages),
-%%     [append_single_page(P, LPN, Page) ||
-%%         {LPN, Page} <- lists:zip(lists:seq(FirstPN, FirstPN+NumPages-1),
-%%                                  PageList)].
-
 append_page(Sequencer, P, Page) ->
     append_page(Sequencer, P, Page, 1).
 
 append_page(Sequencer, P, Page, Retries) when Retries < 50 ->
     case corfurl_sequencer:get(Sequencer, 1) of
         LPN when is_integer(LPN) ->
-            case append_single_page(P, LPN, Page) of
+            case write_single_page(P, LPN, Page) of
                 ok ->
-                    ok;
-                X when X == error_written; X == error_trimmed ->
+                    {ok, LPN};
+                X when X == error_overwritten; X == error_trimmed ->
                     io:format(user, "LPN ~p race lost: ~p\n", [LPN, X]),
                     append_page(Sequencer, P, Page);
                 Else ->
@@ -77,16 +68,16 @@ append_page(Sequencer, P, Page, Retries) when Retries < 50 ->
             append_page(Sequencer, P, Page, Retries * 2)
     end.
 
-append_single_page(#proj{epoch=Epoch} = P, LPN, Page) ->
+write_single_page(#proj{epoch=Epoch} = P, LPN, Page) ->
     Chain = project_to_chain(LPN, P),
-    append_single_page_to_chain(Chain, Epoch, LPN, Page, 1).
+    write_single_page_to_chain(Chain, Epoch, LPN, Page, 1).
 
-append_single_page_to_chain([], _Epoch, _LPN, _Page, _Nth) ->
+write_single_page_to_chain([], _Epoch, _LPN, _Page, _Nth) ->
     ok;
-append_single_page_to_chain([FLU|Rest], Epoch, LPN, Page, Nth) ->
+write_single_page_to_chain([FLU|Rest], Epoch, LPN, Page, Nth) ->
     case corfurl_flu:write(flu_pid(FLU), Epoch, LPN, Page) of
         ok ->
-            append_single_page_to_chain(Rest, Epoch, LPN, Page, Nth+1);
+            write_single_page_to_chain(Rest, Epoch, LPN, Page, Nth+1);
         error_badepoch ->
             %% TODO: Interesting case: there may be cases where retrying with
             %%       a new epoch & that epoch's projection is just fine (and
@@ -100,12 +91,12 @@ append_single_page_to_chain([FLU|Rest], Epoch, LPN, Page, Nth) ->
             %% else junked us.
             %% TODO We should go trim our previously successful writes?
             error_trimmed;
-        error_written when Nth == 1 ->
+        error_overwritten when Nth == 1 ->
             %% The sequencer lied, or we didn't use the sequencer and
             %% guessed and guessed poorly, or someone is accidentally
             %% trying to take our page.  Shouganai, these things happen.
-            error_written;
-        error_written when Nth > 1 ->
+            error_overwritten;
+        error_overwritten when Nth > 1 ->
             %% The likely cause is that another reader has noticed that
             %% we haven't finished writing this page in this chain and
             %% has repaired the remainder of the chain while we were
@@ -114,7 +105,7 @@ append_single_page_to_chain([FLU|Rest], Epoch, LPN, Page, Nth) ->
                 {ok, AlreadyThere} when AlreadyThere =:= Page ->
                     %% Alright, well, let's go continue the repair/writing,
                     %% since we agree on the page's value.
-                    append_single_page_to_chain(Rest, Epoch, LPN, Page, Nth+1);
+                    write_single_page_to_chain(Rest, Epoch, LPN, Page, Nth+1);
                 error_badepoch ->
                     %% TODO: same TODO as the above error_badepoch case.
                     error_badepoch;
@@ -123,8 +114,27 @@ append_single_page_to_chain([FLU|Rest], Epoch, LPN, Page, Nth) ->
             end;
         Else ->
             %% TODO: corner case
-io:format(user, "WTF? Else = ~p\n", [Else]),
+            io:format(user, "WTF? Else = ~p\n", [Else]),
             Else
+    end.
+
+read_page(#proj{epoch=Epoch} = P, LPN) ->
+    Chain = project_to_chain(LPN, P),
+    Tail = lists:last(Chain),
+    case corfurl_flu:read(flu_pid(Tail), Epoch, LPN) of
+        {ok, _} = OK ->
+            OK;
+        error_badepoch ->
+            error_badepoch;
+        error_trimmed ->
+            %% TODO: A sanity/should-never-happen check would be to
+            %%       see if everyone else in the chain are also trimmed.
+            error_trimmed;
+        error_overwritten ->
+            error({impossible, ?MODULE, ?LINE, overwritten_reply_to_read});
+        error_unwritten ->
+            %% TODO: Check head for possible read-repair
+            read_page_tail_unwritten_todo
     end.
 
 flu_pid(X) when is_pid(X) ->
@@ -219,20 +229,21 @@ setup_basic_flus(NumFLUs, PageSize, NumPages) ->
                                    PageSize, NumPages * (PageSize * ?PAGE_OVERHEAD)))
      end || X <- lists:seq(1, NumFLUs)].
 
-append_test() ->
+smoke1_test() ->
     NumFLUs = 4,
     PageSize = 8,
     NumPages = 10,
     FLUs = [F1, F2, F3, F4] = setup_basic_flus(NumFLUs, PageSize, NumPages),
     {ok, Seq} = corfurl_sequencer:start_link(FLUs),
 
+    %% We know that the first LSN will be 1.
+    LPN_Pgs = [{X, list_to_binary(
+                     lists:flatten(io_lib:format("~8..0w", [X])))} ||
+                  X <- lists:seq(1, 5)],
     try
         P1 = new_simple_projection(1, 1, 1*100, [[F1, F2], [F3, F4]]),
-        [begin
-             Pg = lists:flatten(io_lib:format("~8..0w", [X])),
-             ok = append_page(Seq, P1, list_to_binary(Pg))
-         end || X <- lists:seq(1, 5)],
-
+        [begin {ok, LPN} = append_page(Seq, P1, Pg) end || {LPN, Pg} <- LPN_Pgs],
+        [begin {ok, Pg} = read_page(P1, LPN) end || {LPN, Pg} <- LPN_Pgs],
         ok
     after
         corfurl_sequencer:stop(Seq),
