@@ -185,10 +185,23 @@ prop_pulse_test_() ->
        ?assert(eqc:quickcheck(eqc:testing_time(Timeout,?QC_OUT(prop_pulse()))))
    end}.
 
-check_trace(Trace, _Cmds, _Seed) ->
-    %% TODO: yeah
+check_trace(Trace, Cmds, _Seed) ->
+    %% TODO: yeah!!!!!!!!!!
+
     Results = [X || {_TS, {result, _Pid, X}} <- Trace],
-    lists:sort(Results) == lists:usort(Results).
+    {CmdsSeq, CmdsPars} = Cmds,
+    NaiveCmds = CmdsSeq ++ lists:flatten(CmdsPars),
+    NaiveCommands = [{Sym, Args} || {set,_,{call,_,Sym,Args}} <- NaiveCmds],
+    NaiveAppends = [X || {append, _} = X <- NaiveCommands],
+
+    %% If you want to see PULSE causing crazy scheduling, then
+    %% use this commented conjunction() instead of the real one:
+    %% conjunction(
+    %%   [{bogus_order_check_do_not_use_me, equals(Results, lists:usort(Results))}]).
+
+    conjunction(
+      [{hackkkkk_NumResults_match_NumAppends, equals(length(NaiveAppends), length(Results))},
+       {no_duplicate_results, equals(lists:sort(Results), lists:usort(Results))}]).
 
 %% Presenting command data statistics in a nicer way
 command_data({set, _, {call, _, Fun, _}}, {_S, _V}) ->
@@ -260,10 +273,10 @@ setup(NumChains, ChainLen, PageSize) ->
     #run{seq=Seq, proj=Proj, flus=FLUs}.
 
 -define(LOG(Tag, MkCall),
-  event_logger:event({call, self(), Tag}),
-  __Result = MkCall,
-  event_logger:event({result, self(), __Result}),
-  __Result).
+        event_logger:event({call, self(), Tag}),
+        LOG__Result = MkCall,
+        event_logger:event({result, self(), LOG__Result}),
+        LOG__Result).
 
 append(#run{seq=Seq,proj=Proj}, Page) ->
     ?LOG({append, Page},

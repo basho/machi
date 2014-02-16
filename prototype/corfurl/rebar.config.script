@@ -11,12 +11,12 @@ case PulseBuild of
               [{erlang,display,1}
                ]},
              {pulse_side_effect,
-              [ {corfurl_sequencer, get, 0}
-              , {corfurl_flu, write, 4}
-              , {corfurl_flu, read, 3}
-              , {corfurl_flu, seal, 2}
-              , {corfurl_flu, trim, 3}
-              , {corfurl_flu, fill, 3}
+              [ {corfurl_sequencer, get, '_'}
+              , {corfurl_flu, write, '_'}
+              , {corfurl_flu, read, '_'}
+              , {corfurl_flu, seal, '_'}
+              , {corfurl_flu, trim, '_'}
+              , {corfurl_flu, fill, '_'}
 
               , {event_logger, event, '_'}
 
