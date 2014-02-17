@@ -33,11 +33,9 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -compile({parse_transform, pulse_instrument}).
-%% -compile({pulse_replace_module,
-%%           [{application, pulse_application}]}).
 
--compile({pulse_skip,[{prop_pulse_test_,0},{really_delete_bitcask,0},{copy_bitcask_app,0}]}).
--compile({pulse_no_side_effect,[{file,'_','_'}, {erlang, now, 0}]}).
+-compile({pulse_skip,[{prop_pulse_test_,0},{clean_up_runtime,1}]}).
+%% -compile({pulse_no_side_effect,[{file,'_','_'}, {erlang, now, 0}]}).
 
 %% Used for output within EUnit...
 -define(QC_FMT(Fmt, Args),
@@ -185,24 +183,70 @@ prop_pulse_test_() ->
        ?assert(eqc:quickcheck(eqc:testing_time(Timeout,?QC_OUT(prop_pulse()))))
    end}.
 
-check_trace(Trace, Cmds, _Seed) ->
-    %% TODO: yeah!!!!!!!!!!
 
-    Results = [X || {_TS, {result, _Pid, X}} <- Trace],
-    {CmdsSeq, CmdsPars} = Cmds,
-    NaiveCmds = CmdsSeq ++ lists:flatten(CmdsPars),
-    NaiveCommands = [{Sym, Args} || {set,_,{call,_,Sym,Args}} <- NaiveCmds],
-    NaiveAppends = [X || {append, _} = X <- NaiveCommands],
+%% If you want to see PULSE causing crazy scheduling, then
+%% use this code instead of the usual stuff.
+%% check_trace(Trace, Cmds, _Seed) ->
+%%     Results = [X || {_TS, {result, _Pid, X}} <- Trace],
+%%     {CmdsSeq, CmdsPars} = Cmds,
+%%     NaiveCmds = CmdsSeq ++ lists:flatten(CmdsPars),
+%%     NaiveCommands = [{Sym, Args} || {set,_,{call,_,Sym,Args}} <- NaiveCmds],
+%%     NaiveAppends = [X || {append, _} = X <- NaiveCommands],
+%%     conjunction(
+%%       [{identity, equals(NaiveAppends, NaiveAppends)},
+%%        {bogus_order_check_do_not_use_me, equals(Results, lists:usort(Results))}]).
 
-    %% If you want to see PULSE causing crazy scheduling, then
-    %% use this commented conjunction() instead of the real one:
-    %% conjunction(
-    %%   [{identity, equals(NaiveAppends, NaiveAppends)},
-    %%    {bogus_order_check_do_not_use_me, equals(Results, lists:usort(Results))}]).
+%% Example Trace (raw event info, from the ?LOG macro)
+%%
+%% [{32014,{call,<0.467.0>,{append,<<"O">>}}},
+%%  {32421,{call,<0.466.0>,{append,<<134>>}}},
+%%  {44522,{result,<0.467.0>,{ok,1}}},
+%%  {47651,{result,<0.466.0>,{ok,2}}}]
+
+check_trace(Trace, _Cmds, _Seed) ->
+    Events = eqc_temporal:from_timed_list(Trace),
+    %% Example Events, temporal style, 1 usec resolution, same as original trace
+    %%
+    %% [{0,32014,[]},
+    %%  {32014,32015,[{call,<0.467.0>,{append,<<"O">>}}]},
+    %%  {32015,32421,[]},
+    %%  {32421,32422,[{call,<0.466.0>,{append,<<134>>}}]},
+    %%  {32422,44522,[]},
+    %%  {44522,44523,[{result,<0.467.0>,{ok,...}}]},
+    %%  {44523,47651,[]},
+    %%  {47651,47652,[{result,<0.466.0>,{ok,...}}]},
+    %%  {47652,infinity,[]}]
+
+    Calls  = eqc_temporal:stateful(
+               fun({call, Pid, Call}) -> [{call, Pid, Call}] end,
+               fun({call, Pid, _Call}, {result, Pid, _}) -> [] end,
+               Events),
+    %% Example Calls (temporal map of when a call is in progress)
+    %%
+    %% [{0,32014,[]},
+    %%  {32014,32421,[{call,<0.467.0>,{append,<<"O">>}}]},
+    %%  {32421,44522,
+    %%   [{call,<0.466.0>,{append,<<134>>}},{call,<0.467.0>,{append,<<"O">>}}]},
+    %%  {44522,47651,[{call,<0.466.0>,{append,<<134>>}}]},
+    %%  {47651,infinity,[]}]
+
+    AppendResultFilter = fun({ok, LPN}) -> LPN;
+                            (Else)      -> Else end,
+    AppendResults = eqc_temporal:stateful(
+               fun({call, Pid, Call}) -> [{call, Pid, Call}] end,
+               fun({call, Pid, {append, _Pg}}, {result, Pid, Res}) ->
+                       [AppendResultFilter(Res)] end,
+               Events),
+
+    %% Desired properties
+    AllCallsFinish = eqc_temporal:is_false(eqc_temporal:all_future(Calls)),
+    NoAppendLPNDups = lists:sort(AppendResults) == lists:usort(AppendResults),
 
     conjunction(
-      [{hackkkkk_NumResults_match_NumAppends, equals(length(NaiveAppends), length(Results))},
-       {no_duplicate_results, equals(lists:sort(Results), lists:usort(Results))}]).
+      [
+       {all_calls_finish, AllCallsFinish},
+       {no_append_duplicates, NoAppendLPNDups}
+      ]).
 
 %% Presenting command data statistics in a nicer way
 command_data({set, _, {call, _, Fun, _}}, {_S, _V}) ->
