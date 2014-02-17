@@ -65,11 +65,22 @@ initial_state() ->
 gen_page(PageSize) ->
     binary(PageSize).
 
+gen_seed() ->
+    noshrink({choose(1, 20000), choose(1, 20000), choose(1, 20000)}).
+
+gen_sequencer_percent() ->
+    frequency([{10, choose(1,100)},
+               {5, choose(90,100)}]).
+
+gen_sequencer() ->
+    frequency([{100, standard},
+               {50, {gen_seed(), gen_sequencer_percent(), choose(1, 2)}}]).
+
 command(#state{run=Run} = S) ->
     ?LET({NumChains, ChainLen, PageSize},
          {parameter(num_chains), parameter(chain_len), parameter(page_size)},
     frequency(
-      [{10, {call, ?MODULE, setup, [NumChains, ChainLen, PageSize]}}
+      [{10, {call, ?MODULE, setup, [NumChains, ChainLen, PageSize, gen_sequencer()]}}
        || not S#state.is_setup] ++
       [{10, {call, ?MODULE, append, [Run, gen_page(PageSize)]}}
        || S#state.is_setup] ++
@@ -83,7 +94,7 @@ precondition(S, {call, _, _, _}) ->
 
 %% Next state transformation, S is the current state and V is the result of the
 %% command.
-next_state(S, Res, {call, _, setup, [NumChains, ChainLen, PageSize]}) ->
+next_state(S, Res, {call, _, setup, [NumChains, ChainLen, PageSize, _SeqType]}) ->
     S#state{is_setup=true,
             num_chains=NumChains,
             chain_len=ChainLen,
@@ -184,18 +195,6 @@ prop_pulse_test_() ->
    end}.
 
 
-%% If you want to see PULSE causing crazy scheduling, then
-%% use this code instead of the usual stuff.
-%% check_trace(Trace, Cmds, _Seed) ->
-%%     Results = [X || {_TS, {result, _Pid, X}} <- Trace],
-%%     {CmdsSeq, CmdsPars} = Cmds,
-%%     NaiveCmds = CmdsSeq ++ lists:flatten(CmdsPars),
-%%     NaiveCommands = [{Sym, Args} || {set,_,{call,_,Sym,Args}} <- NaiveCmds],
-%%     NaiveAppends = [X || {append, _} = X <- NaiveCommands],
-%%     conjunction(
-%%       [{identity, equals(NaiveAppends, NaiveAppends)},
-%%        {bogus_order_check_do_not_use_me, equals(Results, lists:usort(Results))}]).
-
 %% Example Trace (raw event info, from the ?LOG macro)
 %%
 %% [{32014,{call,<0.467.0>,{append,<<"O">>}}},
@@ -237,16 +236,27 @@ check_trace(Trace, _Cmds, _Seed) ->
                fun({call, Pid, {append, _Pg}}, {result, Pid, Res}) ->
                        [AppendResultFilter(Res)] end,
                Events),
+    {_, infinity, AppendLPNs} = lists:last(eqc_temporal:all_future(AppendResults)),
 
     %% Desired properties
     AllCallsFinish = eqc_temporal:is_false(eqc_temporal:all_future(Calls)),
-    NoAppendLPNDups = lists:sort(AppendResults) == lists:usort(AppendResults),
+    NoAppendLPNDups = lists:sort(AppendLPNs) == lists:usort(AppendLPNs),
 
+    ?WHENFAIL(begin
+    ?QC_FMT("*AppendLPNs: ~p\n", [range_ify(AppendLPNs)])
+    end,
     conjunction(
       [
        {all_calls_finish, AllCallsFinish},
-       {no_append_duplicates, NoAppendLPNDups}
-      ]).
+       {no_append_duplicates, NoAppendLPNDups},
+       %% If you want to see PULSE causing crazy scheduling, then
+       %% change one of the "true orelse" -> "false orelse" below.
+       {bogus_no_gaps,
+        true orelse
+                (AppendLPNs == [] orelse length(range_ify(AppendLPNs)) == 1)},
+       {bogus_exactly_1_to_N,
+        true orelse (AppendLPNs == lists:seq(1, length(AppendLPNs)))}
+      ])).
 
 %% Presenting command data statistics in a nicer way
 command_data({set, _, {call, _, Fun, _}}, {_S, _V}) ->
@@ -308,14 +318,27 @@ make_chains(ChainLen, [H|T], SmallAcc, BigAcc) ->
             make_chains(ChainLen, T, [H|SmallAcc], BigAcc)
     end.
 
-setup(NumChains, ChainLen, PageSize) ->
+setup(NumChains, ChainLen, PageSize, SeqType) ->
     N = NumChains * ChainLen,
     FLUs = corfurl_test:setup_basic_flus(N, PageSize, 50000),
-    {ok, Seq} = corfurl_sequencer:start_link(FLUs),
+    {ok, Seq} = corfurl_sequencer:start_link(FLUs, SeqType),
     Chains = make_chains(ChainLen, FLUs),
     %% io:format(user, "Cs = ~p\n", [Chains]),
     Proj = corfurl:new_simple_projection(1, 1, 50000, Chains),
     #run{seq=Seq, proj=Proj, flus=FLUs}.
+
+range_ify([]) ->
+    [];
+range_ify(L) ->
+    [H|T] = lists:sort(L),
+    range_ify(H, H+1, T).
+
+range_ify(Beginning, Next, [Next|T]) ->
+    range_ify(Beginning, Next+1, T);
+range_ify(Beginning, Next, [Else|T]) ->
+    [{Beginning, to, Next-1}|range_ify(Else, Else+1, T)];
+range_ify(Beginning, Next, []) ->
+    [{Beginning, to, Next-1}].
 
 -define(LOG(Tag, MkCall),
         event_logger:event({call, self(), Tag}),

@@ -23,6 +23,10 @@
 -behaviour(gen_server).
 
 -export([start_link/1, stop/1, get/2]).
+-ifdef(TEST).
+-export([start_link/2]).
+-compile(export_all).
+-endif.
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
@@ -37,8 +41,10 @@
 -define(SERVER, ?MODULE).
 
 start_link(FLUs) ->
-    %% gen_server:start_link({local, ?SERVER}, ?MODULE, {FLUs}, []).
-    gen_server:start_link(?MODULE, {FLUs}, []).
+    start_link(FLUs, standard).
+
+start_link(FLUs, SeqType) ->
+    gen_server:start_link(?MODULE, {FLUs, SeqType}, []).
 
 stop(Pid) ->
     gen_server:call(Pid, stop, infinity).
@@ -48,12 +54,26 @@ get(Pid, NumPages) ->
 
 %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%%
 
-init({FLUs}) ->
+init({FLUs, TypeOrSeed}) ->
     MLP = get_max_logical_page(FLUs),
-    {ok, MLP + 1}.
+    if TypeOrSeed == standard ->
+            {ok, MLP + 1};
+       true ->
+            {Seed, BadPercent, MaxDifference} = TypeOrSeed,
+            random:seed(Seed),
+            {ok, {MLP+1, BadPercent, MaxDifference}}
+    end.
 
-handle_call({get, NumPages}, _From, MLP) ->
+handle_call({get, NumPages}, _From, MLP) when is_integer(MLP) ->
     {reply, MLP, MLP + NumPages};
+handle_call({get, NumPages}, _From, {MLP, BadPercent, MaxDifference}) ->
+    Fudge = case random:uniform(100) of
+                N when N < BadPercent ->
+                    random:uniform(MaxDifference * 2) - MaxDifference;
+                _ ->
+                    0
+            end,
+    {reply, erlang:max(1, MLP + Fudge), {MLP + NumPages, BadPercent, MaxDifference}};
 handle_call(stop, _From, MLP) ->
     {stop, normal, ok, MLP};
 handle_call(_Request, _From, MLP) ->
