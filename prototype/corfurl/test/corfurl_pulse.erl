@@ -195,7 +195,7 @@ prop_pulse_test_() ->
    end}.
 
 
-%% Example Trace (raw event info, from the ?LOG macro)
+%% Example Trace0 (raw event info, from the ?LOG macro)
 %%
 %% [{32014,{call,<0.467.0>,{append,<<"O">>}}},
 %%  {32421,{call,<0.466.0>,{append,<<134>>}}},
@@ -239,43 +239,103 @@ check_trace(Trace0, _Cmds, _Seed) ->
     %%  {44522,47651,[{call,<0.466.0>,{append,<<134>>,will_be,2}}]},
     %%  {47651,infinity,[]}]
 
-    %% Remember: Appends contains only successful append ops!
-    Appends = eqc_temporal:stateful(
+    %% Remember: Mods contains only successful append ops!
+    %% ModsAllFuture is used for calculating which LPNs were written,
+    %% but Mods is used for everything else.  The two stateful() calls
+    %% at identical except for the "Compare here" difference.
+    Mods = eqc_temporal:stateful(
                fun({call, Pid, {append, Pg, will_be, LPN}}) ->
-                       {status, LPN, Pid, Pg}
+                       {lpn, LPN, Pg, Pid}
                end,
-               fun({status, LPN, Pid, Pg}, {result, Pid, {ok, LPN}})->
-                       [{status, LPN, x, Pg}]
+               fun({lpn, LPN, _Pg, Pid}, {result, Pid, {ok, LPN}})->
+                       []                       % Compare here
                end,
                Events),
-    if length(Appends) < 10 -> io:format("Trace ~p\n", [Trace]), io:format("Events ~p\n", [Events]), io:format("Appends ~p\n", [Appends]); true -> ok end,
+    ModsAllFuture = eqc_temporal:stateful(
+               fun({call, Pid, {append, Pg, will_be, LPN}}) ->
+                       {lpn, LPN, Pg, Pid}
+               end,
+               fun({lpn, LPN, Pg, Pid}, {result, Pid, {ok, LPN}})->
+                       %% Keep this into the infinite future
+                       [{lpn, LPN, Pg}]         % Compare here
+               end,
+               Events),
+    %%QQQ = -5,
+    %%if length(Trace) < QQQ -> io:format("Trace ~p\n", [Trace]), io:format("Events ~p\n", [Events]), io:format("Mods ~p\n", [Mods]); true -> ok end,
+
     %% The last item in the relation tells us what the last/infinite future
     %% state of each LPN is.  We'll use it to identify all successfully
     %% written LPNs and other stuff.
-    {_, infinity, FinalStatus} = lists:last(eqc_temporal:all_future(Appends)),
+    {_, infinity, FinalStatus} = lists:last(eqc_temporal:all_future(ModsAllFuture)),
 
+    %% StartMod contains {m_start, LPN, V} when a modification finished.
+    %% DoneMod contains {m_end, LPN, V} when a modification finished.
 
-    InitialVals = eqc_temporal:elems(eqc_temporal:ret([{status, LPN, x, error_unwritten} || {status, LPN, _, _} <- FinalStatus])),
-    Vals = eqc_temporal:union(InitialVals, Appends),
+    %% This is a clever trick: Mods contains the start & end timestamp
+    %% for each modification.  Use shift() by 1 usec to move all timestamps
+    %% backward 1 usec, then subtract away the original time range to leave
+    %% a 1 usec relation in time, then map() to convert it to a {m_end,...}.
+    DoneMod = eqc_temporal:map(
+                fun({lpn, LPN, Pg, _Pid}) -> {m_end, LPN, Pg} end,
+                eqc_temporal:subtract(eqc_temporal:shift(1, Mods), Mods)),
+    StartMod = eqc_temporal:map(
+                fun({lpn, LPN, Pg, _Pid}) -> {m_start, LPN, Pg} end,
+                eqc_temporal:subtract(Mods, eqc_temporal:shift(1, Mods))),
+    %% if length(Trace) < QQQ -> io:format(user, "StartMod  ~P\n", [StartMod, 100]), io:format(user, "DoneMod  ~P\n", [DoneMod, 100]); true -> ok end,
+    StartsDones = eqc_temporal:union(StartMod, DoneMod),
+    %%if length(Trace) < QQQ -> io:format(user, "StartsDones ~P\n", [StartsDones, 100]); true -> ok end,
 
-    Values = eqc_temporal:stateful(
-               fun({status, _LPN, Pid, _Pg} = I) when is_pid(Pid) -> I end,
-               fun({status, LPN, Pid, Pg}, {status, LPN, x, Pg})
-                     when is_pid(Pid) -> [] end,
-               Vals),
-    if length(Appends) < 10 -> io:format(user, "Values ~P\n", [Values, 100]); true -> ok end,
+    %% TODO: A brighter mind than mine might figure out how to do this
+    %% next step using only eqc_temporal.
+    %%
+    %% We create a new relation, ValuesR.  This relation contains
+    %% {values, OD::orddict()} for each time interval in the relation.
+    %% The OD contains all possible values for a particular LPN at
+    %% that time in the relation.
+    %% The key for OD is LPN, the value is an unordered list of possible values.
+
+    InitialDict = orddict:from_list([{LPN, [error_unwritten]} ||
+                                        {lpn, LPN, _} <- FinalStatus]),
+    {_ValuesR, _} =
+        lists:mapfoldl(
+          fun({TS1, TS2, StEnds}, Dict1) ->
+                  Dict2 = lists:foldl(
+                            fun({m_start, LPN, Pg}, D) ->
+                                    orddict:append(LPN, Pg, D)
+                            end, Dict1, [X || X={m_start,_,_} <- StEnds]),
+                  Dict3 = lists:foldl(
+                            fun({m_end, LPN, Pg}, D) ->
+                                    orddict:store(LPN, [Pg], D)
+                            end, Dict2, [X || X={m_end,_,_} <- StEnds]),
+                  {{TS1, TS2, [{values, Dict3}]}, Dict3}
+          end, InitialDict, StartsDones),
+    %%if length(Trace) < QQQ -> io:format(user, "ValuesR ~P\n", [ValuesR, 100]); true -> ok end,
+
+    %% We want to find & fail any two clients that append the exact same page
+    %% data to the same LPN.  Unfortunately, the eqc_temporal library will
+    %% merge two such facts together into a single fact.  So this method
+    %% commented below isn't good enough.
+    %% M_Ends = eqc_temporal:at(infinity, eqc_temporal:any_past(DoneMod)),
+    %% AppendedLPNs = lists:sort([LPN || {m_end, LPN, _} <- M_Ends]),
+    %% {_Last, DuplicateLPNs} = lists:foldl(fun(X, {X, Dups}) -> {X, [X|Dups]};
+    %%                                         (X, {_, Dups}) -> {X, Dups}
+    %%                                      end, {undefined, []}, AppendedLPNs),
+    AppendWillBes = [LPN || {_TS, {call, _, {append, _, will_be, LPN}}} <- Trace],
+    DuplicateLPNs = AppendWillBes -- lists:usort(AppendWillBes),
 
     %% Desired properties
     AllCallsFinish = eqc_temporal:is_false(eqc_temporal:all_future(Calls)),
-    NoAppendLPNDups = true, %%% QQQ TODO!!!!!!!! lists:sort(AppendLPNs) == lists:usort(AppendLPNs),
+    NoAppendDuplicates = (DuplicateLPNs == []),
 
     ?WHENFAIL(begin
-    ?QC_FMT("*AppendLPNs: ~p\n", [todoTODO]) %%%%% [range_ify(AppendLPNs)])
+    %% ?QC_FMT("*Events: ~p\n", [Events]),
+    ?QC_FMT("*Mods: ~p\n", [Mods]),
+    ?QC_FMT("*DuplicateLPNs: ~p\n", [DuplicateLPNs])
     end,
     conjunction(
       [
        {all_calls_finish, AllCallsFinish},
-       {no_append_duplicates, NoAppendLPNDups},
+       {no_append_duplicates, NoAppendDuplicates},
        %% If you want to see PULSE causing crazy scheduling, then
        %% change one of the "true orelse" -> "false orelse" below.
        %% {bogus_no_gaps,
@@ -393,9 +453,26 @@ range_ify(Beginning, Next, []) ->
         event_logger:event({result, self(), LOG__Result}),
         LOG__Result).
 
+-ifndef(TEST_TRIP_no_append_duplicates).
+
 append(#run{seq=Seq,proj=Proj}, Page) ->
     ?LOG({append, Page},
          corfurl:append_page(Seq, Proj, Page)).
+-else. % TEST_TRIP_no_append_duplicates
+
+%% If the appended LPN > 3, just lie and say that it was 3.
+
+append(#run{seq=Seq,proj=Proj}, Page) ->
+    ?LOG({append, Page},
+         begin
+             case corfurl:append_page(Seq, Proj, Page) of
+                 {ok, LPN} when LPN > 3 ->
+                     {ok, 3};
+                 Else ->
+                     Else
+             end
+         end).
+-endif. % TEST_TRIP_no_append_duplicates
 
 -endif. % PULSE
 -endif. % TEST
