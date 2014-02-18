@@ -45,6 +45,8 @@
 -define(QC_OUT(P),
         eqc:on_output(fun(Str, Args) -> ?QC_FMT(Str, Args) end, P)).
 
+-define(MAX_PAGES, 50000).
+
 -record(run, {
           seq,                                  % Sequencer
           proj,                                 % Projection
@@ -76,6 +78,10 @@ gen_sequencer() ->
     frequency([{100, standard},
                {50, {gen_seed(), gen_sequencer_percent(), choose(1, 2)}}]).
 
+gen_approx_page() ->
+    %% EQC can't know what pages are perhaps-written, so pick something big.
+    ?LET(I, largeint(), abs(I)).
+
 command(#state{run=Run} = S) ->
     ?LET({NumChains, ChainLen, PageSize},
          {parameter(num_chains), parameter(chain_len), parameter(page_size)},
@@ -83,6 +89,8 @@ command(#state{run=Run} = S) ->
       [{10, {call, ?MODULE, setup, [NumChains, ChainLen, PageSize, gen_sequencer()]}}
        || not S#state.is_setup] ++
       [{10, {call, ?MODULE, append, [Run, gen_page(PageSize)]}}
+       || S#state.is_setup] ++
+      [{10, {call, ?MODULE, read_approx, [Run, gen_approx_page()]}}
        || S#state.is_setup] ++
       [])).
 
@@ -101,6 +109,8 @@ next_state(S, Res, {call, _, setup, [NumChains, ChainLen, PageSize, _SeqType]}) 
             page_size=PageSize,
             run=Res};
 next_state(S, _, {call, _, append, _}) ->
+    S;
+next_state(S, _, {call, _, read_approx, _}) ->
     S.
 
 eqeq(X, X) -> true;
@@ -111,7 +121,14 @@ postcondition(_S, {call, _, setup, _}, #run{} = _V) ->
 postcondition(_S, {call, _, append, _}, {ok, LPN}) when is_integer(LPN) ->
     true;
 postcondition(_S, {call, _, append, _}, V) ->
-    eqeq(V, todoTODO_fixit).
+    eqeq(V, todoTODO_fixit);
+postcondition(_S, {call, _, read_approx, _}, V) ->
+    case V of
+        {ok, Pg} when is_binary(Pg) -> true;
+        error_unwritten             -> true;
+        error_trimmed               -> true;
+        _                           -> eqeq(V, todoTODO_fixit)
+    end.
 
 run_commands_on_node(_LocalOrSlave, Cmds, Seed) ->
     %% AfterTime = if LocalOrSlave == local -> 50000;
@@ -128,9 +145,9 @@ run_commands_on_node(_LocalOrSlave, Cmds, Seed) ->
           %% application:start(my_test_app),
           %% receive after AfterTime -> ok end,
           {H, S, R} = run_parallel_commands(?MODULE, Cmds),
-    %% io:format(user, "Yooo: H = ~p\n", [H]),
-    %% io:format(user, "Yooo: S = ~p\n", [S]),
-    %% io:format(user, "Yooo: R = ~p\n", [R]),
+          %% io:format(user, "Yooo: H = ~p\n", [H]),
+          %% io:format(user, "Yooo: S = ~p\n", [S]),
+          %% io:format(user, "Yooo: R = ~p\n", [R]),
           %% receive after AfterTime -> ok end,
           Trace = event_logger:get_events(),
           %% receive after AfterTime -> ok end,
@@ -270,11 +287,10 @@ check_trace(Trace0, _Cmds, _Seed) ->
 
     %% StartMod contains {m_start, LPN, V} when a modification finished.
     %% DoneMod contains {m_end, LPN, V} when a modification finished.
-
     %% This is a clever trick: Mods contains the start & end timestamp
     %% for each modification.  Use shift() by 1 usec to move all timestamps
-    %% backward 1 usec, then subtract away the original time range to leave
-    %% a 1 usec relation in time, then map() to convert it to a {m_end,...}.
+    %% forward/backward 1 usec, then subtract away the original time range to
+    %% leave a 1 usec relation in time.
     DoneMod = eqc_temporal:map(
                 fun({lpn, LPN, Pg, _Pid}) -> {m_end, LPN, Pg} end,
                 eqc_temporal:subtract(eqc_temporal:shift(1, Mods), Mods)),
@@ -427,11 +443,11 @@ make_chains(ChainLen, [H|T], SmallAcc, BigAcc) ->
 
 setup(NumChains, ChainLen, PageSize, SeqType) ->
     N = NumChains * ChainLen,
-    FLUs = corfurl_test:setup_basic_flus(N, PageSize, 50000),
+    FLUs = corfurl_test:setup_basic_flus(N, PageSize, ?MAX_PAGES),
     {ok, Seq} = corfurl_sequencer:start_link(FLUs, SeqType),
     Chains = make_chains(ChainLen, FLUs),
     %% io:format(user, "Cs = ~p\n", [Chains]),
-    Proj = corfurl:new_simple_projection(1, 1, 50000, Chains),
+    Proj = corfurl:new_simple_projection(1, 1, ?MAX_PAGES, Chains),
     #run{seq=Seq, proj=Proj, flus=FLUs}.
 
 range_ify([]) ->
@@ -455,14 +471,14 @@ range_ify(Beginning, Next, []) ->
 
 -ifndef(TEST_TRIP_no_append_duplicates).
 
-append(#run{seq=Seq,proj=Proj}, Page) ->
+append(#run{seq=Seq, proj=Proj}, Page) ->
     ?LOG({append, Page},
          corfurl:append_page(Seq, Proj, Page)).
 -else. % TEST_TRIP_no_append_duplicates
 
 %% If the appended LPN > 3, just lie and say that it was 3.
 
-append(#run{seq=Seq,proj=Proj}, Page) ->
+append(#run{seq=Seq, proj=Proj}, Page) ->
     ?LOG({append, Page},
          begin
              case corfurl:append_page(Seq, Proj, Page) of
@@ -473,6 +489,13 @@ append(#run{seq=Seq,proj=Proj}, Page) ->
              end
          end).
 -endif. % TEST_TRIP_no_append_duplicates
+
+read_approx(#run{seq=Seq, proj=Proj}, SeedInt) ->
+    Max = corfurl_sequencer:get(Seq, 0),
+    %% The sequencer may be lying to us, shouganai.
+    LPN = (SeedInt rem Max) + 1,
+    ?LOG({read, LPN},
+         corfurl:read_page(Proj, LPN)).
 
 -endif. % PULSE
 -endif. % TEST
