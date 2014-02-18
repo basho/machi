@@ -277,6 +277,7 @@ check_trace(Trace0, _Cmds, _Seed) ->
                        [{lpn, LPN, Pg}]         % Compare here
                end,
                Events),
+
     %%QQQ = -5,
     %%if length(Trace) < QQQ -> io:format("Trace ~p\n", [Trace]), io:format("Events ~p\n", [Events]), io:format("Mods ~p\n", [Mods]); true -> ok end,
 
@@ -312,7 +313,7 @@ check_trace(Trace0, _Cmds, _Seed) ->
 
     InitialDict = orddict:from_list([{LPN, [error_unwritten]} ||
                                         {lpn, LPN, _} <- FinalStatus]),
-    {_ValuesR, _} =
+    {ValuesR, _} =
         lists:mapfoldl(
           fun({TS1, TS2, StEnds}, Dict1) ->
                   Dict2 = lists:foldl(
@@ -339,19 +340,65 @@ check_trace(Trace0, _Cmds, _Seed) ->
     AppendWillBes = [LPN || {_TS, {call, _, {append, _, will_be, LPN}}} <- Trace],
     DuplicateLPNs = AppendWillBes -- lists:usort(AppendWillBes),
 
+    Reads = eqc_temporal:stateful(
+               fun({call, Pid, {read, LPN}}) ->
+                       {read, Pid, LPN}
+               end,
+               fun({read, Pid, LPN}, {result, Pid, {ok, Pg}}) ->
+                       [{read_finished, LPN, Pg}];
+                  ({read, Pid, LPN}, {result, Pid, Else}) ->
+                       [{read_finished, LPN, Else}]
+               end,
+               Events),
+    DoneRead = eqc_temporal:map(
+                fun({read_finished, LPN, Pg}) -> {read_end, LPN, Pg} end,
+                eqc_temporal:subtract(eqc_temporal:shift(-1, Reads), Reads)),
+    StartRead = eqc_temporal:map(
+                fun({read, Pid, LPN}) -> {read_start, LPN, Pid} end,
+                eqc_temporal:subtract(Reads, eqc_temporal:shift(1, Reads))),
+    %%io:format("Reads = ~P\n", [Reads, 30]),
+    %%io:format("DoneRead = ~P\n", [DoneRead, 30]),
+    %%io:format("UU ~p\n", [eqc_temporal:union(DoneRead, ValuesR)]),
+    BadReadR = eqc_temporal:stateful(
+                 fun({read_end, _, _} = I) -> I end,
+                 fun({read_end, LPN, Pg}, {values, Dict}) ->
+                         {ok, PossibleVals} = orddict:find(LPN, Dict),
+                         case lists:member(Pg, PossibleVals) of
+                             true ->
+                                 [];
+                             false ->
+                                 [{bad, read, LPN, got, Pg,
+                                   possible, PossibleVals}]
+                         end
+                 end, eqc_temporal:union(DoneRead, ValuesR)),
+    %%io:format("BadReadR = ~P\n", [BadReadR, 20]),
+    BadFilter = fun(bad) -> true;
+                   (Bad) when is_tuple(Bad), element(1, Bad) == bad -> true;
+                   (_)   -> false end,
+    %%io:format("BadReadR = ~P\n", [BadReadR, 40]),
+    BadReads = [{TS1, TS2, lists:filter(BadFilter, Facts)} ||
+                   {TS1, TS2, Facts} <- BadReadR,
+                   Fact <- Facts, BadFilter(Fact)],
+
     %% Desired properties
     AllCallsFinish = eqc_temporal:is_false(eqc_temporal:all_future(Calls)),
     NoAppendDuplicates = (DuplicateLPNs == []),
+    NoBadReads = (BadReads == []),
 
     ?WHENFAIL(begin
     %% ?QC_FMT("*Events: ~p\n", [Events]),
+    ?QC_FMT("*DuplicateLPNs: ~p\n", [DuplicateLPNs]),
     ?QC_FMT("*Mods: ~p\n", [Mods]),
-    ?QC_FMT("*DuplicateLPNs: ~p\n", [DuplicateLPNs])
+    ?QC_FMT("*readsUmods: ~p\n", [eqc_temporal:union(Reads, Mods)]),
+    ?QC_FMT("*DreadUDmod: ~p\n", [eqc_temporal:unions([DoneRead, DoneMod,
+                                                       StartRead, StartMod])]),
+    ?QC_FMT("*BadReads: ~p\n", [BadReads])
     end,
     conjunction(
       [
        {all_calls_finish, AllCallsFinish},
        {no_append_duplicates, NoAppendDuplicates},
+       {no_bad_reads, NoBadReads},
        %% If you want to see PULSE causing crazy scheduling, then
        %% change one of the "true orelse" -> "false orelse" below.
        %% {bogus_no_gaps,
@@ -479,16 +526,21 @@ append(#run{seq=Seq, proj=Proj}, Page) ->
 %% If the appended LPN > 3, just lie and say that it was 3.
 
 append(#run{seq=Seq, proj=Proj}, Page) ->
+    MaxLPN = 3,
     ?LOG({append, Page},
          begin
              case corfurl:append_page(Seq, Proj, Page) of
-                 {ok, LPN} when LPN > 3 ->
-                     {ok, 3};
+                 {ok, LPN} when LPN > MaxLPN ->
+                     Bad = {ok, MaxLPN},
+                     io:format("BAD: append: ~p -> ~p\n", [Page, Bad]),
+                     Bad;
                  Else ->
                      Else
              end
          end).
 -endif. % TEST_TRIP_no_append_duplicates
+
+-ifndef(TEST_TRIP_bad_read).
 
 read_approx(#run{seq=Seq, proj=Proj}, SeedInt) ->
     Max = corfurl_sequencer:get(Seq, 0),
@@ -496,6 +548,23 @@ read_approx(#run{seq=Seq, proj=Proj}, SeedInt) ->
     LPN = (SeedInt rem Max) + 1,
     ?LOG({read, LPN},
          corfurl:read_page(Proj, LPN)).
+-else. % TEST_TRIP_bad_read
+
+read_approx(#run{seq=Seq, proj=Proj}, SeedInt) ->
+    Fake = <<"FAKE!">>,
+    Max = corfurl_sequencer:get(Seq, 0),
+    LPN = (SeedInt rem Max) + 1,
+    ?LOG({read, LPN},
+         if LPN > 4 ->
+                 io:format("read_approx: ~p -> ~p\n", [LPN, Fake]),
+                 {ok, Fake};
+            true ->
+                 Res = corfurl:read_page(Proj, LPN),
+                 %% io:format("read_approx: ~p -> ~P\n", [LPN, Res, 6]),
+                 Res
+         end).
+
+-endif. % TEST_TRIP_bad_read
 
 -endif. % PULSE
 -endif. % TEST
