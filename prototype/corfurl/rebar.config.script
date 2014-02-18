@@ -18,8 +18,6 @@ case PulseBuild of
               , {corfurl_flu, trim, '_'}
               , {corfurl_flu, fill, '_'}
 
-              , {event_logger, event, '_'}
-
               , {prim_file, '_', '_'}
               , {file, '_', '_'}
               , {filelib, '_', '_'}
