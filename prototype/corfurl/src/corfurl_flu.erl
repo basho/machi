@@ -294,10 +294,12 @@ check_write(LogicalPN, PageBin,
 
 check_is_written(Offset, _PhysicalPN, #state{mem_fh=FH}) ->
     case file:pread(FH, Offset, 1) of
-        {ok, <<1:8>>} ->
-            true;
         {ok, <<0:8>>} ->
             false;
+        {ok, <<1:8>>} ->  % written
+            true;
+        {ok, <<2:8>>} ->  % trimmed
+            true;
         eof ->
             %% We assume that Offset has been bounds-checked
             false
@@ -318,7 +320,7 @@ read_page(LogicalPN, #state{max_mem=MaxMem, mem_fh=FH,
                     io:format("BUMMER: ~s line ~w: incomplete write at ~p\n",
                               [?MODULE, ?LINE, LogicalPN]),
                     error_unwritten;
-                {ok, <<2:8>>} ->
+                {ok, <<2:8, _/binary>>} ->
                     error_trimmed;
                 {ok, _} ->
                     error_unwritten;
