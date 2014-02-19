@@ -61,6 +61,19 @@
           run :: #run{}
          }).
 
+%% Model testing things:
+%% Define true to fake bad behavior that model **must** notice & fail!
+
+-ifndef(TRIP_no_append_duplicates).
+-define(TRIP_no_append_duplicates, false).
+-endif.
+-ifndef(TRIP_bad_read).
+-define(TRIP_bad_read, false).
+-endif.
+-ifndef(TRIP_bad_scan_forward).
+-define(TRIP_bad_scan_forward, false).
+-endif.
+
 initial_state() ->
     #state{}.
 
@@ -367,6 +380,9 @@ check_trace(Trace0, _Cmds, _Seed) ->
                        {ok, V2s} = orddict:find(LPN, Values),
                        NewVs = lists:umerge(lists:sort(V1s),
                                             lists:sort(V2s)),
+                       %% Throw an exception (which is equivalent to a no-op)
+                       %% if there are no differences: if we make multiples
+                       %% of the exact same thing, stateful() will get confused.
                        false = NewVs == V1s,
                        {read, Pid, LPN, NewVs};
                   ({read, Pid, LPN, Vs}, {result, Pid, Pg}) ->
@@ -531,66 +547,37 @@ log_make_result(Pid, Result) ->
         event_logger:event(log_make_result(LOG__Result)),
         LOG__Result).
 
--ifndef(TEST_TRIP_no_append_duplicates).
-
 append(#run{seq=Seq, proj=Proj}, Page) ->
-    ?LOG({append, Page},
-         corfurl:append_page(Seq, Proj, Page)).
--else. % TEST_TRIP_no_append_duplicates
-
-%% If the appended LPN > 3, just lie and say that it was 3.
-
-append(#run{seq=Seq, proj=Proj}, Page) ->
-    MaxLPN = 3,
     ?LOG({append, Page},
          begin
-             case corfurl:append_page(Seq, Proj, Page) of
-                 {ok, LPN} when LPN > MaxLPN ->
-                     Bad = {ok, MaxLPN},
-                     io:format("BAD: append: ~p -> ~p\n", [Page, Bad]),
-                     Bad;
-                 Else ->
-                     Else
-             end
+             Res = corfurl:append_page(Seq, Proj, Page),
+             perhaps_trip_append_page(?TRIP_no_append_duplicates, Res, Page)
          end).
--endif. % TEST_TRIP_no_append_duplicates
 
 read_result_mangle({ok, Page}) ->
     Page;
 read_result_mangle(Else) ->
     Else.
 
--ifndef(TEST_TRIP_bad_read).
-
 read_approx(#run{seq=Seq, proj=Proj}, SeedInt) ->
     Max = corfurl_sequencer:get(Seq, 0),
     %% The sequencer may be lying to us, shouganai.
     LPN = (SeedInt rem Max) + 1,
     ?LOG({read, LPN},
-         read_result_mangle(corfurl:read_page(Proj, LPN))).
--else. % TEST_TRIP_bad_read
-
-read_approx(#run{seq=Seq, proj=Proj}, SeedInt) ->
-    Fake = <<"FAKE!">>,
-    Max = corfurl_sequencer:get(Seq, 0),
-    LPN = (SeedInt rem Max) + 1,
-    ?LOG({read, LPN},
-         if LPN > 4 ->
-                 io:format("read_approx: ~p -> ~p\n", [LPN, Fake]),
-                 read_result_mangle(Fake);
-            true ->
-                 Res = read_result_mangle(corfurl:read_page(Proj, LPN)),
-                 %% io:format("read_approx: ~p -> ~P\n", [LPN, Res, 6]),
-                 Res
+         begin
+             Res = read_result_mangle(corfurl:read_page(Proj, LPN)),
+             perhaps_trip_read_approx(?TRIP_bad_read, Res, LPN)
          end).
-
--endif. % TEST_TRIP_bad_read
 
 scan_forward(#run{seq=Seq, proj=Proj}, SeedInt, NumPages) ->
     Max = corfurl_sequencer:get(Seq, 0),
     StartLPN = if SeedInt == 1 -> 1;
                   true         -> (SeedInt rem Max) + 1
                end,
+    %% Our job is complicated by the ?LOG() macro, which isn't good enough
+    %% for our purpose: we must lie about the starting timestamp, to make
+    %% it appear as if each LPN result that scan_forward() gives us came
+    %% instead from a single-page read_page() call.
     ?LOG({scan_forward, StartLPN, NumPages},
          begin
              TS1 = event_logger:timestamp(),
@@ -602,7 +589,9 @@ scan_forward(#run{seq=Seq, proj=Proj}, SeedInt, NumPages) ->
                           PidI = {self(), I},
                           event_logger:event(log_make_call(PidI, {read, LPN}),
                                              TS1),
-                          Pm = read_result_mangle(P),
+                          Pm = perhaps_trip_scan_forward(
+                                 ?TRIP_bad_scan_forward, read_result_mangle(P),
+                                 EndLPN),
                           event_logger:event(log_make_result(PidI, Pm), TS2)
                       end || {{LPN, P}, I} <- PageIs],
                      Ps = [{LPN, read_result_mangle(P)} ||
@@ -610,6 +599,30 @@ scan_forward(#run{seq=Seq, proj=Proj}, SeedInt, NumPages) ->
                      {ok, EndLPN, MoreP, Ps}
              end
          end).
+
+perhaps_trip_append_page(false, Res, _Page) ->
+    Res;
+perhaps_trip_append_page(true, {ok, LPN}, _Page) when LPN > 3 ->
+    io:format(user, "TRIP: append_page\n", []),
+    {ok, 3};
+perhaps_trip_append_page(true, Else, _Page) ->
+    Else.
+
+perhaps_trip_read_approx(false, Res, _LPN) ->
+    Res;
+perhaps_trip_read_approx(true, _Res, 3 = LPN) ->
+    io:format(user, "TRIP: read_approx LPN ~p", [LPN]),
+    <<"FAKE!">>;
+perhaps_trip_read_approx(true, Res, _LPN) ->
+    Res.
+
+perhaps_trip_scan_forward(false, Res, _EndLPN) ->
+    Res;
+perhaps_trip_scan_forward(true, _Res, 20) ->
+    io:format(user, "TRIP: scan_forward\n", []),
+    <<"magic number bingo, you are a winner">>;
+perhaps_trip_scan_forward(true, Res, _EndLPN) ->
+    Res.
 
 -endif. % PULSE
 -endif. % TEST
