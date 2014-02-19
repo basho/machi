@@ -80,7 +80,7 @@ gen_sequencer() ->
 
 gen_approx_page() ->
     %% EQC can't know what pages are perhaps-written, so pick something big.
-    ?LET(I, largeint(), abs(I)).
+    noshrink(?LET(I, largeint(), abs(I))).
 
 command(#state{run=Run} = S) ->
     ?LET({NumChains, ChainLen, PageSize},
@@ -124,7 +124,7 @@ postcondition(_S, {call, _, append, _}, V) ->
     eqeq(V, todoTODO_fixit);
 postcondition(_S, {call, _, read_approx, _}, V) ->
     case V of
-        {ok, Pg} when is_binary(Pg) -> true;
+        Pg when is_binary(Pg)       -> true;
         error_unwritten             -> true;
         error_trimmed               -> true;
         _                           -> eqeq(V, todoTODO_fixit)
@@ -244,7 +244,7 @@ check_trace(Trace0, _Cmds, _Seed) ->
     %%  {47652,infinity,[]}]
 
     Calls  = eqc_temporal:stateful(
-               fun({call, Pid, Call}) -> [{call, Pid, Call}] end,
+               fun({call, _Pid, _Call} = I) -> [I] end,
                fun({call, Pid, _Call}, {result, Pid, _}) -> [] end,
                Events),
     %% Example Calls (temporal map of when a call is in progress)
@@ -256,35 +256,25 @@ check_trace(Trace0, _Cmds, _Seed) ->
     %%  {44522,47651,[{call,<0.466.0>,{append,<<134>>,will_be,2}}]},
     %%  {47651,infinity,[]}]
 
-    %% Remember: Mods contains only successful append ops!
-    %% ModsAllFuture is used for calculating which LPNs were written,
-    %% but Mods is used for everything else.  The two stateful() calls
-    %% at identical except for the "Compare here" difference.
+    AllLPNsR = eqc_temporal:stateful(
+                fun({call, _Pid, {append, _Pg, will_be, LPN}}) -> LPN;
+                   ({call, _Pid, {read, LPN}}) -> LPN
+                end,
+                fun(x) -> [] end,
+                Calls),
+    %% The last item in the relation tells us what the final facts are in the
+    %% relation.  In this case, it's all LPNs ever mentioned in the test run.
+    {_, infinity, AllLPNs} = lists:last(eqc_temporal:all_future(AllLPNsR)),
+
+    %% Remember: Mods contains only successful ops that modify an LPN
     Mods = eqc_temporal:stateful(
                fun({call, Pid, {append, Pg, will_be, LPN}}) ->
-                       {lpn, LPN, Pg, Pid}
+                       {mod_lpn, LPN, Pg, Pid}
                end,
-               fun({lpn, LPN, _Pg, Pid}, {result, Pid, {ok, LPN}})->
+               fun({mod_lpn, LPN, _Pg, Pid}, {result, Pid, {ok, LPN}})->
                        []                       % Compare here
                end,
                Events),
-    ModsAllFuture = eqc_temporal:stateful(
-               fun({call, Pid, {append, Pg, will_be, LPN}}) ->
-                       {lpn, LPN, Pg, Pid}
-               end,
-               fun({lpn, LPN, Pg, Pid}, {result, Pid, {ok, LPN}})->
-                       %% Keep this into the infinite future
-                       [{lpn, LPN, Pg}]         % Compare here
-               end,
-               Events),
-
-    %%QQQ = -5,
-    %%if length(Trace) < QQQ -> io:format("Trace ~p\n", [Trace]), io:format("Events ~p\n", [Events]), io:format("Mods ~p\n", [Mods]); true -> ok end,
-
-    %% The last item in the relation tells us what the last/infinite future
-    %% state of each LPN is.  We'll use it to identify all successfully
-    %% written LPNs and other stuff.
-    {_, infinity, FinalStatus} = lists:last(eqc_temporal:all_future(ModsAllFuture)),
 
     %% StartMod contains {m_start, LPN, V} when a modification finished.
     %% DoneMod contains {m_end, LPN, V} when a modification finished.
@@ -293,14 +283,12 @@ check_trace(Trace0, _Cmds, _Seed) ->
     %% forward/backward 1 usec, then subtract away the original time range to
     %% leave a 1 usec relation in time.
     DoneMod = eqc_temporal:map(
-                fun({lpn, LPN, Pg, _Pid}) -> {m_end, LPN, Pg} end,
+                fun({mod_lpn, LPN, Pg, _Pid}) -> {m_end, LPN, Pg} end,
                 eqc_temporal:subtract(eqc_temporal:shift(1, Mods), Mods)),
     StartMod = eqc_temporal:map(
-                fun({lpn, LPN, Pg, _Pid}) -> {m_start, LPN, Pg} end,
+                fun({mod_lpn, LPN, Pg, _Pid}) -> {m_start, LPN, Pg} end,
                 eqc_temporal:subtract(Mods, eqc_temporal:shift(1, Mods))),
-    %% if length(Trace) < QQQ -> io:format(user, "StartMod  ~P\n", [StartMod, 100]), io:format(user, "DoneMod  ~P\n", [DoneMod, 100]); true -> ok end,
     StartsDones = eqc_temporal:union(StartMod, DoneMod),
-    %%if length(Trace) < QQQ -> io:format(user, "StartsDones ~P\n", [StartsDones, 100]); true -> ok end,
 
     %% TODO: A brighter mind than mine might figure out how to do this
     %% next step using only eqc_temporal.
@@ -312,7 +300,7 @@ check_trace(Trace0, _Cmds, _Seed) ->
     %% The key for OD is LPN, the value is an unordered list of possible values.
 
     InitialDict = orddict:from_list([{LPN, [error_unwritten]} ||
-                                        {lpn, LPN, _} <- FinalStatus]),
+                                        LPN <- AllLPNs]),
     {ValuesR, _} =
         lists:mapfoldl(
           fun({TS1, TS2, StEnds}, Dict1) ->
@@ -326,7 +314,6 @@ check_trace(Trace0, _Cmds, _Seed) ->
                             end, Dict2, [X || X={m_end,_,_} <- StEnds]),
                   {{TS1, TS2, [{values, Dict3}]}, Dict3}
           end, InitialDict, StartsDones),
-    %%if length(Trace) < QQQ -> io:format(user, "ValuesR ~P\n", [ValuesR, 100]); true -> ok end,
 
     %% We want to find & fail any two clients that append the exact same page
     %% data to the same LPN.  Unfortunately, the eqc_temporal library will
@@ -340,44 +327,41 @@ check_trace(Trace0, _Cmds, _Seed) ->
     AppendWillBes = [LPN || {_TS, {call, _, {append, _, will_be, LPN}}} <- Trace],
     DuplicateLPNs = AppendWillBes -- lists:usort(AppendWillBes),
 
+    %% Checking reads is a tricky thing.  My first attempt created a temporal
+    %% relation for the 1usec window when the read call was complete, then
+    %% union with the ValuesR relation to see what values were valid at that
+    %% particular instant.  That approach fails sometimes!
+    %%
+    %% The reason is honest race conditions with a mutation: the model doesn't
+    %% know exactly when the data was written, so a valid value may have been
+    %% added/removed from the ValuesR relation that aren't there for the
+    %% 1usec window that intersects with ValuesR.
+    %%
+    %% Instead, we need to merge together all possible values from ValuesR
+    %% that appear at any time during the read op's lifetime.
+
     Reads = eqc_temporal:stateful(
                fun({call, Pid, {read, LPN}}) ->
-                       {read, Pid, LPN}
+                       {read, Pid, LPN, []}
                end,
-               fun({read, Pid, LPN}, {result, Pid, {ok, Pg}}) ->
-                       [{read_finished, LPN, Pg}];
-                  ({read, Pid, LPN}, {result, Pid, Else}) ->
-                       [{read_finished, LPN, Else}]
-               end,
-               Events),
-    DoneRead = eqc_temporal:map(
-                fun({read_finished, LPN, Pg}) -> {read_end, LPN, Pg} end,
-                eqc_temporal:subtract(eqc_temporal:shift(-1, Reads), Reads)),
-    StartRead = eqc_temporal:map(
-                fun({read, Pid, LPN}) -> {read_start, LPN, Pid} end,
-                eqc_temporal:subtract(Reads, eqc_temporal:shift(1, Reads))),
-    %%io:format("Reads = ~P\n", [Reads, 30]),
-    %%io:format("DoneRead = ~P\n", [DoneRead, 30]),
-    %%io:format("UU ~p\n", [eqc_temporal:union(DoneRead, ValuesR)]),
-    BadReadR = eqc_temporal:stateful(
-                 fun({read_end, _, _} = I) -> I end,
-                 fun({read_end, LPN, Pg}, {values, Dict}) ->
-                         {ok, PossibleVals} = orddict:find(LPN, Dict),
-                         case lists:member(Pg, PossibleVals) of
-                             true ->
-                                 [];
-                             false ->
-                                 [{bad, read, LPN, got, Pg,
-                                   possible, PossibleVals}]
-                         end
-                 end, eqc_temporal:union(DoneRead, ValuesR)),
-    %%io:format("BadReadR = ~P\n", [BadReadR, 20]),
+               fun({read, Pid, LPN, V1s}, {values, Values}) ->
+                       {ok, V2s} = orddict:find(LPN, Values),
+                       NewVs = lists:umerge(lists:sort(V1s),
+                                            lists:sort(V2s)),
+                       false = NewVs == V1s,
+                       {read, Pid, LPN, NewVs};
+                  ({read, Pid, LPN, Vs}, {result, Pid, Pg}) ->
+                       case lists:member(Pg, Vs) of
+                           true  -> [];
+                           false -> [{bad, read, LPN, Pid, got, Pg,
+                                      possible, Vs}]
+                       end
+               end, eqc_temporal:union(Events, ValuesR)),
     BadFilter = fun(bad) -> true;
                    (Bad) when is_tuple(Bad), element(1, Bad) == bad -> true;
                    (_)   -> false end,
-    %%io:format("BadReadR = ~P\n", [BadReadR, 40]),
     BadReads = [{TS1, TS2, lists:filter(BadFilter, Facts)} ||
-                   {TS1, TS2, Facts} <- BadReadR,
+                   {TS1, TS2, Facts} <- Reads,
                    Fact <- Facts, BadFilter(Fact)],
 
     %% Desired properties
@@ -390,8 +374,8 @@ check_trace(Trace0, _Cmds, _Seed) ->
     ?QC_FMT("*DuplicateLPNs: ~p\n", [DuplicateLPNs]),
     ?QC_FMT("*Mods: ~p\n", [Mods]),
     ?QC_FMT("*readsUmods: ~p\n", [eqc_temporal:union(Reads, Mods)]),
-    ?QC_FMT("*DreadUDmod: ~p\n", [eqc_temporal:unions([DoneRead, DoneMod,
-                                                       StartRead, StartMod])]),
+    %% ?QC_FMT("*DreadUDmod: ~p\n", [eqc_temporal:unions([DoneRead, DoneMod,
+    %%                                                    StartRead, StartMod])]),
     ?QC_FMT("*BadReads: ~p\n", [BadReads])
     end,
     conjunction(
@@ -540,6 +524,11 @@ append(#run{seq=Seq, proj=Proj}, Page) ->
          end).
 -endif. % TEST_TRIP_no_append_duplicates
 
+read_result_mangle({ok, Page}) ->
+    Page;
+read_result_mangle(Else) ->
+    Else.
+
 -ifndef(TEST_TRIP_bad_read).
 
 read_approx(#run{seq=Seq, proj=Proj}, SeedInt) ->
@@ -547,7 +536,7 @@ read_approx(#run{seq=Seq, proj=Proj}, SeedInt) ->
     %% The sequencer may be lying to us, shouganai.
     LPN = (SeedInt rem Max) + 1,
     ?LOG({read, LPN},
-         corfurl:read_page(Proj, LPN)).
+         read_result_mangle(corfurl:read_page(Proj, LPN))).
 -else. % TEST_TRIP_bad_read
 
 read_approx(#run{seq=Seq, proj=Proj}, SeedInt) ->
@@ -557,9 +546,9 @@ read_approx(#run{seq=Seq, proj=Proj}, SeedInt) ->
     ?LOG({read, LPN},
          if LPN > 4 ->
                  io:format("read_approx: ~p -> ~p\n", [LPN, Fake]),
-                 {ok, Fake};
+                 read_result_mangle(Fake);
             true ->
-                 Res = corfurl:read_page(Proj, LPN),
+                 Res = read_result_mangle(corfurl:read_page(Proj, LPN)),
                  %% io:format("read_approx: ~p -> ~P\n", [LPN, Res, 6]),
                  Res
          end).

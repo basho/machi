@@ -45,7 +45,7 @@ append_page(Sequencer, P, Page, Retries) when Retries < 50 ->
                 ok ->
                     {ok, LPN};
                 X when X == error_overwritten; X == error_trimmed ->
-                    io:format(user, "LPN ~p race lost: ~p\n", [LPN, X]),
+                    report_lost_race(LPN, X),
                     append_page(Sequencer, P, Page);
                 Else ->
                     exit({todo, ?MODULE, line, ?LINE, Else})
@@ -253,3 +253,24 @@ project_to_chain(LPN, P) ->
             element(I, Chains)
     end.
 
+-ifdef(TEST).
+-ifdef(PULSE).
+report_lost_race(_LPN, _Reason) ->
+    %% It's interesting (sometime?) to know if a page was overwritten
+    %% because the sequencer was configured by QuickCheck to hand out
+    %% duplicate LPNs.  If this gets too annoying, this can be a no-op
+    %% function.
+    io:format(user, "o", []).
+-else.  % PULSE
+report_lost_race(LPN, Reason) ->
+    io:format(user, "LPN ~p race lost: ~p\n", [LPN, Reason]).
+-endif. % PULSE
+-else.  % TEST
+
+report_lost_race(LPN, Reason) ->
+    %% Perhaps it's an interesting event, but the rest of the system
+    %% should react correctly whenever this happens, so it shouldn't
+    %% ever cause an external consistency problem.
+    error_logger:debug_msg("LPN ~p race lost: ~p\n", [LPN, Reason]).
+
+-endif. % TEST
