@@ -25,7 +25,7 @@
          read_projection/2,
          save_projection/2]).
 -export([append_page/3, read_page/2, scan_forward/3,
-         fill_page/2]).
+         fill_page/2, trim_page/2]).
 
 -include("corfurl.hrl").
 
@@ -203,16 +203,21 @@ scan_forward(P, LPN, MaxPages, _Status, _MoreP, Acc) ->
 
 fill_page(#proj{epoch=Epoch} = P, LPN) ->
     Chain = project_to_chain(LPN, P),
-    fill_page2(Chain, Epoch, LPN).
+    fill_or_trim_page(Chain, Epoch, LPN, fill).
 
-fill_page2([], _Epoch, _LPN) ->
+trim_page(#proj{epoch=Epoch} = P, LPN) ->
+    Chain = project_to_chain(LPN, P),
+    fill_or_trim_page(Chain, Epoch, LPN, trim).
+
+fill_or_trim_page([], _Epoch, _LPN, _Func) ->
     ok;
-fill_page2([H|T], Epoch, LPN) ->
-    case corfurl_flu:fill(flu_pid(H), Epoch, LPN) of
+fill_or_trim_page([H|T], Epoch, LPN, Func) ->
+    case corfurl_flu:Func(flu_pid(H), Epoch, LPN) of
         ok ->
-            fill_page2(T, Epoch, LPN);
+            fill_or_trim_page(T, Epoch, LPN, Func);
         Else ->
             %% TODO: worth doing anything here, if we're in the middle of chain?
+            %% TODO: is that ^^ anything different for fill vs. trim?
             Else
     end.
 

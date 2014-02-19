@@ -65,7 +65,7 @@
 %% Define true to fake bad behavior that model **must** notice & fail!
 
 -ifndef(TRIP_no_append_duplicates).
--define(TRIP_no_append_duplicates, false).
+-define(TRIP_no_append_duplicates, true).
 -endif.
 -ifndef(TRIP_bad_read).
 -define(TRIP_bad_read, false).
@@ -75,6 +75,9 @@
 -endif.
 -ifndef(TRIP_bad_fill).
 -define(TRIP_bad_fill, false).
+-endif.
+-ifndef(TRIP_bad_trim).
+-define(TRIP_bad_trim, false).
 -endif.
 
 initial_state() ->
@@ -115,6 +118,8 @@ command(#state{run=Run} = S) ->
        || S#state.is_setup] ++
       [{4, {call, ?MODULE, fill, [Run, gen_approx_page()]}}
        || S#state.is_setup] ++
+      [{4, {call, ?MODULE, trim, [Run, gen_approx_page()]}}
+       || S#state.is_setup] ++
       [])).
 
 %% Precondition, checked before a command is added to the command sequence.
@@ -138,6 +143,8 @@ next_state(S, _, {call, _, read_approx, _}) ->
 next_state(S, _, {call, _, scan_forward, _}) ->
     S;
 next_state(S, _, {call, _, fill, _}) ->
+    S;
+next_state(S, _, {call, _, trim, _}) ->
     S.
 
 eqeq(X, X) -> true;
@@ -163,12 +170,14 @@ postcondition(_S, {call, _, scan_forward, _}, V) ->
         _ ->
             eqeq(V, {todoTODO_fixit,?LINE})
     end;
-postcondition(_S, {call, _, fill, _}, V) ->
+postcondition(_S, {call, _, FillTrim, _}, V)
+  when FillTrim == fill; FillTrim == trim ->
     case V of
         ok                -> true;
         error_trimmed     -> true;
+        error_unwritten   -> true;
         error_overwritten -> true;
-        _                 -> eqeq(V, {fill_error, V})
+        _                 -> eqeq(V, {error, FillTrim, V})
     end.
 
 valid_read_result(Pg) when is_binary(Pg) -> true;
@@ -305,7 +314,8 @@ check_trace(Trace0, _Cmds, _Seed) ->
     AllLPNsR = eqc_temporal:stateful(
                 fun({call, _Pid, {append, _Pg, will_be, LPN}}) -> LPN;
                    ({call, _Pid, {read, LPN}}) -> LPN;
-                   ({call, _Pid, {fill, LPN, will_be, ok}}) -> LPN
+                   ({call, _Pid, {fill, LPN, will_be, ok}}) -> LPN;
+                   ({call, _Pid, {trim, LPN, will_be, ok}}) -> LPN
                 end,
                 fun(x) -> [] end,
                 Calls),
@@ -333,8 +343,6 @@ check_trace(Trace0, _Cmds, _Seed) ->
                        []
                end,
                Events),
-    %%ModsX = filter_relation_facts(fun(T) when element(4,T) == fill; element(4,T) == trim -> true; (_) -> false end, Mods),
-    %%io:format("Modsx ~p\n", [ModsX]),
 
     %% StartMod contains {mod_start, Ttn, LPN, V} when a modification finished.
     %% DoneMod contains {mod_end, Ttn, LPN, V} when a modification finished.
@@ -675,6 +683,14 @@ fill(#run{seq=Seq, proj=Proj}, SeedInt) ->
              perhaps_trip_fill_page(?TRIP_bad_fill, Res, LPN)
          end).
 
+trim(#run{seq=Seq, proj=Proj}, SeedInt) ->
+    LPN = pick_an_LPN(Seq, SeedInt) + 2,
+    ?LOG({trim, LPN},
+         begin
+             Res = corfurl:trim_page(Proj, LPN),
+             perhaps_trip_trim_page(?TRIP_bad_trim, Res, LPN)
+         end).
+
 perhaps_trip_append_page(false, Res, _Page) ->
     Res;
 perhaps_trip_append_page(true, {ok, LPN}, _Page) when LPN > 3 ->
@@ -693,7 +709,7 @@ perhaps_trip_read_approx(true, Res, _LPN) ->
 
 perhaps_trip_scan_forward(false, Res, _EndLPN) ->
     Res;
-perhaps_trip_scan_forward(true, _Res, 20) ->
+perhaps_trip_scan_forward(true, _Res, 10) ->
     io:format(user, "TRIP: scan_forward\n", []),
     <<"magic number bingo, you are a winner">>;
 perhaps_trip_scan_forward(true, Res, _EndLPN) ->
@@ -701,10 +717,18 @@ perhaps_trip_scan_forward(true, Res, _EndLPN) ->
 
 perhaps_trip_fill_page(false, Res, _EndLPN) ->
     Res;
-perhaps_trip_fill_page(true, _Res, LPN) when 10 =< LPN, LPN =< 20 ->
+perhaps_trip_fill_page(true, _Res, LPN) when 3 =< LPN, LPN =< 5 ->
     io:format(user, "TRIP: fill_page\n", []),
     ok; % can trigger both invalid ttn and bad read
 perhaps_trip_fill_page(true, Res, _EndLPN) ->
+    Res.
+
+perhaps_trip_trim_page(false, Res, _EndLPN) ->
+    Res;
+perhaps_trip_trim_page(true, _Res, LPN) when 3 =< LPN, LPN =< 5 ->
+    io:format(user, "TRIP: trim_page\n", []),
+    ok;
+perhaps_trip_trim_page(true, Res, _EndLPN) ->
     Res.
 
 -endif. % PULSE
