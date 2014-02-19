@@ -298,28 +298,40 @@ check_trace(Trace0, _Cmds, _Seed) ->
     %% relation.  In this case, it's all LPNs ever mentioned in the test run.
     {_, infinity, AllLPNs} = lists:last(eqc_temporal:all_future(AllLPNsR)),
 
-    %% Remember: Mods contains only successful ops that modify an LPN
+    %% Use the following atoms to denote transitions ("Ttn") by an LPN:
+    %% w_0 = not written yet, error_unwritten
+    %% w_1 = written successfully, {ok, binary::()}
+    %% w_t = trimmed, error_trimmed
+
     Mods = eqc_temporal:stateful(
                fun({call, Pid, {append, Pg, will_be, LPN}}) ->
-                       {mod_lpn, LPN, Pg, Pid}
+                       {mod_working, w_1, LPN, Pg, Pid};
+                  ({call, Pid, {fill, LPN}}) ->
+                       {mod_working, w_t, LPN, unused, Pid};
+                  ({call, Pid, {trim, LPN}}) ->
+                       {mod_working, w_t, LPN, unused, Pid}
                end,
-               fun({mod_lpn, LPN, _Pg, Pid}, {result, Pid, {ok, LPN}})->
-                       []                       % Compare here
+               fun({mod_working, _Ttn, _LPN, _Pg, _Pid}, {result, _Pid, _Res})->
+                       []
                end,
                Events),
 
-    %% StartMod contains {m_start, LPN, V} when a modification finished.
-    %% DoneMod contains {m_end, LPN, V} when a modification finished.
+    %% StartMod contains {mod_start, Ttn, LPN, V} when a modification finished.
+    %% DoneMod contains {mod_end, Ttn, LPN, V} when a modification finished.
     %% This is a clever trick: Mods contains the start & end timestamp
     %% for each modification.  Use shift() by 1 usec to move all timestamps
     %% forward/backward 1 usec, then subtract away the original time range to
     %% leave a 1 usec relation in time.
-    DoneMod = eqc_temporal:map(
-                fun({mod_lpn, LPN, Pg, _Pid}) -> {m_end, LPN, Pg} end,
-                eqc_temporal:subtract(eqc_temporal:shift(1, Mods), Mods)),
     StartMod = eqc_temporal:map(
-                fun({mod_lpn, LPN, Pg, _Pid}) -> {m_start, LPN, Pg} end,
+                fun({mod_working, Ttn, LPN, Pg, _Pid}) ->
+                        {mod_start, Ttn, LPN, Pg}
+                end,
                 eqc_temporal:subtract(Mods, eqc_temporal:shift(1, Mods))),
+    DoneMod = eqc_temporal:map(
+                fun({mod_working, Ttn, LPN, Pg, _Pid}) ->
+                        {mod_end, Ttn, LPN, Pg}
+                end,
+                eqc_temporal:subtract(eqc_temporal:shift(1, Mods), Mods)),
     StartsDones = eqc_temporal:union(StartMod, DoneMod),
 
     %% TODO: A brighter mind than mine might figure out how to do this
@@ -331,33 +343,52 @@ check_trace(Trace0, _Cmds, _Seed) ->
     %% that time in the relation.
     %% The key for OD is LPN, the value is an unordered list of possible values.
 
-    InitialDict = orddict:from_list([{LPN, [error_unwritten]} ||
+    InitialValDict = orddict:from_list([{LPN, [error_unwritten]} ||
                                         LPN <- AllLPNs]),
     {ValuesR, _} =
         lists:mapfoldl(
           fun({TS1, TS2, StEnds}, Dict1) ->
                   Dict2 = lists:foldl(
-                            fun({m_start, LPN, Pg}, D) ->
+                            fun({mod_start, _Ttn, LPN, Pg}, D) ->
                                     orddict:append(LPN, Pg, D)
-                            end, Dict1, [X || X={m_start,_,_} <- StEnds]),
+                            end, Dict1, [X || X={mod_start,_,_,_} <- StEnds]),
                   Dict3 = lists:foldl(
-                            fun({m_end, LPN, Pg}, D) ->
+                            fun({mod_end, _Ttn, LPN, Pg}, D) ->
                                     orddict:store(LPN, [Pg], D)
-                            end, Dict2, [X || X={m_end,_,_} <- StEnds]),
+                            end, Dict2, [X || X={mod_end,_,_,_} <- StEnds]),
                   {{TS1, TS2, [{values, Dict3}]}, Dict3}
-          end, InitialDict, StartsDones),
+          end, InitialValDict, StartsDones),
 
-    %% We want to find & fail any two clients that append the exact same page
-    %% data to the same LPN.  Unfortunately, the eqc_temporal library will
-    %% merge two such facts together into a single fact.  So this method
-    %% commented below isn't good enough.
-    %% M_Ends = eqc_temporal:at(infinity, eqc_temporal:any_past(DoneMod)),
-    %% AppendedLPNs = lists:sort([LPN || {m_end, LPN, _} <- M_Ends]),
-    %% {_Last, DuplicateLPNs} = lists:foldl(fun(X, {X, Dups}) -> {X, [X|Dups]};
-    %%                                         (X, {_, Dups}) -> {X, Dups}
-    %%                                      end, {undefined, []}, AppendedLPNs),
-    AppendWillBes = [LPN || {_TS, {call, _, {append, _, will_be, LPN}}} <- Trace],
-    DuplicateLPNs = AppendWillBes -- lists:usort(AppendWillBes),
+    InitialTtnDict = orddict:from_list([{LPN, [w_0]} || LPN <- AllLPNs]),
+    {TransitionsR, _} =
+        lists:mapfoldl(
+          fun({TS1, TS2, StEnds}, Dict1) ->
+                  Dict2 = lists:foldl(
+                            fun({mod_end, Ttn, LPN, _Pg}, D) ->
+                                    %% orddict does not discard duplicates
+                                    orddict:append(LPN, Ttn, D);
+                               (_, D) ->
+                                    D
+                            end, Dict1, [X || X={mod_end,_,_,_} <- StEnds]),
+                  {{TS1, TS2, [{transitions, Dict2}]}, Dict2}
+          end, InitialTtnDict, StartsDones),
+
+    %% Property: For all LPNs, the transition list for K must be one of the
+    %% following four (4) acceptable transition orderings.
+    {_, _, [{transitions, FinalTtns}]} = lists:last(
+                                         eqc_temporal:all_future(TransitionsR)),
+    InvalidTransitions = orddict:fold(
+                           fun(_LPN, [w_0], Acc) ->
+                                   Acc;
+                              (_LPN, [w_0,w_1], Acc) ->
+                                   Acc;
+                              (_LPN, [w_0,w_t], Acc) ->
+                                   Acc;
+                              (_LPN, [w_0,w_1,w_t], Acc) ->
+                                   Acc;
+                              (LPN, BadTtns, Acc) ->
+                                   [{LPN, BadTtns}|Acc]
+                           end, [], FinalTtns),
 
     %% Checking reads is a tricky thing.  My first attempt created a temporal
     %% relation for the 1usec window when the read call was complete, then
@@ -395,29 +426,26 @@ check_trace(Trace0, _Cmds, _Seed) ->
     BadFilter = fun(bad) -> true;
                    (Bad) when is_tuple(Bad), element(1, Bad) == bad -> true;
                    (_)   -> false end,
-    BadReads = [{TS1, TS2, lists:filter(BadFilter, Facts)} ||
-                   {TS1, TS2, Facts} <- Reads,
-                   Fact <- Facts, BadFilter(Fact)],
-
-    %% Desired properties
-    AllCallsFinish = eqc_temporal:is_false(eqc_temporal:all_future(Calls)),
-    NoAppendDuplicates = (DuplicateLPNs == []),
-    NoBadReads = (BadReads == []),
+    BadReads = filter_relation_facts(BadFilter, Reads),
 
     ?WHENFAIL(begin
     %% ?QC_FMT("*Events: ~p\n", [Events]),
-    ?QC_FMT("*DuplicateLPNs: ~p\n", [DuplicateLPNs]),
     ?QC_FMT("*Mods: ~p\n", [Mods]),
-    ?QC_FMT("*readsUmods: ~p\n", [eqc_temporal:union(Reads, Mods)]),
+    ?QC_FMT("*InvalidTtns: ~p\n", [InvalidTransitions]),
+    ?QC_FMT("*Reads: ~p\n", [Reads]),
+    %% ?QC_FMT("*readsUmods: ~p\n", [eqc_temporal:union(Reads, Mods)]),
     %% ?QC_FMT("*DreadUDmod: ~p\n", [eqc_temporal:unions([DoneRead, DoneMod,
     %%                                                    StartRead, StartMod])]),
     ?QC_FMT("*BadReads: ~p\n", [BadReads])
     end,
     conjunction(
       [
-       {all_calls_finish, AllCallsFinish},
-       {no_append_duplicates, NoAppendDuplicates},
-       {no_bad_reads, NoBadReads},
+       {all_calls_finish,
+        eqc_temporal:is_false(eqc_temporal:all_future(Calls))},
+       {no_invalidTransitions,
+        InvalidTransitions == []},
+       {no_bad_reads,
+        eqc_temporal:is_false(eqc_temporal:all_future(BadReads))},
        %% If you want to see PULSE causing crazy scheduling, then
        %% change one of the "true orelse" -> "false orelse" below.
        %% {bogus_no_gaps,
@@ -435,6 +463,16 @@ add_LPN_to_append_calls([{TS, {call, Pid, {append, Page}}}|Rest]) ->
                   {TS, {call, Pid, {append, Page, will_be, LPN}}};
               Else ->
                   {TS, {call, Pid, {append, Page, will_fail, Else}}}
+          end,
+    [New|add_LPN_to_append_calls(Rest)];
+add_LPN_to_append_calls([{TS, {call, Pid, {OpName, LPN}}}|Rest])
+  when OpName == fill; OpName == trim ->
+    Res = trace_lookahead_pid(Pid, Rest),
+    New = case Res of
+              ok ->
+                  {TS, {call, Pid, {OpName, LPN, will_be, ok}}};
+              Else ->
+                  {TS, {call, Pid, {OpName, LPN, will_fail, Else}}}
           end,
     [New|add_LPN_to_append_calls(Rest)];
 add_LPN_to_append_calls([X|Rest]) ->
@@ -529,6 +567,10 @@ range_ify(Beginning, Next, [Else|T]) ->
 range_ify(Beginning, Next, []) ->
     [{Beginning, to, Next-1}].
 
+filter_relation_facts(FilterFun, R) ->
+    [{TS1, TS2, lists:filter(FilterFun, Facts)} || {TS1, TS2, Facts} <- R].
+        %% {TS1, TS2, Facts} <- Reads, Fact <- Facts, BadFilter(Fact)],
+
 log_make_call(Tag) ->
     log_make_call(self(), Tag).
 
@@ -586,7 +628,7 @@ scan_forward(#run{seq=Seq, proj=Proj}, SeedInt, NumPages) ->
                      PageIs = lists:zip(Pages, lists:seq(1, length(Pages))),
                      TS2 = event_logger:timestamp(),
                      [begin
-                          PidI = {self(), I},
+                          PidI = {self(), s_f, I},
                           event_logger:event(log_make_call(PidI, {read, LPN}),
                                              TS1),
                           Pm = perhaps_trip_scan_forward(
