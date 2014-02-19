@@ -73,6 +73,9 @@
 -ifndef(TRIP_bad_scan_forward).
 -define(TRIP_bad_scan_forward, false).
 -endif.
+-ifndef(TRIP_bad_fill).
+-define(TRIP_bad_fill, false).
+-endif.
 
 initial_state() ->
     #state{}.
@@ -110,6 +113,8 @@ command(#state{run=Run} = S) ->
        || S#state.is_setup] ++
       [{5, {call, ?MODULE, scan_forward, [Run, gen_scan_forward_start(), nat()]}}
        || S#state.is_setup] ++
+      [{4, {call, ?MODULE, fill, [Run, gen_approx_page()]}}
+       || S#state.is_setup] ++
       [])).
 
 %% Precondition, checked before a command is added to the command sequence.
@@ -131,6 +136,8 @@ next_state(S, _, {call, _, append, _}) ->
 next_state(S, _, {call, _, read_approx, _}) ->
     S;
 next_state(S, _, {call, _, scan_forward, _}) ->
+    S;
+next_state(S, _, {call, _, fill, _}) ->
     S.
 
 eqeq(X, X) -> true;
@@ -155,6 +162,13 @@ postcondition(_S, {call, _, scan_forward, _}, V) ->
             true;
         _ ->
             eqeq(V, {todoTODO_fixit,?LINE})
+    end;
+postcondition(_S, {call, _, fill, _}, V) ->
+    case V of
+        ok                -> true;
+        error_trimmed     -> true;
+        error_overwritten -> true;
+        _                 -> eqeq(V, {fill_error, V})
     end.
 
 valid_read_result(Pg) when is_binary(Pg) -> true;
@@ -162,10 +176,10 @@ valid_read_result(error_unwritten)       -> true;
 valid_read_result(error_trimmed)         -> true;
 valid_read_result(V)                     -> eqeq(V, {todoTODO_fixit,?LINE}).
 
-run_commands_on_node(_LocalOrSlave, Cmds, Seed) ->
-    %% AfterTime = if LocalOrSlave == local -> 50000;
-    %%                LocalOrSlave == slave -> 1000000
-    %%             end,
+run_commands_on_node(LocalOrSlave, Cmds, Seed) ->
+    AfterTime = if LocalOrSlave == local -> 50000;
+                   LocalOrSlave == slave -> 1000000
+                end,
     event_logger:start_link(),
     pulse:start(),
     error_logger:tty(false),
@@ -180,7 +194,7 @@ run_commands_on_node(_LocalOrSlave, Cmds, Seed) ->
           %% io:format(user, "Yooo: H = ~p\n", [H]),
           %% io:format(user, "Yooo: S = ~p\n", [S]),
           %% io:format(user, "Yooo: R = ~p\n", [R]),
-          %% receive after AfterTime -> ok end,
+          receive after AfterTime -> ok end,
           Trace = event_logger:get_events(),
           %% receive after AfterTime -> ok end,
           catch exit(pulse_application_controller, shutdown),
@@ -290,10 +304,13 @@ check_trace(Trace0, _Cmds, _Seed) ->
 
     AllLPNsR = eqc_temporal:stateful(
                 fun({call, _Pid, {append, _Pg, will_be, LPN}}) -> LPN;
-                   ({call, _Pid, {read, LPN}}) -> LPN
+                   ({call, _Pid, {read, LPN}}) -> LPN;
+                   ({call, _Pid, {fill, LPN, will_be, ok}}) -> LPN
                 end,
                 fun(x) -> [] end,
                 Calls),
+    %%io:format("Calls ~p\n", [Calls]),
+    %%io:format("AllLPNsR ~p\n", [AllLPNsR]),
     %% The last item in the relation tells us what the final facts are in the
     %% relation.  In this case, it's all LPNs ever mentioned in the test run.
     {_, infinity, AllLPNs} = lists:last(eqc_temporal:all_future(AllLPNsR)),
@@ -306,15 +323,17 @@ check_trace(Trace0, _Cmds, _Seed) ->
     Mods = eqc_temporal:stateful(
                fun({call, Pid, {append, Pg, will_be, LPN}}) ->
                        {mod_working, w_1, LPN, Pg, Pid};
-                  ({call, Pid, {fill, LPN}}) ->
-                       {mod_working, w_t, LPN, unused, Pid};
-                  ({call, Pid, {trim, LPN}}) ->
-                       {mod_working, w_t, LPN, unused, Pid}
+                  ({call, Pid, {fill, LPN, will_be, ok}}) ->
+                       {mod_working, w_t, LPN, fill, Pid};
+                  ({call, Pid, {trim, LPN, will_be, ok}}) ->
+                       {mod_working, w_t, LPN, trim, Pid}
                end,
                fun({mod_working, _Ttn, _LPN, _Pg, _Pid}, {result, _Pid, _Res})->
                        []
                end,
                Events),
+    %%ModsX = filter_relation_facts(fun(T) when element(4,T) == fill; element(4,T) == trim -> true; (_) -> false end, Mods),
+    %%io:format("Modsx ~p\n", [ModsX]),
 
     %% StartMod contains {mod_start, Ttn, LPN, V} when a modification finished.
     %% DoneMod contains {mod_end, Ttn, LPN, V} when a modification finished.
@@ -349,12 +368,16 @@ check_trace(Trace0, _Cmds, _Seed) ->
         lists:mapfoldl(
           fun({TS1, TS2, StEnds}, Dict1) ->
                   Dict2 = lists:foldl(
-                            fun({mod_start, _Ttn, LPN, Pg}, D) ->
-                                    orddict:append(LPN, Pg, D)
+                            fun({mod_start, w_1, LPN, Pg}, D) ->
+                                    orddict:append(LPN, Pg, D);
+                               ({mod_start, w_t, LPN, _Pg}, D) ->
+                                    orddict:append(LPN, [aaaa_error_trimmed], D)
                             end, Dict1, [X || X={mod_start,_,_,_} <- StEnds]),
                   Dict3 = lists:foldl(
-                            fun({mod_end, _Ttn, LPN, Pg}, D) ->
-                                    orddict:store(LPN, [Pg], D)
+                            fun({mod_end, w_1, LPN, Pg}, D) ->
+                                    orddict:store(LPN, [Pg], D);
+                               ({mod_end, w_t, LPN, _Pg}, D) ->
+                                    orddict:store(LPN, [error_trimmed], D)
                             end, Dict2, [X || X={mod_end,_,_,_} <- StEnds]),
                   {{TS1, TS2, [{values, Dict3}]}, Dict3}
           end, InitialValDict, StartsDones),
@@ -432,7 +455,8 @@ check_trace(Trace0, _Cmds, _Seed) ->
     %% ?QC_FMT("*Events: ~p\n", [Events]),
     ?QC_FMT("*Mods: ~p\n", [Mods]),
     ?QC_FMT("*InvalidTtns: ~p\n", [InvalidTransitions]),
-    ?QC_FMT("*Reads: ~p\n", [Reads]),
+ %?QC_FMT("*Reads: ~p\n", [Reads]),
+    ?QC_FMT("*Reads: ~p\n", [eqc_temporal:unions([Mods,Reads])]),
     %% ?QC_FMT("*readsUmods: ~p\n", [eqc_temporal:union(Reads, Mods)]),
     %% ?QC_FMT("*DreadUDmod: ~p\n", [eqc_temporal:unions([DoneRead, DoneMod,
     %%                                                    StartRead, StartMod])]),
@@ -642,6 +666,16 @@ scan_forward(#run{seq=Seq, proj=Proj}, SeedInt, NumPages) ->
              end
          end).
 
+fill(#run{seq=Seq, proj=Proj}, SeedInt) ->
+    Max = corfurl_sequencer:get(Seq, 0),
+    %% The sequencer may be lying to us, shouganai.
+    LPN = (SeedInt rem Max) + 3,
+    ?LOG({fill, LPN},
+         begin
+             Res = corfurl:fill_page(Proj, LPN),
+             perhaps_trip_fill_page(?TRIP_bad_fill, Res, LPN)
+         end).
+
 perhaps_trip_append_page(false, Res, _Page) ->
     Res;
 perhaps_trip_append_page(true, {ok, LPN}, _Page) when LPN > 3 ->
@@ -664,6 +698,14 @@ perhaps_trip_scan_forward(true, _Res, 20) ->
     io:format(user, "TRIP: scan_forward\n", []),
     <<"magic number bingo, you are a winner">>;
 perhaps_trip_scan_forward(true, Res, _EndLPN) ->
+    Res.
+
+perhaps_trip_fill_page(false, Res, _EndLPN) ->
+    Res;
+perhaps_trip_fill_page(true, _Res, 20) ->
+    io:format(user, "TRIP: fill_page\n", []),
+    error_overwritten;
+perhaps_trip_fill_page(true, Res, _EndLPN) ->
     Res.
 
 -endif. % PULSE

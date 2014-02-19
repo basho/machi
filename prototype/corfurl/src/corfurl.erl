@@ -24,7 +24,8 @@
          new_range/3,
          read_projection/2,
          save_projection/2]).
--export([append_page/3, read_page/2, scan_forward/3]).
+-export([append_page/3, read_page/2, scan_forward/3,
+         fill_page/2]).
 
 -include("corfurl.hrl").
 
@@ -198,6 +199,21 @@ scan_forward(P, LPN, MaxPages, _Status, _MoreP, Acc) ->
             %%       allow us to fill the hole.
             scan_forward(P, LPN, 0, ok, false, Acc)
         %% Let it crash: error_overwritten
+    end.
+
+fill_page(#proj{epoch=Epoch} = P, LPN) ->
+    Chain = project_to_chain(LPN, P),
+    fill_page2(Chain, Epoch, LPN).
+
+fill_page2([], _Epoch, _LPN) ->
+    ok;
+fill_page2([H|T], Epoch, LPN) ->
+    case corfurl_flu:fill(flu_pid(H), Epoch, LPN) of
+        ok ->
+            fill_page2(T, Epoch, LPN);
+        Else ->
+            %% TODO: worth doing anything here, if we're in the middle of chain?
+            Else
     end.
 
 flu_pid(X) when is_pid(X) ->
