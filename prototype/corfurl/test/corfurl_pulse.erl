@@ -65,7 +65,7 @@
 %% Define true to fake bad behavior that model **must** notice & fail!
 
 -ifndef(TRIP_no_append_duplicates).
--define(TRIP_no_append_duplicates, true).
+-define(TRIP_no_append_duplicates, false).
 -endif.
 -ifndef(TRIP_bad_read).
 -define(TRIP_bad_read, false).
