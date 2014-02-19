@@ -74,7 +74,7 @@
 -define(TRIP_bad_scan_forward, false).
 -endif.
 -ifndef(TRIP_bad_fill).
--define(TRIP_bad_fill, false).
+-define(TRIP_bad_fill, true).
 -endif.
 
 initial_state() ->
@@ -607,6 +607,13 @@ log_make_result(Result) ->
 log_make_result(Pid, Result) ->
     {result, Pid, Result}.
 
+pick_an_LPN(Seq, SeedInt) ->
+    Max = corfurl_sequencer:get(Seq, 0),
+    %% The sequencer may be lying to us, shouganai.
+    if SeedInt > Max -> (SeedInt rem Max) + 1;
+       true          -> SeedInt
+    end.
+
 -define(LOG(Tag, MkCall),
         event_logger:event(log_make_call(Tag)),
         LOG__Result = MkCall,
@@ -626,9 +633,7 @@ read_result_mangle(Else) ->
     Else.
 
 read_approx(#run{seq=Seq, proj=Proj}, SeedInt) ->
-    Max = corfurl_sequencer:get(Seq, 0),
-    %% The sequencer may be lying to us, shouganai.
-    LPN = (SeedInt rem Max) + 1,
+    LPN = pick_an_LPN(Seq, SeedInt),
     ?LOG({read, LPN},
          begin
              Res = read_result_mangle(corfurl:read_page(Proj, LPN)),
@@ -636,9 +641,8 @@ read_approx(#run{seq=Seq, proj=Proj}, SeedInt) ->
          end).
 
 scan_forward(#run{seq=Seq, proj=Proj}, SeedInt, NumPages) ->
-    Max = corfurl_sequencer:get(Seq, 0),
     StartLPN = if SeedInt == 1 -> 1;
-                  true         -> (SeedInt rem Max) + 1
+                  true         -> pick_an_LPN(Seq, SeedInt)
                end,
     %% Our job is complicated by the ?LOG() macro, which isn't good enough
     %% for our purpose: we must lie about the starting timestamp, to make
@@ -667,9 +671,7 @@ scan_forward(#run{seq=Seq, proj=Proj}, SeedInt, NumPages) ->
          end).
 
 fill(#run{seq=Seq, proj=Proj}, SeedInt) ->
-    Max = corfurl_sequencer:get(Seq, 0),
-    %% The sequencer may be lying to us, shouganai.
-    LPN = (SeedInt rem Max) + 3,
+    LPN = pick_an_LPN(Seq, SeedInt) + 2,
     ?LOG({fill, LPN},
          begin
              Res = corfurl:fill_page(Proj, LPN),
@@ -702,9 +704,9 @@ perhaps_trip_scan_forward(true, Res, _EndLPN) ->
 
 perhaps_trip_fill_page(false, Res, _EndLPN) ->
     Res;
-perhaps_trip_fill_page(true, _Res, 20) ->
+perhaps_trip_fill_page(true, _Res, LPN) when 10 =< LPN, LPN =< 20 ->
     io:format(user, "TRIP: fill_page\n", []),
-    error_overwritten;
+    ok; % can trigger both invalid ttn and bad read
 perhaps_trip_fill_page(true, Res, _EndLPN) ->
     Res.
 
