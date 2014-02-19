@@ -82,6 +82,9 @@ gen_approx_page() ->
     %% EQC can't know what pages are perhaps-written, so pick something big.
     noshrink(?LET(I, largeint(), abs(I))).
 
+gen_scan_forward_start() ->
+    oneof([1, gen_approx_page()]).
+
 command(#state{run=Run} = S) ->
     ?LET({NumChains, ChainLen, PageSize},
          {parameter(num_chains), parameter(chain_len), parameter(page_size)},
@@ -90,7 +93,9 @@ command(#state{run=Run} = S) ->
        || not S#state.is_setup] ++
       [{10, {call, ?MODULE, append, [Run, gen_page(PageSize)]}}
        || S#state.is_setup] ++
-      [{10, {call, ?MODULE, read_approx, [Run, gen_approx_page()]}}
+      [{3, {call, ?MODULE, read_approx, [Run, gen_approx_page()]}}
+       || S#state.is_setup] ++
+      [{5, {call, ?MODULE, scan_forward, [Run, gen_scan_forward_start(), nat()]}}
        || S#state.is_setup] ++
       [])).
 
@@ -111,6 +116,8 @@ next_state(S, Res, {call, _, setup, [NumChains, ChainLen, PageSize, _SeqType]}) 
 next_state(S, _, {call, _, append, _}) ->
     S;
 next_state(S, _, {call, _, read_approx, _}) ->
+    S;
+next_state(S, _, {call, _, scan_forward, _}) ->
     S.
 
 eqeq(X, X) -> true;
@@ -123,12 +130,24 @@ postcondition(_S, {call, _, append, _}, {ok, LPN}) when is_integer(LPN) ->
 postcondition(_S, {call, _, append, _}, V) ->
     eqeq(V, todoTODO_fixit);
 postcondition(_S, {call, _, read_approx, _}, V) ->
+    valid_read_result(V);
+postcondition(_S, {call, _, scan_forward, _}, V) ->
     case V of
-        Pg when is_binary(Pg)       -> true;
-        error_unwritten             -> true;
-        error_trimmed               -> true;
-        _                           -> eqeq(V, todoTODO_fixit)
+        {ok, LastLSN, MoreP, Pages} ->
+            true = is_integer(LastLSN),
+            true = LastLSN > 0,
+            true = (MoreP == true orelse MoreP == false),
+            [] = lists:usort([X || {_LPN, Pg} <- Pages,
+                                   X <- [valid_read_result(Pg)], X /= true]),
+            true;
+        _ ->
+            eqeq(V, {todoTODO_fixit,?LINE})
     end.
+
+valid_read_result(Pg) when is_binary(Pg) -> true;
+valid_read_result(error_unwritten)       -> true;
+valid_read_result(error_trimmed)         -> true;
+valid_read_result(V)                     -> eqeq(V, {todoTODO_fixit,?LINE}).
 
 run_commands_on_node(_LocalOrSlave, Cmds, Seed) ->
     %% AfterTime = if LocalOrSlave == local -> 50000;
@@ -494,10 +513,22 @@ range_ify(Beginning, Next, [Else|T]) ->
 range_ify(Beginning, Next, []) ->
     [{Beginning, to, Next-1}].
 
+log_make_call(Tag) ->
+    log_make_call(self(), Tag).
+
+log_make_call(Pid, Tag) ->
+    {call, Pid, Tag}.
+
+log_make_result(Result) ->
+    log_make_result(self(), Result).
+
+log_make_result(Pid, Result) ->
+    {result, Pid, Result}.
+
 -define(LOG(Tag, MkCall),
-        event_logger:event({call, self(), Tag}),
+        event_logger:event(log_make_call(Tag)),
         LOG__Result = MkCall,
-        event_logger:event({result, self(), LOG__Result}),
+        event_logger:event(log_make_result(LOG__Result)),
         LOG__Result).
 
 -ifndef(TEST_TRIP_no_append_duplicates).
@@ -554,6 +585,31 @@ read_approx(#run{seq=Seq, proj=Proj}, SeedInt) ->
          end).
 
 -endif. % TEST_TRIP_bad_read
+
+scan_forward(#run{seq=Seq, proj=Proj}, SeedInt, NumPages) ->
+    Max = corfurl_sequencer:get(Seq, 0),
+    StartLPN = if SeedInt == 1 -> 1;
+                  true         -> (SeedInt rem Max) + 1
+               end,
+    ?LOG({scan_forward, StartLPN, NumPages},
+         begin
+             TS1 = event_logger:timestamp(),
+             case corfurl:scan_forward(Proj, StartLPN, NumPages) of
+                 {ok, EndLPN, MoreP, Pages} ->
+                     PageIs = lists:zip(Pages, lists:seq(1, length(Pages))),
+                     TS2 = event_logger:timestamp(),
+                     [begin
+                          PidI = {self(), I},
+                          event_logger:event(log_make_call(PidI, {read, LPN}),
+                                             TS1),
+                          Pm = read_result_mangle(P),
+                          event_logger:event(log_make_result(PidI, Pm), TS2)
+                      end || {{LPN, P}, I} <- PageIs],
+                     Ps = [{LPN, read_result_mangle(P)} ||
+                              {LPN, P} <- Pages],
+                     {ok, EndLPN, MoreP, Ps}
+             end
+         end).
 
 -endif. % PULSE
 -endif. % TEST

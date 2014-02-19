@@ -9,7 +9,8 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, event/1, get_events/0, start_logging/0]).
+-export([start_link/0, event/1, event/2, get_events/0, start_logging/0]).
+-export([timestamp/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -36,8 +37,11 @@ start_logging() ->
   gen_server:call(?MODULE, {start, timestamp()}).
 
 event(EventData) ->
+    event(EventData, timestamp()).
+
+event(EventData, Timestamp) ->
   gen_server:call(?MODULE,
-    #event{ timestamp = timestamp(), data = EventData }).
+    #event{ timestamp = Timestamp, data = EventData }).
 
 async_event(EventData) ->
   gen_server:cast(?MODULE,
