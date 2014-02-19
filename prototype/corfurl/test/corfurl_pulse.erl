@@ -74,7 +74,7 @@
 -define(TRIP_bad_scan_forward, false).
 -endif.
 -ifndef(TRIP_bad_fill).
--define(TRIP_bad_fill, true).
+-define(TRIP_bad_fill, false).
 -endif.
 
 initial_state() ->
@@ -318,15 +318,16 @@ check_trace(Trace0, _Cmds, _Seed) ->
     %% Use the following atoms to denote transitions ("Ttn") by an LPN:
     %% w_0 = not written yet, error_unwritten
     %% w_1 = written successfully, {ok, binary::()}
-    %% w_t = trimmed, error_trimmed
+    %% w_ft = fill trimmed, error_trimmed
+    %% w_tt = trim trimmed, error_trimmed
 
     Mods = eqc_temporal:stateful(
                fun({call, Pid, {append, Pg, will_be, LPN}}) ->
                        {mod_working, w_1, LPN, Pg, Pid};
                   ({call, Pid, {fill, LPN, will_be, ok}}) ->
-                       {mod_working, w_t, LPN, fill, Pid};
+                       {mod_working, w_ft, LPN, fill, Pid};
                   ({call, Pid, {trim, LPN, will_be, ok}}) ->
-                       {mod_working, w_t, LPN, trim, Pid}
+                       {mod_working, w_tt, LPN, trim, Pid}
                end,
                fun({mod_working, _Ttn, _LPN, _Pg, _Pid}, {result, _Pid, _Res})->
                        []
@@ -370,13 +371,15 @@ check_trace(Trace0, _Cmds, _Seed) ->
                   Dict2 = lists:foldl(
                             fun({mod_start, w_1, LPN, Pg}, D) ->
                                     orddict:append(LPN, Pg, D);
-                               ({mod_start, w_t, LPN, _Pg}, D) ->
-                                    orddict:append(LPN, [aaaa_error_trimmed], D)
+                               ({mod_start, WType, LPN, _Pg}, D)
+                                 when WType == w_ft; WType == w_tt ->
+                                    orddict:append(LPN, [error_trimmed], D)
                             end, Dict1, [X || X={mod_start,_,_,_} <- StEnds]),
                   Dict3 = lists:foldl(
                             fun({mod_end, w_1, LPN, Pg}, D) ->
                                     orddict:store(LPN, [Pg], D);
-                               ({mod_end, w_t, LPN, _Pg}, D) ->
+                               ({mod_end, WType, LPN, _Pg}, D)
+                                 when WType == w_ft; WType == w_tt ->
                                     orddict:store(LPN, [error_trimmed], D)
                             end, Dict2, [X || X={mod_end,_,_,_} <- StEnds]),
                   {{TS1, TS2, [{values, Dict3}]}, Dict3}
@@ -395,23 +398,6 @@ check_trace(Trace0, _Cmds, _Seed) ->
                             end, Dict1, [X || X={mod_end,_,_,_} <- StEnds]),
                   {{TS1, TS2, [{transitions, Dict2}]}, Dict2}
           end, InitialTtnDict, StartsDones),
-
-    %% Property: For all LPNs, the transition list for K must be one of the
-    %% following four (4) acceptable transition orderings.
-    {_, _, [{transitions, FinalTtns}]} = lists:last(
-                                         eqc_temporal:all_future(TransitionsR)),
-    InvalidTransitions = orddict:fold(
-                           fun(_LPN, [w_0], Acc) ->
-                                   Acc;
-                              (_LPN, [w_0,w_1], Acc) ->
-                                   Acc;
-                              (_LPN, [w_0,w_t], Acc) ->
-                                   Acc;
-                              (_LPN, [w_0,w_1,w_t], Acc) ->
-                                   Acc;
-                              (LPN, BadTtns, Acc) ->
-                                   [{LPN, BadTtns}|Acc]
-                           end, [], FinalTtns),
 
     %% Checking reads is a tricky thing.  My first attempt created a temporal
     %% relation for the 1usec window when the read call was complete, then
@@ -451,15 +437,26 @@ check_trace(Trace0, _Cmds, _Seed) ->
                    (_)   -> false end,
     BadReads = filter_relation_facts(BadFilter, Reads),
 
+    %% Property: For all LPNs, the transition list for K must be one of the
+    %% following four (4) acceptable transition orderings.
+    {_, _, [{transitions, FinalTtns}]} = lists:last(
+                                         eqc_temporal:all_future(TransitionsR)),
+    InvalidTransitions = orddict:fold(
+                           fun(_LPN, [w_0], Acc) ->
+                                   Acc;
+                              (_LPN, [w_0,w_1], Acc) ->
+                                   Acc;
+                              (_LPN, [w_0,w_ft], Acc) ->
+                                   Acc;
+                              (_LPN, [w_0,w_1,w_tt], Acc) ->
+                                   Acc;
+                              (LPN, BadTtns, Acc) ->
+                                   [{LPN, BadTtns}|Acc]
+                           end, [], FinalTtns),
+
     ?WHENFAIL(begin
-    %% ?QC_FMT("*Events: ~p\n", [Events]),
-    ?QC_FMT("*Mods: ~p\n", [Mods]),
+    ?QC_FMT("*ModsReads: ~p\n", [eqc_temporal:unions([Mods,Reads])]),
     ?QC_FMT("*InvalidTtns: ~p\n", [InvalidTransitions]),
- %?QC_FMT("*Reads: ~p\n", [Reads]),
-    ?QC_FMT("*Reads: ~p\n", [eqc_temporal:unions([Mods,Reads])]),
-    %% ?QC_FMT("*readsUmods: ~p\n", [eqc_temporal:union(Reads, Mods)]),
-    %% ?QC_FMT("*DreadUDmod: ~p\n", [eqc_temporal:unions([DoneRead, DoneMod,
-    %%                                                    StartRead, StartMod])]),
     ?QC_FMT("*BadReads: ~p\n", [BadReads])
     end,
     conjunction(
