@@ -676,7 +676,7 @@ scan_forward(#run{seq=Seq, proj=Proj}, SeedInt, NumPages) ->
          end).
 
 fill(#run{seq=Seq, proj=Proj}, SeedInt) ->
-    LPN = pick_an_LPN(Seq, SeedInt) + 2,
+    LPN = pick_an_LPN(Seq, SeedInt),
     ?LOG({fill, LPN},
          begin
              Res = corfurl:fill_page(Proj, LPN),
@@ -684,7 +684,7 @@ fill(#run{seq=Seq, proj=Proj}, SeedInt) ->
          end).
 
 trim(#run{seq=Seq, proj=Proj}, SeedInt) ->
-    LPN = pick_an_LPN(Seq, SeedInt) + 2,
+    LPN = pick_an_LPN(Seq, SeedInt),
     ?LOG({trim, LPN},
          begin
              Res = corfurl:trim_page(Proj, LPN),
