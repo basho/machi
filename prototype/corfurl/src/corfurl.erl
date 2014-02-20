@@ -130,7 +130,7 @@ read_repair_chain(Epoch, LPN, [Head|Rest] = Chain) ->
             error_badepoch;
         error_trimmed ->
             %% TODO: robustify
-            [ok = case corfurl_flu:fill(flu_pid(X), Epoch, LPN) of
+            [ok = case corfurl_flu:trim(flu_pid(X), Epoch, LPN) of
                       ok ->            ok;
                       error_trimmed -> ok;
                       Else          -> Else
