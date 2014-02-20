@@ -449,18 +449,19 @@ check_trace(Trace0, _Cmds, _Seed) ->
     %% following four (4) acceptable transition orderings.
     {_, _, [{transitions, FinalTtns}]} = lists:last(
                                          eqc_temporal:all_future(TransitionsR)),
+    FinaTtns_filtered = filter_transition_trimfill_suffixes(FinalTtns),
     InvalidTransitions = orddict:fold(
                            fun(_LPN, [w_0], Acc) ->
                                    Acc;
                               (_LPN, [w_0,w_1], Acc) ->
                                    Acc;
-                              (_LPN, [w_0,w_ft], Acc) ->
+                              (_LPN, [w_0,'w_t+'], Acc) ->
                                    Acc;
-                              (_LPN, [w_0,w_1,w_tt], Acc) ->
+                              (_LPN, [w_0,w_1,'w_t+'], Acc) ->
                                    Acc;
                               (LPN, BadTtns, Acc) ->
                                    [{LPN, BadTtns}|Acc]
-                           end, [], FinalTtns),
+                           end, [], FinaTtns_filtered),
 
     ?WHENFAIL(begin
     ?QC_FMT("*ModsReads: ~p\n", [eqc_temporal:unions([Mods,Reads])]),
@@ -599,6 +600,23 @@ range_ify(Beginning, Next, []) ->
 filter_relation_facts(FilterFun, R) ->
     [{TS1, TS2, lists:filter(FilterFun, Facts)} || {TS1, TS2, Facts} <- R].
         %% {TS1, TS2, Facts} <- Reads, Fact <- Facts, BadFilter(Fact)],
+
+filter_transition_trimfill_suffixes(Ttns) ->
+    [{X, filter_1_transition_list(L)} || {X, L} <- Ttns].
+
+filter_1_transition_list([]) ->
+    [];
+filter_1_transition_list(Old) ->
+    New = lists:reverse(lists:dropwhile(fun(w_tt) -> true;
+                                           (w_ft) -> true;
+                                           (_)    -> false
+                                        end, lists:reverse(Old))),
+    Suffix = case lists:last(Old) of
+                 w_ft -> ['w_t+'];
+                 w_tt -> ['w_t+'];
+                 _    -> []
+             end,
+    New ++ Suffix.
 
 log_make_call(Tag) ->
     log_make_call(self(), Tag).
