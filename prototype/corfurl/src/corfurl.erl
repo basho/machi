@@ -213,7 +213,22 @@ fill_or_trim_page([], _Epoch, _LPN, _Func) ->
     ok;
 fill_or_trim_page([H|T], Epoch, LPN, Func) ->
     case corfurl_flu:Func(flu_pid(H), Epoch, LPN) of
-        ok ->
+        Res when Res == ok; Res == error_trimmed ->
+            %% Detecting a race here between fills and trims is too crazy,
+            %% and I don't believe that it *matters*.  The ickiest one
+            %% is a race between Proc A = trim and Proc B = read,
+            %% chain length of 2 or more:
+            %% Proc A: trim head -> ok
+            %% Proc B: read tail -> error_unwritten
+            %% Proc B: read head -> error_trimmed
+            %% Proc B: trim tail -> ok
+            %% Proc A: trim tail -> ??
+            %%
+            %% The result that we want that both A & B & any later
+            %% readers agree that the LPN is trimmed.  If the chain is
+            %% >2, then the procs can win some/all/none of the races
+            %% to fix up the chain, that's no problem.  But don't tell
+            %% the caller that there was an error during those races.
             fill_or_trim_page(T, Epoch, LPN, Func);
         Else ->
             %% TODO: worth doing anything here, if we're in the middle of chain?
