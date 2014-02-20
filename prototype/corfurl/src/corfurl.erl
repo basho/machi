@@ -98,6 +98,7 @@ write_single_page_to_chain([FLU|Rest], Epoch, LPN, Page, Nth) ->
                     %% TODO: same TODO as the above error_badepoch case.
                     error_badepoch;
                 Else ->
+                    %% Guess what?? PULSE can drive us to this case, excellent!
                     giant_error({left_off_here, ?MODULE, ?LINE, Else})
             end
     end.
