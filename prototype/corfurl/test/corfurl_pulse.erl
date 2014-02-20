@@ -566,7 +566,7 @@ make_chains(ChainLen, FLUs) ->
     make_chains(ChainLen, FLUs, [], []).
 
 make_chains(_ChainLen, [], SmallAcc, BigAcc) ->
-    lists:reverse([SmallAcc|BigAcc]);
+    [lists:reverse(SmallAcc)|BigAcc];
 make_chains(ChainLen, [H|T], SmallAcc, BigAcc) ->
     if length(SmallAcc) == ChainLen ->
             make_chains(ChainLen, T, [H], [SmallAcc|BigAcc]);
