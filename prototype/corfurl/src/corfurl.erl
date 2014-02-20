@@ -98,7 +98,7 @@ write_single_page_to_chain([FLU|Rest], Epoch, LPN, Page, Nth) ->
                     %% TODO: same TODO as the above error_badepoch case.
                     error_badepoch;
                 Else ->
-                    error({left_off_here, ?MODULE, ?LINE, Else})
+                    giant_error({left_off_here, ?MODULE, ?LINE, Else})
             end
     end.
 
@@ -122,6 +122,13 @@ read_page(#proj{epoch=Epoch} = P, LPN) ->
         %% Let it crash: error_overwritten
     end.
 
+ok_or_trim(ok) ->
+    ok;
+ok_or_trim(error_trimmed) ->
+    ok;
+ok_or_trim(Else) ->
+    Else.
+
 read_repair_chain(Epoch, LPN, [Head|Rest] = Chain) ->
     case corfurl_flu:read(flu_pid(Head), Epoch, LPN) of
         {ok, Page} ->
@@ -130,10 +137,11 @@ read_repair_chain(Epoch, LPN, [Head|Rest] = Chain) ->
             error_badepoch;
         error_trimmed ->
             %% TODO: robustify
-            [ok = case corfurl_flu:trim(flu_pid(X), Epoch, LPN) of
-                      ok ->            ok;
-                      error_trimmed -> ok;
-                      Else          -> Else
+            [ok = case ok_or_trim(corfurl_flu:trim(flu_pid(X), Epoch, LPN)) of
+                      ok              -> ok;
+                      error_unwritten -> ok_or_trim(corfurl_flu:fill(
+                                                      flu_pid(X), Epoch, LPN));
+                      Else            -> Else
                   end || X <- Rest],
             error_trimmed;
         error_unwritten ->
@@ -160,8 +168,8 @@ read_repair_chain2([RepairFLU|Rest], Epoch, LPN, Page, OriginalChain) ->
                     %%       to fix problems?
                     {ok, Page2};
                 {ok, _Page2} ->
-                    error({bummerbummer, ?MODULE, ?LINE, sanity_check_failure,
-                           lpn, LPN, epoch, Epoch});
+                    giant_error({bummerbummer, ?MODULE, ?LINE,
+                                 sanity_check_failure, lpn, LPN, epoch, Epoch});
                 error_badepoch ->
                     error_badepoch;
                 error_trimmed ->
@@ -240,6 +248,10 @@ flu_pid(X) when is_pid(X) ->
     X;
 flu_pid(X) when is_atom(X) ->
     ets:lookup_element(flu_pid_tab, X, 1).
+
+giant_error(Err) ->
+    io:format(user, "GIANT ERROR: ~p\n", [Err]),
+    exit(Err).
 
 %%%% %%%% %%%%    projection utilities    %%%% %%%% %%%%
 
