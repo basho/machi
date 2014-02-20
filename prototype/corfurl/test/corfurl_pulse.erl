@@ -381,7 +381,7 @@ check_trace(Trace0, _Cmds, _Seed) ->
                                     orddict:append(LPN, Pg, D);
                                ({mod_start, WType, LPN, _Pg}, D)
                                  when WType == w_ft; WType == w_tt ->
-                                    orddict:append(LPN, [error_trimmed], D)
+                                    orddict:append(LPN, error_trimmed, D)
                             end, Dict1, [X || X={mod_start,_,_,_} <- StEnds]),
                   Dict3 = lists:foldl(
                             fun({mod_end, w_1, LPN, Pg}, D) ->
