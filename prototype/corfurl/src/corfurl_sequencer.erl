@@ -50,11 +50,15 @@ stop(Pid) ->
     gen_server:call(Pid, stop, infinity).
 
 get(Pid, NumPages) ->
-    gen_server:call(Pid, {get, NumPages}, infinity).
+    {LPN, LC} = gen_server:call(Pid, {get, NumPages, lamport_clock:get()},
+                                infinity),
+    lamport_clock:update(LC),
+    LPN.
 
 %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%%
 
 init({FLUs, TypeOrSeed}) ->
+    lamport_clock:init(),
     MLP = get_max_logical_page(FLUs),
     if TypeOrSeed == standard ->
             {ok, MLP + 1};
@@ -64,16 +68,19 @@ init({FLUs, TypeOrSeed}) ->
             {ok, {MLP+1, BadPercent, MaxDifference}}
     end.
 
-handle_call({get, NumPages}, _From, MLP) when is_integer(MLP) ->
-    {reply, MLP, MLP + NumPages};
-handle_call({get, NumPages}, _From, {MLP, BadPercent, MaxDifference}) ->
+handle_call({get, NumPages, LC}, _From, MLP) when is_integer(MLP) ->
+    NewLC = lamport_clock:update(LC),
+    {reply, {MLP, NewLC}, MLP + NumPages};
+handle_call({get, NumPages, LC}, _From, {MLP, BadPercent, MaxDifference}) ->
+    NewLC = lamport_clock:update(LC),
     Fudge = case random:uniform(100) of
                 N when N < BadPercent ->
                     random:uniform(MaxDifference * 2) - MaxDifference;
                 _ ->
                     0
             end,
-    {reply, erlang:max(1, MLP + Fudge), {MLP + NumPages, BadPercent, MaxDifference}};
+    {reply, {erlang:max(1, MLP + Fudge), NewLC},
+     {MLP + NumPages, BadPercent, MaxDifference}};
 handle_call(stop, _From, MLP) ->
     {stop, normal, ok, MLP};
 handle_call(_Request, _From, MLP) ->
@@ -87,6 +94,7 @@ handle_info(_Info, MLP) ->
     {noreply, MLP}.
 
 terminate(_Reason, _MLP) ->
+    %% io:format(user, "C=~w,", [lamport_clock:get()]),
     ok.
 
 code_change(_OldVsn, MLP, _Extra) ->

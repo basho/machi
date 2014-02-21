@@ -46,6 +46,8 @@
         eqc:on_output(fun(Str, Args) -> ?QC_FMT(Str, Args) end, P)).
 
 -define(MAX_PAGES, 50000).
+-define(MY_TAB,  i_have_a_name).
+-define(MY_KEY, ?MY_TAB).
 
 -record(run, {
           seq,                                  % Sequencer
@@ -197,6 +199,8 @@ run_commands_on_node(LocalOrSlave, Cmds, Seed) ->
     X =
     try
       {H, S, Res, Trace} = pulse:run(fun() ->
+          catch ets:new(?MY_TAB, [public, set, named_table]),
+          ets:insert(?MY_TAB, {?MY_KEY, undefined}),
           %% application:start(my_test_app),
           %% receive after AfterTime -> ok end,
           {H, S, R} = run_parallel_commands(?MODULE, Cmds),
@@ -206,13 +210,15 @@ run_commands_on_node(LocalOrSlave, Cmds, Seed) ->
           receive after AfterTime -> ok end,
           Trace = event_logger:get_events(),
           %% receive after AfterTime -> ok end,
+          [{_, ThisRun}] = ets:lookup(?MY_TAB, ?MY_KEY),
+          [clean_up_runtime(ThisRun) || ThisRun /= undefined],
+          %% stop pulse controller *after* clean_up_runtime().
           catch exit(pulse_application_controller, shutdown),
           {H, S, R, Trace}
         end, [{seed, Seed},
               {strategy, unfair}]),
       Schedule = pulse:get_schedule(),
       Errors = gen_event:call(error_logger, handle_errors, get_errors, 60*1000),
-      [clean_up_runtime(S) || S#state.run /= undefined],
       {H, S, Res, Trace, Schedule, Errors}
     catch
         _:Err ->
@@ -283,7 +289,8 @@ check_trace(Trace0, _Cmds, _Seed) ->
     %%          Also, the append might fail, so the model can ignore those
     %%          failures because they're not mutating any state that and
     %%          external viewer can see.
-    Trace = add_LPN_to_append_calls(Trace0),
+    %% WARNING: Trace0 + lamport_clocks means Trace0 is not strictly sorted!
+    Trace = add_LPN_to_append_calls(lists:sort(Trace0)),
 
     Events = eqc_temporal:from_timed_list(Trace),
     %% Example Events, temporal style, 1 usec resolution, same as original trace
@@ -470,6 +477,7 @@ check_trace(Trace0, _Cmds, _Seed) ->
                            end, [], FinaTtns_filtered),
 
     ?WHENFAIL(begin
+    ?QC_FMT("*Trace: ~p\n", [Trace]),
     ?QC_FMT("*ModsReads: ~p\n", [eqc_temporal:unions([Mods,Reads])]),
     ?QC_FMT("*InvalidTtns: ~p\n", [InvalidTransitions]),
     ?QC_FMT("*BadReads: ~p\n", [BadReads])
@@ -563,7 +571,7 @@ zipwith(F, [X|Xs], [Y|Ys]) ->
   [F(X, Y)|zipwith(F, Xs, Ys)];
 zipwith(_, _, _) -> [].
 
-clean_up_runtime(#state{run=R} = _S) ->
+clean_up_runtime(R) ->
     %% io:format(user, "clean_up_runtime: run = ~p\n", [R]),
     catch corfurl_sequencer:stop(R#run.seq),
     [catch corfurl_flu:stop(F) || F <- R#run.flus],
@@ -582,13 +590,16 @@ make_chains(ChainLen, [H|T], SmallAcc, BigAcc) ->
     end.
 
 setup(NumChains, ChainLen, PageSize, SeqType) ->
+    lamport_clock:init(),
     N = NumChains * ChainLen,
     FLUs = corfurl_test:setup_basic_flus(N, PageSize, ?MAX_PAGES),
     {ok, Seq} = corfurl_sequencer:start_link(FLUs, SeqType),
     Chains = make_chains(ChainLen, FLUs),
     %% io:format(user, "Cs = ~p\n", [Chains]),
     Proj = corfurl:new_simple_projection(1, 1, ?MAX_PAGES, Chains),
-    #run{seq=Seq, proj=Proj, flus=FLUs}.
+    Run = #run{seq=Seq, proj=Proj, flus=FLUs},
+    ets:insert(?MY_TAB, {?MY_KEY, Run}),
+    Run.
 
 range_ify([]) ->
     [];
@@ -644,12 +655,14 @@ pick_an_LPN(Seq, SeedInt) ->
     end.
 
 -define(LOG(Tag, MkCall),
-        event_logger:event(log_make_call(Tag)),
+        event_logger:event(log_make_call(Tag), lamport_clock:get()),
         LOG__Result = MkCall,
-        event_logger:event(log_make_result(LOG__Result)),
+        event_logger:event(log_make_result(LOG__Result), lamport_clock:get()),
         LOG__Result).
 
 append(#run{seq=Seq, proj=Proj}, Page) ->
+    lamport_clock:init(),
+    lamport_clock:incr(),
     ?LOG({append, Page},
          begin
              Res = corfurl:append_page(Seq, Proj, Page),
@@ -662,6 +675,8 @@ read_result_mangle(Else) ->
     Else.
 
 read_approx(#run{seq=Seq, proj=Proj}, SeedInt) ->
+    lamport_clock:init(),
+    lamport_clock:incr(),
     LPN = pick_an_LPN(Seq, SeedInt),
     ?LOG({read, LPN},
          begin
@@ -670,6 +685,8 @@ read_approx(#run{seq=Seq, proj=Proj}, SeedInt) ->
          end).
 
 scan_forward(#run{seq=Seq, proj=Proj}, SeedInt, NumPages) ->
+    lamport_clock:init(),
+    lamport_clock:incr(),
     StartLPN = if SeedInt == 1 -> 1;
                   true         -> pick_an_LPN(Seq, SeedInt)
                end,
@@ -679,11 +696,11 @@ scan_forward(#run{seq=Seq, proj=Proj}, SeedInt, NumPages) ->
     %% instead from a single-page read_page() call.
     ?LOG({scan_forward, StartLPN, NumPages},
          begin
-             TS1 = event_logger:timestamp(),
+             TS1 = lamport_clock:get(),
              case corfurl:scan_forward(Proj, StartLPN, NumPages) of
                  {ok, EndLPN, MoreP, Pages} ->
                      PageIs = lists:zip(Pages, lists:seq(1, length(Pages))),
-                     TS2 = event_logger:timestamp(),
+                     TS2 = lamport_clock:get(),
                      [begin
                           PidI = {self(), s_f, I},
                           event_logger:event(log_make_call(PidI, {read, LPN}),
@@ -700,6 +717,8 @@ scan_forward(#run{seq=Seq, proj=Proj}, SeedInt, NumPages) ->
          end).
 
 fill(#run{seq=Seq, proj=Proj}, SeedInt) ->
+    lamport_clock:init(),
+    lamport_clock:incr(),
     LPN = pick_an_LPN(Seq, SeedInt),
     ?LOG({fill, LPN},
          begin
@@ -708,6 +727,8 @@ fill(#run{seq=Seq, proj=Proj}, SeedInt) ->
          end).
 
 trim(#run{seq=Seq, proj=Proj}, SeedInt) ->
+    lamport_clock:init(),
+    lamport_clock:incr(),
     LPN = pick_an_LPN(Seq, SeedInt),
     ?LOG({trim, LPN},
          begin

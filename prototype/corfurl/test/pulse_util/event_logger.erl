@@ -126,10 +126,8 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 
 add_event(#event{timestamp = Now, data = Data}, State) ->
-  Event = #event{ timestamp = Now - State#state.start_time, data = Data },
+  Event = #event{ timestamp = Now, data = Data },
   State#state{ events = [Event|State#state.events] }.
 
 timestamp() ->
-  {A, B, C} = erlang:now(),
-  1000000 * (1000000 * A + B) + C.
-
+    lamport_clock:get().

@@ -37,6 +37,7 @@
 
 -ifdef(TEST).
 -export([get__mlp/1, get__min_epoch/1, get__trim_watermark/1]).
+-compile(export_all).
 -ifdef(PULSE).
 -compile({parse_transform, pulse_instrument}).
 -endif.
@@ -72,22 +73,28 @@ stop(Pid) ->
 
 write(Pid, Epoch, LogicalPN, PageBin)
   when is_integer(LogicalPN), LogicalPN > 0, is_binary(PageBin) ->
-    gen_server:call(Pid, {write, Epoch, LogicalPN, PageBin}, infinity).
+    g_call(Pid, {write, Epoch, LogicalPN, PageBin}, infinity).
 
 read(Pid, Epoch, LogicalPN)
   when is_integer(Epoch), Epoch > 0, is_integer(LogicalPN), LogicalPN > 0 ->
-    gen_server:call(Pid, {read, Epoch, LogicalPN}, infinity).
+    g_call(Pid, {read, Epoch, LogicalPN}, infinity).
 
 seal(Pid, Epoch) when is_integer(Epoch), Epoch > 0 ->
-    gen_server:call(Pid, {seal, Epoch}, infinity).
+    g_call(Pid, {seal, Epoch}, infinity).
 
 trim(Pid, Epoch, LogicalPN)
   when is_integer(Epoch), Epoch > 0, is_integer(LogicalPN), LogicalPN > 0 ->
-    gen_server:call(Pid, {trim, Epoch, LogicalPN}, infinity).
+    g_call(Pid, {trim, Epoch, LogicalPN}, infinity).
 
 fill(Pid, Epoch, LogicalPN)
   when is_integer(Epoch), Epoch > 0, is_integer(LogicalPN), LogicalPN > 0 ->
-    gen_server:call(Pid, {fill, Epoch, LogicalPN}, infinity).
+    g_call(Pid, {fill, Epoch, LogicalPN}, infinity).
+
+g_call(Pid, Arg, Timeout) ->
+    LC1 = lamport_clock:get(),
+    {Res, LC2} = gen_server:call(Pid, {Arg, LC1}, Timeout),
+    lamport_clock:update(LC2),
+    Res.
 
 -ifdef(TEST).
 
@@ -105,6 +112,8 @@ get__trim_watermark(Pid) ->
 %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%%
 
 init({Dir, ExpPageSize, ExpMaxMem}) ->
+    lamport_clock:init(),
+
     MemFile = memfile_path(Dir),
     filelib:ensure_dir(MemFile),
     {ok, FH} = file:open(MemFile, [read, write, raw, binary]),
@@ -138,49 +147,61 @@ init({Dir, ExpPageSize, ExpMaxMem}) ->
 handle_call(Call, From, #state{max_logical_page=unknown} = State) ->
     {noreply, NewState} = handle_info(finish_init, State),
     handle_call(Call, From, NewState);
-handle_call({write, ClientEpoch, _LogicalPN, _PageBin}, _From,
+handle_call({{write, ClientEpoch, _LogicalPN, _PageBin}, LC1}, _From,
             #state{min_epoch=MinEpoch} = State)
   when ClientEpoch < MinEpoch ->
-    {reply, error_badepoch, State};
-handle_call({write, _ClientEpoch, LogicalPN, PageBin}, _From,
+    LC2 = lamport_clock:update(LC1),
+    {reply, {error_badepoch, LC2}, State};
+handle_call({{write, _ClientEpoch, LogicalPN, PageBin}, LC1}, _From,
             #state{max_logical_page=MLPN} = State) ->
+    LC2 = lamport_clock:update(LC1),
     case check_write(LogicalPN, PageBin, State) of
         {ok, Offset} ->
             ok = write_page(Offset, LogicalPN, PageBin, State),
             NewMLPN = erlang:max(LogicalPN, MLPN),
-            {reply, ok, State#state{max_logical_page=NewMLPN}};
+            {reply, {ok, LC2}, State#state{max_logical_page=NewMLPN}};
         Else ->
-            {reply, Else, State}
+            {reply, {Else, LC2}, State}
     end;
 
-handle_call({read, ClientEpoch, _LogicalPN}, _From,
+handle_call({{read, ClientEpoch, _LogicalPN}, LC1}, _From,
             #state{min_epoch=MinEpoch} = State)
   when ClientEpoch < MinEpoch ->
-    {reply, error_badepoch, State};
-handle_call({read, _ClientEpoch, LogicalPN}, _From, State) ->
-    {reply, read_page(LogicalPN, State), State};
+    LC2 = lamport_clock:update(LC1),
+    {reply, {error_badepoch, LC2}, State};
+handle_call({{read, _ClientEpoch, LogicalPN}, LC1}, _From, State) ->
+    LC2 = lamport_clock:update(LC1),
+    {reply, {read_page(LogicalPN, State), LC2}, State};
 
-handle_call({seal, ClientEpoch}, _From, #state{min_epoch=MinEpoch} = State)
+handle_call({{seal, ClientEpoch}, LC1}, _From, #state{min_epoch=MinEpoch} = State)
   when ClientEpoch =< MinEpoch ->
-    {reply, error_badepoch, State};
-handle_call({seal, ClientEpoch}, _From, #state{max_logical_page=MLPN}=State) ->
+    LC2 = lamport_clock:update(LC1),
+    {reply, {error_badepoch, LC2}, State};
+handle_call({{seal, ClientEpoch}, LC1}, _From, #state{max_logical_page=MLPN}=State) ->
+    LC2 = lamport_clock:update(LC1),
     NewState = State#state{min_epoch=ClientEpoch},
     ok = write_hard_state(NewState),
-    {reply, {ok, MLPN}, NewState};
+    {reply, {{ok, MLPN}, LC2}, NewState};
 
-handle_call({trim, ClientEpoch, _LogicalPN}, _From,
+handle_call({{trim, ClientEpoch, _LogicalPN}, LC1}, _From,
             #state{min_epoch=MinEpoch} = State)
   when ClientEpoch < MinEpoch ->
-    {reply, error_badepoch, State};
-handle_call({trim, _ClientEpoch, LogicalPN}, _From, State) ->
-    do_trim_or_fill(trim, LogicalPN, State);
+    LC2 = lamport_clock:update(LC1),
+    {reply, {error_badepoch, LC2}, State};
+handle_call({{trim, _ClientEpoch, LogicalPN}, LC1}, _From, State) ->
+    LC2 = lamport_clock:update(LC1),
+    {Reply, NewState} = do_trim_or_fill(trim, LogicalPN, State),
+    {reply, {Reply, LC2}, NewState};
 
-handle_call({fill, ClientEpoch, _LogicalPN}, _From,
+handle_call({{fill, ClientEpoch, _LogicalPN}, LC1}, _From,
             #state{min_epoch=MinEpoch} = State)
   when ClientEpoch < MinEpoch ->
-    {reply, error_badepoch, State};
-handle_call({fill, _ClientEpoch, LogicalPN}, _From, State) ->
-    do_trim_or_fill(fill, LogicalPN, State);
+    LC2 = lamport_clock:update(LC1),
+    {reply, {error_badepoch, LC2}, State};
+handle_call({{fill, _ClientEpoch, LogicalPN}, LC1}, _From, State) ->
+    LC2 = lamport_clock:update(LC1),
+    {Reply, NewState} = do_trim_or_fill(fill, LogicalPN, State),
+    {reply, {Reply, LC2}, NewState};
 
 handle_call(get__mlp, _From, State) ->
     {reply, State#state.max_logical_page, State};
@@ -347,9 +368,9 @@ do_trim_or_fill(Op, LogicalPN,
                true ->
                     ok
             end,
-            {reply, ok, NewS};
+            {ok, NewS};
         Else ->
-            {reply, Else, S}
+            {Else, S}
     end.
 
 trim_page(Op, LogicalPN, #state{max_mem=MaxMem, mem_fh=FH} = S) ->
