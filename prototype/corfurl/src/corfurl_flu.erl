@@ -45,6 +45,10 @@
 
 -include_lib("kernel/include/file.hrl").
 
+%%% Debugging: for extra events in the PULSE event log, use the 2nd statement.
+-define(EVENT_LOG(X), ok).
+%%% -define(EVENT_LOG(X), event_logger(X)).
+
 -record(state, {
           dir :: string(),
           mem_fh :: term(),
@@ -159,6 +163,7 @@ handle_call({{write, _ClientEpoch, LogicalPN, PageBin}, LC1}, _From,
         {ok, Offset} ->
             ok = write_page(Offset, LogicalPN, PageBin, State),
             NewMLPN = erlang:max(LogicalPN, MLPN),
+            ?EVENT_LOG({flu, write, self(), LogicalPN, ok}),
             {reply, {ok, LC2}, State#state{max_logical_page=NewMLPN}};
         Else ->
             {reply, {Else, LC2}, State}
@@ -191,6 +196,7 @@ handle_call({{trim, ClientEpoch, _LogicalPN}, LC1}, _From,
 handle_call({{trim, _ClientEpoch, LogicalPN}, LC1}, _From, State) ->
     LC2 = lamport_clock:update(LC1),
     {Reply, NewState} = do_trim_or_fill(trim, LogicalPN, State),
+    ?EVENT_LOG({flu, trim, self(), LogicalPN, Reply}),
     {reply, {Reply, LC2}, NewState};
 
 handle_call({{fill, ClientEpoch, _LogicalPN}, LC1}, _From,
@@ -201,6 +207,7 @@ handle_call({{fill, ClientEpoch, _LogicalPN}, LC1}, _From,
 handle_call({{fill, _ClientEpoch, LogicalPN}, LC1}, _From, State) ->
     LC2 = lamport_clock:update(LC1),
     {Reply, NewState} = do_trim_or_fill(fill, LogicalPN, State),
+    ?EVENT_LOG({flu, fill, self(), LogicalPN, Reply}),
     {reply, {Reply, LC2}, NewState};
 
 handle_call(get__mlp, _From, State) ->
