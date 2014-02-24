@@ -62,14 +62,14 @@ append_page(Sequencer, P, Page, Retries) when Retries < 50 ->
 
 write_single_page(#proj{epoch=Epoch} = P, LPN, Page) ->
     Chain = project_to_chain(LPN, P),
-    write_single_page_to_chain(Chain, Epoch, LPN, Page, 1).
+    write_single_page_to_chain(Chain, Chain, Epoch, LPN, Page, 1).
 
-write_single_page_to_chain([], _Epoch, _LPN, _Page, _Nth) ->
+write_single_page_to_chain([], _Chain, _Epoch, _LPN, _Page, _Nth) ->
     ok;
-write_single_page_to_chain([FLU|Rest], Epoch, LPN, Page, Nth) ->
+write_single_page_to_chain([FLU|Rest], Chain, Epoch, LPN, Page, Nth) ->
     case corfurl_flu:write(flu_pid(FLU), Epoch, LPN, Page) of
         ok ->
-            write_single_page_to_chain(Rest, Epoch, LPN, Page, Nth+1);
+            write_single_page_to_chain(Rest, Chain, Epoch, LPN, Page, Nth+1);
         error_badepoch ->
             %% TODO: Interesting case: there may be cases where retrying with
             %%       a new epoch & that epoch's projection is just fine (and
@@ -96,13 +96,22 @@ write_single_page_to_chain([FLU|Rest], Epoch, LPN, Page, Nth) ->
                 {ok, AlreadyThere} when AlreadyThere =:= Page ->
                     %% Alright, well, let's go continue the repair/writing,
                     %% since we agree on the page's value.
-                    write_single_page_to_chain(Rest, Epoch, LPN, Page, Nth+1);
+                    write_single_page_to_chain(Rest, Chain, Epoch, LPN, Page, Nth+1);
                 error_badepoch ->
                     %% TODO: same TODO as the above error_badepoch case.
                     error_badepoch;
+                error_trimmed ->
+                    %% PULSE can drive us to this case, excellent!
+                    %% We had a race with read-repair and lost (the write).
+                    %% Now this read failed with error_trimmed because we
+                    %% lost a race with someone trimming this block.
+                    %% Let's be paranoid and repair, just in case.
+                    OurResult = error_trimmed,
+                    error_trimmed = read_repair_chain(Epoch, LPN, Chain),
+                    OurResult;
                 Else ->
                     %% Guess what?? PULSE can drive us to this case, excellent!
-                    giant_error({left_off_here, ?MODULE, ?LINE, Else})
+                    giant_error({left_off_here, ?MODULE, ?LINE, Else, nth, Nth})
             end
     end.
 

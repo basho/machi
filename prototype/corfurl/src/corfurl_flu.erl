@@ -40,6 +40,7 @@
 -compile(export_all).
 -ifdef(PULSE).
 -compile({parse_transform, pulse_instrument}).
+-compile({pulse_skip,[{msc, 3}]}).
 -endif.
 -endif.
 
@@ -47,6 +48,7 @@
 
 %%% Debugging: for extra events in the PULSE event log, use the 2nd statement.
 -define(EVENT_LOG(X), ok).
+%% -define(EVENT_LOG(X), erlang:display(X)).
 %%% -define(EVENT_LOG(X), event_logger(X)).
 
 -record(state, {
@@ -96,7 +98,9 @@ fill(Pid, Epoch, LogicalPN)
 
 g_call(Pid, Arg, Timeout) ->
     LC1 = lamport_clock:get(),
+    msc(self(), Pid, Arg),
     {Res, LC2} = gen_server:call(Pid, {Arg, LC1}, Timeout),
+    msc(Pid, self(), Res),
     lamport_clock:update(LC2),
     Res.
 
@@ -176,7 +180,9 @@ handle_call({{read, ClientEpoch, _LogicalPN}, LC1}, _From,
     {reply, {error_badepoch, LC2}, State};
 handle_call({{read, _ClientEpoch, LogicalPN}, LC1}, _From, State) ->
     LC2 = lamport_clock:update(LC1),
-    {reply, {read_page(LogicalPN, State), LC2}, State};
+    Reply = read_page(LogicalPN, State),
+    ?EVENT_LOG({flu, read, self(), LogicalPN, Reply}),
+    {reply, {Reply, LC2}, State};
 
 handle_call({{seal, ClientEpoch}, LC1}, _From, #state{min_epoch=MinEpoch} = State)
   when ClientEpoch =< MinEpoch ->
@@ -409,3 +415,15 @@ trim_page(Op, LogicalPN, #state{max_mem=MaxMem, mem_fh=FH} = S) ->
        true ->
             badarg
     end.
+
+-ifdef(PULSE_HACKING).
+%% Create a trace file that can be formatted by "mscgen" utility.
+%% Lots of hand-editing is required after creating the file, sorry!
+msc(_From, _To, _Tag) ->
+    {ok, FH} = file:open("/tmp/goo", [write, append]),
+    io:format(FH, "    \"~w\" -> \"~w\" [ label = \"~w\" ] ;\n", [_From, _To, _Tag]),
+    file:close(FH).
+-else. % PULSE_HACKING
+msc(_From, _To, _Tag) ->
+    ok.
+-endif. % PULSE_HACkING
