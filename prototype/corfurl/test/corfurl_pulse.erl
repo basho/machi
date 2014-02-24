@@ -156,6 +156,9 @@ postcondition(_S, {call, _, setup, _}, #run{} = _V) ->
     true;
 postcondition(_S, {call, _, append, _}, {ok, LPN}) when is_integer(LPN) ->
     true;
+postcondition(_S, {call, _, append, _}, {special_trimmed, LPN})
+  when is_integer(LPN) ->
+    true;
 postcondition(_S, {call, _, append, _}, V) ->
     eqeq(V, todoTODO_fixit);
 postcondition(_S, {call, _, read_approx, _}, V) ->
@@ -320,6 +323,7 @@ check_trace(Trace0, _Cmds, _Seed) ->
 
     AllLPNsR = eqc_temporal:stateful(
                 fun({call, _Pid, {append, _Pg, will_be, LPN}}) -> LPN;
+                   ({call, _Pid, {append, _Pg, will_fail, {special_trimmed, LPN}}}) -> LPN;
                    ({call, _Pid, {read, LPN, _, _}}) -> LPN;
                    ({call, _Pid, {fill, LPN, will_be, ok}}) -> LPN;
                    ({call, _Pid, {trim, LPN, will_be, ok}}) -> LPN
@@ -341,6 +345,14 @@ check_trace(Trace0, _Cmds, _Seed) ->
     Mods = eqc_temporal:stateful(
                fun({call, Pid, {append, Pg, will_be, LPN}}) ->
                        {mod_working, w_1, LPN, Pg, Pid};
+                  ({call, Pid, {append, Pg, will_fail, {special_trimmed, LPN}}}) ->
+                       %% This is a special case for the model.  We know that
+                       %% a write raced with a trim and lost (at least some of
+                       %% the time inside the chain).  But the transition that
+                       %% we model in this case is a special w_ type that is
+                       %% is trated specially by the dictionary-making
+                       %% creation of the ValuesR relation.
+                       {mod_working, w_special_trimmed, LPN, Pg, Pid};
                   ({call, Pid, {fill, LPN, will_be, ok}}) ->
                        {mod_working, w_ft, LPN, fill, Pid};
                   ({call, Pid, {trim, LPN, will_be, ok}}) ->
@@ -396,13 +408,17 @@ check_trace(Trace0, _Cmds, _Seed) ->
                                             D;
                                         false ->
                                             orddict:append(LPN, error_trimmed,D)
-                                    end
+                                    end;
+                               ({mod_start, w_special_trimmed, LPN, Pg}, D)->
+                                       orddict:append(LPN, Pg, D)
                             end, Dict1, [X || X={mod_start,_,_,_} <- StEnds]),
                   Dict3 = lists:foldl(
                             fun({mod_end, w_1, LPN, Pg}, D) ->
                                     orddict:store(LPN, [Pg], D);
                                ({mod_end, WType, LPN, _Pg}, D)
                                   when WType == w_ft; WType == w_tt ->
+                                    orddict:store(LPN, [error_trimmed], D);
+                               ({mod_end, w_special_trimmed, LPN, _Pg}, D) ->
                                     orddict:store(LPN, [error_trimmed], D)
                             end, Dict2, [X || X={mod_end,_,_,_} <- StEnds]),
                   {{TS1, TS2, [{values, Dict3}]}, Dict3}
@@ -635,14 +651,19 @@ filter_transition_trimfill_suffixes(Ttns) ->
 filter_1_transition_list([]) ->
     [];
 filter_1_transition_list(Old) ->
-    New = lists:reverse(lists:dropwhile(fun(w_tt) -> true;
-                                           (w_ft) -> true;
+    %% Strategy: Chop off all of the w_* at the end, then look at **Old** to
+    %% see if we chopped off any.  If we did chop off any, then add back a
+    %% constant 'w_t+' as a suffix.
+    New = lists:reverse(lists:dropwhile(fun(w_tt)              -> true;
+                                           (w_ft)              -> true;
+                                           (w_special_trimmed) -> true;
                                            (_)    -> false
                                         end, lists:reverse(Old))),
     Suffix = case lists:last(Old) of
-                 w_ft -> ['w_t+'];
-                 w_tt -> ['w_t+'];
-                 _    -> []
+                 w_ft ->              ['w_t+'];
+                 w_tt ->              ['w_t+'];
+                 w_special_trimmed -> ['w_t+'];
+                 _ ->                 []
              end,
     New ++ Suffix.
 

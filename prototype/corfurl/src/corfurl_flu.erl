@@ -48,8 +48,7 @@
 
 %%% Debugging: for extra events in the PULSE event log, use the 2nd statement.
 -define(EVENT_LOG(X), ok).
-%% -define(EVENT_LOG(X), erlang:display(X)).
-%%% -define(EVENT_LOG(X), event_logger(X)).
+%% -define(EVENT_LOG(X), event_logger:event(X)).
 
 -record(state, {
           dir :: string(),
@@ -170,6 +169,7 @@ handle_call({{write, _ClientEpoch, LogicalPN, PageBin}, LC1}, _From,
             ?EVENT_LOG({flu, write, self(), LogicalPN, ok}),
             {reply, {ok, LC2}, State#state{max_logical_page=NewMLPN}};
         Else ->
+            ?EVENT_LOG({flu, write, self(), LogicalPN, Else}),
             {reply, {Else, LC2}, State}
     end;
 
@@ -415,6 +415,18 @@ trim_page(Op, LogicalPN, #state{max_mem=MaxMem, mem_fh=FH} = S) ->
        true ->
             badarg
     end.
+
+-ifdef(PULSE).
+%% We do *not* want to remove any special PULSE return code.
+undo_special_pulse_test_result(Res) ->
+    Res.
+-else.  % PULSE
+undo_special_pulse_test_result({special_trimmed, LPN}) ->
+    {ok, LPN};
+undo_special_pulse_test_result(Res) ->
+    Res.
+-endif. % PULSE
+
 
 -ifdef(PULSE_HACKING).
 %% Create a trace file that can be formatted by "mscgen" utility.

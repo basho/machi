@@ -33,7 +33,8 @@
 
 
 setup_flu_basedir() ->
-    "/tmp/" ++ atom_to_list(?MODULE) ++ ".".    
+    "./tmp." ++
+        atom_to_list(?MODULE) ++ "." ++ os:getpid() ++ ".".
 
 setup_flu_dir(N) ->
     setup_flu_basedir() ++ integer_to_list(N).

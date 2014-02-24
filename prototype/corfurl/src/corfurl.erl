@@ -52,6 +52,8 @@ append_page(Sequencer, P, Page, Retries) when Retries < 50 ->
                 X when X == error_overwritten; X == error_trimmed ->
                     report_lost_race(LPN, X),
                     append_page(Sequencer, P, Page);
+                {special_trimmed, LPN}=XX ->
+                    XX;
                 Else ->
                     exit({todo, ?MODULE, line, ?LINE, Else})
             end;
@@ -62,14 +64,14 @@ append_page(Sequencer, P, Page, Retries) when Retries < 50 ->
 
 write_single_page(#proj{epoch=Epoch} = P, LPN, Page) ->
     Chain = project_to_chain(LPN, P),
-    write_single_page_to_chain(Chain, Chain, Epoch, LPN, Page, 1).
+    write_single_page_to_chain(Chain, Chain, Epoch, LPN, Page, 1, ok).
 
-write_single_page_to_chain([], _Chain, _Epoch, _LPN, _Page, _Nth) ->
-    ok;
-write_single_page_to_chain([FLU|Rest], Chain, Epoch, LPN, Page, Nth) ->
+write_single_page_to_chain([], _Chain, _Epoch, _LPN, _Page, _Nth, Reply) ->
+    Reply;
+write_single_page_to_chain([FLU|Rest], Chain, Epoch, LPN, Page, Nth, Reply) ->
     case corfurl_flu:write(flu_pid(FLU), Epoch, LPN, Page) of
         ok ->
-            write_single_page_to_chain(Rest, Chain, Epoch, LPN, Page, Nth+1);
+            write_single_page_to_chain(Rest, Chain, Epoch, LPN, Page, Nth+1, Reply);
         error_badepoch ->
             %% TODO: Interesting case: there may be cases where retrying with
             %%       a new epoch & that epoch's projection is just fine (and
@@ -77,11 +79,19 @@ write_single_page_to_chain([FLU|Rest], Chain, Epoch, LPN, Page, Nth) ->
             %%       Figure out what those cases are, then for the
             %%       destined-to-fail case, try to clean up (via trim?)?
             error_badepoch;
-        error_trimmed ->
+        error_trimmed when Nth == 1 ->
             %% Whoa, partner, you're movin' kinda fast for a trim.
             %% This might've been due to us being too slow and someone
             %% else junked us.
             error_trimmed;
+        error_trimmed when Nth > 1 ->
+            %% We're racing with a trimmer.  We won the race at head,
+            %% but here in the middle or tail (Nth > 1), we lost.
+            %% Our strategy is keep racing down to the tail.
+            %% If we continue to lose the exact same race for the rest
+            %% of the chain, the 1st clause of this func will return 'ok'.
+            %% That is *exactly* our intent and purpose!
+            write_single_page_to_chain(Rest, Chain, Epoch, LPN, Page, Nth+1, {special_trimmed, LPN});
         error_overwritten when Nth == 1 ->
             %% The sequencer lied, or we didn't use the sequencer and
             %% guessed and guessed poorly, or someone is accidentally
@@ -96,21 +106,16 @@ write_single_page_to_chain([FLU|Rest], Chain, Epoch, LPN, Page, Nth) ->
                 {ok, AlreadyThere} when AlreadyThere =:= Page ->
                     %% Alright, well, let's go continue the repair/writing,
                     %% since we agree on the page's value.
-                    write_single_page_to_chain(Rest, Chain, Epoch, LPN, Page, Nth+1);
+                    write_single_page_to_chain(Rest, Chain, Epoch, LPN, Page, Nth+1, Reply);
                 error_badepoch ->
                     %% TODO: same TODO as the above error_badepoch case.
                     error_badepoch;
                 error_trimmed ->
-                    %% PULSE can drive us to this case, excellent!
-                    %% We had a race with read-repair and lost (the write).
-                    %% Now this read failed with error_trimmed because we
-                    %% lost a race with someone trimming this block.
-                    %% Let's be paranoid and repair, just in case.
-                    OurResult = error_trimmed,
-                    error_trimmed = read_repair_chain(Epoch, LPN, Chain),
-                    OurResult;
+                    %% This is the same as 'error_trimmed when Nth > 1' above.
+                    %% Do the same thing.
+                    write_single_page_to_chain(Rest, Chain, Epoch, LPN, Page, Nth+1, {special_trimmed, LPN});
                 Else ->
-                    %% Guess what?? PULSE can drive us to this case, excellent!
+                    %% Can PULSE can drive us to this case?
                     giant_error({left_off_here, ?MODULE, ?LINE, Else, nth, Nth})
             end
     end.
