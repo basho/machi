@@ -320,7 +320,7 @@ check_trace(Trace0, _Cmds, _Seed) ->
 
     AllLPNsR = eqc_temporal:stateful(
                 fun({call, _Pid, {append, _Pg, will_be, LPN}}) -> LPN;
-                   ({call, _Pid, {read, LPN}}) -> LPN;
+                   ({call, _Pid, {read, LPN, _, _}}) -> LPN;
                    ({call, _Pid, {fill, LPN, will_be, ok}}) -> LPN;
                    ({call, _Pid, {trim, LPN, will_be, ok}}) -> LPN
                 end,
@@ -344,7 +344,9 @@ check_trace(Trace0, _Cmds, _Seed) ->
                   ({call, Pid, {fill, LPN, will_be, ok}}) ->
                        {mod_working, w_ft, LPN, fill, Pid};
                   ({call, Pid, {trim, LPN, will_be, ok}}) ->
-                       {mod_working, w_tt, LPN, trim, Pid}
+                       {mod_working, w_tt, LPN, trim, Pid};
+                  ({call, Pid, {read, LPN, will_fail, error_trimmed}}) ->
+                       {mod_working, w_tt, LPN, read_repair_maybe, Pid}
                end,
                fun({mod_working, _Ttn, _LPN, _Pg, _Pid}, {result, _Pid, _Res})->
                        []
@@ -434,7 +436,7 @@ check_trace(Trace0, _Cmds, _Seed) ->
     %% that appear at any time during the read op's lifetime.
 
     Reads = eqc_temporal:stateful(
-               fun({call, Pid, {read, LPN}}) ->
+               fun({call, Pid, {read, LPN, _, _}}) ->
                        {read, Pid, LPN, []}
                end,
                fun({read, Pid, LPN, V1s}, {values, Values}) ->
@@ -517,6 +519,15 @@ add_LPN_to_append_calls([{TS, {call, Pid, {OpName, LPN}}}|Rest])
                   {TS, {call, Pid, {OpName, LPN, will_be, ok}}};
               Else ->
                   {TS, {call, Pid, {OpName, LPN, will_fail, Else}}}
+          end,
+    [New|add_LPN_to_append_calls(Rest)];
+add_LPN_to_append_calls([{TS, {call, Pid, {read, LPN}}}|Rest]) ->
+    Res = trace_lookahead_pid(Pid, Rest),
+    New = case Res of
+              Page when is_binary(Page) ->
+                  {TS, {call, Pid, {read, LPN, will_be, Page}}};
+              Else ->
+                  {TS, {call, Pid, {read, LPN, will_fail, Else}}}
           end,
     [New|add_LPN_to_append_calls(Rest)];
 add_LPN_to_append_calls([X|Rest]) ->
@@ -747,7 +758,7 @@ perhaps_trip_append_page(true, Else, _Page) ->
 perhaps_trip_read_approx(false, Res, _LPN) ->
     Res;
 perhaps_trip_read_approx(true, _Res, 3 = LPN) ->
-    io:format(user, "TRIP: read_approx LPN ~p", [LPN]),
+    io:format(user, "TRIP: read_approx LPN ~p\n", [LPN]),
     <<"FAKE!">>;
 perhaps_trip_read_approx(true, Res, _LPN) ->
     Res.
