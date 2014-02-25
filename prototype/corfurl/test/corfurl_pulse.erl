@@ -425,8 +425,8 @@ check_trace(Trace0, _Cmds, _Seed) ->
                                ({mod_end, WType, LPN, _Pg}, D)
                                   when WType == w_ft; WType == w_tt ->
                                     orddict:store(LPN, [error_trimmed], D);
-                               ({mod_end, w_special_trimmed, LPN, _Pg}, D) ->
-                                    orddict:store(LPN, [error_trimmed], D)
+                               ({mod_end, w_special_trimmed, LPN, Pg}, D) ->
+                                    orddict:store(LPN, [Pg,error_trimmed], D)
                             end, Dict2, [X || X={mod_end,_,_,_} <- StEnds]),
                   {{TS1, TS2, [{values, Dict3}]}, Dict3}
           end, InitialValDict, StartsDones),
