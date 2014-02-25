@@ -64,7 +64,10 @@ append_page(Sequencer, P, Page, Retries) when Retries < 50 ->
 
 write_single_page(#proj{epoch=Epoch} = P, LPN, Page) ->
     Chain = project_to_chain(LPN, P),
-    write_single_page_to_chain(Chain, Chain, Epoch, LPN, Page, 1, ok).
+    write_single_page_to_chain(Chain, Chain, Epoch, LPN, Page, 1).
+
+write_single_page_to_chain(Chain, Chain, Epoch, LPN, Page, Nth) ->
+    write_single_page_to_chain(Chain, Chain, Epoch, LPN, Page, Nth, ok).
 
 write_single_page_to_chain([], _Chain, _Epoch, _LPN, _Page, _Nth, Reply) ->
     Reply;

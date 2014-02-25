@@ -505,6 +505,8 @@ check_trace(Trace0, _Cmds, _Seed) ->
     ?QC_FMT("*Trace: ~p\n", [Trace]),
     ?QC_FMT("*ModsReads: ~p\n", [eqc_temporal:unions([Mods,Reads])]),
     ?QC_FMT("*InvalidTtns: ~p\n", [InvalidTransitions]),
+    ?QC_FMT("*ValuesR: ~p\n", [eqc_temporal:unions([ValuesR, StartsDones])]),
+    ?QC_FMT("*Calls: ~p\n", [Calls]),
     ?QC_FMT("*BadReads: ~p\n", [BadReads])
     end,
     conjunction(

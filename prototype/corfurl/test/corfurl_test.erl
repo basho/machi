@@ -106,7 +106,7 @@ smoke1_test() ->
         %% Simulate a failed write to the chain.
         [F6a, F6b, F6c] = Chain6 = ?M:project_to_chain(6, P1),
         NotHead6 = [F6b, F6c],
-        ok = ?M:write_single_page_to_chain([F6a], Epoch, 6, Pg6, 1),
+        ok = ?M:write_single_page_to_chain([F6a], [F6a], Epoch, 6, Pg6, 1),
 
         %% Does the chain look as expected?
         {ok, Pg6} = corfurl_flu:read(?M:flu_pid(F6a), Epoch, 6),

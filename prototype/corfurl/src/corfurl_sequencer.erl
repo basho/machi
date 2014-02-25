@@ -33,6 +33,7 @@
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+-compile(export_all).
 -ifdef(PULSE).
 -compile({parse_transform, pulse_instrument}).
 -endif.
@@ -50,15 +51,15 @@ stop(Pid) ->
     gen_server:call(Pid, stop, infinity).
 
 get(Pid, NumPages) ->
-    {LPN, LC} = gen_server:call(Pid, {get, NumPages, lamport_clock:get()},
+    {LPN, LC} = gen_server:call(Pid, {get, NumPages, lclock_get()},
                                 infinity),
-    lamport_clock:update(LC),
+    lclock_update(LC),
     LPN.
 
 %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%%
 
 init({FLUs, TypeOrSeed}) ->
-    lamport_clock:init(),
+    lclock_init(),
     MLP = get_max_logical_page(FLUs),
     if TypeOrSeed == standard ->
             {ok, MLP + 1};
@@ -69,10 +70,10 @@ init({FLUs, TypeOrSeed}) ->
     end.
 
 handle_call({get, NumPages, LC}, _From, MLP) when is_integer(MLP) ->
-    NewLC = lamport_clock:update(LC),
+    NewLC = lclock_update(LC),
     {reply, {MLP, NewLC}, MLP + NumPages};
 handle_call({get, NumPages, LC}, _From, {MLP, BadPercent, MaxDifference}) ->
-    NewLC = lamport_clock:update(LC),
+    NewLC = lclock_update(LC),
     Fudge = case random:uniform(100) of
                 N when N < BadPercent ->
                     random:uniform(MaxDifference * 2) - MaxDifference;
@@ -94,7 +95,7 @@ handle_info(_Info, MLP) ->
     {noreply, MLP}.
 
 terminate(_Reason, _MLP) ->
-    %% io:format(user, "C=~w,", [lamport_clock:get()]),
+    %% io:format(user, "C=~w,", [lclock_get()]),
     ok.
 
 code_change(_OldVsn, MLP, _Extra) ->
@@ -107,51 +108,26 @@ get_max_logical_page(FLUs) ->
                   FLU <- FLUs,
                   {ok, Ps} <- [corfurl_flu:status(FLU)]]).
 
-%%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%%
+-ifdef(PULSE).
 
--ifdef(TEST).
--ifndef(PULSE).
+lclock_init() ->
+    lamport_clock:init().
 
-smoke_test() ->
-    BaseDir = "/tmp/" ++ atom_to_list(?MODULE) ++ ".",
-    PageSize = 8,
-    NumPages = 500,
-    NumFLUs = 4,
-    MyDir = fun(X) -> BaseDir ++ integer_to_list(X) end,
-    Del = fun() -> [ok = corfurl_util:delete_dir(MyDir(X)) ||
-                       X <- lists:seq(1, NumFLUs)] end,
+lclock_get() ->
+    lamport_clock:get().
 
-    Del(),
-    FLUs = [begin
-                element(2, corfurl_flu:start_link(MyDir(X),
-                                                  PageSize, NumPages*PageSize))
-            end || X <- lists:seq(1, NumFLUs)],
-    FLUsNums = lists:zip(FLUs, lists:seq(1, NumFLUs)),
-    
-    try
-        [ok = corfurl_flu:write(FLU, 1, PageNum, <<42:(8*8)>>) ||
-            {FLU, PageNum} <- FLUsNums],
-        MLP0 = NumFLUs,
-        NumFLUs = get_max_logical_page(FLUs),
+lclock_update(LC) ->
+    lamport_clock:update(LC).
 
-        %% Excellent.  Now let's start the sequencer and see if it gets
-        %% the same answer.  If yes, then the first get will return MLP1,
-        %% yadda yadda.
-        MLP1 = MLP0 + 1,
-        MLP3 = MLP0 + 3,
-        MLP4 = MLP0 + 4,
-        {ok, Sequencer} = start_link(FLUs),
-        try
-            MLP1 = get(Sequencer, 2),
-            MLP3 = get(Sequencer, 1),
-            MLP4 = get(Sequencer, 1)
-        after
-            stop(Sequencer)
-        end
-    after
-        [ok = corfurl_flu:stop(FLU) || FLU <- FLUs],
-        Del()
-    end.
+-else.  % PULSE
 
--endif. % not PULSE
--endif. % TEST
+lclock_init() ->
+    ok.
+
+lclock_get() ->
+    ok.
+
+lclock_update(_LC) ->
+    ok.
+
+-endif. % PLUSE

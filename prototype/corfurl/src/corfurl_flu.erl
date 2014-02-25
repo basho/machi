@@ -93,14 +93,15 @@ trim(Pid, Epoch, LogicalPN)
 
 fill(Pid, Epoch, LogicalPN)
   when is_integer(Epoch), Epoch > 0, is_integer(LogicalPN), LogicalPN > 0 ->
-    g_call(Pid, {fill, Epoch, LogicalPN}, infinity).
+    Res = g_call(Pid, {fill, Epoch, LogicalPN}, infinity),
+    undo_special_pulse_test_result(Res).
 
 g_call(Pid, Arg, Timeout) ->
-    LC1 = lamport_clock:get(),
+    LC1 = lclock_get(),
     msc(self(), Pid, Arg),
     {Res, LC2} = gen_server:call(Pid, {Arg, LC1}, Timeout),
     msc(Pid, self(), Res),
-    lamport_clock:update(LC2),
+    lclock_update(LC2),
     Res.
 
 -ifdef(TEST).
@@ -119,7 +120,7 @@ get__trim_watermark(Pid) ->
 %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%%
 
 init({Dir, ExpPageSize, ExpMaxMem}) ->
-    lamport_clock:init(),
+    lclock_init(),
 
     MemFile = memfile_path(Dir),
     filelib:ensure_dir(MemFile),
@@ -157,11 +158,11 @@ handle_call(Call, From, #state{max_logical_page=unknown} = State) ->
 handle_call({{write, ClientEpoch, _LogicalPN, _PageBin}, LC1}, _From,
             #state{min_epoch=MinEpoch} = State)
   when ClientEpoch < MinEpoch ->
-    LC2 = lamport_clock:update(LC1),
+    LC2 = lclock_update(LC1),
     {reply, {error_badepoch, LC2}, State};
 handle_call({{write, _ClientEpoch, LogicalPN, PageBin}, LC1}, _From,
             #state{max_logical_page=MLPN} = State) ->
-    LC2 = lamport_clock:update(LC1),
+    LC2 = lclock_update(LC1),
     case check_write(LogicalPN, PageBin, State) of
         {ok, Offset} ->
             ok = write_page(Offset, LogicalPN, PageBin, State),
@@ -176,20 +177,20 @@ handle_call({{write, _ClientEpoch, LogicalPN, PageBin}, LC1}, _From,
 handle_call({{read, ClientEpoch, _LogicalPN}, LC1}, _From,
             #state{min_epoch=MinEpoch} = State)
   when ClientEpoch < MinEpoch ->
-    LC2 = lamport_clock:update(LC1),
+    LC2 = lclock_update(LC1),
     {reply, {error_badepoch, LC2}, State};
 handle_call({{read, _ClientEpoch, LogicalPN}, LC1}, _From, State) ->
-    LC2 = lamport_clock:update(LC1),
+    LC2 = lclock_update(LC1),
     Reply = read_page(LogicalPN, State),
     ?EVENT_LOG({flu, read, self(), LogicalPN, Reply}),
     {reply, {Reply, LC2}, State};
 
 handle_call({{seal, ClientEpoch}, LC1}, _From, #state{min_epoch=MinEpoch} = State)
   when ClientEpoch =< MinEpoch ->
-    LC2 = lamport_clock:update(LC1),
+    LC2 = lclock_update(LC1),
     {reply, {error_badepoch, LC2}, State};
 handle_call({{seal, ClientEpoch}, LC1}, _From, #state{max_logical_page=MLPN}=State) ->
-    LC2 = lamport_clock:update(LC1),
+    LC2 = lclock_update(LC1),
     NewState = State#state{min_epoch=ClientEpoch},
     ok = write_hard_state(NewState),
     {reply, {{ok, MLPN}, LC2}, NewState};
@@ -197,10 +198,10 @@ handle_call({{seal, ClientEpoch}, LC1}, _From, #state{max_logical_page=MLPN}=Sta
 handle_call({{trim, ClientEpoch, _LogicalPN}, LC1}, _From,
             #state{min_epoch=MinEpoch} = State)
   when ClientEpoch < MinEpoch ->
-    LC2 = lamport_clock:update(LC1),
+    LC2 = lclock_update(LC1),
     {reply, {error_badepoch, LC2}, State};
 handle_call({{trim, _ClientEpoch, LogicalPN}, LC1}, _From, State) ->
-    LC2 = lamport_clock:update(LC1),
+    LC2 = lclock_update(LC1),
     {Reply, NewState} = do_trim_or_fill(trim, LogicalPN, State),
     ?EVENT_LOG({flu, trim, self(), LogicalPN, Reply}),
     {reply, {Reply, LC2}, NewState};
@@ -208,10 +209,10 @@ handle_call({{trim, _ClientEpoch, LogicalPN}, LC1}, _From, State) ->
 handle_call({{fill, ClientEpoch, _LogicalPN}, LC1}, _From,
             #state{min_epoch=MinEpoch} = State)
   when ClientEpoch < MinEpoch ->
-    LC2 = lamport_clock:update(LC1),
+    LC2 = lclock_update(LC1),
     {reply, {error_badepoch, LC2}, State};
 handle_call({{fill, _ClientEpoch, LogicalPN}, LC1}, _From, State) ->
-    LC2 = lamport_clock:update(LC1),
+    LC2 = lclock_update(LC1),
     {Reply, NewState} = do_trim_or_fill(fill, LogicalPN, State),
     ?EVENT_LOG({flu, fill, self(), LogicalPN, Reply}),
     {reply, {Reply, LC2}, NewState};
@@ -439,3 +440,27 @@ msc(_From, _To, _Tag) ->
 msc(_From, _To, _Tag) ->
     ok.
 -endif. % PULSE_HACkING
+
+-ifdef(PULSE).
+
+lclock_init() ->
+    lamport_clock:init().
+
+lclock_get() ->
+    lamport_clock:get().
+
+lclock_update(LC) ->
+    lamport_clock:update(LC).
+
+-else.  % PULSE
+
+lclock_init() ->
+    ok.
+
+lclock_get() ->
+    ok.
+
+lclock_update(_LC) ->
+    ok.
+
+-endif. % PLUSE
