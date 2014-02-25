@@ -414,7 +414,14 @@ check_trace(Trace0, _Cmds, _Seed) ->
                             end, Dict1, [X || X={mod_start,_,_,_} <- StEnds]),
                   Dict3 = lists:foldl(
                             fun({mod_end, w_1, LPN, Pg}, D) ->
-                                    orddict:store(LPN, [Pg], D);
+                                    Vs1 = orddict:fetch(LPN, D),
+                                    %% We've written a page.  error_unwriten is
+                                    %% now impossible; any other binary() is
+                                    %% also impossible.  However, there may be
+                                    %% a trim operation that's still in flight!
+                                    Vs2 = [V || V <- Vs1, V /= error_unwritten,
+                                                not is_binary(V)],
+                                    orddict:store(LPN, [Pg|Vs2], D);
                                ({mod_end, WType, LPN, _Pg}, D)
                                   when WType == w_ft; WType == w_tt ->
                                     orddict:store(LPN, [error_trimmed], D);
