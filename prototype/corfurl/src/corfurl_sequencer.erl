@@ -45,7 +45,10 @@ start_link(FLUs) ->
     start_link(FLUs, standard).
 
 start_link(FLUs, SeqType) ->
-    gen_server:start_link(?MODULE, {FLUs, SeqType}, []).
+    start_link(FLUs, SeqType, ?SERVER).
+
+start_link(FLUs, SeqType, RegName) ->
+    gen_server:start_link({local, RegName}, ?MODULE, {FLUs, SeqType}, []).
 
 stop(Pid) ->
     gen_server:call(Pid, stop, infinity).

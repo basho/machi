@@ -22,6 +22,8 @@
 -type flu() :: pid() | flu_name().
 -type flu_chain() :: [flu()].
 
+-type seq_name() :: {'undefined' | pid(), atom(), atom()}.
+
 -record(range, {
           pn_start :: non_neg_integer(),            % start page number
           pn_end :: non_neg_integer(),              % end page number
@@ -30,6 +32,7 @@
 
 -record(proj, {                                 % Projection
           epoch :: non_neg_integer(),
+          seq :: 'undefined' | seq_name(),
           r :: [#range{}]
          }).
 

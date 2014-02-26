@@ -83,8 +83,9 @@ smoke1_test() ->
                      lists:flatten(io_lib:format("~8..0w", [X])))} ||
                   X <- lists:seq(1, 5)],
     try
-        P1 = ?M:new_simple_projection(1, 1, 1*100, [[F1, F2, F3], [F4, F5, F6]]),
-        [begin {ok, LPN} = ?M:append_page(Seq, P1, Pg) end || {LPN, Pg} <- LPN_Pgs],
+        P0 = ?M:new_simple_projection(1, 1, 1*100, [[F1, F2, F3], [F4, F5, F6]]),
+        P1 = P0#proj{seq={Seq, unused, unused}},
+        [begin {ok, LPN} = ?M:append_page(P1, Pg) end || {LPN, Pg} <- LPN_Pgs],
 
         [begin {ok, Pg} = ?M:read_page(P1, LPN) end || {LPN, Pg} <- LPN_Pgs],
 
@@ -153,11 +154,11 @@ forfun_test_() ->
                              [forfun(Procs) || Procs <- [10,100,1000,5000]]
                      end}.
 
-forfun_append(0, _Seq, _P, _Page) ->
+forfun_append(0, _P, _Page) ->
     ok;
-forfun_append(N, Seq, P, Page) ->
+forfun_append(N, #proj{seq={Seq, _, _}} = P, Page) ->
     {ok, _} = ?M:append_page(Seq, P, Page),
-    forfun_append(N - 1, Seq, P, Page).
+    forfun_append(N - 1, P, Page).
 
 %%% My MBP, SSD
 %%% The 1K and 5K procs shows full-mailbox-scan ickiness
@@ -191,13 +192,14 @@ forfun(NumProcs) ->
     try
         Chains = [[F1, F2], [F3, F4]],
         %%Chains = [[F1], [F2], [F3], [F4]],
-        P = ?M:new_simple_projection(1, 1, NumPages*2, Chains),
+        P0 = ?M:new_simple_projection(1, 1, NumPages*2, Chains),
+        P = P0#proj{seq={Seq, unused, unused}},
         Me = self(),
         Start = now(),
         Ws = [begin
                   Page = <<X:(PageSize*8)>>,
                   spawn_link(fun() ->
-                                     forfun_append(PagesPerProc, Seq, P, Page),
+                                     forfun_append(PagesPerProc, P, Page),
                                      Me ! {done, self()}
                              end)
               end || X <- lists:seq(1, NumProcs)],

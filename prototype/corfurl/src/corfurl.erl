@@ -24,7 +24,7 @@
          new_range/3,
          read_projection/2,
          save_projection/2]).
--export([append_page/3, read_page/2, scan_forward/3,
+-export([append_page/2, read_page/2, scan_forward/3,
          fill_page/2, trim_page/2]).
 
 -include("corfurl.hrl").
@@ -40,10 +40,17 @@
 -define(EVENT_LOG(X), ok).
 %%% -define(EVENT_LOG(X), event_logger:event(X)).
 
-append_page(Sequencer, P, Page) ->
-    append_page(Sequencer, P, Page, 1).
+append_page(P, Page) ->
+    append_page(P, Page, 1).
 
-append_page(Sequencer, P, Page, Retries) when Retries < 50 ->
+append_page(#proj{seq={undefined, SeqHost, SeqName}} = P, Page, Retries) ->
+    case rpc:call(SeqHost, erlang, whereis, [SeqName]) of
+        SeqPid when is_pid(SeqPid) ->
+            append_page(P#proj{seq={SeqPid, SeqHost, SeqName}}, Page, Retries);
+        Else ->
+            exit({bummer, mod, ?MODULE, line, ?LINE, error, Else})
+    end;
+append_page(#proj{seq={Sequencer,_,_}} = P, Page, Retries) when Retries < 50 ->
     case corfurl_sequencer:get(Sequencer, 1) of
         LPN when is_integer(LPN) ->
             case write_single_page(P, LPN, Page) of
@@ -51,7 +58,7 @@ append_page(Sequencer, P, Page, Retries) when Retries < 50 ->
                     {ok, LPN};
                 X when X == error_overwritten; X == error_trimmed ->
                     report_lost_race(LPN, X),
-                    append_page(Sequencer, P, Page);
+                    append_page(P, Page);
                 {special_trimmed, LPN}=XX ->
                     XX;
                 Else ->
@@ -59,7 +66,7 @@ append_page(Sequencer, P, Page, Retries) when Retries < 50 ->
             end;
         _ ->
             timer:sleep(Retries),               % TODO naive
-            append_page(Sequencer, P, Page, Retries * 2)
+            append_page(P, Page, Retries * 2)
     end.
 
 write_single_page(#proj{epoch=Epoch} = P, LPN, Page) ->

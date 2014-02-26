@@ -50,7 +50,6 @@
 -define(MY_KEY, ?MY_TAB).
 
 -record(run, {
-          seq,                                  % Sequencer
           proj,                                 % Projection
           flus                                  % List of FLUs
          }).
@@ -607,11 +606,12 @@ zipwith(F, [X|Xs], [Y|Ys]) ->
   [F(X, Y)|zipwith(F, Xs, Ys)];
 zipwith(_, _, _) -> [].
 
-clean_up_runtime(R) ->
+clean_up_runtime(#run{flus=Flus, proj=P}) ->
     %% io:format(user, "clean_up_runtime: run = ~p\n", [R]),
-    catch corfurl_sequencer:stop(R#run.seq),
-    [catch corfurl_flu:stop(F) || F <- R#run.flus],
-    corfurl_test:setup_del_all(length(R#run.flus)).
+    #proj{seq={Seq,_,_}} = P,
+    catch corfurl_sequencer:stop(Seq),
+    [catch corfurl_flu:stop(F) || F <- Flus],
+    corfurl_test:setup_del_all(length(Flus)).
 
 make_chains(ChainLen, FLUs) ->
     make_chains(ChainLen, FLUs, [], []).
@@ -633,7 +633,8 @@ setup(NumChains, ChainLen, PageSize, SeqType) ->
     Chains = make_chains(ChainLen, FLUs),
     %% io:format(user, "Cs = ~p\n", [Chains]),
     Proj = corfurl:new_simple_projection(1, 1, ?MAX_PAGES, Chains),
-    Run = #run{seq=Seq, proj=Proj, flus=FLUs},
+    Run = #run{proj=Proj#proj{seq={Seq, node(), 'corfurl pulse seq thingie'}},
+               flus=FLUs},
     ets:insert(?MY_TAB, {?MY_KEY, Run}),
     Run.
 
@@ -688,7 +689,7 @@ log_make_result(Result) ->
 log_make_result(Pid, Result) ->
     {result, Pid, Result}.
 
-pick_an_LPN(Seq, SeedInt) ->
+pick_an_LPN(#proj{seq={Seq,_,_}}, SeedInt) ->
     Max = corfurl_sequencer:get(Seq, 0),
     %% The sequencer may be lying to us, shouganai.
     if SeedInt > Max -> (SeedInt rem Max) + 1;
@@ -701,12 +702,12 @@ pick_an_LPN(Seq, SeedInt) ->
         event_logger:event(log_make_result(LOG__Result), lamport_clock:get()),
         LOG__Result).
 
-append(#run{seq=Seq, proj=Proj}, Page) ->
+append(#run{proj=Proj}, Page) ->
     lamport_clock:init(),
     lamport_clock:incr(),
     ?LOG({append, Page},
          begin
-             Res = corfurl:append_page(Seq, Proj, Page),
+             Res = corfurl:append_page(Proj, Page),
              perhaps_trip_append_page(?TRIP_no_append_duplicates, Res, Page)
          end).
 
@@ -715,21 +716,21 @@ read_result_mangle({ok, Page}) ->
 read_result_mangle(Else) ->
     Else.
 
-read_approx(#run{seq=Seq, proj=Proj}, SeedInt) ->
+read_approx(#run{proj=Proj}, SeedInt) ->
     lamport_clock:init(),
     lamport_clock:incr(),
-    LPN = pick_an_LPN(Seq, SeedInt),
+    LPN = pick_an_LPN(Proj, SeedInt),
     ?LOG({read, LPN},
          begin
              Res = read_result_mangle(corfurl:read_page(Proj, LPN)),
              perhaps_trip_read_approx(?TRIP_bad_read, Res, LPN)
          end).
 
-scan_forward(#run{seq=Seq, proj=Proj}, SeedInt, NumPages) ->
+scan_forward(#run{proj=Proj}, SeedInt, NumPages) ->
     lamport_clock:init(),
     lamport_clock:incr(),
     StartLPN = if SeedInt == 1 -> 1;
-                  true         -> pick_an_LPN(Seq, SeedInt)
+                  true         -> pick_an_LPN(Proj, SeedInt)
                end,
     %% Our job is complicated by the ?LOG() macro, which isn't good enough
     %% for our purpose: we must lie about the starting timestamp, to make
@@ -757,20 +758,20 @@ scan_forward(#run{seq=Seq, proj=Proj}, SeedInt, NumPages) ->
              end
          end).
 
-fill(#run{seq=Seq, proj=Proj}, SeedInt) ->
+fill(#run{proj=Proj}, SeedInt) ->
     lamport_clock:init(),
     lamport_clock:incr(),
-    LPN = pick_an_LPN(Seq, SeedInt),
+    LPN = pick_an_LPN(Proj, SeedInt),
     ?LOG({fill, LPN},
          begin
              Res = corfurl:fill_page(Proj, LPN),
              perhaps_trip_fill_page(?TRIP_bad_fill, Res, LPN)
          end).
 
-trim(#run{seq=Seq, proj=Proj}, SeedInt) ->
+trim(#run{proj=Proj}, SeedInt) ->
     lamport_clock:init(),
     lamport_clock:incr(),
-    LPN = pick_an_LPN(Seq, SeedInt),
+    LPN = pick_an_LPN(Proj, SeedInt),
     ?LOG({trim, LPN},
          begin
              Res = corfurl:trim_page(Proj, LPN),
