@@ -320,8 +320,13 @@ save_projection(Dir, #proj{epoch=Epoch} = P) ->
     end.
 
 latest_projection_epoch_number(Dir) ->
-    {Epoch, _} = string:to_integer(lists:last(filelib:wildcard("*.proj", Dir))),
-    Epoch.
+    case filelib:wildcard("*.proj", Dir) of
+        [] ->
+            -1;
+        Files ->
+            {Epoch, _} = string:to_integer(lists:last(Files)),
+            Epoch
+    end.
 
 project_to_chain(LPN, P) ->
     %% TODO fixme

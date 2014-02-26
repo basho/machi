@@ -118,15 +118,15 @@ command(#state{run=Run} = S) ->
        || not S#state.is_setup] ++
       [{50, {call, ?MODULE, append, [Run, gen_page(PageSize)]}}
        || S#state.is_setup] ++
-      [{15, {call, ?MODULE, read_approx, [Run, gen_approx_page()]}}
-       || S#state.is_setup] ++
+      %% [{15, {call, ?MODULE, read_approx, [Run, gen_approx_page()]}}
+      %%  || S#state.is_setup] ++
       %% [{15, {call, ?MODULE, scan_forward, [Run, gen_scan_forward_start(), nat()]}}
       %%  || S#state.is_setup] ++
       %% [{12, {call, ?MODULE, fill, [Run, gen_approx_page()]}}
       %%  || S#state.is_setup] ++
       %% [{12, {call, ?MODULE, trim, [Run, gen_approx_page()]}}
        %% || S#state.is_setup] ++
-      [{ 1, {call, ?MODULE, stop_sequencer, [Run, gen_stop_method()]}}
+      [{10, {call, ?MODULE, stop_sequencer, [Run, gen_stop_method()]}}
        || S#state.is_setup] ++
       [])).
 
@@ -162,13 +162,13 @@ eqeq(X, Y) -> {X, '/=', Y}.
 
 postcondition(_S, {call, _, setup, _}, #run{} = _V) ->
     true;
-postcondition(_S, {call, _, append, _}, {ok, LPN}) when is_integer(LPN) ->
-    true;
-postcondition(_S, {call, _, append, _}, {special_trimmed, LPN})
-  when is_integer(LPN) ->
-    true;
 postcondition(_S, {call, _, append, _}, V) ->
-    eqeq(V, todoTODO_fixit);
+    case V of
+        {ok, LPN} when is_integer(LPN)               -> true;
+        {special_trimmed, LPN}  when is_integer(LPN) -> true;
+        error_badepoch                               -> true;
+        _                                            -> eqeq(V, todoTODO_fixit)
+    end;
 postcondition(_S, {call, _, read_approx, _}, V) ->
     valid_read_result(V);
 postcondition(_S, {call, _, scan_forward, _}, V) ->
@@ -736,10 +736,11 @@ append(#run{proj=OriginalProj}, Page) ->
     Proj = get_projection(OriginalProj),
     ?LOG({append, Page},
          try
-             {Res, Proj2} = (catch corfurl_client:append_page(Proj, Page)),
+             {Res, Proj2} = corfurl_client:append_page(Proj, Page),
              put_projection(Proj2),
              perhaps_trip_append_page(?TRIP_no_append_duplicates, Res, Page)
          catch X:Y ->
+                 io:format("APPEND ~p\n", [{error, append, X, Y, erlang:get_stacktrace()}]),
                  {error, append, X, Y, erlang:get_stacktrace()}
          end).
 
@@ -811,9 +812,7 @@ trim(#run{proj=OriginalProj}, SeedInt) ->
     LPN = pick_an_LPN(Proj, SeedInt),
     ?LOG({trim, LPN},
          begin
-io:format(user, "LPN = ~p\n", [LPN]),
-io:format(user, "PROJ = ~p\n", [Proj]),
-             Res = (catch corfurl:trim_page(Proj, LPN)),
+             Res = corfurl:trim_page(Proj, LPN),
              perhaps_trip_trim_page(?TRIP_bad_trim, Res, LPN)
          end).
 

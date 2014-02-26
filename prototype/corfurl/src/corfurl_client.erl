@@ -39,6 +39,13 @@ append_page(#proj{seq={Sequencer,_,_}} = P, Page, Retries)
                 case append_page2(P, LPN, Page) of
                     lost_race ->
                         append_page(P, Page, Retries - 1);
+                    error_badepoch ->
+                        case poll_for_new_epoch_projection(P) of
+                            {ok, NewP} ->
+                                append_page(NewP, Page, Retries-1);
+                            Else ->
+                                {Else, P}
+                        end;
                     Else ->
                         {Else, P}
                 end
@@ -49,7 +56,9 @@ append_page(#proj{seq={Sequencer,_,_}} = P, Page, Retries)
             append_page(restart_sequencer(P), Page, Retries);
         exit:Exit ->
             {failed, incomplete_code, Exit}
-    end.
+    end;
+append_page(P, _Page, _Retries) ->
+    {error_badepoch, P}.
 
 append_page2(P, LPN, Page) ->
     case corfurl:write_page(P, LPN, Page) of
@@ -59,6 +68,8 @@ append_page2(P, LPN, Page) ->
             report_lost_race(LPN, X),
             lost_race;
         {special_trimmed, LPN}=XX ->
+            XX;
+        error_badepoch=XX->
             XX
             %% Let it crash: error_unwritten
     end.
@@ -72,10 +83,45 @@ restart_sequencer(#proj{seq={OldSequencer, _SeqHost, SeqName},
     FLUs = lists:usort(
              [FLU || R <- Ranges,
                      C <- tuple_to_list(R#range.chains), FLU <- C]),
+    %% TODO: We can proceed if we can seal at least one FLU in
+    %%       each chain.  Robustify and sanity check.
+    [begin
+         _Res = corfurl_flu:seal(FLU, Epoch)
+     end || FLU <- lists:reverse(FLUs)],
+    case get(goo) of undefined -> put(goo, 0); _Q -> ok end,
     case corfurl_sequencer:start_link(FLUs, TODO_type, SeqName) of
         {ok, Pid} ->
             NewP = P#proj{seq={Pid, node(), SeqName}, epoch=Epoch+1},
             save_projection_or_get_latest(NewP)
+            %% case put(goo, get(goo) + 1) of
+            %%     N when N < 2 ->
+            %%         io:format(user, "hiiiiiiiiiiiiiiiiiiiiiiiiiiiii", []),
+            %%         P#proj{seq={Pid, node(), SeqName}, epoch=Epoch};
+            %%     _ ->
+            %%         save_projection_or_get_latest(NewP)
+            %% end
+    end.
+
+poll_for_new_epoch_projection(P) ->
+    poll_for_new_epoch_projection(P, 25).
+
+poll_for_new_epoch_projection(P, 0) ->
+    %% TODO: The client that caused the seal may have crashed before
+    %%       writing a new projection.  We should try to pick up here,
+    %%       write a new projection, and bully forward.
+    case corfurl:latest_projection_epoch_number(P#proj.dir) of
+        Neg when Neg < 0 ->
+            error_badepoch;
+        Other ->
+            exit({bummer, ?MODULE, ?LINE, latest_epoch, Other})
+    end;
+poll_for_new_epoch_projection(#proj{dir=Dir, epoch=Epoch} = P, Tries) ->
+    case corfurl:latest_projection_epoch_number(Dir) of
+        NewEpoch when NewEpoch > Epoch ->
+            corfurl:read_projection(Dir, NewEpoch);
+        _ ->
+            timer:sleep(50),
+            poll_for_new_epoch_projection(P, Tries - 1)
     end.
 
 save_projection_or_get_latest(#proj{dir=Dir} = P) ->

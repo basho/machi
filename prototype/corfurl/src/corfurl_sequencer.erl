@@ -66,7 +66,6 @@ stop(Pid) ->
 stop(Pid, Method) ->
     Res = gen_server:call(Pid, stop, infinity),
     if Method == kill ->
-            io:format("stop(kill)"),
             %% Emulate gen.erl's client-side behavior when the server process
             %% is killed.
             exit(killed);

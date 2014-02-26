@@ -174,14 +174,11 @@ smoke_append_badepoch_test() ->
         [begin {{ok, LPN}, _} = corfurl_client:append_page(P1, Pg) end || {LPN, Pg} <- LPN_Pgs],
 
         [{ok, _} = corfurl_flu:seal(FLU, BigEpoch) || FLU <- FLUs],
-        [begin
-             {error_badepoch, _} = corfurl_client:append_page(P1, Pg)
-         end || {_LPN, Pg} <- LPN_Pgs],
+        {_LPN, Pg} = hd(LPN_Pgs),
+        {error_badepoch, _} = corfurl_client:append_page(P1, Pg),
 
         P2 = P1#proj{epoch=LittleEpoch},
-        [begin
-             {error_badepoch, _} = corfurl_client:append_page(P2, Pg)
-         end || {_LPN, Pg} <- LPN_Pgs],
+        {error_badepoch, _} = corfurl_client:append_page(P2, Pg),
 
         ok
     after

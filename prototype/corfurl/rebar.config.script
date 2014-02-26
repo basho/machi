@@ -18,6 +18,9 @@ case PulseBuild of
               , {corfurl_flu, trim, '_'}
               , {corfurl_flu, fill, '_'}
 
+              , {corfurl, read_projection, '_'}
+              , {corfurl, save_projection, '_'}
+
               , {prim_file, '_', '_'}
               , {file, '_', '_'}
               , {filelib, '_', '_'}
