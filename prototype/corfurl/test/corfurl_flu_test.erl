@@ -56,6 +56,7 @@ basic_test() ->
     try
         Epoch1 = 1,
         Epoch2 = 2,
+        Epoch3 = 3,
         LPN = 1,
         Bin1 = <<42:64>>,
         Bin2 = <<42042:64>>,
@@ -71,13 +72,13 @@ basic_test() ->
         0 = ?M:get__min_epoch(P1),
         0 = ?M:get__trim_watermark(P1),
         {ok, LPN} = ?M:seal(P1, Epoch1),
-        1 = ?M:get__min_epoch(P1),
+        2 = ?M:get__min_epoch(P1),
 
         error_overwritten = ?M:write(P1, Epoch2, LPN, Bin1),
         ok = ?M:write(P1, Epoch2, LPN+1, Bin2),
-        Epoch1 = ?M:get__min_epoch(P1),
+        Epoch2 = ?M:get__min_epoch(P1),
 
-        {ok, Bin1} = ?M:read(P1, Epoch1, LPN),
+        error_badepoch = ?M:read(P1, Epoch1, LPN),
         {ok, Bin2} = ?M:read(P1, Epoch2, LPN+1),
         error_unwritten = ?M:read(P1, Epoch2, LPN+2),
         badarg = ?M:read(P1, Epoch2, 1 bsl 2982),
@@ -88,23 +89,23 @@ basic_test() ->
 
         error_badepoch = ?M:read(P1, Epoch1, LPN),
         error_badepoch = ?M:read(P1, Epoch1, LPN+1),
-        {ok, Bin1} = ?M:read(P1, Epoch2, LPN),
-        {ok, Bin2} = ?M:read(P1, Epoch2, LPN+1),
+        {ok, Bin1} = ?M:read(P1, Epoch3, LPN),
+        {ok, Bin2} = ?M:read(P1, Epoch3, LPN+1),
 
         error_badepoch = ?M:trim(P1, Epoch1, LPN+1),
-        ok = ?M:trim(P1, Epoch2, LPN+1),
-        error_trimmed = ?M:trim(P1, Epoch2, LPN+1),
+        ok = ?M:trim(P1, Epoch3, LPN+1),
+        error_trimmed = ?M:trim(P1, Epoch3, LPN+1),
         %% Current watermark processing is broken.  But we'll test what's
         %% there now.
         ExpectedWaterFixMe = LPN+1,
         ExpectedWaterFixMe = ?M:get__trim_watermark(P1),
 
-        ok = ?M:fill(P1, Epoch2, LPN+3),
-        error_trimmed = ?M:read(P1, Epoch2, LPN+3),
-        error_trimmed = ?M:fill(P1, Epoch2, LPN+3),
-        error_trimmed = ?M:trim(P1, Epoch2, LPN+3),
+        ok = ?M:fill(P1, Epoch3, LPN+3),
+        error_trimmed = ?M:read(P1, Epoch3, LPN+3),
+        error_trimmed = ?M:fill(P1, Epoch3, LPN+3),
+        error_trimmed = ?M:trim(P1, Epoch3, LPN+3),
 
-        Epoch2 = ?M:get__min_epoch(P1),
+        Epoch3 = ?M:get__min_epoch(P1),
         ok = ?M:stop(P1),
         ok
     after
@@ -117,7 +118,7 @@ seal_persistence_test() ->
     try
         0 = ?M:get__min_epoch(P1),
         Epoch = 665,
-        {ok, LPN} = ?M:seal(P1, Epoch),
+        {ok, LPN} = ?M:seal(P1, Epoch-1),
         Epoch = ?M:get__min_epoch(P1),
         ok = ?M:stop(P1),
 

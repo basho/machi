@@ -186,12 +186,12 @@ handle_call({{read, _ClientEpoch, LogicalPN}, LC1}, _From, State) ->
     {reply, {Reply, LC2}, State};
 
 handle_call({{seal, ClientEpoch}, LC1}, _From, #state{min_epoch=MinEpoch} = State)
-  when ClientEpoch =< MinEpoch ->
+  when ClientEpoch < MinEpoch ->
     LC2 = lclock_update(LC1),
     {reply, {error_badepoch, LC2}, State};
 handle_call({{seal, ClientEpoch}, LC1}, _From, #state{max_logical_page=MLPN}=State) ->
     LC2 = lclock_update(LC1),
-    NewState = State#state{min_epoch=ClientEpoch},
+    NewState = State#state{min_epoch=ClientEpoch+1},
     ok = write_hard_state(NewState),
     {reply, {{ok, MLPN}, LC2}, NewState};
 

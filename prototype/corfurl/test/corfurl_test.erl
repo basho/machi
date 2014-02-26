@@ -152,6 +152,45 @@ smoke1_test() ->
         setup_del_all(NumFLUs)
     end.
 
+smoke_append_badepoch_test() ->
+    PDir = "./tmp.smoke2.projection",
+    NumFLUs = 6,
+    PageSize = 8,
+    NumPages = 10,
+    FLUs = [F1, F2, F3, F4, F5, F6] =
+        setup_basic_flus(NumFLUs, PageSize, NumPages),
+    {ok, Seq} = corfurl_sequencer:start_link(FLUs),
+
+    %% We know that the first LPN will be 1.
+    LPN_Pgs = [{X, list_to_binary(
+                     lists:flatten(io_lib:format("~8..0w", [X])))} ||
+                  X <- lists:seq(1, 5)],
+    try
+        LittleEpoch = 4,
+        BigEpoch = 42,
+        P0 = ?M:new_simple_projection(PDir, BigEpoch, 1, 1*100,
+                                      [[F1, F2, F3], [F4, F5, F6]]),
+        P1 = P0#proj{seq={Seq, unused, unused}},
+        [begin {{ok, LPN}, _} = corfurl_client:append_page(P1, Pg) end || {LPN, Pg} <- LPN_Pgs],
+
+        [{ok, _} = corfurl_flu:seal(FLU, BigEpoch) || FLU <- FLUs],
+        [begin
+             {error_badepoch, _} = corfurl_client:append_page(P1, Pg)
+         end || {_LPN, Pg} <- LPN_Pgs],
+
+        P2 = P1#proj{epoch=LittleEpoch},
+        [begin
+             {error_badepoch, _} = corfurl_client:append_page(P2, Pg)
+         end || {_LPN, Pg} <- LPN_Pgs],
+
+        ok
+    after
+        corfurl_util:delete_dir(PDir),
+        corfurl_sequencer:stop(Seq),
+        [corfurl_flu:stop(F) || F <- FLUs],
+        setup_del_all(NumFLUs)
+    end.
+
 -ifdef(TIMING_TEST).
 
 forfun_test_() ->
