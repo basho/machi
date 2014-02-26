@@ -65,9 +65,9 @@ smoke_test() ->
         MLP4 = MLP0 + 4,
         {ok, Sequencer} = ?M:start_link(FLUs),
         try
-            MLP1 = ?M:get(Sequencer, 2),
-            MLP3 = ?M:get(Sequencer, 1),
-            MLP4 = ?M:get(Sequencer, 1)
+            {ok, MLP1} = ?M:get(Sequencer, 2),
+            {ok, MLP3} = ?M:get(Sequencer, 1),
+            {ok, MLP4} = ?M:get(Sequencer, 1)
         after
             ?M:stop(Sequencer)
         end

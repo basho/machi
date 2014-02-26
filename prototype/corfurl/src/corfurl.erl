@@ -20,11 +20,12 @@
 
 -module(corfurl).
 
--export([new_simple_projection/4,
+-export([new_simple_projection/5,
          new_range/3,
          read_projection/2,
-         save_projection/2]).
--export([append_page/2, read_page/2, scan_forward/3,
+         save_projection/2,
+         latest_projection_epoch_number/1]).
+-export([write_page/3, read_page/2, scan_forward/3,
          fill_page/2, trim_page/2]).
 
 -include("corfurl.hrl").
@@ -40,48 +41,19 @@
 -define(EVENT_LOG(X), ok).
 %%% -define(EVENT_LOG(X), event_logger:event(X)).
 
-append_page(P, Page) ->
-    append_page(P, Page, 1).
-
-append_page(#proj{seq={undefined, SeqHost, SeqName}} = P, Page, Retries) ->
-    case rpc:call(SeqHost, erlang, whereis, [SeqName]) of
-        SeqPid when is_pid(SeqPid) ->
-            append_page(P#proj{seq={SeqPid, SeqHost, SeqName}}, Page, Retries);
-        Else ->
-            exit({bummer, mod, ?MODULE, line, ?LINE, error, Else})
-    end;
-append_page(#proj{seq={Sequencer,_,_}} = P, Page, Retries) when Retries < 50 ->
-    case corfurl_sequencer:get(Sequencer, 1) of
-        LPN when is_integer(LPN) ->
-            case write_single_page(P, LPN, Page) of
-                ok ->
-                    {ok, LPN};
-                X when X == error_overwritten; X == error_trimmed ->
-                    report_lost_race(LPN, X),
-                    append_page(P, Page);
-                {special_trimmed, LPN}=XX ->
-                    XX;
-                Else ->
-                    exit({todo, ?MODULE, line, ?LINE, Else})
-            end;
-        _ ->
-            timer:sleep(Retries),               % TODO naive
-            append_page(P, Page, Retries * 2)
-    end.
-
-write_single_page(#proj{epoch=Epoch} = P, LPN, Page) ->
+write_page(#proj{epoch=Epoch} = P, LPN, Page) ->
     Chain = project_to_chain(LPN, P),
-    write_single_page_to_chain(Chain, Chain, Epoch, LPN, Page, 1).
+    write_page_to_chain(Chain, Chain, Epoch, LPN, Page, 1).
 
-write_single_page_to_chain(Chain, Chain, Epoch, LPN, Page, Nth) ->
-    write_single_page_to_chain(Chain, Chain, Epoch, LPN, Page, Nth, ok).
+write_page_to_chain(Chain, Chain, Epoch, LPN, Page, Nth) ->
+    write_page_to_chain(Chain, Chain, Epoch, LPN, Page, Nth, ok).
 
-write_single_page_to_chain([], _Chain, _Epoch, _LPN, _Page, _Nth, Reply) ->
+write_page_to_chain([], _Chain, _Epoch, _LPN, _Page, _Nth, Reply) ->
     Reply;
-write_single_page_to_chain([FLU|Rest], Chain, Epoch, LPN, Page, Nth, Reply) ->
+write_page_to_chain([FLU|Rest], Chain, Epoch, LPN, Page, Nth, Reply) ->
     case corfurl_flu:write(flu_pid(FLU), Epoch, LPN, Page) of
         ok ->
-            write_single_page_to_chain(Rest, Chain, Epoch, LPN, Page, Nth+1, Reply);
+            write_page_to_chain(Rest, Chain, Epoch, LPN, Page, Nth+1, Reply);
         error_badepoch ->
             %% TODO: Interesting case: there may be cases where retrying with
             %%       a new epoch & that epoch's projection is just fine (and
@@ -101,7 +73,7 @@ write_single_page_to_chain([FLU|Rest], Chain, Epoch, LPN, Page, Nth, Reply) ->
             %% If we continue to lose the exact same race for the rest
             %% of the chain, the 1st clause of this func will return 'ok'.
             %% That is *exactly* our intent and purpose!
-            write_single_page_to_chain(Rest, Chain, Epoch, LPN, Page, Nth+1, {special_trimmed, LPN});
+            write_page_to_chain(Rest, Chain, Epoch, LPN, Page, Nth+1, {special_trimmed, LPN});
         error_overwritten when Nth == 1 ->
             %% The sequencer lied, or we didn't use the sequencer and
             %% guessed and guessed poorly, or someone is accidentally
@@ -116,14 +88,14 @@ write_single_page_to_chain([FLU|Rest], Chain, Epoch, LPN, Page, Nth, Reply) ->
                 {ok, AlreadyThere} when AlreadyThere =:= Page ->
                     %% Alright, well, let's go continue the repair/writing,
                     %% since we agree on the page's value.
-                    write_single_page_to_chain(Rest, Chain, Epoch, LPN, Page, Nth+1, Reply);
+                    write_page_to_chain(Rest, Chain, Epoch, LPN, Page, Nth+1, Reply);
                 error_badepoch ->
                     %% TODO: same TODO as the above error_badepoch case.
                     error_badepoch;
                 error_trimmed ->
                     %% This is the same as 'error_trimmed when Nth > 1' above.
                     %% Do the same thing.
-                    write_single_page_to_chain(Rest, Chain, Epoch, LPN, Page, Nth+1, {special_trimmed, LPN});
+                    write_page_to_chain(Rest, Chain, Epoch, LPN, Page, Nth+1, {special_trimmed, LPN});
                 Else ->
                     %% Can PULSE can drive us to this case?
                     giant_error({left_off_here, ?MODULE, ?LINE, Else, nth, Nth})
@@ -313,8 +285,9 @@ new_range(Start, End, ChainList) ->
     %% TODO: sanity checking of ChainList, Start < End, yadda
     #range{pn_start=Start, pn_end=End, chains=list_to_tuple(ChainList)}.
 
-new_simple_projection(Epoch, Start, End, ChainList) ->
-    #proj{epoch=Epoch, r=[new_range(Start, End, ChainList)]}.
+new_simple_projection(Dir, Epoch, Start, End, ChainList) ->
+    ok = filelib:ensure_dir(Dir ++ "/unused"),
+    #proj{dir=Dir, epoch=Epoch, r=[new_range(Start, End, ChainList)]}.
 
 make_projection_path(Dir, Epoch) ->
     lists:flatten(io_lib:format("~s/~12..0w.proj", [Dir, Epoch])).
@@ -346,6 +319,10 @@ save_projection(Dir, #proj{epoch=Epoch} = P) ->
             Else                                % TODO API corner case
     end.
 
+latest_projection_epoch_number(Dir) ->
+    {Epoch, _} = string:to_integer(lists:last(filelib:wildcard("*.proj", Dir))),
+    Epoch.
+
 project_to_chain(LPN, P) ->
     %% TODO fixme
     %% TODO something other than round-robin?
@@ -354,25 +331,3 @@ project_to_chain(LPN, P) ->
             I = ((LPN - Start) rem tuple_size(Chains)) + 1,
             element(I, Chains)
     end.
-
--ifdef(TEST).
--ifdef(PULSE).
-report_lost_race(_LPN, _Reason) ->
-    %% It's interesting (sometime?) to know if a page was overwritten
-    %% because the sequencer was configured by QuickCheck to hand out
-    %% duplicate LPNs.  If this gets too annoying, this can be a no-op
-    %% function.
-    io:format(user, "o", []).
--else.  % PULSE
-report_lost_race(LPN, Reason) ->
-    io:format(user, "LPN ~p race lost: ~p\n", [LPN, Reason]).
--endif. % PULSE
--else.  % TEST
-
-report_lost_race(LPN, Reason) ->
-    %% Perhaps it's an interesting event, but the rest of the system
-    %% should react correctly whenever this happens, so it shouldn't
-    %% ever cause an external consistency problem.
-    error_logger:debug_msg("LPN ~p race lost: ~p\n", [LPN, Reason]).
-
--endif. % TEST

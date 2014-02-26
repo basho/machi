@@ -31,6 +31,7 @@
          }).
 
 -record(proj, {                                 % Projection
+          dir :: string(),
           epoch :: non_neg_integer(),
           seq :: 'undefined' | seq_name(),
           r :: [#range{}]

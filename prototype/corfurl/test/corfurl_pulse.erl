@@ -34,7 +34,7 @@
 
 -compile({parse_transform, pulse_instrument}).
 
--compile({pulse_skip,[{prop_pulse_test_,0},{clean_up_runtime,1}]}).
+-compile({pulse_skip,[{prop_pulse_test_,0},{clean_up_runtime,1},{delete_dir,1}]}).
 %% -compile({pulse_no_side_effect,[{file,'_','_'}, {erlang, now, 0}]}).
 
 %% Used for output within EUnit...
@@ -48,6 +48,8 @@
 -define(MAX_PAGES, 50000).
 -define(MY_TAB,  i_have_a_name).
 -define(MY_KEY, ?MY_TAB).
+-define(PROJECTION_DIR, "./tmp.projection." ++ os:getpid()).
+-define(SEQUENCER_NAME, 'corfurl pulse seq thingie').
 
 -record(run, {
           proj,                                 % Projection
@@ -105,21 +107,26 @@ gen_approx_page() ->
 gen_scan_forward_start() ->
     oneof([1, gen_approx_page()]).
 
+gen_stop_method() ->
+    oneof([stop, kill]).
+
 command(#state{run=Run} = S) ->
     ?LET({NumChains, ChainLen, PageSize},
          {parameter(num_chains), parameter(chain_len), parameter(page_size)},
     frequency(
-      [{10, {call, ?MODULE, setup, [NumChains, ChainLen, PageSize, gen_sequencer()]}}
+      [{50, {call, ?MODULE, setup, [NumChains, ChainLen, PageSize, gen_sequencer()]}}
        || not S#state.is_setup] ++
-      [{10, {call, ?MODULE, append, [Run, gen_page(PageSize)]}}
+      [{50, {call, ?MODULE, append, [Run, gen_page(PageSize)]}}
        || S#state.is_setup] ++
-      [{3, {call, ?MODULE, read_approx, [Run, gen_approx_page()]}}
+      [{15, {call, ?MODULE, read_approx, [Run, gen_approx_page()]}}
        || S#state.is_setup] ++
-      [{5, {call, ?MODULE, scan_forward, [Run, gen_scan_forward_start(), nat()]}}
-       || S#state.is_setup] ++
-      [{4, {call, ?MODULE, fill, [Run, gen_approx_page()]}}
-       || S#state.is_setup] ++
-      [{4, {call, ?MODULE, trim, [Run, gen_approx_page()]}}
+      %% [{15, {call, ?MODULE, scan_forward, [Run, gen_scan_forward_start(), nat()]}}
+      %%  || S#state.is_setup] ++
+      %% [{12, {call, ?MODULE, fill, [Run, gen_approx_page()]}}
+      %%  || S#state.is_setup] ++
+      %% [{12, {call, ?MODULE, trim, [Run, gen_approx_page()]}}
+       %% || S#state.is_setup] ++
+      [{ 1, {call, ?MODULE, stop_sequencer, [Run, gen_stop_method()]}}
        || S#state.is_setup] ++
       [])).
 
@@ -146,6 +153,8 @@ next_state(S, _, {call, _, scan_forward, _}) ->
 next_state(S, _, {call, _, fill, _}) ->
     S;
 next_state(S, _, {call, _, trim, _}) ->
+    S;
+next_state(S, _, {call, _, stop_sequencer, _}) ->
     S.
 
 eqeq(X, X) -> true;
@@ -182,7 +191,9 @@ postcondition(_S, {call, _, FillTrim, _}, V)
         error_unwritten   -> true;
         error_overwritten -> true;
         _                 -> eqeq(V, {error, FillTrim, V})
-    end.
+    end;
+postcondition(_S, {call, _, stop_sequencer, _}, _V) ->
+    true.
 
 valid_read_result(Pg) when is_binary(Pg) -> true;
 valid_read_result(error_unwritten)       -> true;
@@ -195,6 +206,7 @@ run_commands_on_node(LocalOrSlave, Cmds, Seed) ->
                 end,
     event_logger:start_link(),
     pulse:start(),
+    delete_dir(?PROJECTION_DIR),
     error_logger:tty(false),
     error_logger:add_report_handler(handle_errors),
     event_logger:start_logging(),
@@ -606,12 +618,17 @@ zipwith(F, [X|Xs], [Y|Ys]) ->
   [F(X, Y)|zipwith(F, Xs, Ys)];
 zipwith(_, _, _) -> [].
 
+delete_dir(Dir) ->
+    corfurl_util:delete_dir(Dir).
+
 clean_up_runtime(#run{flus=Flus, proj=P}) ->
     %% io:format(user, "clean_up_runtime: run = ~p\n", [R]),
     #proj{seq={Seq,_,_}} = P,
     catch corfurl_sequencer:stop(Seq),
     [catch corfurl_flu:stop(F) || F <- Flus],
-    corfurl_test:setup_del_all(length(Flus)).
+    corfurl_test:setup_del_all(length(Flus)),
+    delete_dir(?PROJECTION_DIR),
+    (catch exit(whereis(?SEQUENCER_NAME), kill)).
 
 make_chains(ChainLen, FLUs) ->
     make_chains(ChainLen, FLUs, [], []).
@@ -626,14 +643,21 @@ make_chains(ChainLen, [H|T], SmallAcc, BigAcc) ->
     end.
 
 setup(NumChains, ChainLen, PageSize, SeqType) ->
+    (catch exit(whereis(?SEQUENCER_NAME), kill)),
     lamport_clock:init(),
+
     N = NumChains * ChainLen,
     FLUs = corfurl_test:setup_basic_flus(N, PageSize, ?MAX_PAGES),
     {ok, Seq} = corfurl_sequencer:start_link(FLUs, SeqType),
     Chains = make_chains(ChainLen, FLUs),
     %% io:format(user, "Cs = ~p\n", [Chains]),
-    Proj = corfurl:new_simple_projection(1, 1, ?MAX_PAGES, Chains),
-    Run = #run{proj=Proj#proj{seq={Seq, node(), 'corfurl pulse seq thingie'}},
+    Proj = corfurl:new_simple_projection(?PROJECTION_DIR,
+                                         1, 1, ?MAX_PAGES, Chains),
+    ok = corfurl:save_projection(?PROJECTION_DIR, Proj),
+    error_overwritten = corfurl:save_projection(?PROJECTION_DIR, Proj),
+    1 = corfurl:latest_projection_epoch_number(?PROJECTION_DIR),
+    {ok, Proj} = corfurl:read_projection(?PROJECTION_DIR, 1),
+    Run = #run{proj=Proj#proj{seq={Seq, node(), ?SEQUENCER_NAME}},
                flus=FLUs},
     ets:insert(?MY_TAB, {?MY_KEY, Run}),
     Run.
@@ -689,11 +713,15 @@ log_make_result(Result) ->
 log_make_result(Pid, Result) ->
     {result, Pid, Result}.
 
-pick_an_LPN(#proj{seq={Seq,_,_}}, SeedInt) ->
-    Max = corfurl_sequencer:get(Seq, 0),
-    %% The sequencer may be lying to us, shouganai.
-    if SeedInt > Max -> (SeedInt rem Max) + 1;
-       true          -> SeedInt
+pick_an_LPN(#proj{seq={Seq,_,_}} = P, SeedInt) ->
+    case (catch corfurl_sequencer:get(Seq, 0)) of
+        {ok, Max} ->
+            %% The sequencer may be lying to us, shouganai.
+            if SeedInt > Max -> (SeedInt rem Max) + 1;
+               true          -> SeedInt
+            end;
+        _Else ->
+            pick_an_LPN(corfurl_client:restart_sequencer(P), SeedInt)
     end.
 
 -define(LOG(Tag, MkCall),
@@ -702,13 +730,17 @@ pick_an_LPN(#proj{seq={Seq,_,_}}, SeedInt) ->
         event_logger:event(log_make_result(LOG__Result), lamport_clock:get()),
         LOG__Result).
 
-append(#run{proj=Proj}, Page) ->
+append(#run{proj=OriginalProj}, Page) ->
     lamport_clock:init(),
     lamport_clock:incr(),
+    Proj = get_projection(OriginalProj),
     ?LOG({append, Page},
-         begin
-             Res = corfurl:append_page(Proj, Page),
+         try
+             {Res, Proj2} = (catch corfurl_client:append_page(Proj, Page)),
+             put_projection(Proj2),
              perhaps_trip_append_page(?TRIP_no_append_duplicates, Res, Page)
+         catch X:Y ->
+                 {error, append, X, Y, erlang:get_stacktrace()}
          end).
 
 read_result_mangle({ok, Page}) ->
@@ -716,19 +748,22 @@ read_result_mangle({ok, Page}) ->
 read_result_mangle(Else) ->
     Else.
 
-read_approx(#run{proj=Proj}, SeedInt) ->
+read_approx(#run{proj=OriginalProj}, SeedInt) ->
     lamport_clock:init(),
     lamport_clock:incr(),
+    Proj = get_projection(OriginalProj),
     LPN = pick_an_LPN(Proj, SeedInt),
     ?LOG({read, LPN},
          begin
              Res = read_result_mangle(corfurl:read_page(Proj, LPN)),
+             put_projection(Proj),
              perhaps_trip_read_approx(?TRIP_bad_read, Res, LPN)
          end).
 
-scan_forward(#run{proj=Proj}, SeedInt, NumPages) ->
+scan_forward(#run{proj=OriginalProj}, SeedInt, NumPages) ->
     lamport_clock:init(),
     lamport_clock:incr(),
+    Proj = get_projection(OriginalProj),
     StartLPN = if SeedInt == 1 -> 1;
                   true         -> pick_an_LPN(Proj, SeedInt)
                end,
@@ -758,9 +793,10 @@ scan_forward(#run{proj=Proj}, SeedInt, NumPages) ->
              end
          end).
 
-fill(#run{proj=Proj}, SeedInt) ->
+fill(#run{proj=OriginalProj}, SeedInt) ->
     lamport_clock:init(),
     lamport_clock:incr(),
+    Proj = get_projection(OriginalProj),
     LPN = pick_an_LPN(Proj, SeedInt),
     ?LOG({fill, LPN},
          begin
@@ -768,15 +804,39 @@ fill(#run{proj=Proj}, SeedInt) ->
              perhaps_trip_fill_page(?TRIP_bad_fill, Res, LPN)
          end).
 
-trim(#run{proj=Proj}, SeedInt) ->
+trim(#run{proj=OriginalProj}, SeedInt) ->
     lamport_clock:init(),
     lamport_clock:incr(),
+    Proj = get_projection(OriginalProj),
     LPN = pick_an_LPN(Proj, SeedInt),
     ?LOG({trim, LPN},
          begin
-             Res = corfurl:trim_page(Proj, LPN),
+io:format(user, "LPN = ~p\n", [LPN]),
+io:format(user, "PROJ = ~p\n", [Proj]),
+             Res = (catch corfurl:trim_page(Proj, LPN)),
              perhaps_trip_trim_page(?TRIP_bad_trim, Res, LPN)
          end).
+
+stop_sequencer(#run{proj=OriginalProj}, Method) ->
+    Proj = get_projection(OriginalProj),
+    Seq = element(1,Proj#proj.seq),
+    try
+        corfurl_sequencer:stop(Seq, Method),
+        ok
+    catch _:_ ->
+            ok
+    end.
+
+get_projection(OriginalProj) ->
+    case get(projection) of
+        undefined ->
+            OriginalProj;
+        Proj ->
+            Proj
+    end.
+
+put_projection(Proj) ->
+    put(projection, Proj).
 
 perhaps_trip_append_page(false, Res, _Page) ->
     Res;

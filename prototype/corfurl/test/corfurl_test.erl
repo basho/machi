@@ -54,8 +54,9 @@ setup_basic_flus(NumFLUs, PageSize, NumPages) ->
 
 save_read_test() ->
     Dir = "/tmp/" ++ atom_to_list(?MODULE) ++".save-read",
+    PDir = Dir ++ ".projection",
     Chain = [a,b],
-    P1 = ?M:new_simple_projection(1, 1, 1*100, [Chain]),
+    P1 = ?M:new_simple_projection(PDir, 1, 1, 1*100, [Chain]),
 
     try
         filelib:ensure_dir(Dir ++ "/ignored"),
@@ -67,10 +68,12 @@ save_read_test() ->
 
         ok
     after
-        ok = corfurl_util:delete_dir(Dir)
+        ok = corfurl_util:delete_dir(Dir),
+        ok = corfurl_util:delete_dir(PDir)
     end.
 
 smoke1_test() ->
+    PDir = "./tmp.smoke1.projection",
     NumFLUs = 6,
     PageSize = 8,
     NumPages = 10,
@@ -83,7 +86,8 @@ smoke1_test() ->
                      lists:flatten(io_lib:format("~8..0w", [X])))} ||
                   X <- lists:seq(1, 5)],
     try
-        P0 = ?M:new_simple_projection(1, 1, 1*100, [[F1, F2, F3], [F4, F5, F6]]),
+        P0 = ?M:new_simple_projection(PDir, 1, 1, 1*100,
+                                      [[F1, F2, F3], [F4, F5, F6]]),
         P1 = P0#proj{seq={Seq, unused, unused}},
         [begin {ok, LPN} = ?M:append_page(P1, Pg) end || {LPN, Pg} <- LPN_Pgs],
 
@@ -142,6 +146,7 @@ smoke1_test() ->
 
         ok
     after
+        corfurl_util:delete_dir(PDir),
         corfurl_sequencer:stop(Seq),
         [corfurl_flu:stop(F) || F <- FLUs],
         setup_del_all(NumFLUs)
@@ -180,6 +185,7 @@ forfun_append(N, #proj{seq={Seq, _, _}} = P, Page) ->
 %%%% forfun: 5000 procs writing 200000 pages of 4096 bytes/page to 2 chains of 4 total FLUs in 38.972076 sec
 
 forfun(NumProcs) ->
+    PDir = "./tmp.forfun.projection",
     io:format(user, "\n", []),
     NumFLUs = 4,
     PageSize = 8,
@@ -192,7 +198,7 @@ forfun(NumProcs) ->
     try
         Chains = [[F1, F2], [F3, F4]],
         %%Chains = [[F1], [F2], [F3], [F4]],
-        P0 = ?M:new_simple_projection(1, 1, NumPages*2, Chains),
+        P0 = ?M:new_simple_projection(PDir, 1, 1, NumPages*2, Chains),
         P = P0#proj{seq={Seq, unused, unused}},
         Me = self(),
         Start = now(),
@@ -209,6 +215,7 @@ forfun(NumProcs) ->
                   [NumProcs, NumPages, PageSize, length(Chains), length(lists:flatten(Chains)), timer:now_diff(End, Start) / 1000000]),
         ok
     after
+        corfur_util:delete_dir(PDir),
         corfurl_sequencer:stop(Seq),
         [corfurl_flu:stop(F) || F <- FLUs],
         setup_del_all(NumFLUs)

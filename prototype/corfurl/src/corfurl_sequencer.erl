@@ -22,7 +22,8 @@
 
 -behaviour(gen_server).
 
--export([start_link/1, stop/1, get/2]).
+-export([start_link/1, stop/1, stop/2,
+         get/2]).
 -ifdef(TEST).
 -export([start_link/2]).
 -compile(export_all).
@@ -40,6 +41,8 @@
 -endif.
 
 -define(SERVER, ?MODULE).
+%% -define(LONG_TIME, 30*1000).
+-define(LONG_TIME, 5*1000).
 
 start_link(FLUs) ->
     start_link(FLUs, standard).
@@ -48,14 +51,31 @@ start_link(FLUs, SeqType) ->
     start_link(FLUs, SeqType, ?SERVER).
 
 start_link(FLUs, SeqType, RegName) ->
-    gen_server:start_link({local, RegName}, ?MODULE, {FLUs, SeqType}, []).
+    case gen_server:start_link({local, RegName}, ?MODULE, {FLUs, SeqType},[]) of
+        {ok, Pid} ->
+            {ok, Pid};
+        {error, {already_started, Pid}} ->
+            {ok, Pid};
+        Else ->
+            Else
+    end.
 
 stop(Pid) ->
-    gen_server:call(Pid, stop, infinity).
+    stop(Pid, stop).
+
+stop(Pid, Method) ->
+    Res = gen_server:call(Pid, stop, infinity),
+    if Method == kill ->
+            io:format("stop(kill)"),
+            %% Emulate gen.erl's client-side behavior when the server process
+            %% is killed.
+            exit(killed);
+       true ->
+            Res
+    end.
 
 get(Pid, NumPages) ->
-    {LPN, LC} = gen_server:call(Pid, {get, NumPages, lclock_get()},
-                                infinity),
+    {LPN, LC} = gen_server:call(Pid, {get, NumPages, lclock_get()}, ?LONG_TIME),
     lclock_update(LC),
     LPN.
 
@@ -74,7 +94,7 @@ init({FLUs, TypeOrSeed}) ->
 
 handle_call({get, NumPages, LC}, _From, MLP) when is_integer(MLP) ->
     NewLC = lclock_update(LC),
-    {reply, {MLP, NewLC}, MLP + NumPages};
+    {reply, {{ok, MLP}, NewLC}, MLP + NumPages};
 handle_call({get, NumPages, LC}, _From, {MLP, BadPercent, MaxDifference}) ->
     NewLC = lclock_update(LC),
     Fudge = case random:uniform(100) of
@@ -83,7 +103,7 @@ handle_call({get, NumPages, LC}, _From, {MLP, BadPercent, MaxDifference}) ->
                 _ ->
                     0
             end,
-    {reply, {erlang:max(1, MLP + Fudge), NewLC},
+    {reply, {{ok, erlang:max(1, MLP + Fudge)}, NewLC},
      {MLP + NumPages, BadPercent, MaxDifference}};
 handle_call(stop, _From, MLP) ->
     {stop, normal, ok, MLP};
@@ -98,7 +118,6 @@ handle_info(_Info, MLP) ->
     {noreply, MLP}.
 
 terminate(_Reason, _MLP) ->
-    %% io:format(user, "C=~w,", [lclock_get()]),
     ok.
 
 code_change(_OldVsn, MLP, _Extra) ->
