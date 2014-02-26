@@ -89,7 +89,7 @@ smoke1_test() ->
         P0 = ?M:new_simple_projection(PDir, 1, 1, 1*100,
                                       [[F1, F2, F3], [F4, F5, F6]]),
         P1 = P0#proj{seq={Seq, unused, unused}},
-        [begin {ok, LPN} = ?M:append_page(P1, Pg) end || {LPN, Pg} <- LPN_Pgs],
+        [begin {{ok, LPN}, _} = corfurl_client:append_page(P1, Pg) end || {LPN, Pg} <- LPN_Pgs],
 
         [begin {ok, Pg} = ?M:read_page(P1, LPN) end || {LPN, Pg} <- LPN_Pgs],
 
@@ -111,7 +111,7 @@ smoke1_test() ->
         %% Simulate a failed write to the chain.
         [F6a, F6b, F6c] = Chain6 = ?M:project_to_chain(6, P1),
         NotHead6 = [F6b, F6c],
-        ok = ?M:write_single_page_to_chain([F6a], [F6a], Epoch, 6, Pg6, 1),
+        ok = ?M:write_page_to_chain([F6a], [F6a], Epoch, 6, Pg6, 1),
 
         %% Does the chain look as expected?
         {ok, Pg6} = corfurl_flu:read(?M:flu_pid(F6a), Epoch, 6),
