@@ -74,7 +74,17 @@ append_page2(P, LPN, Page) ->
             %% Let it crash: error_unwritten
     end.
 
-restart_sequencer(#proj{seq={OldSequencer, _SeqHost, SeqName},
+restart_sequencer(#proj{epoch=Epoch, dir=Dir} = P) ->
+    case corfurl:latest_projection_epoch_number(Dir) of
+        N when N > Epoch ->
+            %% Yay, someone else has intervened.  Perhaps they've solved
+            %% our sequencer problem for us?
+            read_latest_projection(P);
+        _ ->
+            restart_sequencer2(P)
+    end.
+
+restart_sequencer2(#proj{seq={OldSequencer, _SeqHost, SeqName},
                         epoch=Epoch, r=Ranges} = P) ->
     spawn(fun() ->
                   (catch corfurl_sequencer:stop(OldSequencer))
@@ -88,18 +98,10 @@ restart_sequencer(#proj{seq={OldSequencer, _SeqHost, SeqName},
     [begin
          _Res = corfurl_flu:seal(FLU, Epoch)
      end || FLU <- lists:reverse(FLUs)],
-    case get(goo) of undefined -> put(goo, 0); _Q -> ok end,
     case corfurl_sequencer:start_link(FLUs, TODO_type, SeqName) of
         {ok, Pid} ->
             NewP = P#proj{seq={Pid, node(), SeqName}, epoch=Epoch+1},
             save_projection_or_get_latest(NewP)
-            %% case put(goo, get(goo) + 1) of
-            %%     N when N < 2 ->
-            %%         io:format(user, "hiiiiiiiiiiiiiiiiiiiiiiiiiiiii", []),
-            %%         P#proj{seq={Pid, node(), SeqName}, epoch=Epoch};
-            %%     _ ->
-            %%         save_projection_or_get_latest(NewP)
-            %% end
     end.
 
 poll_for_new_epoch_projection(P) ->
@@ -110,6 +112,8 @@ poll_for_new_epoch_projection(P, 0) ->
     %% TODO: The client that caused the seal may have crashed before
     %%       writing a new projection.  We should try to pick up here,
     %%       write a new projection, and bully forward.
+    %%       NOTE: When that new logic is added, the huge polling interval
+    %%       that PULSE uses should be reduced to something tiny.
     case corfurl:latest_projection_epoch_number(P#proj.dir) of
         Neg when Neg < 0 ->
             error_badepoch;
@@ -134,10 +138,13 @@ save_projection_or_get_latest(#proj{dir=Dir} = P) ->
         ok ->
             P;
         error_overwritten ->
-            NewEpoch = corfurl:latest_projection_epoch_number(Dir),
-            {ok, NewP} = corfurl:read_projection(Dir, NewEpoch),
-            NewP
+            read_latest_projection(P)
     end.
+
+read_latest_projection(#proj{dir=Dir}) ->
+    NewEpoch = corfurl:latest_projection_epoch_number(Dir),
+    {ok, NewP} = corfurl:read_projection(Dir, NewEpoch),
+    NewP.
 
 -ifdef(TEST).
 -ifdef(PULSE).
