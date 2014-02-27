@@ -20,8 +20,7 @@
 
 -module(corfurl_client).
 
--export([append_page/2]).
-%% -export([append_page/2, read_page/2]).
+-export([append_page/2, read_page/2, fill_page/2, trim_page/2]).
 -export([restart_sequencer/1]).
 
 -include("corfurl.hrl").
@@ -30,10 +29,10 @@
 %% -define(LONG_TIME, 30*1000).
 
 append_page(Proj, Page) ->
-    append_page(Proj, Page, 50).
+    append_page(Proj, Page, 5).
 
 append_page(Proj, _Page, 0) ->
-    {error_failed, Proj};
+    {{error_failed, ?MODULE, ?LINE}, Proj};
 append_page(#proj{seq={Sequencer,_,_}} = Proj, Page, Retries) ->
     try
         case corfurl_sequencer:get(Sequencer, 1) of
@@ -57,7 +56,7 @@ append_page(#proj{seq={Sequencer,_,_}} = Proj, Page, Retries) ->
           when Reason == noproc; Reason == normal ->
             append_page(restart_sequencer(Proj), Page, Retries);
         exit:Exit ->
-            {failed, incomplete_code, Exit}
+            {{error_failed, ?MODULE, ?LINE}, incomplete_code, Exit}
     end.
 
 append_page2(Proj, LPN, Page) ->
@@ -74,21 +73,31 @@ append_page2(Proj, LPN, Page) ->
             %% Let it crash: error_unwritten
     end.
 
-%% read_page(Proj, Page) ->
-%%     read_page(Proj, Page, 10).
+read_page(Proj, LPN) ->
+    retry_loop(Proj, fun(P) -> corfurl:read_page(P, LPN) end, 10).
 
-%% read_page(Proj, LPN) ->
-%%     case corfurl:read_page(Proj, LPN) of
-%%         error_badepoch ->
-%%             case poll_for_new_epoch_projection(P) of
-%%                 {ok, NewP} ->
-%%                     read_page(NewProj, Page);
-%%                 Else ->
-%%                     {Else, P}
-            
-    
+trim_page(Proj, LPN) ->
+    retry_loop(Proj, fun(P) -> corfurl:trim_page(P, LPN) end, 10).
+
+fill_page(Proj, LPN) ->
+    retry_loop(Proj, fun(P) -> corfurl:fill_page(P, LPN) end, 10).
 
 %%%%% %%%%% %%%%% %%%%% %%%%% %%%%% %%%%% %%%%% %%%%% 
+
+retry_loop(Proj, _Fun, 0) ->
+    {{error_failed, ?MODULE, ?LINE}, Proj};
+retry_loop(Proj, Fun, Retries) ->
+    case Fun(Proj) of
+        error_badepoch ->
+            case poll_for_new_epoch_projection(Proj) of
+                {ok, NewProj} ->
+                    retry_loop(NewProj, Fun, Retries - 1);
+                _Else ->
+                    {{error_failed, ?MODULE, ?LINE}, Proj}
+            end;
+        Else ->
+            {Else, Proj}
+    end.
 
 restart_sequencer(#proj{epoch=Epoch, dir=Dir} = P) ->
     case corfurl:latest_projection_epoch_number(Dir) of
