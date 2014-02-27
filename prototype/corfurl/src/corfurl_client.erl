@@ -18,6 +18,11 @@
 %%
 %% -------------------------------------------------------------------
 
+%% TODO: fix this failure case with append_page(Bin) -> {ok, 2},
+%%       but read_page(LPN=1) can read Bin, and model believes that
+%%       LPN=1 was never written
+%% Ca = [{2,2,1},{{[{set,{var,1},{call,corfurl_pulse,setup,[2,2,1,standard]}}],[[{set,{var,3},{call,corfurl_pulse,append,[{var,1},<<0>>]}}],[{set,{var,2},{call,corfurl_pulse,stop_sequencer,[{var,1},kill]}},{set,{var,4},{call,corfurl_pulse,trim,[{var,1},386862782]}},{set,{var,5},{call,corfurl_pulse,scan_forward,[{var,1},5412106233,1]}}]]},{24672,25300,90107}},[{events,[[{no_bad_reads,[]}]]}]].
+
 -module(corfurl_client).
 
 -export([append_page/2, read_page/2, fill_page/2, trim_page/2, scan_forward/3]).
