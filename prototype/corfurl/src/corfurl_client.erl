@@ -103,7 +103,8 @@ restart_sequencer(#proj{seq={OldSequencer, _SeqHost, SeqName},
     end.
 
 poll_for_new_epoch_projection(P) ->
-    poll_for_new_epoch_projection(P, 25).
+    put(silly_poll_counter, 0),
+    poll_for_new_epoch_projection(P, get_poll_retries()).
 
 poll_for_new_epoch_projection(P, 0) ->
     %% TODO: The client that caused the seal may have crashed before
@@ -120,7 +121,11 @@ poll_for_new_epoch_projection(#proj{dir=Dir, epoch=Epoch} = P, Tries) ->
         NewEpoch when NewEpoch > Epoch ->
             corfurl:read_projection(Dir, NewEpoch);
         _ ->
-            timer:sleep(50),
+            timer:sleep(get_poll_sleep_time()),
+            case put(silly_poll_counter, get(silly_poll_counter) + 1) div 10*1000 of
+                0 -> io:format(user, "P", []);
+                _ -> ok
+            end,
             poll_for_new_epoch_projection(P, Tries - 1)
     end.
 
@@ -155,3 +160,19 @@ report_lost_race(LPN, Reason) ->
     error_logger:debug_msg("LPN ~p race lost: ~p\n", [LPN, Reason]).
 
 -endif. % TEST
+
+-ifdef(PULSE).
+get_poll_retries() ->
+    9999*1000.
+
+get_poll_sleep_time() ->
+    1.
+
+-else.
+get_poll_retries() ->
+    25.
+
+get_poll_sleep_time() ->
+    50.
+
+-endif.
