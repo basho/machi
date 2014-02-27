@@ -20,7 +20,7 @@
 
 -module(corfurl_client).
 
--export([append_page/2]).
+-export([append_page/2, read_page/2]).
 -export([restart_sequencer/1]).
 
 -include("corfurl.hrl").
@@ -28,21 +28,21 @@
 -define(LONG_TIME, 5*1000).
 %% -define(LONG_TIME, 30*1000).
 
-append_page(P, Page) ->
-    append_page(P, Page, 1).
+append_page(Proj, Page) ->
+    append_page(Proj, Page, 1).
 
-append_page(#proj{seq={Sequencer,_,_}} = P, Page, Retries)
+append_page(#proj{seq={Sequencer,_,_}} = Proj, Page, Retries)
   when Retries < 50 ->
     try
         case corfurl_sequencer:get(Sequencer, 1) of
             {ok, LPN} ->
-                case append_page2(P, LPN, Page) of
+                case append_page2(Proj, LPN, Page) of
                     lost_race ->
-                        append_page(P, Page, Retries - 1);
+                        append_page(Proj, Page, Retries - 1);
                     error_badepoch ->
                         case poll_for_new_epoch_projection(P) of
                             {ok, NewP} ->
-                                append_page(NewP, Page, Retries-1);
+                                append_page(NewProj, Page, Retries-1);
                             Else ->
                                 {Else, P}
                         end;
@@ -57,11 +57,11 @@ append_page(#proj{seq={Sequencer,_,_}} = P, Page, Retries)
         exit:Exit ->
             {failed, incomplete_code, Exit}
     end;
-append_page(P, _Page, _Retries) ->
-    {error_badepoch, P}.
+append_page(Proj, _Page, _Retries) ->
+    {error_badepoch, Proj}.
 
-append_page2(P, LPN, Page) ->
-    case corfurl:write_page(P, LPN, Page) of
+append_page2(Proj, LPN, Page) ->
+    case corfurl:write_page(Proj, LPN, Page) of
         ok ->
             {ok, LPN};
         X when X == error_overwritten; X == error_trimmed ->
@@ -73,6 +73,12 @@ append_page2(P, LPN, Page) ->
             XX
             %% Let it crash: error_unwritten
     end.
+
+%% read_page(Proj, LPN) ->
+%%     case corfurl:read_page(Proj, 
+    
+
+%%%%% %%%%% %%%%% %%%%% %%%%% %%%%% %%%%% %%%%% %%%%% 
 
 restart_sequencer(#proj{epoch=Epoch, dir=Dir} = P) ->
     case corfurl:latest_projection_epoch_number(Dir) of
