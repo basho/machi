@@ -20,7 +20,8 @@
 
 -module(corfurl_client).
 
--export([append_page/2, read_page/2]).
+-export([append_page/2]).
+%% -export([append_page/2, read_page/2]).
 -export([restart_sequencer/1]).
 
 -include("corfurl.hrl").
@@ -29,10 +30,11 @@
 %% -define(LONG_TIME, 30*1000).
 
 append_page(Proj, Page) ->
-    append_page(Proj, Page, 1).
+    append_page(Proj, Page, 50).
 
-append_page(#proj{seq={Sequencer,_,_}} = Proj, Page, Retries)
-  when Retries < 50 ->
+append_page(Proj, _Page, 0) ->
+    {error_failed, Proj};
+append_page(#proj{seq={Sequencer,_,_}} = Proj, Page, Retries) ->
     try
         case corfurl_sequencer:get(Sequencer, 1) of
             {ok, LPN} ->
@@ -40,25 +42,23 @@ append_page(#proj{seq={Sequencer,_,_}} = Proj, Page, Retries)
                     lost_race ->
                         append_page(Proj, Page, Retries - 1);
                     error_badepoch ->
-                        case poll_for_new_epoch_projection(P) of
-                            {ok, NewP} ->
-                                append_page(NewProj, Page, Retries-1);
+                        case poll_for_new_epoch_projection(Proj) of
+                            {ok, NewProj} ->
+                                append_page(NewProj, Page, Retries - 1);
                             Else ->
-                                {Else, P}
+                                {Else, Proj}
                         end;
                     Else ->
-                        {Else, P}
+                        {Else, Proj}
                 end
         end
     catch
         exit:{Reason,{_gen_server_or_pulse_gen_server,call,[Sequencer|_]}}
           when Reason == noproc; Reason == normal ->
-            append_page(restart_sequencer(P), Page, Retries);
+            append_page(restart_sequencer(Proj), Page, Retries);
         exit:Exit ->
             {failed, incomplete_code, Exit}
-    end;
-append_page(Proj, _Page, _Retries) ->
-    {error_badepoch, Proj}.
+    end.
 
 append_page2(Proj, LPN, Page) ->
     case corfurl:write_page(Proj, LPN, Page) of
@@ -74,8 +74,18 @@ append_page2(Proj, LPN, Page) ->
             %% Let it crash: error_unwritten
     end.
 
+%% read_page(Proj, Page) ->
+%%     read_page(Proj, Page, 10).
+
 %% read_page(Proj, LPN) ->
-%%     case corfurl:read_page(Proj, 
+%%     case corfurl:read_page(Proj, LPN) of
+%%         error_badepoch ->
+%%             case poll_for_new_epoch_projection(P) of
+%%                 {ok, NewP} ->
+%%                     read_page(NewProj, Page);
+%%                 Else ->
+%%                     {Else, P}
+            
     
 
 %%%%% %%%%% %%%%% %%%%% %%%%% %%%%% %%%%% %%%%% %%%%% 
