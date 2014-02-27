@@ -20,7 +20,7 @@
 
 -module(corfurl_client).
 
--export([append_page/2, read_page/2, fill_page/2, trim_page/2]).
+-export([append_page/2, read_page/2, fill_page/2, trim_page/2, scan_forward/3]).
 -export([restart_sequencer/1]).
 
 -include("corfurl.hrl").
@@ -76,11 +76,30 @@ append_page2(Proj, LPN, Page) ->
 read_page(Proj, LPN) ->
     retry_loop(Proj, fun(P) -> corfurl:read_page(P, LPN) end, 10).
 
+fill_page(Proj, LPN) ->
+    retry_loop(Proj, fun(P) -> corfurl:fill_page(P, LPN) end, 10).
+
 trim_page(Proj, LPN) ->
     retry_loop(Proj, fun(P) -> corfurl:trim_page(P, LPN) end, 10).
 
-fill_page(Proj, LPN) ->
-    retry_loop(Proj, fun(P) -> corfurl:fill_page(P, LPN) end, 10).
+scan_forward(Proj, LPN, MaxPages) ->
+    %% This is fiddly stuff that I'll get 0.7% wrong if I try to be clever.
+    %% So, do something simple and (I hope) obviously correct.
+    %% TODO: do something "smarter".
+    case corfurl:scan_forward(Proj, LPN, MaxPages) of
+        {error_badepoch, _LPN2, _MoreP, _Pages} = Res ->
+            case poll_for_new_epoch_projection(Proj) of
+                {ok, NewProj} ->
+                    {Res, NewProj};
+                _Else ->
+                    %% TODO: What is the risk of getting caught in a situation
+                    %% where we can never make any forward progress when pages
+                    %% really are being written?
+                    {Res, Proj}
+            end;
+        Res ->
+            {Res, Proj}
+    end.
 
 %%%%% %%%%% %%%%% %%%%% %%%%% %%%%% %%%%% %%%%% %%%%% 
 

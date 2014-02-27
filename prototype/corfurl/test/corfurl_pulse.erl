@@ -118,14 +118,14 @@ command(#state{run=Run} = S) ->
        || not S#state.is_setup] ++
       [{50, {call, ?MODULE, append, [Run, gen_page(PageSize)]}}
        || S#state.is_setup] ++
-      %% [{15, {call, ?MODULE, read_approx, [Run, gen_approx_page()]}}
-      %%  || S#state.is_setup] ++
-      %% [{15, {call, ?MODULE, scan_forward, [Run, gen_scan_forward_start(), nat()]}}
-      %%  || S#state.is_setup] ++
-      %% [{12, {call, ?MODULE, fill, [Run, gen_approx_page()]}}
-      %%  || S#state.is_setup] ++
-      %% [{12, {call, ?MODULE, trim, [Run, gen_approx_page()]}}
-       %% || S#state.is_setup] ++
+      [{15, {call, ?MODULE, read_approx, [Run, gen_approx_page()]}}
+       || S#state.is_setup] ++
+      [{15, {call, ?MODULE, scan_forward, [Run, gen_scan_forward_start(), nat()]}}
+       || S#state.is_setup] ++
+      [{12, {call, ?MODULE, fill, [Run, gen_approx_page()]}}
+       || S#state.is_setup] ++
+      [{12, {call, ?MODULE, trim, [Run, gen_approx_page()]}}
+       || S#state.is_setup] ++
       [{10, {call, ?MODULE, stop_sequencer, [Run, gen_stop_method()]}}
        || S#state.is_setup] ++
       [])).
@@ -740,8 +740,7 @@ append(#run{proj=OriginalProj}, Page) ->
              put_projection(Proj2),
              perhaps_trip_append_page(?TRIP_no_append_duplicates, Res, Page)
          catch X:Y ->
-                 io:format("APPEND ~p\n", [{error, append, X, Y, erlang:get_stacktrace()}]),
-                 {error, append, X, Y, erlang:get_stacktrace()}
+                 {caught, ?MODULE, ?LINE, X, Y, erlang:get_stacktrace()}
          end).
 
 read_result_mangle({ok, Page}) ->
@@ -755,10 +754,13 @@ read_approx(#run{proj=OriginalProj}, SeedInt) ->
     Proj = get_projection(OriginalProj),
     LPN = pick_an_LPN(Proj, SeedInt),
     ?LOG({read, LPN},
-         begin
-             Res = read_result_mangle(corfurl:read_page(Proj, LPN)),
-             put_projection(Proj),
-             perhaps_trip_read_approx(?TRIP_bad_read, Res, LPN)
+         try
+             {Res, Proj2} = corfurl_client:read_page(Proj, LPN),
+             put_projection(Proj2),
+             Res2 = read_result_mangle(Res),
+             perhaps_trip_read_approx(?TRIP_bad_read, Res2, LPN)
+         catch X:Y ->
+                 {caught, ?MODULE, ?LINE, X, Y, erlang:get_stacktrace()}
          end).
 
 scan_forward(#run{proj=OriginalProj}, SeedInt, NumPages) ->
@@ -773,10 +775,12 @@ scan_forward(#run{proj=OriginalProj}, SeedInt, NumPages) ->
     %% it appear as if each LPN result that scan_forward() gives us came
     %% instead from a single-page read_page() call.
     ?LOG({scan_forward, StartLPN, NumPages},
-         begin
+         try
              TS1 = lamport_clock:get(),
-             case corfurl:scan_forward(Proj, StartLPN, NumPages) of
-                 {ok, EndLPN, MoreP, Pages} ->
+             case corfurl_client:scan_forward(Proj, StartLPN, NumPages) of
+                 {{Res, EndLPN, MoreP, Pages}, Proj2}
+                   when Res == ok; Res == error_badepoch ->
+                     put_projection(Proj2),
                      PageIs = lists:zip(Pages, lists:seq(1, length(Pages))),
                      TS2 = lamport_clock:get(),
                      [begin
@@ -792,6 +796,8 @@ scan_forward(#run{proj=OriginalProj}, SeedInt, NumPages) ->
                               {LPN, P} <- Pages],
                      {ok, EndLPN, MoreP, Ps}
              end
+         catch X:Y ->
+                 {caught, ?MODULE, ?LINE, X, Y, erlang:get_stacktrace()}
          end).
 
 fill(#run{proj=OriginalProj}, SeedInt) ->
@@ -800,9 +806,12 @@ fill(#run{proj=OriginalProj}, SeedInt) ->
     Proj = get_projection(OriginalProj),
     LPN = pick_an_LPN(Proj, SeedInt),
     ?LOG({fill, LPN},
-         begin
-             Res = corfurl:fill_page(Proj, LPN),
+         try
+             {Res, Proj2} = corfurl_client:fill_page(Proj, LPN),
+             put_projection(Proj2),
              perhaps_trip_fill_page(?TRIP_bad_fill, Res, LPN)
+         catch X:Y ->
+                 {caught, ?MODULE, ?LINE, X, Y, erlang:get_stacktrace()}
          end).
 
 trim(#run{proj=OriginalProj}, SeedInt) ->
@@ -811,9 +820,12 @@ trim(#run{proj=OriginalProj}, SeedInt) ->
     Proj = get_projection(OriginalProj),
     LPN = pick_an_LPN(Proj, SeedInt),
     ?LOG({trim, LPN},
-         begin
-             Res = corfurl:trim_page(Proj, LPN),
+         try
+             {Res, Proj2} = corfurl_client:trim_page(Proj, LPN),
+             put_projection(Proj2),
              perhaps_trip_trim_page(?TRIP_bad_trim, Res, LPN)
+         catch X:Y ->
+                 {caught, ?MODULE, ?LINE, X, Y, erlang:get_stacktrace()}
          end).
 
 stop_sequencer(#run{proj=OriginalProj}, Method) ->
