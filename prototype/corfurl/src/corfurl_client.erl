@@ -22,6 +22,8 @@
 
 -export([append_page/2, read_page/2, fill_page/2, trim_page/2, scan_forward/3]).
 -export([restart_sequencer/1]).
+%% For debugging/verification only
+-export([pulse_tracing_start/1, pulse_tracing_add/2, pulse_tracing_get/1]).
 
 -include("corfurl.hrl").
 
@@ -36,6 +38,7 @@ append_page(Proj, _Page, 0) ->
 append_page(#proj{seq={Sequencer,_,_}} = Proj, Page, Retries) ->
     try
         {ok, LPN} = corfurl_sequencer:get(Sequencer, 1),
+        pulse_tracing_add(write, LPN),
         append_page1(Proj, LPN, Page, 5)
     catch
         exit:{Reason,{_gen_server_or_pulse_gen_server,call,[Sequencer|_]}}
@@ -217,7 +220,7 @@ report_lost_race(LPN, Reason) ->
 
 -ifdef(PULSE).
 get_poll_retries() ->
-    9999*1000.
+    999*1000.
 
 get_poll_sleep_time() ->
     1.
@@ -228,5 +231,33 @@ get_poll_retries() ->
 
 get_poll_sleep_time() ->
     50.
+
+-endif.
+
+-ifdef(PULSE).
+
+pulse_tracing_start(Type) ->
+    put({?MODULE, Type}, []).
+
+pulse_tracing_add(Type, Stuff) ->
+    List = case pulse_tracing_get(Type) of
+               undefined -> [];
+               L         -> L
+           end,
+    put({?MODULE, Type}, [Stuff|List]).
+
+pulse_tracing_get(Type) ->
+    get({?MODULE, Type}).
+
+-else.
+
+pulse_tracing_start(_Type) ->
+    ok.
+
+pulse_tracing_add(_Type, _Stuff) ->
+    ok.
+
+pulse_tracing_get(_Type) ->
+    ok.
 
 -endif.

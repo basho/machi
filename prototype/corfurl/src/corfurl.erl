@@ -129,7 +129,15 @@ ok_or_trim(error_trimmed) ->
 ok_or_trim(Else) ->
     Else.
 
-read_repair_chain(Epoch, LPN, [Head|Rest] = Chain) ->
+read_repair_chain(Epoch, LPN, Chain) ->
+    try
+        read_repair_chain1(Epoch, LPN, Chain)
+    catch
+        throw:{i_give_up,Res} ->
+            Res
+    end.
+
+read_repair_chain1(Epoch, LPN, [Head|Rest] = Chain) ->
     ?EVENT_LOG({read_repair, LPN, Chain, i_am, self()}),
     case corfurl_flu:read(flu_pid(Head), Epoch, LPN) of
         {ok, Page} ->
@@ -153,10 +161,17 @@ read_repair_chain(Epoch, LPN, [Head|Rest] = Chain) ->
                               Res2 = ok_or_trim(corfurl_flu:trim(
                                                   flu_pid(X), Epoch, LPN)),
                               ?EVENT_LOG({read_repair, LPN, fill, flu_pid(X), trim, Res2}),
-                              Res2;
+                              case Res2 of ok -> ok;
+                                           _  -> throw({i_give_up,Res2})
+                              end;
                           Else ->
+                              %% We're too deeply nested for the current code
+                              %% to deal with, and we're racing.  Fine, let
+                              %% our opponent continue.  We'll give up, and if
+                              %% the client wants to try again, we can try
+                              %% again from the top.
                               ?EVENT_LOG({read_repair, LPN, fill, flu_pid(X), Else}),
-                              Else
+                              throw({i_give_up,Else})
                       end
              end || X <- Rest],
             error_trimmed;

@@ -337,7 +337,8 @@ check_trace(Trace0, _Cmds, _Seed) ->
                    ({call, _Pid, {append, _Pg, will_fail, {special_trimmed, LPN}}}) -> LPN;
                    ({call, _Pid, {read, LPN, _, _}}) -> LPN;
                    ({call, _Pid, {fill, LPN, will_be, ok}}) -> LPN;
-                   ({call, _Pid, {trim, LPN, will_be, ok}}) -> LPN
+                   ({call, _Pid, {trim, LPN, will_be, ok}}) -> LPN;
+                   ({call, _Pid, {goo_write, LPN, _Pg}}) -> LPN
                 end,
                 fun(x) -> [] end,
                 Calls),
@@ -405,8 +406,7 @@ check_trace(Trace0, _Cmds, _Seed) ->
 
     InitialValDict = orddict:from_list([{LPN, [error_unwritten]} ||
                                         LPN <- AllLPNs]),
-    {ValuesR, _} =
-        lists:mapfoldl(
+    ValuesRFun =
           fun({TS1, TS2, StEnds}, Dict1) ->
                   Dict2 = lists:foldl(
                             fun({mod_start, w_1, LPN, Pg}, D) ->
@@ -440,7 +440,8 @@ check_trace(Trace0, _Cmds, _Seed) ->
                                     orddict:store(LPN, [Pg,error_trimmed], D)
                             end, Dict2, [X || X={mod_end,_,_,_} <- StEnds]),
                   {{TS1, TS2, [{values, Dict3}]}, Dict3}
-          end, InitialValDict, StartsDones),
+          end,        
+    {ValuesR, _} = lists:mapfoldl(ValuesRFun, InitialValDict, StartsDones),
 
     InitialTtnDict = orddict:from_list([{LPN, [w_0]} || LPN <- AllLPNs]),
     {TransitionsR, _} =
@@ -469,6 +470,14 @@ check_trace(Trace0, _Cmds, _Seed) ->
     %% Instead, we need to merge together all possible values from ValuesR
     %% that appear at any time during the read op's lifetime.
 
+    PerhapsR = eqc_temporal:stateful(
+               fun({call, _Pid, {goo_write, LPN, Pg}}) ->
+                       {perhaps, LPN, Pg}
+               end,
+               fun(x)-> [] end,
+               Events),
+    {_, _, Perhaps} = lists:last(eqc_temporal:all_future(PerhapsR)),
+    %%?QC_FMT("*Perhaps: ~p\n", [Perhaps]),
     Reads = eqc_temporal:stateful(
                fun({call, Pid, {read, LPN, _, _}}) ->
                        {read, Pid, LPN, []}
@@ -483,10 +492,27 @@ check_trace(Trace0, _Cmds, _Seed) ->
                        false = NewVs == V1s,
                        {read, Pid, LPN, NewVs};
                   ({read, Pid, LPN, Vs}, {result, Pid, Pg}) ->
+                       %% case lists:member(Pg, Vs) orelse
+                       %%      lists:member({perhaps, LPN, Pg}, Perhaps) of
                        case lists:member(Pg, Vs) of
-                           true  -> [];
-                           false -> [{bad, read, LPN, Pid, got, Pg,
-                                      possible, Vs}]
+                           true  ->
+                               [];
+                           false ->
+                               case lists:member({perhaps, LPN, Pg}, Perhaps) of
+                                   true ->
+                                       %% The checking of the Perhaps list in
+                                       %% this manner is not strictly
+                                       %% temporally valid.  It is possible
+                                       %% for the {perhaps,...} event to be
+                                       %% after the event we're checking here.
+                                       %% TODO work is to make this check 100%
+                                       %% temporally valid.
+                                       io:format(user, "Yo, found ~p ~p in Perhaps\n", [LPN, Pg]),
+                                       [];
+                                   false ->
+                                       [{bad, read, LPN, Pid, got, Pg,
+                                         possible, Vs}]
+                               end
                        end
                end, eqc_temporal:union(Events, ValuesR)),
     BadFilter = fun(bad) -> true;
@@ -518,7 +544,8 @@ check_trace(Trace0, _Cmds, _Seed) ->
     ?QC_FMT("*InvalidTtns: ~p\n", [InvalidTransitions]),
     ?QC_FMT("*ValuesR: ~p\n", [eqc_temporal:unions([ValuesR, StartsDones])]),
     ?QC_FMT("*Calls: ~p\n", [Calls]),
-    ?QC_FMT("*BadReads: ~p\n", [BadReads])
+    ?QC_FMT("*BadReads: ~p\n", [BadReads]),
+    ?QC_FMT("*Perhaps: ~p\n", [Perhaps])
     end,
     conjunction(
       [
@@ -724,23 +751,52 @@ pick_an_LPN(#proj{seq={Seq,_,_}} = P, SeedInt) ->
             pick_an_LPN(corfurl_client:restart_sequencer(P), SeedInt)
     end.
 
--define(LOG(Tag, MkCall),
-        event_logger:event(log_make_call(Tag), lamport_clock:get()),
-        LOG__Result = MkCall,
-        event_logger:event(log_make_result(LOG__Result), lamport_clock:get()),
-        LOG__Result).
+-define(LOG3(Tag, MkCall, PostCall),
+        begin
+            LOG__Start = lamport_clock:get(),
+            event_logger:event(log_make_call(Tag), LOG__Start),
+            LOG__Result = MkCall,
+            LOG__End = lamport_clock:get(),
+            PostCall,
+            event_logger:event(log_make_result(LOG__Result), LOG__End),
+            LOG__Result
+        end).
+
+-define(LOG(Tag, MkCall), ?LOG3(Tag, MkCall, okqq)).
 
 append(#run{proj=OriginalProj}, Page) ->
     lamport_clock:init(),
     lamport_clock:incr(),
     Proj = get_projection(OriginalProj),
-    ?LOG({append, Page},
+    ?LOG3({append, Page},
          try
+             corfurl_client:pulse_tracing_start(write),
              {Res, Proj2} = corfurl_client:append_page(Proj, Page),
              put_projection(Proj2),
+             OtherPages0 = lists:usort(corfurl_client:pulse_tracing_get(write)),
+             OtherPages = case Res of
+                              {ok, LPN} ->
+                                  OtherPages0 -- [LPN];
+                              _ ->
+                                  OtherPages0
+                          end,
+             put(zzzOtherPages, OtherPages),
              perhaps_trip_append_page(?TRIP_no_append_duplicates, Res, Page)
          catch X:Y ->
                  {caught, ?MODULE, ?LINE, X, Y, erlang:get_stacktrace()}
+         end,
+         try
+             OPages = get(zzzOtherPages),
+             %%if OPages /= [] -> io:format("OPages = ~w\n", [OPages]); true -> ok end,
+             GooPid = {self(), goo, now()},
+             [begin
+                  event_logger:event(log_make_call(GooPid, {goo_write, OP, Page}),
+                                     LOG__Start),
+                  event_logger:event(log_make_result(GooPid, who_knows),
+                                     LOG__End)
+              end || OP <- OPages]
+         catch XX:YY ->
+                 exit({oops, ?MODULE, ?LINE, XX, YY, erlang:get_stacktrace()})
          end).
 
 read_result_mangle({ok, Page}) ->
