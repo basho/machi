@@ -20,4 +20,73 @@ substantially to make it clearer what is happening.
 Also for commit 087c2605ab.
 
 I believe that I have a fix for the silver-colored
-`error-overwritten`, but the correctness of it remains to be seen.
+`error-overwritten` ... and it was indeed added to the code soon
+afterward, but it turns out that it doesn't solve the entire problem
+of "two clients try to write the exact same data at the same time to
+the same LPN".
+
+
+## "Two Clients Try to Write the Exact Same Data at the Same Time to the Same LPN"
+
+This situation is something that CORFU cannot protect against, IMO.
+
+I have been struggling for a while, to try to find a way for CORFU
+clients to know *always* when there is a conflict with another
+writer.  It usually works: the basic nature of write-once registers is
+very powerful.  However, in the case where two clients are trying to
+write the same page data to the same LPN, it looks impossible to
+resolve.
+
+How do you tell the difference between:
+
+1. A race between a client A writing page P at address LPN and
+   read-repair fixing P.  P *is* A's data and no other's, so this race
+   doesn't confuse anyone.
+
+1. A race between a client A writing page P at address LPN and client
+   B writing the exact same page data P at the same LPN.
+   A's page P = B's page P, but clients A & B don't know that.
+
+   If CORFU tells both A & B that they were successful, A & B assume
+   that the CORFU log has two new pages appended to it, but in truth
+   only one new page was appended.
+
+If we try to solve this by always avoiding the same LPN address
+conflict, we are deluding ourselves.  If we assume that the sequencer
+is 100% correct in that it never assigns the same LPN twice, and if we
+assume that a client must never write a block without an assignment
+from the sequencer, then the problem is solved.  But the problem has a
+_heavy_ price: the log is only available when the sequencer is
+available, and only when never more than one sequencer running at a
+time.
+
+The CORFU base system promises correct operation, even if:
+
+* Zero sequencers are running, and clients might choose the same LPN
+  to write to.
+* Two more more sequencers are running, and different sequencers
+  assign the same LPN to two different clients.
+
+But CORFU's "correct" behavior does not include detecting the same
+page at the same LPN.  The papers don't specifically say it, alas.
+But IMO it's impossible to guarantee, so all docs ought to explicitly
+say that it's impossible and that clients must not assume it.
+
+See also
+* two-clients-race.1.png
+
+## A scenario of chain repair & write-once registers
+
+See:
+* 2014-02-27.chain-repair-write-twice.png
+
+... for a scenario where write-once registers that are truly only
+write-once-ever-for-the-rest-of-the-future are "inconvenient" when it
+comes to chain repair.  Client 3 is attempting to do chain repair ops,
+bringing FLU1 back into sync with FLU2.
+
+The diagram proposes one possible idea for making overwriting a
+read-once register a bit safer: ask another node in the chain to
+verify that the page you've been asked to repair is exactly the same
+as that other FLU's page.
+
