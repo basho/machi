@@ -22,5 +22,5 @@ eunit:
 	$(REBAR_BIN) -v skip_deps=true eunit
 
 pulse: compile
-	env BITCASK_PULSE=1 $(REBAR_BIN) skip_deps=true clean compile
-	env BITCASK_PULSE=1 $(REBAR_BIN) skip_deps=true -D PULSE eunit
+	env USE_PULSE=1 $(REBAR_BIN) skip_deps=true clean compile
+	env USE_PULSE=1 $(REBAR_BIN) skip_deps=true -D PULSE eunit

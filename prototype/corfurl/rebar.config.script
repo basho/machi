@@ -1,4 +1,4 @@
-PulseBuild = case os:getenv("BITCASK_PULSE") of
+PulseBuild = case os:getenv("USE_PULSE") of
                  false ->
                      false;
                  _ ->
