@@ -48,37 +48,22 @@ pack_v1_test() ->
             Term <- [foo, {bar, baz, <<"yo">>}],
             Size <- lists:seq(100, 5000, 500)].
 
-run_test(Name, PageSize, NumPages, NumFLUs, FUN) ->
-    PDir = "./tmp." ++ Name,
-    BaseDir = "/tmp/" ++ atom_to_list(?MODULE) ++ ".",
-    MyDir = fun(X) -> BaseDir ++ integer_to_list(X) end,
-    Del = fun() -> [ok = corfurl_util:delete_dir(MyDir(X)) ||
-                       X <- lists:seq(1, NumFLUs)] end,
-
-    Del(),
-    FLUs = [begin
-                element(2, corfurl_flu:start_link(MyDir(X),
-                                                  PageSize, NumPages*PageSize))
-            end || X <- lists:seq(1, NumFLUs)],
-
+run_test(RootDir, BaseDirName, PageSize, NumPages, NumFLUs, FUN) ->
+    {FLUs, Seq, P1, Del} = corfurl:simple_test_setup(
+                             RootDir, BaseDirName, PageSize, NumPages, NumFLUs),
     try
-        {ok, Seq} = ?SEQ:start_link(FLUs),
-        try
-            P0 = corfurl:new_simple_projection(PDir, 1, 1, 1*100, [FLUs]),
-            P1 = P0#proj{seq={Seq, unused, unused}},
-            FUN(PageSize, Seq, P1)
-        after
-            ?SEQ:stop(Seq)
-        end
+        FUN(PageSize, Seq, P1)
     after
+        ?SEQ:stop(Seq),
         [ok = corfurl_flu:stop(FLU) || FLU <- FLUs],
         Del()
     end.
 
 smoke_test() ->
-    ok = run_test("projection", 4096, 5*1024, 1, fun smoke_test_fun/3).
+    ok = run_test("/tmp", "projection",
+                  4096, 5*1024, 1, fun smoke_test_int/3).
 
-smoke_test_fun(PageSize, Seq, P1) ->
+smoke_test_int(PageSize, Seq, P1) ->
     ok = ?SEQ:set_tails(Seq, [{42,4242}, {43,4343}]),
     {ok, [4242, 4343]} = ?SEQ:get_tails(Seq, [42, 43]),
 
@@ -94,9 +79,10 @@ smoke_test_fun(PageSize, Seq, P1) ->
     ok.
 
 write_forward_test() ->
-    ok = run_test("write_forward", 4096, 5*1024, 1, fun write_forward_test_fun/3).
+    ok = run_test("/tmp", "write_forward",
+                  4096, 5*1024, 1, fun write_forward_test_int/3).
 
-write_forward_test_fun(PageSize, _Seq, P1) ->
+write_forward_test_int(PageSize, _Seq, P1) ->
     StreamNum = 0,
     NumPages = 10,
     Pages = [term_to_binary({smoke, X}) || X <- lists:seq(1, NumPages)],
@@ -118,9 +104,10 @@ write_stream_pages(Proj0, Pages, PageSize, InitialBackPs, StreamNum) ->
     Res.
 
 scan_backward_test() ->
-    ok = run_test("scan_backward", 4096, 5*1024, 1, fun scan_backward_test_fun/3).
+    ok = run_test("/tmp", "scan_backward",
+                  4096, 5*1024, 1, fun scan_backward_test_int/3).
 
-scan_backward_test_fun(PageSize, _Seq, P1) ->
+scan_backward_test_int(PageSize, _Seq, P1) ->
     StreamNum = 0,
     NumPages = 10,
     PageSeq = lists:seq(1, NumPages),

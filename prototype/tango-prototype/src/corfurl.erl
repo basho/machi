@@ -27,6 +27,7 @@
          latest_projection_epoch_number/1]).
 -export([write_page/3, read_page/2, scan_forward/3,
          fill_page/2, trim_page/2]).
+-export([simple_test_setup/5]).
 
 -include("corfurl.hrl").
 
@@ -351,3 +352,21 @@ project_to_chain(LPN, P) ->
             I = ((LPN - Start) rem tuple_size(Chains)) + 1,
             element(I, Chains)
     end.
+
+simple_test_setup(RootDir, BaseDirName, PageSize, NumPages, NumFLUs) ->
+    PDir = RootDir ++ "/" ++ BaseDirName ++ ".projection",
+    filelib:ensure_dir(PDir),
+    BaseDir = RootDir ++ "/flu." ++ BaseDirName ++ ".",
+    MyDir = fun(X) -> BaseDir ++ integer_to_list(X) end,
+    DeleteFLUData = fun() -> [ok = corfurl_util:delete_dir(MyDir(X)) ||
+                                 X <- lists:seq(1, NumFLUs)] end,
+    DeleteFLUData(),
+    FLUs = [begin
+                element(2, corfurl_flu:start_link(MyDir(X),
+                                                  PageSize, NumPages*PageSize))
+            end || X <- lists:seq(1, NumFLUs)],
+
+    {ok, Seq} = corfurl_sequencer:start_link(FLUs),
+    P0 = corfurl:new_simple_projection(PDir, 1, 1, 1*100, [FLUs]),
+    P1 = P0#proj{seq={Seq, unused, unused}},
+    {FLUs, Seq, P1, DeleteFLUData}.

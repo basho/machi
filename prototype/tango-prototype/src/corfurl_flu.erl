@@ -123,7 +123,7 @@ init({Dir, ExpPageSize, ExpMaxMem}) ->
     lclock_init(),
 
     MemFile = memfile_path(Dir),
-    filelib:ensure_dir(MemFile),
+    ok = filelib:ensure_dir(MemFile),
     {ok, FH} = file:open(MemFile, [read, write, raw, binary]),
     
     {_Version, MinEpoch, PageSize, MaxMem, TrimWatermark} =
