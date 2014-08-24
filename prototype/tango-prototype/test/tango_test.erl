@@ -88,19 +88,29 @@ write_forward_test_int(PageSize, _Seq, P1) ->
     Pages = [term_to_binary({smoke, X}) || X <- lists:seq(1, NumPages)],
     BackPs0 = [{StreamNum, []}],
     {P2, BackPs1} = write_stream_pages(P1, Pages, PageSize, BackPs0, StreamNum),
-    {_P3, _BackPs2} = write_stream_pages(P2, Pages, PageSize, BackPs1, StreamNum),
+    {_P3, _BackPs2} = write_stream_pages(P2, Pages, PageSize, BackPs1, StreamNum, 3),
 
     ok.
 
 write_stream_pages(Proj0, Pages, PageSize, InitialBackPs, StreamNum) ->
+    write_stream_pages(Proj0, Pages, PageSize, InitialBackPs, StreamNum, 0).
+
+write_stream_pages(Proj0, Pages, PageSize, InitialBackPs, StreamNum, Junk) ->
+    WriteJunk = fun() -> JP0 = tango:pack_v1([], <<>>, PageSize),
+                         {{ok, _}, _} = corfurl_client:append_page(Proj0, JP0)
+                end,
     F = fun(Page, {Proj1, BackPs}) ->
+                if Junk band 1 /= 0 -> WriteJunk();
+                   true             -> ok end,
                 FullPage = tango:pack_v1(BackPs, Page, PageSize),
                 {{ok, LPN}, Proj2} =
                     corfurl_client:append_page(Proj1, FullPage),
+                if Junk band 1 /= 0 -> WriteJunk();
+                   true             -> ok end,
                 {Proj2, tango:add_back_pointer(StreamNum, BackPs, LPN)}
         end,
     {_Px, BackPs} = Res = lists:foldl(F, {Proj0, InitialBackPs}, Pages),
-    io:format(user, "BackPs ~p\n", [BackPs]),
+    io:format(user, "BackPs ~w\n", [BackPs]),
     Res.
 
 scan_backward_test() ->
