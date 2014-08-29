@@ -25,6 +25,7 @@
 -export([pack_v1/3, unpack_v1/2,
          add_back_pointer/3,
          scan_backward/4,
+         scan_backward/5,
          pad_bin/2]).
 
 -define(MAGIC_NUMBER_V1, 16#88990011).
@@ -74,16 +75,21 @@ add_back_pointer([], New) ->
 add_back_pointer(BackPs, New) ->
     [New|BackPs].
 
-scan_backward(Proj, Stream, LastLPN, _WithPagesP) ->
-    lists:reverse(scan_backward2(Proj, Stream, LastLPN, _WithPagesP)).
+scan_backward(Proj, Stream, LastLPN, WithPagesP) ->
+    scan_backward(Proj, Stream, LastLPN, 0, WithPagesP).
 
-scan_backward2(Proj, Stream, LastLPN, WithPagesP) ->
+scan_backward(Proj, Stream, LastLPN, StopAtLPN, WithPagesP) ->
+    lists:reverse(scan_backward2(Proj, Stream, LastLPN, StopAtLPN, WithPagesP)).
+
+scan_backward2(_Proj, _Stream, LastLPN, StopAtLPN, _WithPagesP)
+  when LastLPN =< StopAtLPN ->
+    [];
+scan_backward2(Proj, Stream, LastLPN, StopAtLPN, WithPagesP) ->
     case corfurl:read_page(Proj, LastLPN) of
         {ok, FullPage} ->
             case proplists:get_value(Stream, unpack_v1(FullPage, stream_list)) of
                 undefined ->
-                    {gahh, lpn, LastLPN, unpack_v1(FullPage, stream_list)};
-                    %% [];
+                    {gah_fixme, lpn, LastLPN, unpack_v1(FullPage, stream_list)};
                 [] ->
                     if WithPagesP ->
                             [{LastLPN, unpack_v1(FullPage, page)}];
@@ -94,13 +100,16 @@ scan_backward2(Proj, Stream, LastLPN, WithPagesP) ->
                     if WithPagesP ->
                             [{LastLPN, unpack_v1(FullPage, page)}|
                              scan_backward2(Proj, Stream,
-                                            hd(BackPs),
+                                            hd(BackPs), StopAtLPN,
                                             WithPagesP)];
                        true ->
                             SkipLPN = lists:last(BackPs),
-                            [LastLPN] ++ (BackPs -- [SkipLPN]) ++
+                            AddLPNs = [LPN || LPN <- BackPs,
+                                              LPN /= SkipLPN,
+                                              LPN > StopAtLPN],
+                            [LastLPN] ++ AddLPNs ++
                                 scan_backward2(Proj, Stream,
-                                               SkipLPN,
+                                               SkipLPN, StopAtLPN,
                                                WithPagesP)
                     end
             end;

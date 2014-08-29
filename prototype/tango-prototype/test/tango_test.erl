@@ -136,6 +136,17 @@ scan_backward_test_int(PageSize, _Seq, P1) ->
          %% oldest -> newest (i.e. smallest LPN to largest LPN) order.
          ShouldBe = tango:scan_backward(P2, StreamNum, BackwardStartLPN,
                                         false),
+         StopAtLimit = NumPages div 2,
+         StopAtKicksInAt = StopAtLimit + 2,
+         {StopAtLPN, ShouldBeLPNS} =
+             if BackwardStartLPN < StopAtKicksInAt ->
+                     {0, ShouldBe};
+               true ->
+                     {StopAtLimit, [LPN || LPN <- ShouldBe, LPN > StopAtLimit]}
+            end,
+         ShouldBeLPNS =
+             tango:scan_backward(P2, StreamNum, BackwardStartLPN, StopAtLPN,
+                                 false),
 
          %% If we scan backward, we should get a list of LPNs in
          %% oldest -> newest (i.e. smallest LPN to largest LPN) order
