@@ -36,7 +36,7 @@ tango_oid_smoke_test() ->
                              fun tango_oid_smoke_test_int/3).
 
 tango_oid_smoke_test_int(PageSize, Seq, Proj) ->
-    {ok, OID_Map} = tango_oid:start_link(PageSize, Seq, Proj),
+    {ok, OID_Map} = tango_oid:start_link(PageSize, Seq, Proj, tango_dt_map),
 
     ok = tango_oid:stop(OID_Map),
     ok.
@@ -46,15 +46,15 @@ tango_oid_one_test() ->
                              fun tango_oid_one_test_int/3).
 
 tango_oid_one_test_int(PageSize, Seq, Proj) ->
-    {ok, OID_Map} = tango_oid:start_link(PageSize, Seq, Proj),
+    {ok, OID_Map} = tango_oid:start_link(PageSize, Seq, Proj, tango_dt_map),
 
     try
         K1 = foo,
         V1 = bar1,
         V2 = bar2,
-        garrr = tango_oid:put(OID_Map, K1, V1),
+        ok = tango_oid:put(OID_Map, K1, V1),
         {ok, V1} = tango_oid:get(OID_Map, K1),
-        garrr = tango_oid:put(OID_Map, K1, V2),
+        ok = tango_oid:put(OID_Map, K1, V2),
         {ok, V2} = tango_oid:get(OID_Map, K1),
         error = tango_oid:get(OID_Map, "does not exist"),
 
