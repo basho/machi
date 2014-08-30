@@ -350,7 +350,11 @@ project_to_chain(LPN, P) ->
     [#range{pn_start=Start, pn_end=End, chains=Chains}] = P#proj.r,
     if Start =< LPN, LPN =< End ->
             I = ((LPN - Start) rem tuple_size(Chains)) + 1,
-            element(I, Chains)
+            element(I, Chains);
+       true ->
+            exit({?MODULE, project_to_chain, [{start, Start},
+                                              {lpn, LPN},
+                                              {'end', End}]})
     end.
 
 simple_test_setup(RootDir, BaseDirName, PageSize, NumPages, NumFLUs) ->

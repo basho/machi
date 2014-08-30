@@ -23,12 +23,15 @@
 -module(tango).
 
 -export([pack_v1/3, unpack_v1/2,
+         add_back_pointer/2,
          add_back_pointer/3,
          scan_backward/4,
          scan_backward/5,
          pad_bin/2]).
 
 -define(MAGIC_NUMBER_V1, 16#88990011).
+
+-define(D(X), io:format(user, "Dbg: ~s =\n  ~p\n", [??X, X])).
 
 %% TODO: for version 2: add strong checksum
 
@@ -86,8 +89,11 @@ scan_backward2(_Proj, _Stream, LastLPN, StopAtLPN, _NumPages, _WithPagesP)
   when LastLPN =< StopAtLPN; LastLPN =< 0 ->
     [];
 scan_backward2(Proj, Stream, LastLPN, StopAtLPN, NumPages, WithPagesP) ->
+    %% ?D({scan, lastlpn, LastLPN}),
     case corfurl:read_page(Proj, LastLPN) of
         {ok, FullPage} ->
+            %% ?D({scan, LastLPN, ok}),
+            %% ?D({scan, Stream, unpack_v1(FullPage, stream_list)}),
             case proplists:get_value(Stream, unpack_v1(FullPage, stream_list)) of
                 undefined ->
                     if NumPages == 0 ->
@@ -110,6 +116,7 @@ scan_backward2(Proj, Stream, LastLPN, StopAtLPN, NumPages, WithPagesP) ->
                     end;
                 BackPs ->
                     if WithPagesP ->
+                            %% ?D({bummer, BackPs}),
                             [{LastLPN, unpack_v1(FullPage, page)}|
                              scan_backward2(Proj, Stream,
                                             hd(BackPs), StopAtLPN, NumPages + 1,
@@ -126,6 +133,7 @@ scan_backward2(Proj, Stream, LastLPN, StopAtLPN, NumPages, WithPagesP) ->
                     end
             end;
         Err ->
+            %% ?D({scan, LastLPN, Err}),
             Err
     end.
 
