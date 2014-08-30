@@ -79,17 +79,29 @@ scan_backward(Proj, Stream, LastLPN, WithPagesP) ->
     scan_backward(Proj, Stream, LastLPN, 0, WithPagesP).
 
 scan_backward(Proj, Stream, LastLPN, StopAtLPN, WithPagesP) ->
-    lists:reverse(scan_backward2(Proj, Stream, LastLPN, StopAtLPN, WithPagesP)).
+    lists:reverse(scan_backward2(Proj, Stream, LastLPN, StopAtLPN,
+                                 0, WithPagesP)).
 
-scan_backward2(_Proj, _Stream, LastLPN, StopAtLPN, _WithPagesP)
-  when LastLPN =< StopAtLPN ->
+scan_backward2(_Proj, _Stream, LastLPN, StopAtLPN, _NumPages, _WithPagesP)
+  when LastLPN =< StopAtLPN; LastLPN =< 0 ->
     [];
-scan_backward2(Proj, Stream, LastLPN, StopAtLPN, WithPagesP) ->
+scan_backward2(Proj, Stream, LastLPN, StopAtLPN, NumPages, WithPagesP) ->
     case corfurl:read_page(Proj, LastLPN) of
         {ok, FullPage} ->
             case proplists:get_value(Stream, unpack_v1(FullPage, stream_list)) of
                 undefined ->
-                    {gah_fixme, lpn, LastLPN, unpack_v1(FullPage, stream_list)};
+                    if NumPages == 0 ->
+                            %% We were told to start scanning backward at some
+                            %% LPN, but that LPN doesn't have a stream for us.
+                            %% So we'll go backward a page and see if we get
+                            %% lucky there.
+                            scan_backward2(Proj, Stream, LastLPN-1, StopAtLPN,
+                                           NumPages, WithPagesP);
+                       true ->
+                            %% Oops, we pointed into a hole.  That's bad.
+                            %% TODO: fixme
+                            {gah_fixme, lpn, LastLPN, unpack_v1(FullPage, stream_list)}
+                    end;
                 [] ->
                     if WithPagesP ->
                             [{LastLPN, unpack_v1(FullPage, page)}];
@@ -100,7 +112,7 @@ scan_backward2(Proj, Stream, LastLPN, StopAtLPN, WithPagesP) ->
                     if WithPagesP ->
                             [{LastLPN, unpack_v1(FullPage, page)}|
                              scan_backward2(Proj, Stream,
-                                            hd(BackPs), StopAtLPN,
+                                            hd(BackPs), StopAtLPN, NumPages + 1,
                                             WithPagesP)];
                        true ->
                             SkipLPN = lists:last(BackPs),
@@ -109,7 +121,7 @@ scan_backward2(Proj, Stream, LastLPN, StopAtLPN, WithPagesP) ->
                                               LPN > StopAtLPN],
                             [LastLPN] ++ AddLPNs ++
                                 scan_backward2(Proj, Stream,
-                                               SkipLPN, StopAtLPN,
+                                               SkipLPN, StopAtLPN, NumPages + 1,
                                                WithPagesP)
                     end
             end;
