@@ -48,7 +48,7 @@
           last_read_lpn :: lpn(),               %
           last_write_lpn :: lpn(),
           back_ps :: [lpn()],                   % back pointers (up to 4)
-          i_state :: orddict:orddict()          % internal state thingie
+          i_state :: term()                     % internal state thingie
          }).
 
 start_link(PageSize, SequencerPid, Proj, CallbackMod) ->
