@@ -109,8 +109,8 @@ write_stream_pages(Proj0, Pages, PageSize, InitialBackPs, StreamNum, Junk) ->
                    true             -> ok end,
                 {Proj2, tango:add_back_pointer(StreamNum, BackPs, LPN)}
         end,
-    {_Px, BackPs} = Res = lists:foldl(F, {Proj0, InitialBackPs}, Pages),
-    io:format(user, "BackPs ~w\n", [BackPs]),
+    {_Px, _BackPs} = Res = lists:foldl(F, {Proj0, InitialBackPs}, Pages),
+    %% io:format(user, "BackPs ~w\n", [_BackPs]),
     Res.
 
 scan_backward_test() ->
@@ -125,7 +125,6 @@ scan_backward_test_int(PageSize, _Seq, P1) ->
     BackPs0 = [{StreamNum, []}],
     {P2, BackPs1} = write_stream_pages(P1, Pages, PageSize, BackPs0, StreamNum),
     LastLPN = hd(proplists:get_value(StreamNum, BackPs1)),
-    io:format(user, "\nLastLPN ~p\n", [LastLPN]),
 
     LastLPN=LastLPN,
     [begin
@@ -152,7 +151,8 @@ scan_backward_test_int(PageSize, _Seq, P1) ->
          %% oldest -> newest (i.e. smallest LPN to largest LPN) order
          %% together with the actual page data.
          ShouldBePages = tango:scan_backward(P2, StreamNum, BackwardStartLPN,
-                                             true)
+                                             true),
+         ok
      end || BackwardStartLPN <- lists:seq(1, NumPages)],
 
     ok.
