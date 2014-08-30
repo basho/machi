@@ -22,7 +22,8 @@
 
 -behaviour(gen_server).
 
--export([start_link/1, stop/1, stop/2,
+-export([start_link/1, start_link/2, start_link/3,
+         stop/1, stop/2,
          get/2, get/3, get_tails/2]).
 -export([set_tails/2]).
 -ifdef(TEST).

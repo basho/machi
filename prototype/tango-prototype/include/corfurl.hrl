@@ -27,7 +27,8 @@
 -record(range, {
           pn_start :: non_neg_integer(),            % start page number
           pn_end :: non_neg_integer(),              % end page number
-          chains :: [flu_chain()]
+          %% chains :: [flu_chain()]
+          chains :: tuple()
          }).
 
 -record(proj, {                                 % Projection

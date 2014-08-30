@@ -214,7 +214,7 @@ report_lost_race(LPN, Reason) ->
     %% Perhaps it's an interesting event, but the rest of the system
     %% should react correctly whenever this happens, so it shouldn't
     %% ever cause an external consistency problem.
-    error_logger:debug_msg("LPN ~p race lost: ~p\n", [LPN, Reason]).
+    error_logger:info_msg("LPN ~p race lost: ~p\n", [LPN, Reason]).
 
 -endif. % TEST
 
