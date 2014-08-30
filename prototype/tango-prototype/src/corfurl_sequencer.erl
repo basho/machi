@@ -27,7 +27,6 @@
          get/2, get/3, get_tails/2]).
 -export([set_tails/2]).
 -ifdef(TEST).
--export([start_link/2]).
 -compile(export_all).
 -endif.
 

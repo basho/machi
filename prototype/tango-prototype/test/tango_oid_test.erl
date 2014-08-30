@@ -28,6 +28,9 @@
 -endif.
 -endif.
 
+-ifdef(TEST).
+-ifndef(PULSE).
+
 tango_oid_smoke_test() ->
     ok = tango_test:run_test("/tmp", "tango_oid_smoke", 4096, 5*1024, 1,
                              fun tango_oid_smoke_test_int/3).
@@ -59,3 +62,6 @@ tango_oid_one_test_int(PageSize, Seq, Proj) ->
     after
         tango_oid:stop(OID_Map)
     end.
+
+-endif. % not PULSE
+-endif. % TEST
