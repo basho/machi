@@ -184,6 +184,11 @@ tango_dt_register_int(PageSize, Seq, Proj) ->
     {ok, Reg2b} = tango_dt_register:start_link(PageSize, Seq, Proj,
                                               tango_dt_register, Reg2Num),
     {ok, LastVal} = tango_dt_register:get(Reg2b),
+    %% If we update the "old" instance of a register, then the "new"
+    %% instance should also see the update.
+    NewVal = {"Heh", "a new value"},
+    ok = tango_dt_register:set(Reg2, NewVal),
+    {ok, NewVal} = tango_dt_register:get(Reg2b),
 
     ok.
 
