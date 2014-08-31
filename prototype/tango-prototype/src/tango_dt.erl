@@ -98,7 +98,7 @@ handle_call({cb_dirty_op, Op}, _From,
 handle_call({cb_pure_op, Op}, _From, #state{cb_mod=CallbackMod} = State) ->
     State2 = #state{i_state=I_State} = roll_log_forward(State),
     Reply = CallbackMod:do_pure_op(Op, I_State),
-    {reply, {ok, Reply}, State2};
+    {reply, Reply, State2};
 handle_call({stop}, _From, State) ->
     {stop, normal, ok, State};
 handle_call(_Request, _From, State) ->

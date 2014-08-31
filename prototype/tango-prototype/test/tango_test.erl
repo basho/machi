@@ -193,5 +193,40 @@ tango_dt_register_int(PageSize, Seq, Proj) ->
 
     ok.
 
+tango_dt_map_test() ->
+    ok = run_test("/tmp", "tango_dt_map",
+                  4096, 5*1024, 1, fun tango_dt_map_int/3).
+
+tango_dt_map_int(PageSize, Seq, Proj) ->
+    {ok, OID_Map} = tango_oid:start_link(PageSize, Seq, Proj),
+
+    {ok, Reg1Num} = tango_oid:new(OID_Map, "map1"),
+    {ok, Reg1} = tango_dt_map:start_link(PageSize, Seq, Proj, Reg1Num),
+    {ok, Reg2Num} = tango_oid:new(OID_Map, "map2"),
+    {ok, Reg2} = tango_dt_map:start_link(PageSize, Seq, Proj, Reg2Num),
+
+    NumVals = 8,
+    Vals = [lists:flatten(io_lib:format("version ~w", [X])) ||
+               X <- lists:seq(1, NumVals)],
+    Keys = ["key1", "key2"],
+    [tango_dt_map:set(Reg, Key, Val) || Reg <- [Reg1, Reg2],
+                                        Key <- Keys, Val <- Vals],
+    LastVal = lists:last(Vals),
+    [{ok, LastVal} = tango_dt_map:get(Reg1, Key) || Key <- Keys],
+    [{ok, LastVal} = tango_dt_map:get(Reg2, Key) || Key <- Keys],
+
+    %% If we instantiate a new instance of an existing map, then
+    %% a single get should show the most recent modification.
+    {ok, Reg2b} = tango_dt_map:start_link(PageSize, Seq, Proj, Reg2Num),
+    [{ok, LastVal} = tango_dt_map:get(Reg2b, Key) || Key <- Keys],
+    %% If we update the "old" instance of a map, then the "new"
+    %% instance should also see the update.
+    NewVal = {"Heh", "a new value"},
+    [ok = tango_dt_map:set(Reg2, Key, NewVal) || Key <- Keys],
+    [{ok, NewVal} = tango_dt_map:get(Reg2b, Key) || Key <- Keys],
+    [{ok, NewVal} = tango_dt_map:get(Reg2, Key) || Key <- Keys], % sanity
+
+    ok.
+
 -endif. % not PULSE
 -endif. % TEST

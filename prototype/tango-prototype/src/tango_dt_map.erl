@@ -18,16 +18,18 @@
 %%
 %% -------------------------------------------------------------------
 
--module(tango_dt_register).
+-module(tango_dt_map).
 
 -behaviour(tango_dt).
 
 -export([start_link/4,
-         set/2, get/1]).
+         set/3, get/2]).
 
 %% Tango datatype callbacks
 -export([fresh/0,
          do_pure_op/2, do_dirty_op/6, play_log_mutate_i_state/3]).
+
+-define(DICTMOD, dict).
 
 -define(LONG_TIME, 30*1000).
 
@@ -36,20 +38,20 @@ start_link(PageSize, SequencerPid, Proj, StreamNum) ->
                           [PageSize, SequencerPid, Proj, ?MODULE, StreamNum],
                           []).
 
-set(Pid, Val) ->
-    gen_server:call(Pid, {cb_dirty_op, {o_set, Val}}, ?LONG_TIME).
+set(Pid, Key, Val) ->
+    gen_server:call(Pid, {cb_dirty_op, {o_set, Key, Val}}, ?LONG_TIME).
 
-get(Pid) ->
-    gen_server:call(Pid, {cb_pure_op, {o_get}}, ?LONG_TIME).
+get(Pid, Key) ->
+    gen_server:call(Pid, {cb_pure_op, {o_get, Key}}, ?LONG_TIME).
 
 
 fresh() ->
-    undefined.
+    ?DICTMOD:new().
 
-do_pure_op({o_get}, Register) ->
-    {ok, Register}.
+do_pure_op({o_get, Key}, Dict) ->
+    ?DICTMOD:find(Key, Dict).
 
-do_dirty_op({o_set, _Val}=Op,
+do_dirty_op({o_set, _Key, _Val}=Op,
             I_State, StreamNum, Proj0, PageSize, BackPs) ->
     Page = term_to_binary(Op),
     FullPage = tango:pack_v1([{StreamNum, BackPs}], Page, PageSize),
@@ -59,8 +61,8 @@ do_dirty_op({o_set, _Val}=Op,
     {ok, I_State, Proj1, LPN, NewBackPs}.
 
 play_log_mutate_i_state(Pages, _SideEffectsP, I_State) ->
-    lists:foldl(fun({o_set, Val}=_Op, _OldVal) ->
-                        Val
+    lists:foldl(fun({o_set, Key, Val}=_Op, Dict) ->
+                        ?DICTMOD:store(Key, Val, Dict)
                 end,
                 I_State,
                 [binary_to_term(Page) || Page <- Pages]).
