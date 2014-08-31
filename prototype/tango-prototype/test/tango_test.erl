@@ -157,5 +157,35 @@ scan_backward_test_int(PageSize, _Seq, P1) ->
 
     ok.
 
+tango_dt_register_test() ->
+    ok = run_test("/tmp", "tango_dt_register",
+                  4096, 5*1024, 1, fun tango_dt_register_int/3).
+
+tango_dt_register_int(PageSize, Seq, Proj) ->
+    {ok, OID_Map} = tango_oid:start_link(PageSize, Seq, Proj),
+
+    {ok, Reg1Num} = tango_oid:new(OID_Map, "register1"),
+    {ok, Reg1} = tango_dt_register:start_link(PageSize, Seq, Proj,
+                                              tango_dt_register, Reg1Num),
+    {ok, Reg2Num} = tango_oid:new(OID_Map, "register2"),
+    {ok, Reg2} = tango_dt_register:start_link(PageSize, Seq, Proj,
+                                              tango_dt_register, Reg2Num),
+
+    NumVals = 8,
+    Vals = [lists:flatten(io_lib:format("version ~w", [X])) ||
+               X <- lists:seq(1, NumVals)],
+    [tango_dt_register:set(Reg, Val) || Reg <- [Reg1, Reg2], Val <- Vals],
+    LastVal = lists:last(Vals),
+    {ok, LastVal} = tango_dt_register:get(Reg1),
+    {ok, LastVal} = tango_dt_register:get(Reg2),
+
+    %% If we instantiate a new instance of an existing register, then
+    %% a single get should show the most recent modification.
+    {ok, Reg2b} = tango_dt_register:start_link(PageSize, Seq, Proj,
+                                              tango_dt_register, Reg2Num),
+    {ok, LastVal} = tango_dt_register:get(Reg2b),
+
+    ok.
+
 -endif. % not PULSE
 -endif. % TEST

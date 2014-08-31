@@ -23,7 +23,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/4, stop/1,
+-export([start_link/3, stop/1,
          new/2, get/2]).
 
 %% gen_server callbacks
@@ -47,16 +47,15 @@
           page_size :: non_neg_integer(),       % CORFU page size
           seq :: pid(),                         % sequencer pid
           proj :: term(),                       % projection
-          cb_mod :: atom(),                     % callback module
           last_read_lpn :: lpn(),               %
           last_write_lpn :: lpn(),
           back_ps :: [lpn()],                   % back pointers (up to 4)
           i_state :: term()                     % internal state thingie
          }).
 
-start_link(PageSize, SequencerPid, Proj, CallbackMod) ->
+start_link(PageSize, SequencerPid, Proj) ->
     gen_server:start_link(?MODULE,
-                          [PageSize, SequencerPid, Proj, CallbackMod], []).
+                          [PageSize, SequencerPid, Proj], []).
 
 stop(Pid) ->
     gen_server:call(Pid, {stop}, ?LONG_TIME).
@@ -69,26 +68,25 @@ get(Pid, Key) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init([PageSize, SequencerPid, Proj, CallbackMod]) ->
+init([PageSize, SequencerPid, Proj]) ->
     LastLPN = find_last_lpn(SequencerPid),
     {BackPs, Pages} = fetch_unread_pages(Proj, LastLPN, 0),
-    I_State = play_log_pages(Pages, CallbackMod:fresh(), CallbackMod, false),
+    I_State = play_log_pages(Pages, fresh(), ?MODULE, false),
     {ok, #state{page_size=PageSize,
                 seq=SequencerPid,
                 proj=Proj,
-                cb_mod=CallbackMod,
                 last_read_lpn=LastLPN,
                 last_write_lpn=LastLPN,
                 back_ps=BackPs,
                 i_state=I_State}}.
 
 handle_call({new, Key}, From,
-            #state{proj=Proj0, cb_mod=CallbackMod,
+            #state{proj=Proj0,
                    page_size=PageSize, back_ps=BackPs, i_state=I_State}=State) ->
     Op = {new_oid, Key, From},
     {_Res, I_State2, Proj1, LPN, NewBackPs} =
-        CallbackMod:do_dirty_op(Op, I_State, ?OID_STREAM_NUMBER,
-                                Proj0, PageSize, BackPs),
+        do_dirty_op(Op, I_State, ?OID_STREAM_NUMBER,
+                    Proj0, PageSize, BackPs),
     %% Let's see how much trouble we can get outselves in here.
     %% If we're here, then we've written to the log without error.
     %% So then the cast to roll forward must see that log entry
@@ -99,9 +97,9 @@ handle_call({new, Key}, From,
                           proj=Proj1,
                           last_write_lpn=LPN,
                           back_ps=NewBackPs}};
-handle_call({get, _Key}=Op, _From, #state{cb_mod=CallbackMod} = State) ->
+handle_call({get, _Key}=Op, _From, State) ->
     State2 = #state{i_state=I_State} = roll_log_forward(State),
-    Reply = CallbackMod:do_pure_op(Op, I_State),
+    Reply = do_pure_op(Op, I_State),
     {reply, Reply, State2};
 handle_call({stop}, _From, State) ->
     {stop, normal, ok, State};
@@ -154,8 +152,8 @@ fetch_unread_pages(Proj, LastLPN, StopAtLPN) ->
     {BackPs, Pages}.
 
 play_log_pages(Pages, SideEffectsP,
-               #state{cb_mod=CallbackMod, i_state=I_State} = State) ->
-    I_State2 = play_log_pages(Pages, I_State, CallbackMod, SideEffectsP),
+               #state{i_state=I_State} = State) ->
+    I_State2 = play_log_pages(Pages, I_State, ?MODULE, SideEffectsP),
     State#state{i_state=I_State2}.
 
 play_log_pages(Pages, I_State, CallbackMod, SideEffectsP) ->
