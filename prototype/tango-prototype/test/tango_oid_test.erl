@@ -36,7 +36,7 @@ tango_oid_smoke_test() ->
                              fun tango_oid_smoke_test_int/3).
 
 tango_oid_smoke_test_int(PageSize, Seq, Proj) ->
-    {ok, OID_Map} = tango_oid:start_link(PageSize, Seq, Proj, tango_dt_map),
+    {ok, OID_Map} = tango_oid:start_link(PageSize, Seq, Proj, tango_oid),
 
     ok = tango_oid:stop(OID_Map),
     ok.
@@ -46,17 +46,21 @@ tango_oid_one_test() ->
                              fun tango_oid_one_test_int/3).
 
 tango_oid_one_test_int(PageSize, Seq, Proj) ->
-    {ok, OID_Map} = tango_oid:start_link(PageSize, Seq, Proj, tango_dt_map),
+    {ok, OID_Map} = tango_oid:start_link(PageSize, Seq, Proj, tango_oid),
 
     try
         K1 = foo,
-        V1 = bar1,
-        V2 = bar2,
-        ok = tango_oid:put(OID_Map, K1, V1),
-        {ok, V1} = tango_oid:get(OID_Map, K1),
-        ok = tango_oid:put(OID_Map, K1, V2),
-        {ok, V2} = tango_oid:get(OID_Map, K1),
+        K2 = bar,
+        OID_Num1 = 1,
+        {ok, OID_Num1} = tango_oid:new(OID_Map, K1),
+        {ok, OID_Num1} = tango_oid:get(OID_Map, K1),
+        already_exists = tango_oid:new(OID_Map, K1),
+        %% The V2 put should *not* have clobbered the previous value
+        {ok, OID_Num1} = tango_oid:get(OID_Map, K1),
         error = tango_oid:get(OID_Map, "does not exist"),
+
+        {ok, OID_Num2} = tango_oid:new(OID_Map, K2),
+        {ok, OID_Num2} = tango_oid:get(OID_Map, K2),
 
         ok
     after
