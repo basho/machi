@@ -20,7 +20,8 @@
 
 -module(corfurl_client).
 
--export([append_page/2, read_page/2, fill_page/2, trim_page/2, scan_forward/3]).
+-export([append_page/2, append_page/3,
+         read_page/2, fill_page/2, trim_page/2, scan_forward/3]).
 -export([restart_sequencer/1]).
 %% For debugging/verification only
 -export([pulse_tracing_start/1, pulse_tracing_add/2, pulse_tracing_get/1]).
@@ -31,33 +32,36 @@
 %% -define(LONG_TIME, 30*1000).
 
 append_page(Proj, Page) ->
-    append_page(Proj, Page, 5).
+    append_page(Proj, Page, []).
 
-append_page(Proj, _Page, 0) ->
+append_page(Proj, Page, StreamList) ->
+    append_page(Proj, Page, StreamList, 5).
+
+append_page(Proj, _Page, _StreamList, 0) ->
     {{error_failed, ?MODULE, ?LINE}, Proj};
-append_page(#proj{seq={Sequencer,_,_}} = Proj, Page, Retries) ->
+append_page(#proj{seq={Sequencer,_,_}} = Proj, Page, StreamList, Retries) ->
     try
-        {ok, LPN} = corfurl_sequencer:get(Sequencer, 1),
+        {ok, LPN} = corfurl_sequencer:get(Sequencer, 1, StreamList),
         pulse_tracing_add(write, LPN),
-        append_page1(Proj, LPN, Page, 5)
+        append_page1(Proj, LPN, Page, StreamList, 5)
     catch
         exit:{Reason,{_gen_server_or_pulse_gen_server,call,[Sequencer|_]}}
           when Reason == noproc; Reason == normal ->
-            append_page(restart_sequencer(Proj), Page, Retries);
+            append_page(restart_sequencer(Proj), Page, StreamList, Retries);
         exit:Exit ->
             {{error_failed, ?MODULE, ?LINE}, incomplete_code, Exit}
     end.
 
-append_page1(Proj, _LPN, _Page, 0) ->
+append_page1(Proj, _LPN, _Page, _StreamList, 0) ->
     {{error_failed, ?MODULE, ?LINE}, Proj};
-append_page1(Proj, LPN, Page, Retries) ->
+append_page1(Proj, LPN, Page, StreamList, Retries) ->
     case append_page2(Proj, LPN, Page) of
         lost_race ->
-            append_page(Proj, Page, Retries - 1);
+            append_page(Proj, Page, StreamList, Retries - 1);
         error_badepoch ->
             case poll_for_new_epoch_projection(Proj) of
                 {ok, NewProj} ->
-                    append_page1(NewProj, LPN, Page, Retries - 1);
+                    append_page1(NewProj, LPN, Page, StreamList, Retries - 1);
                 Else ->
                     {Else, Proj}
             end;

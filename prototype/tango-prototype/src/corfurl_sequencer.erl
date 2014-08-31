@@ -45,6 +45,8 @@
 %% -define(LONG_TIME, 30*1000).
 -define(LONG_TIME, 5*1000).
 
+-define(D(X), io:format(user, "Dbg: ~s =\n  ~p\n", [??X, X])).
+
 start_link(FLUs) ->
     start_link(FLUs, standard).
 
@@ -124,7 +126,7 @@ handle_call({get, NumPages, StreamList, LC}, _From,
      {Tab, MLP + NumPages, BadPercent, MaxDifference}};
 handle_call({get_tails, StreamList, LC}, _From, MLP_tuple) ->
     Tab = element(1, MLP_tuple),
-    Tails = [ets:lookup_element(Tab, Stream, 2) || Stream <- StreamList],
+    Tails = [(catch ets:lookup_element(Tab, Stream, 2)) || Stream <- StreamList],
     NewLC = lclock_update(LC),
     {reply, {{ok, Tails}, NewLC}, MLP_tuple};
 handle_call({set_tails, StreamTails}, _From, MLP_tuple) ->

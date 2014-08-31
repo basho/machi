@@ -183,7 +183,8 @@ do_dirty_op({new_oid, _Key, _From}=Op,
             I_State, StreamNum, Proj0, PageSize, BackPs) ->
     Page = term_to_binary(Op),
     FullPage = tango:pack_v1([{StreamNum, BackPs}], Page, PageSize),
-    {{ok, LPN}, Proj1} = corfurl_client:append_page(Proj0, FullPage),
+    {{ok, LPN}, Proj1} = corfurl_client:append_page(Proj0, FullPage,
+                                                    [StreamNum]),
     NewBackPs = tango:add_back_pointer(BackPs, LPN),
     {ok, I_State, Proj1, LPN, NewBackPs}.
 
