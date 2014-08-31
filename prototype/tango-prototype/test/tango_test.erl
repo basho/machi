@@ -166,10 +166,10 @@ tango_dt_register_int(PageSize, Seq, Proj) ->
 
     {ok, Reg1Num} = tango_oid:new(OID_Map, "register1"),
     {ok, Reg1} = tango_dt_register:start_link(PageSize, Seq, Proj,
-                                              tango_dt_register, Reg1Num),
+                                              Reg1Num),
     {ok, Reg2Num} = tango_oid:new(OID_Map, "register2"),
     {ok, Reg2} = tango_dt_register:start_link(PageSize, Seq, Proj,
-                                              tango_dt_register, Reg2Num),
+                                              Reg2Num),
 
     NumVals = 8,
     Vals = [lists:flatten(io_lib:format("version ~w", [X])) ||
@@ -182,7 +182,7 @@ tango_dt_register_int(PageSize, Seq, Proj) ->
     %% If we instantiate a new instance of an existing register, then
     %% a single get should show the most recent modification.
     {ok, Reg2b} = tango_dt_register:start_link(PageSize, Seq, Proj,
-                                              tango_dt_register, Reg2Num),
+                                               Reg2Num),
     {ok, LastVal} = tango_dt_register:get(Reg2b),
     %% If we update the "old" instance of a register, then the "new"
     %% instance should also see the update.
