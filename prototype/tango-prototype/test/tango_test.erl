@@ -35,6 +35,8 @@
 -define(SEQ, corfurl_sequencer).
 -define(T, tango).
 
+-define(D(X), io:format(user, "Dbg: ~s =\n  ~p\n", [??X, X])).
+
 -ifdef(TEST).
 -ifndef(PULSE).
 
@@ -225,6 +227,44 @@ tango_dt_map_int(PageSize, Seq, Proj) ->
     [ok = tango_dt_map:set(Reg2, Key, NewVal) || Key <- Keys],
     [{ok, NewVal} = tango_dt_map:get(Reg2b, Key) || Key <- Keys],
     [{ok, NewVal} = tango_dt_map:get(Reg2, Key) || Key <- Keys], % sanity
+
+    ok.
+
+tango_dt_queue_test() ->
+    ok = run_test("/tmp", "tango_dt_queue",
+                  4096, 5*1024, 1, fun tango_dt_queue_int/3).
+
+tango_dt_queue_int(PageSize, Seq, Proj) ->
+    {ok, OID_Map} = tango_oid:start_link(PageSize, Seq, Proj),
+
+    {ok, Q1Num} = tango_oid:new(OID_Map, "queue1"),
+    {ok, Q1} = tango_dt_queue:start_link(PageSize, Seq, Proj, Q1Num),
+
+    {ok, true} = tango_dt_queue:is_empty(Q1),
+    {ok, 0} = tango_dt_queue:length(Q1),
+    Num1 = 5,
+    Seq1 = lists:seq(1, Num1),
+    RevSeq1 = lists:reverse(Seq1),
+    [ok = tango_dt_queue:in(Q1, X) || X <- Seq1],
+    {ok, Num1} = tango_dt_queue:length(Q1),
+    {ok, {value, 1}} = tango_dt_queue:peek(Q1),
+    {ok, Seq1} = tango_dt_queue:to_list(Q1),
+    ok = tango_dt_queue:reverse(Q1),
+    {ok, RevSeq1} = tango_dt_queue:to_list(Q1),
+    ok = tango_dt_queue:reverse(Q1),
+
+    [{ok, {value, X}} = tango_dt_queue:out(Q1) || X <- lists:seq(1, Num1)],
+    {ok, empty} = tango_dt_queue:out(Q1),
+    {ok, []} = tango_dt_queue:to_list(Q1),
+
+    [ok = tango_dt_queue:in(Q1, X) || X <- Seq1],
+    {ok, false} = tango_dt_queue:member(Q1, does_not_exist),
+    {ok, true} = tango_dt_queue:member(Q1, Num1),
+    ok = tango_dt_queue:filter(Q1, fun(X) when X == Num1 -> false;
+                                      (_)                -> true
+                                   end),
+    {ok, false} = tango_dt_queue:member(Q1, Num1),
+    {ok, true} = tango_dt_queue:member(Q1, Num1 - 1),
 
     ok.
 

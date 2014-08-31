@@ -27,7 +27,7 @@
 
 %% Tango datatype callbacks
 -export([fresh/0,
-         do_pure_op/2, do_dirty_op/6, play_log_mutate_i_state/3]).
+         do_pure_op/2, do_dirty_op/7, play_log_mutate_i_state/3]).
 
 -define(LONG_TIME, 30*1000).
 
@@ -49,14 +49,14 @@ fresh() ->
 do_pure_op({o_get}, Register) ->
     {ok, Register}.
 
-do_dirty_op({o_set, _Val}=Op,
+do_dirty_op({o_set, _Val}=Op, _From,
             I_State, StreamNum, Proj0, PageSize, BackPs) ->
     Page = term_to_binary(Op),
     FullPage = tango:pack_v1([{StreamNum, BackPs}], Page, PageSize),
     {{ok, LPN}, Proj1} = corfurl_client:append_page(Proj0, FullPage,
                                                     [StreamNum]),
     NewBackPs = tango:add_back_pointer(BackPs, LPN),
-    {ok, I_State, Proj1, LPN, NewBackPs}.
+    {op_t_async, I_State, Proj1, LPN, NewBackPs}.
 
 play_log_mutate_i_state(Pages, _SideEffectsP, I_State) ->
     lists:foldl(fun({o_set, Val}=_Op, _OldVal) ->
