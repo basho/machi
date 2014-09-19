@@ -75,7 +75,7 @@ checkpoint(Pid) ->
 
 init([PageSize, SequencerPid, Proj, CallbackMod, StreamNum]) ->
     LastLPN = find_last_lpn(SequencerPid),
-    {BackPs, Pages} = fetch_unread_pages(Proj, LastLPN, 0, StreamNum),
+    {BackPs, Pages} = fetch_unread_pages(Proj, LastLPN, 0, [], StreamNum),
     I_State = play_log_pages(Pages, CallbackMod:fresh(), CallbackMod, false),
     {ok, #state{page_size=PageSize,
                 seq=SequencerPid,
@@ -153,17 +153,18 @@ fetch_unread_pages(LastLPN, State) ->
     fetch_unread_pages2(LastLPN, State).
 
 fetch_unread_pages2(LastLPN,
-                    #state{proj=Proj, stream_num=StreamNum,
+                    #state{proj=Proj, stream_num=StreamNum, back_ps=OldBackPs,
                           last_read_lpn=StopAtLPN} = State) ->
-    {BackPs, Pages} = fetch_unread_pages(Proj, LastLPN, StopAtLPN, StreamNum),
+    {BackPs, Pages} = fetch_unread_pages(Proj, LastLPN, StopAtLPN,
+                                         OldBackPs, StreamNum),
     {Pages, State#state{last_read_lpn=LastLPN, back_ps=BackPs}}.
 
-fetch_unread_pages(Proj, LastLPN, StopAtLPN, StreamNum) ->
+fetch_unread_pages(Proj, LastLPN, StopAtLPN, OldBackPs, StreamNum) ->
     LPNandPages = tango:scan_backward(Proj, StreamNum, LastLPN,
                                       StopAtLPN, true),
     {LPNs, Pages} = lists:unzip(LPNandPages),
     BackPs = lists:foldl(fun(P, BPs) -> tango:add_back_pointer(BPs, P) end,
-                         [], LPNs),
+                         OldBackPs, LPNs),
     {BackPs, Pages}.
 
 play_log_pages(Pages, SideEffectsP,
