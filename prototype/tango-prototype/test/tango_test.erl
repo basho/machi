@@ -243,37 +243,57 @@ tango_dt_queue_test() ->
                   4096, 5*1024, 1, fun tango_dt_queue_int/3).
 
 tango_dt_queue_int(PageSize, Seq, Proj) ->
+    MOD = tango_dt_queue,
     {ok, OID_Map} = tango_oid:start_link(PageSize, Seq, Proj),
 
     {ok, Q1Num} = tango_oid:new(OID_Map, "queue1"),
-    {ok, Q1} = tango_dt_queue:start_link(PageSize, Seq, Proj, Q1Num),
+    {ok, Q1} = MOD:start_link(PageSize, Seq, Proj, Q1Num),
 
-    {ok, true} = tango_dt_queue:is_empty(Q1),
-    {ok, 0} = tango_dt_queue:length(Q1),
-    Num1 = 5,
+    {ok, true} = MOD:is_empty(Q1),
+    {ok, 0} = MOD:length(Q1),
+    Num1 = 15,
     Seq1 = lists:seq(1, Num1),
     RevSeq1 = lists:reverse(Seq1),
-    [ok = tango_dt_queue:in(Q1, X) || X <- Seq1],
-    {ok, Num1} = tango_dt_queue:length(Q1),
-    {ok, {value, 1}} = tango_dt_queue:peek(Q1),
-    {ok, Seq1} = tango_dt_queue:to_list(Q1),
-    ok = tango_dt_queue:reverse(Q1),
-    {ok, RevSeq1} = tango_dt_queue:to_list(Q1),
-    ok = tango_dt_queue:reverse(Q1),
+    [ok = MOD:in(Q1, X) || X <- Seq1],
+    {ok, Num1} = MOD:length(Q1),
+    {ok, {value, 1}} = MOD:peek(Q1),
+    {ok, Seq1} = MOD:to_list(Q1),
+    ok = MOD:reverse(Q1),
+    {ok, RevSeq1} = MOD:to_list(Q1),
+    ok = MOD:reverse(Q1),
 
-    [{ok, {value, X}} = tango_dt_queue:out(Q1) || X <- lists:seq(1, Num1)],
-    {ok, empty} = tango_dt_queue:out(Q1),
-    {ok, []} = tango_dt_queue:to_list(Q1),
+    [{ok, {value, X}} = MOD:out(Q1) || X <- lists:seq(1, Num1)],
+    {ok, empty} = MOD:out(Q1),
+    {ok, []} = MOD:to_list(Q1),
 
-    [ok = tango_dt_queue:in(Q1, X) || X <- Seq1],
-    {ok, false} = tango_dt_queue:member(Q1, does_not_exist),
-    {ok, true} = tango_dt_queue:member(Q1, Num1),
-    ok = tango_dt_queue:filter(Q1, fun(X) when X == Num1 -> false;
-                                      (_)                -> true
-                                   end),
-    {ok, false} = tango_dt_queue:member(Q1, Num1),
-    {ok, true} = tango_dt_queue:member(Q1, Num1 - 1),
+    [ok = MOD:in(Q1, X) || X <- Seq1],
+    {ok, false} = MOD:member(Q1, does_not_exist),
+    {ok, true} = MOD:member(Q1, Num1),
+    ok = MOD:filter(Q1, fun(X) when X == Num1 -> false;
+                           (_)                -> true
+                        end),
+    Num1Minus1 = Num1 - 1,
+    C1 = fun(Q, Expected) -> {ok, false} = MOD:member(Q, Num1),
+                             {ok, true} = MOD:member(Q, Num1 - 1),
+                             {ok, Expected} = MOD:length(Q), ok end,
+    ok = C1(Q1, Num1Minus1),
 
+    {ok, Q2} = MOD:start_link(PageSize, Seq, Proj, Q1Num),
+    ok = C1(Q2, Num1Minus1),
+    ok = MOD:in(Q2, 88),
+    ok = C1(Q2, Num1),
+    ok = C1(Q1, Num1),
+
+    [ok = MOD:checkpoint(Q1) || _ <- lists:seq(1, 4)],
+    [ok = C1(X, Num1) || X <- [Q1, Q2]],
+    {ok, Q3} = MOD:start_link(PageSize, Seq, Proj, Q1Num),
+    [ok = C1(X, Num1) || X <- [Q1, Q2, Q3]],
+    {ok, Q4} = MOD:start_link(PageSize, Seq, Proj, Q1Num),
+    ok = MOD:in(Q4, 89),
+    Num1Plus1 = Num1 + 1,
+    [ok = C1(X, Num1Plus1) || X <- [Q1, Q2, Q3, Q4]],
+
+    [ok = MOD:stop(X) || X <- [Q1, Q2, Q3, Q4]],
     ok.
 
 -endif. % not PULSE

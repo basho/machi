@@ -70,11 +70,13 @@ do_dirty_op(Op0, _From,
     {op_t_async, I_State, Proj1, LPN, NewBackPs}.
 
 do_checkpoint(Register=_I_State) ->
-    [{o_set, Register}].
+    [{o_start_checkpoint},{o_set, Register}].
 
 play_log_mutate_i_state(Pages, _SideEffectsP, OldRegister=_I_State) ->
     lists:foldl(fun({o_set, Val}=_Op, _OldVal) ->
-                        Val
+                        Val;
+                   ({o_start_checkpoint}, _OldVal) ->
+                        fresh()
                 end,
                 OldRegister,
                 lists:append([binary_to_term(Page) || Page <- Pages])).

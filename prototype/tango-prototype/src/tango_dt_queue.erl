@@ -22,13 +22,15 @@
 
 -behaviour(tango_dt).
 
--export([start_link/4,
+-export([start_link/4, stop/1,
          is_empty/1, length/1, peek/1, to_list/1, member/2,
-         in/2, out/1, reverse/1, filter/2]).
+         in/2, out/1, reverse/1, filter/2,
+         checkpoint/1]).
 
 %% Tango datatype callbacks
 -export([fresh/0,
-         do_pure_op/2, do_dirty_op/7, play_log_mutate_i_state/3]).
+         do_pure_op/2, do_dirty_op/7, do_checkpoint/1,
+         play_log_mutate_i_state/3]).
 
 -define(LONG_TIME, 30*1000).
 
@@ -39,8 +41,8 @@ start_link(PageSize, SequencerPid, Proj, StreamNum) ->
                           [PageSize, SequencerPid, Proj, ?MODULE, StreamNum],
                           []).
 
-%% set(Pid, Val) ->
-%%     gen_server:call(Pid, {cb_dirty_op, {o_set, Val}}, ?LONG_TIME).
+stop(Pid) ->
+    tango_dt:stop(Pid).
 
 is_empty(Pid) ->
     gen_server:call(Pid, {cb_pure_op, {o_is_empty}}, ?LONG_TIME).
@@ -69,6 +71,9 @@ reverse(Pid) ->
 filter(Pid, Fun) ->
     gen_server:call(Pid, {cb_dirty_op, {o_filter, Fun}}, ?LONG_TIME).
 
+checkpoint(Pid) ->
+    tango_dt:checkpoint(Pid).
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 fresh() ->
@@ -95,6 +100,9 @@ do_dirty_op(Op0, From,
     NewBackPs = tango:add_back_pointer(BackPs, LPN),
     {AsyncType, I_State, Proj1, LPN, NewBackPs}.
 
+do_checkpoint(Q=_I_State) ->
+    [{o_start_checkpoint}|[{o_in, X} || X <- queue:to_list(Q)]].
+
 play_log_mutate_i_state(Pages, _SideEffectsP, I_State) ->
     lists:foldl(fun({o_in, Val}=_Op, Q) ->
                         queue:in(Val, Q);
@@ -109,14 +117,18 @@ play_log_mutate_i_state(Pages, _SideEffectsP, I_State) ->
                    ({o_reverse}, Q) ->
                         queue:reverse(Q);
                    ({o_filter, Fun}, Q) ->
-                        queue:filter(Fun, Q)
+                        queue:filter(Fun, Q);
+                   ({o_start_checkpoint}, _Q) ->
+                        fresh()
                 end,
                 I_State,
-                [binary_to_term(Page) || Page <- Pages]).
+                lists:append([binary_to_term(Page) || Page <- Pages])).
     
 transform_dirty_op({o_out}, From) ->
     %% This func will be executed on the server side prior to writing
     %% to the log.
-    {op_t_sync, {o_out, From, node(), self()}};
+    {op_t_sync, [{o_out, From, node(), self()}]};
+transform_dirty_op(OpList, _From) when is_list(OpList) ->
+    {op_t_async, OpList};
 transform_dirty_op(Op, _From) ->
-    {op_t_async, Op}.
+    {op_t_async, [Op]}.
