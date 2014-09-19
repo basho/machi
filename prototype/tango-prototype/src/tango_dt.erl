@@ -23,7 +23,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/5, stop/1]).
+-export([start_link/5, stop/1, checkpoint/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -68,6 +68,9 @@ start_link(PageSize, SequencerPid, Proj, CallbackMod, StreamNum) ->
 stop(Pid) ->
     gen_server:call(Pid, {stop}, ?LONG_TIME).
 
+checkpoint(Pid) ->
+    gen_server:call(Pid, {sync_checkpoint}, ?LONG_TIME).
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init([PageSize, SequencerPid, Proj, CallbackMod, StreamNum]) ->
@@ -85,7 +88,7 @@ init([PageSize, SequencerPid, Proj, CallbackMod, StreamNum]) ->
 
 handle_call({cb_dirty_op, Op}, From,
             #state{proj=Proj0, cb_mod=CallbackMod, stream_num=StreamNum,
-                   page_size=PageSize, back_ps=BackPs, i_state=I_State}=State) ->
+                   page_size=PageSize, back_ps=BackPs, i_state=I_State}=State)->
     {AsyncType, I_State2, Proj1, LPN, NewBackPs} =
         CallbackMod:do_dirty_op(Op, From, I_State, StreamNum,
                                 Proj0, PageSize, BackPs),
@@ -102,6 +105,19 @@ handle_call({cb_pure_op, Op}, _From, #state{cb_mod=CallbackMod} = State) ->
     State2 = #state{i_state=I_State} = roll_log_forward(State),
     Reply = CallbackMod:do_pure_op(Op, I_State),
     {reply, Reply, State2};
+handle_call({sync_checkpoint}, From,
+            #state{proj=Proj0, cb_mod=CallbackMod, stream_num=StreamNum,
+                   page_size=PageSize, i_state=I_State}=State)->
+    CheckpointOps = CallbackMod:do_checkpoint(I_State),
+    CheckpointBackPs = [],
+    {_OpT, I_State2, Proj1, _LPN, NewBackPs} =
+        CallbackMod:do_dirty_op(CheckpointOps, From, I_State, StreamNum,
+                                Proj0, PageSize, CheckpointBackPs),
+    %% TODO: Use this LPN so that we can tell the corfurl log GC
+    %%       that we have created some dead bytes in the log.
+    {reply, ok, State#state{i_state=I_State2,
+                            proj=Proj1,
+                            back_ps=NewBackPs}};
 handle_call({stop}, _From, State) ->
     {stop, normal, ok, State};
 handle_call(_Request, _From, State) ->
