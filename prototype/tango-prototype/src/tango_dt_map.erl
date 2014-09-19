@@ -22,12 +22,14 @@
 
 -behaviour(tango_dt).
 
--export([start_link/4,
-         set/3, get/2]).
+-export([start_link/4, stop/1,
+         set/3, get/2,
+         checkpoint/1]).
 
 %% Tango datatype callbacks
 -export([fresh/0,
-         do_pure_op/2, do_dirty_op/7, play_log_mutate_i_state/3]).
+         do_pure_op/2, do_dirty_op/7, do_checkpoint/1,
+         play_log_mutate_i_state/3]).
 
 -define(DICTMOD, dict).
 
@@ -38,12 +40,19 @@ start_link(PageSize, SequencerPid, Proj, StreamNum) ->
                           [PageSize, SequencerPid, Proj, ?MODULE, StreamNum],
                           []).
 
+stop(Pid) ->
+    tango_dt:stop(Pid).
+
 set(Pid, Key, Val) ->
     gen_server:call(Pid, {cb_dirty_op, {o_set, Key, Val}}, ?LONG_TIME).
 
 get(Pid, Key) ->
     gen_server:call(Pid, {cb_pure_op, {o_get, Key}}, ?LONG_TIME).
 
+checkpoint(Pid) ->
+    tango_dt:checkpoint(Pid).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 fresh() ->
     ?DICTMOD:new().
@@ -51,8 +60,11 @@ fresh() ->
 do_pure_op({o_get, Key}, Dict) ->
     ?DICTMOD:find(Key, Dict).
 
-do_dirty_op({o_set, _Key, _Val}=Op, _From,
+do_dirty_op(Op0, _From,
             I_State, StreamNum, Proj0, PageSize, BackPs) ->
+    Op = if is_list(Op0) -> Op0;
+            true         -> [Op0]               % always make a list
+         end,
     Page = term_to_binary(Op),
     FullPage = tango:pack_v1([{StreamNum, BackPs}], Page, PageSize),
     {{ok, LPN}, Proj1} = corfurl_client:append_page(Proj0, FullPage,
@@ -60,10 +72,15 @@ do_dirty_op({o_set, _Key, _Val}=Op, _From,
     NewBackPs = tango:add_back_pointer(BackPs, LPN),
     {op_t_async, I_State, Proj1, LPN, NewBackPs}.
 
+do_checkpoint(Dict=_I_State) ->
+    [{o_start_checkpoint}|[{o_set, X, Y} || {X, Y} <- ?DICTMOD:to_list(Dict)]].
+
 play_log_mutate_i_state(Pages, _SideEffectsP, I_State) ->
     lists:foldl(fun({o_set, Key, Val}=_Op, Dict) ->
-                        ?DICTMOD:store(Key, Val, Dict)
+                        ?DICTMOD:store(Key, Val, Dict);
+                   ({o_start_checkpoint}, _Dict) ->
+                        fresh()
                 end,
                 I_State,
-                [binary_to_term(Page) || Page <- Pages]).
+                lists:append([binary_to_term(Page) || Page <- Pages])).
     

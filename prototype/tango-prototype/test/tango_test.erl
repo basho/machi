@@ -222,8 +222,10 @@ tango_dt_map_int(PageSize, Seq, Proj) ->
     [tango_dt_map:set(Reg, Key, Val) || Reg <- [Reg1, Reg2],
                                         Key <- Keys, Val <- Vals],
     LastVal = lists:last(Vals),
-    [{ok, LastVal} = tango_dt_map:get(Reg1, Key) || Key <- Keys],
-    [{ok, LastVal} = tango_dt_map:get(Reg2, Key) || Key <- Keys],
+    C1 = fun(R, LV) -> [{ok, LV} = tango_dt_map:get(R, Key) || Key <- Keys],
+                       ok end,
+    ok = C1(Reg1, LastVal),
+    ok = C1(Reg2, LastVal),
 
     %% If we instantiate a new instance of an existing map, then
     %% a single get should show the most recent modification.
@@ -233,8 +235,14 @@ tango_dt_map_int(PageSize, Seq, Proj) ->
     %% instance should also see the update.
     NewVal = {"Heh", "a new value"},
     [ok = tango_dt_map:set(Reg2, Key, NewVal) || Key <- Keys],
-    [{ok, NewVal} = tango_dt_map:get(Reg2b, Key) || Key <- Keys],
-    [{ok, NewVal} = tango_dt_map:get(Reg2, Key) || Key <- Keys], % sanity
+    [ok = C1(R, NewVal) || R <- [Reg2, Reg2b]],
+    [ok = C1(R, LastVal) || R <- [Reg1]],
+
+    [ok = tango_dt_map:checkpoint(R) || R <- [Reg1, Reg2, Reg2b]],
+    NewVal2 = "after the checkpoint....",
+    [ok = tango_dt_map:set(Reg2, Key, NewVal2) || Key <- Keys],
+    [ok = C1(R, NewVal2) || R <- [Reg2, Reg2b]],
+    [ok = C1(R, LastVal) || R <- [Reg1]],
 
     ok.
 
