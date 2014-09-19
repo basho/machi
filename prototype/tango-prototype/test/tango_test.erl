@@ -190,9 +190,17 @@ tango_dt_register_int(PageSize, Seq, Proj) ->
     %% instance should also see the update.
     NewVal = {"Heh", "a new value"},
     ok = tango_dt_register:set(Reg2, NewVal),
-    {ok, NewVal} = tango_dt_register:get(Reg2b),
-    {ok, NewVal} = tango_dt_register:get(Reg2), % sanity check
+    C1 = fun() -> {ok, NewVal} = tango_dt_register:get(Reg2), % sanity check
+                  {ok, NewVal} = tango_dt_register:get(Reg2b), ok end,
+    ok = C1(),
 
+    ok = tango_dt_register:checkpoint(Reg2),
+    ok = C1(),
+    {ok, Reg2c} = tango_dt_register:start_link(PageSize, Seq, Proj,
+                                               Reg2Num),
+    {ok, NewVal} = tango_dt_register:get(Reg2c),
+
+    [ok = tango_dt_register:stop(X) || X <- [Reg1, Reg2, Reg2b, Reg2c]],
     ok.
 
 tango_dt_map_test() ->

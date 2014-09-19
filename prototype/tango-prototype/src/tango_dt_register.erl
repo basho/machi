@@ -22,12 +22,14 @@
 
 -behaviour(tango_dt).
 
--export([start_link/4,
-         set/2, get/1]).
+-export([start_link/4, stop/1,
+         set/2, get/1,
+         checkpoint/1]).
 
 %% Tango datatype callbacks
 -export([fresh/0,
-         do_pure_op/2, do_dirty_op/7, play_log_mutate_i_state/3]).
+         do_pure_op/2, do_dirty_op/7, do_checkpoint/1,
+         play_log_mutate_i_state/3]).
 
 -define(LONG_TIME, 30*1000).
 
@@ -36,11 +38,17 @@ start_link(PageSize, SequencerPid, Proj, StreamNum) ->
                           [PageSize, SequencerPid, Proj, ?MODULE, StreamNum],
                           []).
 
+stop(Pid) ->
+    tango_dt:stop(Pid).
+
 set(Pid, Val) ->
     gen_server:call(Pid, {cb_dirty_op, {o_set, Val}}, ?LONG_TIME).
 
 get(Pid) ->
     gen_server:call(Pid, {cb_pure_op, {o_get}}, ?LONG_TIME).
+
+checkpoint(Pid) ->
+    tango_dt:checkpoint(Pid).
 
 
 fresh() ->
@@ -49,8 +57,11 @@ fresh() ->
 do_pure_op({o_get}, Register) ->
     {ok, Register}.
 
-do_dirty_op({o_set, _Val}=Op, _From,
+do_dirty_op(Op0, _From,
             I_State, StreamNum, Proj0, PageSize, BackPs) ->
+    Op = if is_list(Op0) -> Op0;
+            true         -> [Op0]               % always make a list
+         end,
     Page = term_to_binary(Op),
     FullPage = tango:pack_v1([{StreamNum, BackPs}], Page, PageSize),
     {{ok, LPN}, Proj1} = corfurl_client:append_page(Proj0, FullPage,
@@ -58,10 +69,13 @@ do_dirty_op({o_set, _Val}=Op, _From,
     NewBackPs = tango:add_back_pointer(BackPs, LPN),
     {op_t_async, I_State, Proj1, LPN, NewBackPs}.
 
-play_log_mutate_i_state(Pages, _SideEffectsP, I_State) ->
+do_checkpoint(Register=_I_State) ->
+    [{o_set, Register}].
+
+play_log_mutate_i_state(Pages, _SideEffectsP, OldRegister=_I_State) ->
     lists:foldl(fun({o_set, Val}=_Op, _OldVal) ->
                         Val
                 end,
-                I_State,
-                [binary_to_term(Page) || Page <- Pages]).
+                OldRegister,
+                lists:append([binary_to_term(Page) || Page <- Pages])).
     
