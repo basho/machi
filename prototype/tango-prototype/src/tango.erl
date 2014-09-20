@@ -30,7 +30,8 @@
          scan_backward/4,
          scan_backward/5,
          pad_bin/2,
-         append_page/3]).
+         append_page/3,
+         back_ps2last_lpn/1]).
 
 -define(MAGIC_NUMBER_V1, 16#88990011).
 
@@ -87,8 +88,8 @@ add_back_pointer(BackPs, New) ->
     [New|BackPs].
 
 convert_options_list2int(Options) ->
-    lists:foldl(fun(to_final_page, Int) -> Int + 1;
-                   (_,             Int) -> Int
+    lists:foldl(fun(t_final_page, Int) -> Int + 1;
+                   (_,            Int) -> Int
                 end, 0, Options).
 
 scan_backward(Proj, Stream, LastLPN, WithPagesP) ->
@@ -161,7 +162,7 @@ append_page(#proj{seq={Sequencer,_,_}, page_size=PageSize} = Proj,
                                                             StreamList),
         %% pulse_tracing_add(write, LPN),
         StreamBackPs = lists:zip(StreamList, BackPsList),
-        Page = tango:pack_v1(StreamBackPs, [to_final_page],
+        Page = tango:pack_v1(StreamBackPs, [t_final_page],
                              OrigPage, PageSize),
         append_page1(Proj, LPN, Page, StreamList, 5, OrigPage)
     catch
@@ -204,3 +205,8 @@ append_page2(Proj, LPN, Page) ->
             XX
             %% Let it crash: error_unwritten
     end.
+
+back_ps2last_lpn([]) ->
+    0;
+back_ps2last_lpn([H|_]) ->
+    H.

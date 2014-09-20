@@ -28,7 +28,7 @@
 
 %% Tango datatype callbacks
 -export([fresh/0,
-         do_pure_op/2, do_dirty_op/7, do_checkpoint/1,
+         do_pure_op/2, do_dirty_op/6, do_checkpoint/1,
          play_log_mutate_i_state/3]).
 
 -define(DICTMOD, dict).
@@ -61,16 +61,13 @@ do_pure_op({o_get, Key}, Dict) ->
     ?DICTMOD:find(Key, Dict).
 
 do_dirty_op(Op0, _From,
-            I_State, StreamNum, Proj0, PageSize, BackPs) ->
+            I_State, StreamNum, Proj0, ___TODO_delme_PageSize) ->
     Op = if is_list(Op0) -> Op0;
             true         -> [Op0]               % always make a list
          end,
     Page = term_to_binary(Op),
-    FullPage = tango:pack_v1([{StreamNum, BackPs}], Page, PageSize),
-    {{ok, LPN}, Proj1} = corfurl_client:append_page(Proj0, FullPage,
-                                                    [StreamNum]),
-    NewBackPs = tango:add_back_pointer(BackPs, LPN),
-    {op_t_async, I_State, Proj1, LPN, NewBackPs}.
+    {{ok, LPN}, Proj1} = tango:append_page(Proj0, Page, [StreamNum]),
+    {op_t_async, I_State, Proj1, LPN}.
 
 do_checkpoint(Dict=_I_State) ->
     [{o_start_checkpoint}|[{o_set, X, Y} || {X, Y} <- ?DICTMOD:to_list(Dict)]].

@@ -42,11 +42,12 @@
 
 pack_v1_test() ->
     [begin
-         Packed = ?T:pack_v1(StreamList, term_to_binary(Term), Size),
+         Packed = ?T:pack_v1(StreamList, Options, term_to_binary(Term), Size),
          StreamList = ?T:unpack_v1(Packed, stream_list),
          TermBin = ?T:unpack_v1(Packed, page),
          Term = binary_to_term(TermBin)
      end || StreamList <- [[], [1], [1,2,4]],
+            Options <- [[]],
             Term <- [foo, {bar, baz, <<"yo">>}],
             Size <- lists:seq(100, 5000, 500)].
 
@@ -67,7 +68,7 @@ smoke_test() ->
 
 smoke_test_int(PageSize, Seq, P1) ->
     ok = ?SEQ:set_tails(Seq, [{42,4242}, {43,4343}]),
-    {ok, [4242, 4343]} = ?SEQ:get_tails(Seq, [42, 43]),
+    {ok, _, [4242, 4343]} = ?SEQ:get_tails(Seq, 0, [42, 43]),
 
     LPN_Pgs = [{X, ?T:pad_bin(PageSize, term_to_binary({smoke, X}))} ||
                   X <- lists:seq(1, 5)],
@@ -97,16 +98,16 @@ write_forward_test_int(PageSize, _Seq, P1) ->
 write_stream_pages(Proj0, Pages, PageSize, InitialBackPs, StreamNum) ->
     write_stream_pages(Proj0, Pages, PageSize, InitialBackPs, StreamNum, 0).
 
-write_stream_pages(Proj0, Pages, PageSize, InitialBackPs, StreamNum, Junk) ->
-    WriteJunk = fun() -> JP0 = tango:pack_v1([], <<>>, PageSize),
-                         {{ok, _}, _} = corfurl_client:append_page(Proj0, JP0)
+write_stream_pages(Proj0, Pages, _PageSize, InitialBackPs, StreamNum, Junk) ->
+    WriteJunk = fun() -> JP0 = <<"blah">>,
+                         {{ok, _}, _} = tango:append_page(Proj0, JP0,
+                                                          [StreamNum])
                 end,
     F = fun(Page, {Proj1, BackPs}) ->
                 if Junk band 1 /= 0 -> WriteJunk();
                    true             -> ok end,
-                FullPage = tango:pack_v1(BackPs, Page, PageSize),
                 {{ok, LPN}, Proj2} =
-                    corfurl_client:append_page(Proj1, FullPage),
+                    tango:append_page(Proj1, Page, [StreamNum]),
                 if Junk band 1 /= 0 -> WriteJunk();
                    true             -> ok end,
                 {Proj2, tango:add_back_pointer(StreamNum, BackPs, LPN)}

@@ -39,10 +39,10 @@
           page_size :: non_neg_integer(),       % Corfurl page size
           seq :: pid(),                         % sequencer pid
           proj :: term(),                       % projection
-          stream_num :: non_neg_integer(),         % this instance's OID number
+          stream_num :: non_neg_integer(),      % this instance's OID number
           cb_mod :: atom(),                     % callback module
-          last_read_lpn :: lpn(),               %
-          back_ps :: [lpn()],                   % back pointers (up to 4)
+          last_fetch_lpn :: lpn(),              %
+          all_back_ps :: [lpn()],               % All back-pointers LIFO order!
           i_state :: term()                     % internal state thingie
          }).
 
@@ -53,8 +53,7 @@
 -callback do_pure_op(term(), callback_i_state()) -> term().
 -callback do_dirty_op(term(), gen_server_from(), callback_i_state(),
                       StreamNum::non_neg_integer(),
-                      Proj0::term(), PageSize::non_neg_integer(),
-                      BackPs::list()) ->
+                      Proj0::term(), PageSize::non_neg_integer()) ->
     {Reply::term(), New_I_State::callback_i_state(),
      Proj::term(), LPN::non_neg_integer(), NewBackPs::list()}.
 -callback play_log_mutate_i_state([binary()], boolean(), callback_i_state()) ->
@@ -74,31 +73,32 @@ checkpoint(Pid) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init([PageSize, SequencerPid, Proj, CallbackMod, StreamNum]) ->
-    LastLPN = find_last_lpn(SequencerPid),
-    {BackPs, Pages} = fetch_unread_pages(Proj, LastLPN, 0, [], StreamNum),
+    LastLPN = find_last_lpn(SequencerPid, StreamNum),
+    {LPNs, Pages} = fetch_unread_pages(Proj, LastLPN, 0, StreamNum),
+    BackPs = lists:reverse(LPNs),
+    LastFetchLPN = tango:back_ps2last_lpn(BackPs),
     I_State = play_log_pages(Pages, CallbackMod:fresh(), CallbackMod, false),
     {ok, #state{page_size=PageSize,
                 seq=SequencerPid,
                 proj=Proj,
                 cb_mod=CallbackMod,
                 stream_num=StreamNum,
-                last_read_lpn=LastLPN,
-                back_ps=BackPs,
+                last_fetch_lpn=LastFetchLPN,
+                all_back_ps=BackPs,
                 i_state=I_State}}.
 
 handle_call({cb_dirty_op, Op}, From,
             #state{proj=Proj0, cb_mod=CallbackMod, stream_num=StreamNum,
-                   page_size=PageSize, back_ps=BackPs, i_state=I_State}=State)->
-    {AsyncType, I_State2, Proj1, LPN, NewBackPs} =
+                   page_size=PageSize, i_state=I_State}=State)->
+    {AsyncType, I_State2, Proj1, _LPN} =
         CallbackMod:do_dirty_op(Op, From, I_State, StreamNum,
-                                Proj0, PageSize, BackPs),
+                                Proj0, PageSize),
     State2 = State#state{i_state=I_State2,
-                         proj=Proj1,
-                         back_ps=NewBackPs},
+                         proj=Proj1},
     if AsyncType == op_t_async ->
             {reply, ok, State2};
        AsyncType == op_t_sync ->
-            State3 = roll_log_forward(LPN, State2),
+            State3 = roll_log_forward(State2),
             {noreply, State3}
     end;
 handle_call({cb_pure_op, Op}, _From, #state{cb_mod=CallbackMod} = State) ->
@@ -109,15 +109,14 @@ handle_call({sync_checkpoint}, From,
             #state{proj=Proj0, cb_mod=CallbackMod, stream_num=StreamNum,
                    page_size=PageSize, i_state=I_State}=State)->
     CheckpointOps = CallbackMod:do_checkpoint(I_State),
-    CheckpointBackPs = [],
-    {_OpT, I_State2, Proj1, _LPN, NewBackPs} =
+    %% CheckpointBackPs = [],
+    {_OpT, I_State2, Proj1, _LPN} =
         CallbackMod:do_dirty_op(CheckpointOps, From, I_State, StreamNum,
-                                Proj0, PageSize, CheckpointBackPs),
+                                Proj0, PageSize),
     %% TODO: Use this LPN so that we can tell the corfurl log GC
     %%       that we have created some dead bytes in the log.
     {reply, ok, State#state{i_state=I_State2,
-                            proj=Proj1,
-                            back_ps=NewBackPs}};
+                            proj=Proj1}};
 handle_call({stop}, _From, State) ->
     {stop, normal, ok, State};
 handle_call(_Request, _From, State) ->
@@ -138,34 +137,17 @@ code_change(_OldVsn, State, _Extra) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-find_last_lpn(#state{seq=SequencerPid}) ->
-    find_last_lpn(SequencerPid);
-find_last_lpn(SequencerPid) ->
-    {ok, CurrentLPN} = corfurl_sequencer:get(SequencerPid, 0),
-    CurrentLPN - 1.
+find_last_lpn(SequencerPid, StreamNum) ->
+    {ok, _, [BackPs]} = corfurl_sequencer:get_tails(SequencerPid,
+                                                    0, [StreamNum]),
+    tango:back_ps2last_lpn(BackPs).
 
-fetch_unread_pages(#state{seq=SequencerPid, stream_num=StreamNum} = State) ->
-    {ok, [LastLPN]} = corfurl_sequencer:get_tails(SequencerPid,
-                                                  [StreamNum]),
-    fetch_unread_pages2(LastLPN, State).
-
-fetch_unread_pages(LastLPN, State) ->
-    fetch_unread_pages2(LastLPN, State).
-
-fetch_unread_pages2(LastLPN,
-                    #state{proj=Proj, stream_num=StreamNum, back_ps=OldBackPs,
-                          last_read_lpn=StopAtLPN} = State) ->
-    {BackPs, Pages} = fetch_unread_pages(Proj, LastLPN, StopAtLPN,
-                                         OldBackPs, StreamNum),
-    {Pages, State#state{last_read_lpn=LastLPN, back_ps=BackPs}}.
-
-fetch_unread_pages(Proj, LastLPN, StopAtLPN, OldBackPs, StreamNum) ->
+fetch_unread_pages(Proj, LastLPN, StopAtLPN, StreamNum)
+  when LastLPN >= StopAtLPN ->
+    %% ?D({fetch_unread_pages, LastLPN, StopAtLPN}),
     LPNandPages = tango:scan_backward(Proj, StreamNum, LastLPN,
                                       StopAtLPN, true),
-    {LPNs, Pages} = lists:unzip(LPNandPages),
-    BackPs = lists:foldl(fun(P, BPs) -> tango:add_back_pointer(BPs, P) end,
-                         OldBackPs, LPNs),
-    {BackPs, Pages}.
+    {_LPNs, _Pages} = lists:unzip(LPNandPages).
 
 play_log_pages(Pages, SideEffectsP,
                #state{cb_mod=CallbackMod, i_state=I_State} = State) ->
@@ -175,11 +157,16 @@ play_log_pages(Pages, SideEffectsP,
 play_log_pages(Pages, I_State, CallbackMod, SideEffectsP) ->
     CallbackMod:play_log_mutate_i_state(Pages, SideEffectsP, I_State).
 
-roll_log_forward(State) ->
-    {Pages, State2} = fetch_unread_pages(State),
-    play_log_pages(Pages, true, State2).
+roll_log_forward(#state{seq=SequencerPid, proj=Proj, all_back_ps=BackPs,
+                        stream_num=StreamNum,
+                        last_fetch_lpn=StopAtLPN} = State) ->
+    LastLPN = find_last_lpn(SequencerPid, StreamNum),
+    {LPNs, Pages} = fetch_unread_pages(Proj, LastLPN, StopAtLPN, StreamNum),
+    NewBPs = append_lpns(LPNs, BackPs),
+    play_log_pages(Pages, true, State#state{all_back_ps=NewBPs}).
 
-roll_log_forward(MaybeStartingLPN, State) ->
-    {Pages, State2} = fetch_unread_pages(MaybeStartingLPN, State),
-    play_log_pages(Pages, true, State2).
+append_lpns([], BPs) ->
+    BPs;
+append_lpns(LPNs, BPs) ->
+    lists:reverse(LPNs) ++ BPs.
 

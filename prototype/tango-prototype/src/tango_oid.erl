@@ -32,7 +32,7 @@
 
 %% Tango datatype callbacks (prototype)
 -export([fresh/0,
-         do_pure_op/2, do_dirty_op/5, play_log_mutate_i_state/3]).
+         do_pure_op/2, do_dirty_op/4, play_log_mutate_i_state/3]).
 
 -define(SERVER, ?MODULE).
 -define(OID_STREAM_NUMBER, 0).
@@ -68,10 +68,10 @@ get(Pid, Key) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init([PageSize, SequencerPid, Proj]) ->
-    LastLPN = find_last_lpn(SequencerPid),
-    {LPNs, Pages} = fetch_unread_pages(Proj, LastLPN, 0),
+    LastLPN = find_last_lpn(SequencerPid, ?OID_STREAM_NUMBER),
+    {LPNs, Pages} = fetch_unread_pages(Proj, LastLPN, 0, ?OID_STREAM_NUMBER),
     BackPs = lists:reverse(LPNs),
-    LastFetchLPN = back_ps2last_lpn(BackPs),
+    LastFetchLPN = tango:back_ps2last_lpn(BackPs),
     I_State = play_log_pages(Pages, fresh(), ?MODULE, false),
     {ok, #state{page_size=PageSize,
                 seq=SequencerPid,
@@ -81,10 +81,10 @@ init([PageSize, SequencerPid, Proj]) ->
                 i_state=I_State}}.
 
 handle_call({new, Key}, From,
-            #state{proj=Proj0, page_size=PageSize, i_state=I_State}=State) ->
+            #state{proj=Proj0, i_state=I_State}=State) ->
     Op = {new_oid, Key, From, 0},
     {_Res, I_State2, Proj1, _LPN} =
-        do_dirty_op(Op, I_State, ?OID_STREAM_NUMBER, Proj0, PageSize),
+        do_dirty_op(Op, I_State, ?OID_STREAM_NUMBER, Proj0),
     %% Let's see how much trouble we can get outselves in here.
     %% If we're here, then we've written to the log without error.
     %% So then the cast to roll forward must see that log entry
@@ -120,28 +120,15 @@ code_change(_OldVsn, State, _Extra) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-back_ps2last_lpn([]) ->
-    0;
-back_ps2last_lpn([H|_]) ->
-    H.
+find_last_lpn(SequencerPid, StreamNum) ->
+    {ok, _, [BackPs]} = corfurl_sequencer:get_tails(SequencerPid,
+                                                    0, [StreamNum]),
+    tango:back_ps2last_lpn(BackPs).
 
-find_last_lpn(#state{seq=SequencerPid}) ->
-    find_last_lpn(SequencerPid);
-find_last_lpn(SequencerPid) ->
-    {ok, _, [BackPs]} = corfurl_sequencer:get_tails(SequencerPid, 0, [?OID_STREAM_NUMBER]),
-    back_ps2last_lpn(BackPs).
-
-%% fetch_unread_pages(#state{proj=Proj, last_fetch_lpn=StopAtLPN,
-%%                           all_back_ps=BPs} = State) ->
-%%     LastLPN = find_last_lpn(State),
-%%     {LPNs, Pages} = fetch_unread_pages(Proj, LastLPN, StopAtLPN),
-%%     NewBPs = append_lpns(LPNs, BPs),
-%%     {LPNs, Pages, State#state{last_fetch_lpn=LastLPN, all_back_ps=NewBPs}}.
-
-fetch_unread_pages(Proj, LastLPN, StopAtLPN)
+fetch_unread_pages(Proj, LastLPN, StopAtLPN, StreamNum)
   when LastLPN >= StopAtLPN ->
     %% ?D({fetch_unread_pages, LastLPN, StopAtLPN}),
-    LPNandPages = tango:scan_backward(Proj, ?OID_STREAM_NUMBER, LastLPN,
+    LPNandPages = tango:scan_backward(Proj, StreamNum, LastLPN,
                                       StopAtLPN, true),
     {_LPNs, _Pages} = lists:unzip(LPNandPages).
 
@@ -155,8 +142,8 @@ play_log_pages(Pages, I_State, CallbackMod, SideEffectsP) ->
 
 roll_log_forward(#state{seq=SequencerPid, proj=Proj, all_back_ps=BackPs,
                         last_fetch_lpn=StopAtLPN} = State) ->
-    LastLPN = find_last_lpn(SequencerPid),
-    {LPNs, Pages} = fetch_unread_pages(Proj, LastLPN, StopAtLPN),
+    LastLPN = find_last_lpn(SequencerPid, ?OID_STREAM_NUMBER),
+    {LPNs, Pages} = fetch_unread_pages(Proj, LastLPN, StopAtLPN, ?OID_STREAM_NUMBER),
     NewBPs = append_lpns(LPNs, BackPs),
     play_log_pages(Pages, true, State#state{all_back_ps=NewBPs}).
 
@@ -182,7 +169,7 @@ do_pure_op({get, Key}, #oid_map{map=Dict}) ->
     ?DICTMOD:find(Key, Dict).
 
 do_dirty_op({new_oid, _Key, _From, _NumOfAttempts}=Op,
-            I_State, StreamNum, Proj0, ___TODO_delme_PageSize) ->
+            I_State, StreamNum, Proj0) ->
     Page = term_to_binary(Op),
     {{ok, LPN}, Proj1} = tango:append_page(Proj0, Page, [StreamNum]),
     {ok, I_State, Proj1, LPN}.

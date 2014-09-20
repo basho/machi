@@ -29,7 +29,7 @@
 
 %% Tango datatype callbacks
 -export([fresh/0,
-         do_pure_op/2, do_dirty_op/7, do_checkpoint/1,
+         do_pure_op/2, do_dirty_op/6, do_checkpoint/1,
          play_log_mutate_i_state/3]).
 
 -define(LONG_TIME, 30*1000).
@@ -91,14 +91,11 @@ do_pure_op({o_member, X}, Q) ->
     {ok, queue:member(X, Q)}.
 
 do_dirty_op(Op0, From,
-            I_State, StreamNum, Proj0, PageSize, BackPs) ->
+            I_State, StreamNum, Proj0, ___TODO_delme_PageSize) ->
     {AsyncType, Op} = transform_dirty_op(Op0, From),
     Page = term_to_binary(Op),
-    FullPage = tango:pack_v1([{StreamNum, BackPs}], Page, PageSize),
-    {{ok, LPN}, Proj1} = corfurl_client:append_page(Proj0, FullPage,
-                                                    [StreamNum]),
-    NewBackPs = tango:add_back_pointer(BackPs, LPN),
-    {AsyncType, I_State, Proj1, LPN, NewBackPs}.
+    {{ok, LPN}, Proj1} = tango:append_page(Proj0, Page, [StreamNum]),
+    {AsyncType, I_State, Proj1, LPN}.
 
 do_checkpoint(Q=_I_State) ->
     [{o_start_checkpoint}|[{o_in, X} || X <- queue:to_list(Q)]].
