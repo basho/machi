@@ -24,7 +24,7 @@
 
 -export([start_link/1, start_link/2, start_link/3,
          stop/1, stop/2,
-         get/2, get/3, get_tails/2]).
+         get/2, get_tails/3]).
 -export([set_tails/2]).
 -ifdef(TEST).
 -compile(export_all).
@@ -77,17 +77,15 @@ stop(Pid, Method) ->
     end.
 
 get(Pid, NumPages) ->
-    get(Pid, NumPages, []).
-
-get(Pid, NumPages, StreamList) ->
-    {LPN, LC} = gen_server:call(Pid, {get, NumPages, StreamList, lclock_get()},
+    {LPN, LC} = gen_server:call(Pid, {get, NumPages, lclock_get()},
                                 ?LONG_TIME),
     lclock_update(LC),
     LPN.
 
-get_tails(Pid, StreamList) ->
-    {Tails, LC} = gen_server:call(Pid, {get_tails, StreamList, lclock_get()},
-                                  ?LONG_TIME),
+get_tails(Pid, NumPages, StreamList) ->
+    {Tails, LC} = gen_server:call(Pid,
+                                {get_tails, NumPages, StreamList, lclock_get()},
+                                ?LONG_TIME),
     lclock_update(LC),
     Tails.
 
@@ -108,13 +106,11 @@ init({FLUs, TypeOrSeed}) ->
             {ok, {Tab, MLP+1, BadPercent, MaxDifference}}
     end.
 
-handle_call({get, NumPages, StreamList, LC}, _From, {Tab, MLP}) ->
-    update_stream_tails(Tab, StreamList, MLP),
+handle_call({get, NumPages, LC}, _From, {Tab, MLP}) ->
     NewLC = lclock_update(LC),
     {reply, {{ok, MLP}, NewLC}, {Tab, MLP + NumPages}};
-handle_call({get, NumPages, StreamList, LC}, _From,
+handle_call({get, NumPages, LC}, _From,
             {Tab, MLP, BadPercent, MaxDifference}) ->
-    [ets:insert(Tab, {Stream, MLP}) || Stream <- StreamList],
     NewLC = lclock_update(LC),
     Fudge = case random:uniform(100) of
                 N when N < BadPercent ->
@@ -124,16 +120,23 @@ handle_call({get, NumPages, StreamList, LC}, _From,
             end,
     {reply, {{ok, erlang:max(1, MLP + Fudge)}, NewLC},
      {Tab, MLP + NumPages, BadPercent, MaxDifference}};
-handle_call({get_tails, StreamList, LC}, _From, MLP_tuple) ->
+handle_call({get_tails, NumPages, StreamList, LC}, _From, MLP_tuple) ->
     Tab = element(1, MLP_tuple),
+    MLP = element(2, MLP_tuple),
+    if NumPages > 0 ->
+            update_stream_tails(Tab, StreamList, MLP);
+       true ->
+            ok
+    end,
     Tails = [case (catch ets:lookup_element(Tab, Stream, 2)) of
                  {'EXIT', _} ->
-                     1;
+                     [];
                  Res ->
                      Res
              end || Stream <- StreamList],
     NewLC = lclock_update(LC),
-    {reply, {{ok, Tails}, NewLC}, MLP_tuple};
+    {reply, {{ok, MLP, Tails}, NewLC},
+     setelement(2, MLP_tuple, MLP + NumPages)};
 handle_call({set_tails, StreamTails}, _From, MLP_tuple) ->
     Tab = element(1, MLP_tuple),
     true = ets:delete_all_objects(Tab),

@@ -18,16 +18,19 @@
 %%
 %% -------------------------------------------------------------------
 
-%% A prototype implementation of Tango over CORFU.
+%% A prototype implementation of Tango over Corfurl.
 
 -module(tango).
 
--export([pack_v1/3, unpack_v1/2,
+-include("corfurl.hrl").
+
+-export([pack_v1/4, unpack_v1/2,
          add_back_pointer/2,
          add_back_pointer/3,
          scan_backward/4,
          scan_backward/5,
-         pad_bin/2]).
+         pad_bin/2,
+         append_page/3]).
 
 -define(MAGIC_NUMBER_V1, 16#88990011).
 
@@ -35,18 +38,23 @@
 
 %% TODO: for version 2: add strong checksum
 
-pack_v1(StreamList, Page, PageSize) when is_list(StreamList), is_binary(Page) ->
+pack_v1(StreamList, Options, Page, PageSize)
+  when is_list(StreamList), is_list(Options), is_binary(Page),
+       is_integer(PageSize), PageSize > 0 ->
     StreamListBin = term_to_binary(StreamList),
     StreamListSize = byte_size(StreamListBin),
+    OptionsInt = convert_options_list2int(Options),
     PageActualSize = byte_size(Page),
     pad_bin(PageSize,
             list_to_binary([<<?MAGIC_NUMBER_V1:32/big>>,
+                            <<OptionsInt:8/big>>,
                             <<StreamListSize:16/big>>,
                             StreamListBin,
                             <<PageActualSize:16/big>>,
                             Page])).
 
 unpack_v1(<<?MAGIC_NUMBER_V1:32/big,
+            _Options:8/big,
             StreamListSize:16/big, StreamListBin:StreamListSize/binary,
             PageActualSize:16/big, Page:PageActualSize/binary,
             _/binary>>, Part) ->
@@ -77,6 +85,11 @@ add_back_pointer([], New) ->
     [New];
 add_back_pointer(BackPs, New) ->
     [New|BackPs].
+
+convert_options_list2int(Options) ->
+    lists:foldl(fun(to_final_page, Int) -> Int + 1;
+                   (_,             Int) -> Int
+                end, 0, Options).
 
 scan_backward(Proj, Stream, LastLPN, WithPagesP) ->
     scan_backward(Proj, Stream, LastLPN, 0, WithPagesP).
@@ -137,3 +150,54 @@ scan_backward2(Proj, Stream, LastLPN, StopAtLPN, NumPages, WithPagesP) ->
             Err
     end.
 
+%% Hrm, this looks pretty similar to corfurl_client:append_page.
+
+append_page(Proj, Page, StreamList) ->
+    append_page(Proj, Page, StreamList, 5).
+
+append_page(Proj, _Page, _StreamList, 0) ->
+    {{error_failed, ?MODULE, ?LINE}, Proj};
+append_page(#proj{seq={Sequencer,_,_}} = Proj, Page, StreamList, Retries) ->
+    try
+        {ok, LPN} = corfurl_sequencer:get(Sequencer, 1, StreamList),
+        %% pulse_tracing_add(write, LPN),
+        append_page1(Proj, LPN, Page, StreamList, 5)
+    catch
+        exit:{Reason,{_gen_server_or_pulse_gen_server,call,[Sequencer|_]}}
+          when Reason == noproc; Reason == normal ->
+            NewSeq = corfurl_client:restart_sequencer(Proj),
+            append_page(Proj#proj{seq=NewSeq}, Page, StreamList, Retries);
+        exit:Exit ->
+            {{error_failed, ?MODULE, ?LINE}, incomplete_code, Exit}
+    end.
+
+append_page1(Proj, _LPN, _Page, _StreamList, 0) ->
+    {{error_failed, ?MODULE, ?LINE}, Proj};
+append_page1(Proj, LPN, Page, StreamList, Retries) ->
+    case append_page2(Proj, LPN, Page) of
+        lost_race ->
+            append_page(Proj, Page, StreamList, Retries - 1);
+        error_badepoch ->
+            case corfurl_sequencer:poll_for_new_epoch_projection(Proj) of
+                {ok, NewProj} ->
+                    append_page1(NewProj, LPN, Page, StreamList, Retries - 1);
+                Else ->
+                    {Else, Proj}
+            end;
+        Else ->
+            {Else, Proj}
+    end.
+
+append_page2(Proj, LPN, Page) ->
+    case corfurl:write_page(Proj, LPN, Page) of
+        ok ->
+            {ok, LPN};
+        X when X == error_overwritten; X == error_trimmed ->
+            %% report_lost_race(LPN, X),
+            lost_race;
+        {special_trimmed, LPN}=XX ->
+            XX;
+        error_badepoch=XX->
+            XX
+            %% Let it crash: error_unwritten
+    end.

@@ -57,28 +57,35 @@ smoke_test() ->
         MLP0 = NumFLUs,
         NumFLUs = ?M:get_max_logical_page(FLUs),
 
-        %% Excellent.  Now let's start the sequencer and see if it gets
-        %% the same answer.  If yes, then the first get will return MLP1,
-        %% yadda yadda.
-        MLP1 = MLP0 + 1,
-        MLP3 = MLP0 + 3,
-        MLP4 = MLP0 + 4,
         {ok, Sequencer} = ?M:start_link(FLUs),
         try
+            {ok, _} = ?M:get(Sequencer, 5000),
             [{Stream9, Tails9}] = StreamTails = [{9, [1125, 1124, 1123]}],
             ok = ?M:set_tails(Sequencer, StreamTails),
-            {ok, [Tails9]} = ?M:get_tails(Sequencer, [Stream9]),
+            {ok, _, [Tails9]} = ?M:get_tails(Sequencer, 0, [Stream9]),
 
-            {ok, LPN1} = ?M:get(Sequencer, 2),
-            {ok, LPN3} = ?M:get(Sequencer, 1, [2]),
-            {ok, LPN4} = ?M:get(Sequencer, 1, [1]),
-            {ok, LPN5} = ?M:get(Sequencer, 1, [2]),
-            {ok, LPN6} = ?M:get(Sequencer, 1, [2]),
-            {ok, LPN7} = ?M:get(Sequencer, 1, [2]),
-            {ok, LPN8} = ?M:get(Sequencer, 1, [2]),
+            {ok, LPN0a} = ?M:get(Sequencer, 2),
+            {ok, LPN0b} = ?M:get(Sequencer, 0),
+            LPN0a = LPN0b - 2,
+            
+            {ok, LPN2a, _} = ?M:get_tails(Sequencer, 1, [2]),
+            {ok, LPN1a, _} = ?M:get_tails(Sequencer, 1, [1]),
+            {ok, _, [[LPN1a], [LPN2a]]} = ?M:get_tails(Sequencer,
+                                                       0, [1,2]),
+            {ok, LPN2b, _} = ?M:get_tails(Sequencer, 1, [2]),
+            {ok, LPN2c, _} = ?M:get_tails(Sequencer, 1, [2]),
+            {ok, _, [[LPN1a], [LPN2c, LPN2b, LPN2a]]} =
+                ?M:get_tails(Sequencer, 0, [1,2]),
+            {ok, LPN2d, _} = ?M:get_tails(Sequencer, 1, [2]),
+            {ok, LPN2e, _} = ?M:get_tails(Sequencer, 1, [2]),
 
-            {ok, [[LPN4], [LPN8, LPN7, LPN6, LPN5]]} = ?M:get_tails(Sequencer,
-                                                                    [1,2])
+            {ok, LPNX, [[LP1a], [LPN2e, LPN2d, LPN2c, LPN2b]]} =
+                ?M:get_tails(Sequencer, 0, [1,2]),
+            {ok, LPNX, [[LP1a], [LPN2e, LPN2d, LPN2c, LPN2b]]} =
+                ?M:get_tails(Sequencer, 0, [1,2]), % same results
+            LPNX = LPN2e + 1,                      % no change with 0 request
+
+            ok
         after
             ?M:stop(Sequencer)
         end

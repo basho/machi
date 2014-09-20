@@ -36,7 +36,7 @@
 -type lpn() :: non_neg_integer().
 
 -record(state, {
-          page_size :: non_neg_integer(),       % CORFU page size
+          page_size :: non_neg_integer(),       % Corfurl page size
           seq :: pid(),                         % sequencer pid
           proj :: term(),                       % projection
           stream_num :: non_neg_integer(),         % this instance's OID number
