@@ -38,28 +38,28 @@
 
 %% TODO: for version 2: add strong checksum
 
-pack_v1(StreamList, Options, Page, PageSize)
-  when is_list(StreamList), is_list(Options), is_binary(Page),
+pack_v1(Stream_BackPs, Options, Page, PageSize)
+  when is_list(Stream_BackPs), is_list(Options), is_binary(Page),
        is_integer(PageSize), PageSize > 0 ->
-    StreamListBin = term_to_binary(StreamList),
-    StreamListSize = byte_size(StreamListBin),
+    Stream_BackPsBin = term_to_binary(Stream_BackPs),
+    Stream_BackPsSize = byte_size(Stream_BackPsBin),
     OptionsInt = convert_options_list2int(Options),
     PageActualSize = byte_size(Page),
     pad_bin(PageSize,
             list_to_binary([<<?MAGIC_NUMBER_V1:32/big>>,
                             <<OptionsInt:8/big>>,
-                            <<StreamListSize:16/big>>,
-                            StreamListBin,
+                            <<Stream_BackPsSize:16/big>>,
+                            Stream_BackPsBin,
                             <<PageActualSize:16/big>>,
                             Page])).
 
 unpack_v1(<<?MAGIC_NUMBER_V1:32/big,
             _Options:8/big,
-            StreamListSize:16/big, StreamListBin:StreamListSize/binary,
+            Stream_BackPsSize:16/big, Stream_BackPsBin:Stream_BackPsSize/binary,
             PageActualSize:16/big, Page:PageActualSize/binary,
             _/binary>>, Part) ->
     if Part == stream_list ->
-            binary_to_term(StreamListBin);
+            binary_to_term(Stream_BackPsBin);
        Part == page ->
             Page
     end.
@@ -102,11 +102,12 @@ scan_backward2(_Proj, _Stream, LastLPN, StopAtLPN, _NumPages, _WithPagesP)
   when LastLPN =< StopAtLPN; LastLPN =< 0 ->
     [];
 scan_backward2(Proj, Stream, LastLPN, StopAtLPN, NumPages, WithPagesP) ->
-    %% ?D({scan, lastlpn, LastLPN}),
+    ?D({scan, Stream, LastLPN}),
     case corfurl:read_page(Proj, LastLPN) of
         {ok, FullPage} ->
-            %% ?D({scan, LastLPN, ok}),
-            %% ?D({scan, Stream, unpack_v1(FullPage, stream_list)}),
+            ?D({scan, LastLPN, ok}),
+            ?D({scan, Stream, unpack_v1(FullPage, stream_list)}),
+?D(proplists:get_value(Stream, unpack_v1(FullPage, stream_list))),
             case proplists:get_value(Stream, unpack_v1(FullPage, stream_list)) of
                 undefined ->
                     if NumPages == 0 ->
@@ -123,11 +124,14 @@ scan_backward2(Proj, Stream, LastLPN, StopAtLPN, NumPages, WithPagesP) ->
                     end;
                 [] ->
                     if WithPagesP ->
+?D(?LINE),
                             [{LastLPN, unpack_v1(FullPage, page)}];
                        true ->
+?D(?LINE),
                             [LastLPN]
                     end;
                 BackPs ->
+?D(?LINE),
                     if WithPagesP ->
                             %% ?D({bummer, BackPs}),
                             [{LastLPN, unpack_v1(FullPage, page)}|
@@ -163,7 +167,8 @@ append_page(#proj{seq={Sequencer,_,_}, page_size=PageSize} = Proj,
         {ok, LPN, BackPsList} = corfurl_sequencer:get_tails(Sequencer, 1,
                                                             StreamList),
         %% pulse_tracing_add(write, LPN),
-        Page = tango:pack_v1(StreamList, [to_final_page],
+        StreamBackPs = lists:zip(StreamList, BackPsList),
+        Page = tango:pack_v1(StreamBackPs, [to_final_page],
                              OrigPage, PageSize),
         append_page1(Proj, LPN, Page, StreamList, 5, OrigPage)
     catch
