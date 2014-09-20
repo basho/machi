@@ -39,9 +39,10 @@ append_page(Proj, Page, StreamList) ->
 
 append_page(Proj, _Page, _StreamList, 0) ->
     {{error_failed, ?MODULE, ?LINE}, Proj};
+%% TODO: remove _StreamList arg entirely?
 append_page(#proj{seq={Sequencer,_,_}} = Proj, Page, StreamList, Retries) ->
     try
-        {ok, LPN} = corfurl_sequencer:get(Sequencer, 1, StreamList),
+        {ok, LPN} = corfurl_sequencer:get(Sequencer, 1),
         pulse_tracing_add(write, LPN),
         append_page1(Proj, LPN, Page, StreamList, 5)
     catch
