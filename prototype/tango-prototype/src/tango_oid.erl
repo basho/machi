@@ -143,7 +143,6 @@ fetch_unread_pages(Proj, LastLPN, StopAtLPN)
     %% ?D({fetch_unread_pages, LastLPN, StopAtLPN}),
     LPNandPages = tango:scan_backward(Proj, ?OID_STREAM_NUMBER, LastLPN,
                                       StopAtLPN, true),
-?D(LPNandPages),
     {_LPNs, _Pages} = lists:unzip(LPNandPages).
 
 play_log_pages(Pages, SideEffectsP,
@@ -156,11 +155,8 @@ play_log_pages(Pages, I_State, CallbackMod, SideEffectsP) ->
 
 roll_log_forward(#state{seq=SequencerPid, proj=Proj, all_back_ps=BackPs,
                         last_fetch_lpn=StopAtLPN} = State) ->
-?D(StopAtLPN),
     LastLPN = find_last_lpn(SequencerPid),
-?D(LastLPN),
     {LPNs, Pages} = fetch_unread_pages(Proj, LastLPN, StopAtLPN),
-?D(LPNs),
     NewBPs = append_lpns(LPNs, BackPs),
     play_log_pages(Pages, true, State#state{all_back_ps=NewBPs}).
 
@@ -197,19 +193,15 @@ play_log_mutate_i_state(Pages, SideEffectsP, I_State) ->
                         {Res, O2} =
                             case ?DICTMOD:find(Key, Dict) of
                                 error ->
-?D(?LINE),
                                     Dict2 = ?DICTMOD:store(Key, Next, Dict),
                                     {{ok, Next},O#oid_map{map=Dict2,
                                                           next=Next + 1}};
                                 {ok, _} ->
-?D(?LINE),
                                     {already_exists, O}
                             end,
                         if SideEffectsP ->
-?D(?LINE),
                                 gen_server:reply(From, Res);
                            true ->
-?D(?LINE),
                                 ok
                         end,
                         O2

@@ -102,12 +102,8 @@ scan_backward2(_Proj, _Stream, LastLPN, StopAtLPN, _NumPages, _WithPagesP)
   when LastLPN =< StopAtLPN; LastLPN =< 0 ->
     [];
 scan_backward2(Proj, Stream, LastLPN, StopAtLPN, NumPages, WithPagesP) ->
-    ?D({scan, Stream, LastLPN}),
     case corfurl:read_page(Proj, LastLPN) of
         {ok, FullPage} ->
-            ?D({scan, LastLPN, ok}),
-            ?D({scan, Stream, unpack_v1(FullPage, stream_list)}),
-?D(proplists:get_value(Stream, unpack_v1(FullPage, stream_list))),
             case proplists:get_value(Stream, unpack_v1(FullPage, stream_list)) of
                 undefined ->
                     if NumPages == 0 ->
@@ -124,14 +120,11 @@ scan_backward2(Proj, Stream, LastLPN, StopAtLPN, NumPages, WithPagesP) ->
                     end;
                 [] ->
                     if WithPagesP ->
-?D(?LINE),
                             [{LastLPN, unpack_v1(FullPage, page)}];
                        true ->
-?D(?LINE),
                             [LastLPN]
                     end;
                 BackPs ->
-?D(?LINE),
                     if WithPagesP ->
                             %% ?D({bummer, BackPs}),
                             [{LastLPN, unpack_v1(FullPage, page)}|

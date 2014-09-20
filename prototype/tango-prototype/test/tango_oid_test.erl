@@ -56,11 +56,8 @@ tango_oid_one_test_int(PageSize, Seq, Proj) ->
         OID_Num1 = 1,
         error = tango_oid:get(OID_Map, "does not exist"),
 
-?D(?LINE),
         {ok, OID_Num1} = tango_oid:new(OID_Map, K1),
-?D(?LINE),
         {ok, OID_Num1} = tango_oid:get(OID_Map, K1),
-?D(?LINE),
         already_exists = tango_oid:new(OID_Map, K1),
         %% The V2 put should *not* have clobbered the previous value
         {ok, OID_Num1} = tango_oid:get(OID_Map, K1),

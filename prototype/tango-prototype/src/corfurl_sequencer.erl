@@ -123,17 +123,17 @@ handle_call({get, NumPages, LC}, _From,
 handle_call({get_tails, NumPages, StreamList, LC}, _From, MLP_tuple) ->
     Tab = element(1, MLP_tuple),
     MLP = element(2, MLP_tuple),
-    if NumPages > 0 ->
-            update_stream_tails(Tab, StreamList, MLP);
-       true ->
-            ok
-    end,
     Tails = [case (catch ets:lookup_element(Tab, Stream, 2)) of
                  {'EXIT', _} ->
                      [];
                  Res ->
                      Res
              end || Stream <- StreamList],
+    if NumPages > 0 ->
+            update_stream_tails(Tab, StreamList, MLP);
+       true ->
+            ok
+    end,
     NewLC = lclock_update(LC),
     {reply, {{ok, MLP, Tails}, NewLC},
      setelement(2, MLP_tuple, MLP + NumPages)};
