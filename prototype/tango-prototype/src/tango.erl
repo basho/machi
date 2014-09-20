@@ -31,7 +31,8 @@
          scan_backward/5,
          pad_bin/2,
          append_page/3,
-         back_ps2last_lpn/1]).
+         back_ps2last_lpn/1,
+         append_lpns/2]).
 
 -define(MAGIC_NUMBER_V1, 16#88990011).
 
@@ -210,3 +211,9 @@ back_ps2last_lpn([]) ->
     0;
 back_ps2last_lpn([H|_]) ->
     H.
+
+append_lpns([], BPs) ->
+    BPs;
+append_lpns(LPNs, BPs) ->
+    lists:reverse(LPNs) ++ BPs.
+

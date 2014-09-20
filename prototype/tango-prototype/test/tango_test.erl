@@ -260,7 +260,8 @@ tango_dt_queue_int(PageSize, Seq, Proj) ->
 
     {ok, true} = MOD:is_empty(Q1),
     {ok, 0} = MOD:length(Q1),
-    Num1 = 15,
+
+    Num1 = 4,
     Seq1 = lists:seq(1, Num1),
     RevSeq1 = lists:reverse(Seq1),
     [ok = MOD:in(Q1, X) || X <- Seq1],

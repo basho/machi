@@ -70,7 +70,7 @@ get(Pid, Key) ->
 init([PageSize, SequencerPid, Proj]) ->
     LastLPN = find_last_lpn(SequencerPid, ?OID_STREAM_NUMBER),
     {LPNs, Pages} = fetch_unread_pages(Proj, LastLPN, 0, ?OID_STREAM_NUMBER),
-    BackPs = lists:reverse(LPNs),
+    BackPs = tango:append_lpns(LPNs, []),
     LastFetchLPN = tango:back_ps2last_lpn(BackPs),
     I_State = play_log_pages(Pages, fresh(), ?MODULE, false),
     {ok, #state{page_size=PageSize,
@@ -127,7 +127,6 @@ find_last_lpn(SequencerPid, StreamNum) ->
 
 fetch_unread_pages(Proj, LastLPN, StopAtLPN, StreamNum)
   when LastLPN >= StopAtLPN ->
-    %% ?D({fetch_unread_pages, LastLPN, StopAtLPN}),
     LPNandPages = tango:scan_backward(Proj, StreamNum, LastLPN,
                                       StopAtLPN, true),
     {_LPNs, _Pages} = lists:unzip(LPNandPages).
@@ -144,13 +143,8 @@ roll_log_forward(#state{seq=SequencerPid, proj=Proj, all_back_ps=BackPs,
                         last_fetch_lpn=StopAtLPN} = State) ->
     LastLPN = find_last_lpn(SequencerPid, ?OID_STREAM_NUMBER),
     {LPNs, Pages} = fetch_unread_pages(Proj, LastLPN, StopAtLPN, ?OID_STREAM_NUMBER),
-    NewBPs = append_lpns(LPNs, BackPs),
+    NewBPs = tango:append_lpns(LPNs, BackPs),
     play_log_pages(Pages, true, State#state{all_back_ps=NewBPs}).
-
-append_lpns([], BPs) ->
-    BPs;
-append_lpns(LPNs, BPs) ->
-    lists:reverse(LPNs) ++ BPs.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
