@@ -65,15 +65,20 @@ smoke_test() ->
         MLP4 = MLP0 + 4,
         {ok, Sequencer} = ?M:start_link(FLUs),
         try
-            [{Stream9, Tail9}] = StreamTails = [{9, 99999}],
+            [{Stream9, Tails9}] = StreamTails = [{9, [1125, 1124, 1123]}],
             ok = ?M:set_tails(Sequencer, StreamTails),
-            {ok, [Tail9]} = ?M:get_tails(Sequencer, [Stream9]),
+            {ok, [Tails9]} = ?M:get_tails(Sequencer, [Stream9]),
 
-            {ok, MLP1} = ?M:get(Sequencer, 2),
-            {ok, MLP3} = ?M:get(Sequencer, 1, [2]),
-            {ok, MLP4} = ?M:get(Sequencer, 1, [1]),
+            {ok, LPN1} = ?M:get(Sequencer, 2),
+            {ok, LPN3} = ?M:get(Sequencer, 1, [2]),
+            {ok, LPN4} = ?M:get(Sequencer, 1, [1]),
+            {ok, LPN5} = ?M:get(Sequencer, 1, [2]),
+            {ok, LPN6} = ?M:get(Sequencer, 1, [2]),
+            {ok, LPN7} = ?M:get(Sequencer, 1, [2]),
+            {ok, LPN8} = ?M:get(Sequencer, 1, [2]),
 
-            {ok, [MLP4, MLP3]} = ?M:get_tails(Sequencer, [1,2])
+            {ok, [[LPN4], [LPN8, LPN7, LPN6, LPN5]]} = ?M:get_tails(Sequencer,
+                                                                    [1,2])
         after
             ?M:stop(Sequencer)
         end

@@ -109,7 +109,7 @@ init({FLUs, TypeOrSeed}) ->
     end.
 
 handle_call({get, NumPages, StreamList, LC}, _From, {Tab, MLP}) ->
-    [ets:insert(Tab, {Stream, MLP}) || Stream <- StreamList],
+    update_stream_tails(Tab, StreamList, MLP),
     NewLC = lclock_update(LC),
     {reply, {{ok, MLP}, NewLC}, {Tab, MLP + NumPages}};
 handle_call({get, NumPages, StreamList, LC}, _From,
@@ -163,6 +163,22 @@ get_max_logical_page(FLUs) ->
     lists:max([proplists:get_value(max_logical_page, Ps, 0) ||
                   FLU <- FLUs,
                   {ok, Ps} <- [corfurl_flu:status(FLU)]]).
+
+update_stream_tails(Tab, StreamList, LPN) ->
+    [begin
+         OldBackPs = try   ets:lookup_element(Tab, Stream, 2)
+                     catch error:badarg -> []
+                     end,
+         NewBackPs = add_back_pointer(OldBackPs, LPN),
+         ets:insert(Tab, {Stream, NewBackPs})
+     end || Stream <- StreamList].
+
+add_back_pointer([D,C,B,_A|_], New) ->
+    [New,D,C,B];
+add_back_pointer([], New) ->
+    [New];
+add_back_pointer(BackPs, New) ->
+    [New|BackPs].
 
 -ifdef(PULSE).
 
