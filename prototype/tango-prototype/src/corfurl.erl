@@ -372,5 +372,5 @@ simple_test_setup(RootDir, BaseDirName, PageSize, NumPages, NumFLUs) ->
 
     {ok, Seq} = corfurl_sequencer:start_link(FLUs),
     P0 = corfurl:new_simple_projection(PDir, 1, 1, 1*100, [FLUs]),
-    P1 = P0#proj{seq={Seq, unused, unused}},
+    P1 = P0#proj{seq={Seq, unused, unused}, page_size=PageSize},
     {FLUs, Seq, P1, DeleteFLUData}.

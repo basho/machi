@@ -157,30 +157,35 @@ append_page(Proj, Page, StreamList) ->
 
 append_page(Proj, _Page, _StreamList, 0) ->
     {{error_failed, ?MODULE, ?LINE}, Proj};
-append_page(#proj{seq={Sequencer,_,_}} = Proj, Page, StreamList, Retries) ->
+append_page(#proj{seq={Sequencer,_,_}, page_size=PageSize} = Proj,
+            OrigPage, StreamList, Retries) ->
     try
-        {ok, LPN} = corfurl_sequencer:get(Sequencer, 1, StreamList),
+        {ok, LPN, BackPsList} = corfurl_sequencer:get_tails(Sequencer, 1,
+                                                            StreamList),
         %% pulse_tracing_add(write, LPN),
-        append_page1(Proj, LPN, Page, StreamList, 5)
+        Page = tango:pack_v1(StreamList, [to_final_page],
+                             OrigPage, PageSize),
+        append_page1(Proj, LPN, Page, StreamList, 5, OrigPage)
     catch
         exit:{Reason,{_gen_server_or_pulse_gen_server,call,[Sequencer|_]}}
           when Reason == noproc; Reason == normal ->
             NewSeq = corfurl_client:restart_sequencer(Proj),
-            append_page(Proj#proj{seq=NewSeq}, Page, StreamList, Retries);
+            append_page(Proj#proj{seq=NewSeq}, OrigPage, StreamList, Retries);
         exit:Exit ->
             {{error_failed, ?MODULE, ?LINE}, incomplete_code, Exit}
     end.
 
-append_page1(Proj, _LPN, _Page, _StreamList, 0) ->
+append_page1(Proj, _LPN, _Page, _StreamList, 0, _OrigPage) ->
     {{error_failed, ?MODULE, ?LINE}, Proj};
-append_page1(Proj, LPN, Page, StreamList, Retries) ->
+append_page1(Proj, LPN, Page, StreamList, Retries, OrigPage) ->
     case append_page2(Proj, LPN, Page) of
         lost_race ->
-            append_page(Proj, Page, StreamList, Retries - 1);
+            append_page(Proj, OrigPage, StreamList, Retries - 1);
         error_badepoch ->
             case corfurl_sequencer:poll_for_new_epoch_projection(Proj) of
                 {ok, NewProj} ->
-                    append_page1(NewProj, LPN, Page, StreamList, Retries - 1);
+                    append_page1(NewProj, LPN, Page, StreamList, Retries - 1,
+                                 OrigPage);
                 Else ->
                     {Else, Proj}
             end;
