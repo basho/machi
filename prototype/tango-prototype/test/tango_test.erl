@@ -294,12 +294,17 @@ tango_dt_queue_int(PageSize, Seq, Proj) ->
     ok = C1(Q2, Num1),
     ok = C1(Q1, Num1),
 
+?D(before_CPs_start),
     [ok = MOD:checkpoint(Q1) || _ <- lists:seq(1, 4)],
+?D(after_CPs_end),
     [ok = C1(X, Num1) || X <- [Q1, Q2]],
     {ok, Q3} = MOD:start_link(PageSize, Seq, Proj, Q1Num),
     [ok = C1(X, Num1) || X <- [Q1, Q2, Q3]],
+?D(before_Q4_start),
     {ok, Q4} = MOD:start_link(PageSize, Seq, Proj, Q1Num),
+?D({after_Q4_start, Q4}),
     ok = MOD:in(Q4, 89),
+?D(after_Q4_in),
     Num1Plus1 = Num1 + 1,
     [ok = C1(X, Num1Plus1) || X <- [Q1, Q2, Q3, Q4]],
 

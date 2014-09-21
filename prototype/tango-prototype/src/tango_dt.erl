@@ -75,6 +75,7 @@ checkpoint(Pid) ->
 init([PageSize, SequencerPid, Proj, CallbackMod, StreamNum]) ->
     LastLPN = find_last_lpn(SequencerPid, StreamNum),
     {LPNs, Pages} = fetch_unread_pages(Proj, LastLPN, 0, StreamNum),
+?D({self(), LPNs}),
     BackPs = tango:append_lpns(LPNs, []),
     LastFetchLPN = tango:back_ps2last_lpn(BackPs),
     I_State = play_log_pages(Pages, CallbackMod:fresh(), CallbackMod, false),
@@ -113,6 +114,7 @@ handle_call({sync_checkpoint}, From,
     {_OpT, I_State2, Proj1, _LPN} =
         CallbackMod:do_dirty_op(CheckpointOps, From, I_State, StreamNum,
                                 Proj0, PageSize),
+?D({sync_checkpoint, _LPN}),
     %% TODO: Use this LPN so that we can tell the corfurl log GC
     %%       that we have created some dead bytes in the log.
     {reply, ok, State#state{i_state=I_State2,
@@ -161,6 +163,7 @@ roll_log_forward(#state{seq=SequencerPid, proj=Proj, all_back_ps=BackPs,
                         last_fetch_lpn=StopAtLPN} = State) ->
     LastLPN = find_last_lpn(SequencerPid, StreamNum),
     {LPNs, Pages} = fetch_unread_pages(Proj, LastLPN, StopAtLPN, StreamNum),
+?D({self(), LPNs}),
     NewBackPs = tango:append_lpns(LPNs, BackPs),
     LastFetchLPN = tango:back_ps2last_lpn(NewBackPs),
     play_log_pages(Pages, true,
