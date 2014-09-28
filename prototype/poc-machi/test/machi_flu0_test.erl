@@ -31,16 +31,21 @@ concuerror3_test() ->
 
 concuerror4_test() ->
     {ok, F1} = machi_flu0:start_link("one"),
+    ProjNum = 1,
+    ok = machi_flu0:proj_write(F1, ProjNum, dontcare),
+
     Val = <<"val!">>,
-    ok = machi_flu0:write(F1, Val),
+    ok = machi_flu0:write(F1, ProjNum, Val),
+    {error_stale_projection, ProjNum} = machi_flu0:write(F1, ProjNum - 1, Val),
+
     Me = self(),
-    TrimFun = fun() -> Res = machi_flu0:trim(F1),
+    TrimFun = fun() -> Res = machi_flu0:trim(F1, ProjNum),
                        Me ! {self(), Res}
                end,
-    TrimPids = [spawn(TrimFun), spawn(TrimFun),spawn(TrimFun)],
+    TrimPids = [spawn(TrimFun), spawn(TrimFun), spawn(TrimFun)],
     TrimExpected = [error_trimmed,error_trimmed,ok],
 
-    GetFun = fun() -> Res = machi_flu0:get(F1),
+    GetFun = fun() -> Res = machi_flu0:get(F1, ProjNum),
                       Me ! {self(), Res}
                end,
     GetPids = [spawn(GetFun)],
@@ -73,6 +78,30 @@ proj_store_test() ->
     {ok, Proj1} = machi_flu0:proj_read(F1, 1),
     {ok, 1} = machi_flu0:proj_get_latest_num(F1),
     {ok, Proj1} = machi_flu0:proj_read_latest(F1),
+
+    ok = machi_flu0:stop(F1),
+    ok.
+
+wedge_test() ->
+    {ok, F1} = machi_flu0:start_link("one"),
+    ProjNum1 = 1,
+    ok = machi_flu0:proj_write(F1, ProjNum1, dontcare),
+
+    Val = <<"val!">>,
+    ok = machi_flu0:write(F1, ProjNum1, Val),
+    {error_stale_projection, ProjNum1} = machi_flu0:write(F1, ProjNum1 - 1, Val),
+    error_wedged = machi_flu0:write(F1, ProjNum1 + 1, Val),
+    %% Until we write a newer/bigger projection, all ops are error_wedged
+    error_wedged = machi_flu0:get(F1, ProjNum1),
+    error_wedged = machi_flu0:write(F1, ProjNum1, Val),
+    error_wedged = machi_flu0:trim(F1, ProjNum1),
+
+    ProjNum2 = ProjNum1 + 1,
+    ok = machi_flu0:proj_write(F1, ProjNum2, dontcare),
+    {ok, Val} = machi_flu0:get(F1, ProjNum2),
+    error_written = machi_flu0:write(F1, ProjNum2, Val),
+    ok = machi_flu0:trim(F1, ProjNum2),
+    error_trimmed = machi_flu0:trim(F1, ProjNum2),
 
     ok = machi_flu0:stop(F1),
     ok.
