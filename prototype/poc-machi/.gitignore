@@ -1,5 +1,6 @@
 .eunit
 .eqc-info
+concuerror_report.txt
 current_counterexample.eqc
 deps
 ebin/*.beam
