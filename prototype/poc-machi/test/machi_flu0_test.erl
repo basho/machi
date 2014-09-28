@@ -13,13 +13,13 @@ concuerror1_test() ->
     ok.
 
 concuerror2_test() ->
-    {ok, F} = machi_flu0:start_link(),
+    {ok, F} = machi_flu0:start_link("one"),
     ok = machi_flu0:stop(F),
     ok.
 
 concuerror3_test() ->
     Me = self(),
-    Fun = fun() -> {ok, F1} = machi_flu0:start_link(),
+    Fun = fun() -> {ok, F1} = machi_flu0:start_link("one"),
                         ok = machi_flu0:stop(F1),
                         Me ! done
                end,
@@ -30,7 +30,7 @@ concuerror3_test() ->
     ok.
 
 concuerror4_test() ->
-    {ok, F1} = machi_flu0:start_link(),
+    {ok, F1} = machi_flu0:start_link("one"),
     Val = <<"val!">>,
     ok = machi_flu0:write(F1, Val),
     Me = self(),

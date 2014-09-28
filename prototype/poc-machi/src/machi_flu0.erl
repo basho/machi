@@ -2,7 +2,7 @@
 
 -behaviour(gen_server).
 
--export([start_link/0, stop/1,
+-export([start_link/1, stop/1,
          write/2, get/1, trim/1]).
 -ifdef(TEST).
 -compile(export_all).
@@ -27,11 +27,12 @@
 -type register() :: 'unwritten' | binary() | 'trimmed'.
 
 -record(state, {
+          name :: list(),
           register = 'unwritten' :: register()
          }).
 
-start_link() ->
-    gen_server:start_link(?MODULE, [], []).
+start_link(Name) when is_list(Name) ->
+    gen_server:start_link(?MODULE, [Name], []).
 
 stop(Pid) ->
     gen_server:call(Pid, stop, infinity).
@@ -47,8 +48,8 @@ trim(Pid) ->
 
 %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%%
 
-init([]) ->
-    {ok, #state{}}.
+init([Name]) ->
+    {ok, #state{name=Name}}.
 
 handle_call({write, Bin}, _From, #state{register=unwritten} = S) ->
     {reply, ok, S#state{register=Bin}};
