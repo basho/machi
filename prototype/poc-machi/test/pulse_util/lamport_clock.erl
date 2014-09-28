@@ -10,8 +10,6 @@
 init() ->
     case get(?KEY) of
         undefined ->
-            %% {Ca, Cb, _} = now(),
-            %% FakeTOD = ((Ca * 1000000) + Cb) * 1000000,
             FakeTOD = 0,
             put(?KEY, FakeTOD + 1);
         N when is_integer(N) ->
@@ -19,6 +17,7 @@ init() ->
     end.
 
 get() ->
+    init(),
     get(?KEY).
 
 update(Remote) ->

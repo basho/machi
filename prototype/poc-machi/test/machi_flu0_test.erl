@@ -83,6 +83,7 @@ proj_store_test() ->
     ok.
 
 wedge_test() ->
+    event_setup(),
     {ok, F1} = machi_flu0:start_link("one"),
     ProjNum1 = 1,
     ok = machi_flu0:proj_write(F1, ProjNum1, dontcare),
@@ -92,19 +93,46 @@ wedge_test() ->
     {error_stale_projection, ProjNum1} = machi_flu0:write(F1, ProjNum1 - 1, Val),
     error_wedged = machi_flu0:write(F1, ProjNum1 + 1, Val),
     %% Until we write a newer/bigger projection, all ops are error_wedged
-    error_wedged = machi_flu0:read(F1, ProjNum1),
+    error_wedged = read(F1, ProjNum1),
     error_wedged = machi_flu0:write(F1, ProjNum1, Val),
     error_wedged = machi_flu0:trim(F1, ProjNum1),
 
     ProjNum2 = ProjNum1 + 1,
     ok = machi_flu0:proj_write(F1, ProjNum2, dontcare),
-    {ok, Val} = machi_flu0:read(F1, ProjNum2),
+    {ok, Val} = read(F1, ProjNum2),
     error_written = machi_flu0:write(F1, ProjNum2, Val),
     ok = machi_flu0:trim(F1, ProjNum2),
     error_trimmed = machi_flu0:trim(F1, ProjNum2),
 
     ok = machi_flu0:stop(F1),
+    XX = event_get_all(), io:format(user, "XX ~p\n", [XX]),
+    event_shutdown(),
     ok.
+
+%%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%%
+
+read(Pid, ProjNum) ->
+    Res = machi_flu0:read(Pid, ProjNum),
+    event_add(get, Res),
+    Res.
+
+event_setup() ->
+    Tab = ?MODULE,
+    ok = event_shutdown(),
+    ets:new(Tab, [named_table, ordered_set]).
+
+event_shutdown() ->
+    Tab = ?MODULE,
+    (catch ets:delete(Tab)),
+    ok.
+
+event_add(Key, Description) ->
+    Tab = ?MODULE,
+    ets:insert(Tab, {lamport_clock:get(), Key, Description}).
+
+event_get_all() ->
+    Tab = ?MODULE,
+    ets:tab2list(Tab).
 
 -endif.
 -endif.
