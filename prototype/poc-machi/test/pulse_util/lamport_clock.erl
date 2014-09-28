@@ -1,7 +1,7 @@
 
 -module(lamport_clock).
 
--export([init/0, get/0, update/1, incr/0]).
+-export([init/0, reset/0, get/0, update/1, incr/0]).
 
 -define(KEY, ?MODULE).
 
@@ -10,11 +10,14 @@
 init() ->
     case get(?KEY) of
         undefined ->
-            FakeTOD = 0,
-            put(?KEY, FakeTOD + 1);
+            reset();
         N when is_integer(N) ->
             ok
     end.
+
+reset() ->
+    FakeTOD = 0,
+    put(?KEY, FakeTOD + 1).
 
 get() ->
     init(),
@@ -33,6 +36,9 @@ incr() ->
 -else. % TEST
 
 init() ->
+    ok.
+
+reset() ->
     ok.
 
 get() ->

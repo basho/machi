@@ -2,9 +2,13 @@
 
 -behaviour(gen_server).
 
+-include("machi.hrl").
+
 -export([start_link/1, stop/1,
          write/3, read/2, trim/2,
          proj_write/3, proj_read/2, proj_get_latest_num/1, proj_read_latest/1]).
+-export([make_proj/1, make_proj/2]).
+
 -ifdef(TEST).
 -compile(export_all).
 -endif.
@@ -31,7 +35,7 @@
           name :: list(),
           wedged = false :: boolean(),
           register = 'unwritten' :: register(),
-          proj_num :: non_neg_integer(),
+          proj_epoch :: non_neg_integer(),
           proj_store :: dict()
          }).
 
@@ -41,20 +45,20 @@ start_link(Name) when is_list(Name) ->
 stop(Pid) ->
     g_call(Pid, stop, infinity).
 
-read(Pid, ProjNum) ->
-    g_call(Pid, {reg_op, ProjNum, read}, ?LONG_TIME).
+read(Pid, Epoch) ->
+    g_call(Pid, {reg_op, Epoch, read}, ?LONG_TIME).
 
-write(Pid, ProjNum, Bin) when is_binary(Bin) ->
-    g_call(Pid, {reg_op, ProjNum, {write, Bin}}, ?LONG_TIME).
+write(Pid, Epoch, Bin) ->
+    g_call(Pid, {reg_op, Epoch, {write, Bin}}, ?LONG_TIME).
 
-trim(Pid, ProjNum) ->
-    g_call(Pid, {reg_op, ProjNum, trim}, ?LONG_TIME).
+trim(Pid, Epoch) ->
+    g_call(Pid, {reg_op, Epoch, trim}, ?LONG_TIME).
 
-proj_write(Pid, ProjNum, Proj) ->
-    g_call(Pid, {proj_write, ProjNum, Proj}, ?LONG_TIME).
+proj_write(Pid, Epoch, Proj) ->
+    g_call(Pid, {proj_write, Epoch, Proj}, ?LONG_TIME).
 
-proj_read(Pid, ProjNum) ->
-    g_call(Pid, {proj_read, ProjNum}, ?LONG_TIME).
+proj_read(Pid, Epoch) ->
+    g_call(Pid, {proj_read, Epoch}, ?LONG_TIME).
 
 proj_get_latest_num(Pid) ->
     g_call(Pid, {proj_get_latest_num}, ?LONG_TIME).
@@ -70,62 +74,70 @@ g_call(Pid, Arg, Timeout) ->
 
 %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%%
 
+make_proj(FLUs) ->
+    make_proj(1, FLUs).
+
+make_proj(Epoch, FLUs) ->
+    #proj{epoch=Epoch, all=FLUs, active=FLUs}.
+
+%%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%%
+
 init([Name]) ->
     lclock_init(),
     {ok, #state{name=Name,
-                proj_num=-42,
+                proj_epoch=-42,
                 proj_store=orddict:new()}}.
 
-handle_call({{reg_op, _ProjNum, _}, LC1}, _From, #state{wedged=true} = S) ->
+handle_call({{reg_op, _Epoch, _}, LC1}, _From, #state{wedged=true} = S) ->
     LC2 = lclock_update(LC1),
     {reply, {error_wedged, LC2}, S};
-handle_call({{reg_op, ProjNum, _}, LC1}, _From, #state{proj_num=MyProjNum} = S)
-  when ProjNum < MyProjNum ->
+handle_call({{reg_op, Epoch, _}, LC1}, _From, #state{proj_epoch=MyEpoch} = S)
+  when Epoch < MyEpoch ->
     LC2 = lclock_update(LC1),
-    {reply, {{error_stale_projection, MyProjNum}, LC2}, S};
-handle_call({{reg_op, ProjNum, _}, LC1}, _From, #state{proj_num=MyProjNum} = S)
-  when ProjNum > MyProjNum ->
+    {reply, {{error_stale_projection, MyEpoch}, LC2}, S};
+handle_call({{reg_op, Epoch, _}, LC1}, _From, #state{proj_epoch=MyEpoch} = S)
+  when Epoch > MyEpoch ->
     LC2 = lclock_update(LC1),
     {reply, {error_wedged, LC2}, S#state{wedged=true}};
 
-handle_call({{reg_op, _ProjNum, {write, Bin}}, LC1}, _From,
+handle_call({{reg_op, _Epoch, {write, Bin}}, LC1}, _From,
              #state{register=unwritten} = S) ->
     LC2 = lclock_update(LC1),
     {reply, {ok, LC2}, S#state{register=Bin}};
-handle_call({{reg_op, _ProjNum, {write, _Bin}}, LC1}, _From,
+handle_call({{reg_op, _Epoch, {write, _Bin}}, LC1}, _From,
             #state{register=B} = S) when is_binary(B) ->
     LC2 = lclock_update(LC1),
     {reply, {error_written, LC2}, S};
-handle_call({{reg_op, _ProjNum, {write, _Bin}}, LC1}, _From,
+handle_call({{reg_op, _Epoch, {write, _Bin}}, LC1}, _From,
             #state{register=trimmed} = S) ->
     LC2 = lclock_update(LC1),
     {reply, {error_trimmed, LC2}, S};
 
-handle_call({{reg_op, ProjNum, read}, LC1}, _From, #state{proj_num=MyProjNum} = S)
-  when ProjNum /= MyProjNum ->
+handle_call({{reg_op, Epoch, read}, LC1}, _From, #state{proj_epoch=MyEpoch} = S)
+  when Epoch /= MyEpoch ->
     LC2 = lclock_update(LC1),
-    {reply, {{error_stale_projection, MyProjNum}, LC2}, S};
-handle_call({{reg_op, _ProjNum, read}, LC1}, _From, #state{register=Reg} = S) ->
+    {reply, {{error_stale_projection, MyEpoch}, LC2}, S};
+handle_call({{reg_op, _Epoch, read}, LC1}, _From, #state{register=Reg} = S) ->
     LC2 = lclock_update(LC1),
     {reply, {{ok, Reg}, LC2}, S};
 
-handle_call({{reg_op, _ProjNum, trim}, LC1}, _From, #state{register=unwritten} = S) ->
+handle_call({{reg_op, _Epoch, trim}, LC1}, _From, #state{register=unwritten} = S) ->
     LC2 = lclock_update(LC1),
     {reply, {ok, LC2}, S#state{register=trimmed}};
-handle_call({{reg_op, _ProjNum, trim}, LC1}, _From, #state{register=B} = S) when is_binary(B) ->
+handle_call({{reg_op, _Epoch, trim}, LC1}, _From, #state{register=B} = S) when is_binary(B) ->
     LC2 = lclock_update(LC1),
     {reply, {ok, LC2}, S#state{register=trimmed}};
-handle_call({{reg_op, _ProjNum, trim}, LC1}, _From, #state{register=trimmed} = S) ->
+handle_call({{reg_op, _Epoch, trim}, LC1}, _From, #state{register=trimmed} = S) ->
     LC2 = lclock_update(LC1),
     {reply, {error_trimmed, LC2}, S};
 
-handle_call({{proj_write, ProjNum, Proj}, LC1}, _From, S) ->
+handle_call({{proj_write, Epoch, Proj}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
-    {Reply, NewS} = do_proj_write(ProjNum, Proj, S),
+    {Reply, NewS} = do_proj_write(Epoch, Proj, S),
     {reply, {Reply, LC2}, NewS};
-handle_call({{proj_read, ProjNum}, LC1}, _From, S) ->
+handle_call({{proj_read, Epoch}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
-    {Reply, NewS} = do_proj_read(ProjNum, S),
+    {Reply, NewS} = do_proj_read(Epoch, S),
     {reply, {Reply, LC2}, NewS};
 handle_call({{proj_get_latest_num}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
@@ -136,8 +148,8 @@ handle_call({{proj_read_latest}, LC1}, _From, S) ->
     case do_proj_get_latest_num(S) of
         {error_unwritten, _S} ->
             {reply, {error_unwritten, LC2}, S};
-        {{ok, ProjNum}, _S} ->
-            Proj = orddict:fetch(ProjNum, S#state.proj_store),
+        {{ok, Epoch}, _S} ->
+            Proj = orddict:fetch(Epoch, S#state.proj_store),
             {reply, {{ok, Proj}, LC2}, S}
     end;
 handle_call({stop, LC1}, _From, MLP) ->
@@ -161,25 +173,25 @@ code_change(_OldVsn, MLP, _Extra) ->
 
 %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%%
 
-do_proj_write(ProjNum, Proj, #state{proj_num=MyProjNum, proj_store=D,
+do_proj_write(Epoch, Proj, #state{proj_epoch=MyEpoch, proj_store=D,
                                     wedged=MyWedged} = S) ->
-    case orddict:find(ProjNum, D) of
+    case orddict:find(Epoch, D) of
         error ->
-            D2 = orddict:store(ProjNum, Proj, D),
-            {NewProjNum, NewWedged} = if ProjNum > MyProjNum ->
-                                              {ProjNum, false};
+            D2 = orddict:store(Epoch, Proj, D),
+            {NewEpoch, NewWedged} = if Epoch > MyEpoch ->
+                                              {Epoch, false};
                                          true ->
-                                              {MyProjNum, MyWedged}
+                                              {MyEpoch, MyWedged}
                                       end,
             {ok, S#state{wedged=NewWedged,
-                         proj_num=NewProjNum,
+                         proj_epoch=NewEpoch,
                          proj_store=D2}};
         {ok, _} ->
             {error_written, S}
     end.
 
-do_proj_read(ProjNum, #state{proj_store=D} = S) ->
-    case orddict:find(ProjNum, D) of
+do_proj_read(Epoch, #state{proj_store=D} = S) ->
+    case orddict:find(Epoch, D) of
         error ->
             {error_unwritten, S};
         {ok, Proj} ->
@@ -191,8 +203,8 @@ do_proj_get_latest_num(#state{proj_store=D} = S) ->
         [] ->
             {error_unwritten, S};
         L ->
-            {ProjNum, _Proj} = lists:last(L),
-            {{ok, ProjNum}, S}
+            {Epoch, _Proj} = lists:last(L),
+            {{ok, Epoch}, S}
     end.
 
 -ifdef(TEST).

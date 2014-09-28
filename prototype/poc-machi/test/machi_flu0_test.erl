@@ -1,6 +1,8 @@
 
 -module(machi_flu0_test).
 
+-include("machi.hrl").
+
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 -compile(export_all).
@@ -32,21 +34,21 @@ concuerror3_test() ->
 concuerror4_test() ->
     event_setup(),
     {ok, F1} = machi_flu0:start_link("one"),
-    ProjNum = 1,
-    ok = m_proj_write(F1, ProjNum, dontcare),
+    Epoch = 1,
+    ok = m_proj_write(F1, Epoch, dontcare),
 
     Val = <<"val!">>,
-    ok = m_write(F1, ProjNum, Val),
-    {error_stale_projection, ProjNum} = m_write(F1, ProjNum - 1, Val),
+    ok = m_write(F1, Epoch, Val),
+    {error_stale_projection, Epoch} = m_write(F1, Epoch - 1, Val),
 
     Me = self(),
-    TrimFun = fun() -> Res = m_trim(F1, ProjNum),
+    TrimFun = fun() -> Res = m_trim(F1, Epoch),
                        Me ! {self(), Res}
                end,
     TrimPids = [spawn(TrimFun), spawn(TrimFun), spawn(TrimFun)],
     TrimExpected = [error_trimmed,error_trimmed,ok],
 
-    GetFun = fun() -> Res = m_read(F1, ProjNum),
+    GetFun = fun() -> Res = m_read(F1, Epoch),
                       Me ! {self(), Res}
                end,
     GetPids = [spawn(GetFun)],
@@ -87,44 +89,77 @@ proj_store_test() ->
 wedge_test() ->
     event_setup(),
     {ok, F1} = machi_flu0:start_link("one"),
-    ProjNum1 = 1,
-    ok = m_proj_write(F1, ProjNum1, dontcare),
+    Epoch1 = 1,
+    ok = m_proj_write(F1, Epoch1, dontcare),
 
     Val = <<"val!">>,
-    ok = m_write(F1, ProjNum1, Val),
-    {error_stale_projection, ProjNum1} = m_write(F1, ProjNum1 - 1, Val),
-    error_wedged = m_write(F1, ProjNum1 + 1, Val),
+    ok = m_write(F1, Epoch1, Val),
+    {error_stale_projection, Epoch1} = m_write(F1, Epoch1 - 1, Val),
+    error_wedged = m_write(F1, Epoch1 + 1, Val),
     %% Until we write a newer/bigger projection, all ops are error_wedged
-    error_wedged = m_read(F1, ProjNum1),
-    error_wedged = m_write(F1, ProjNum1, Val),
-    error_wedged = m_trim(F1, ProjNum1),
+    error_wedged = m_read(F1, Epoch1),
+    error_wedged = m_write(F1, Epoch1, Val),
+    error_wedged = m_trim(F1, Epoch1),
 
-    ProjNum2 = ProjNum1 + 1,
-    ok = m_proj_write(F1, ProjNum2, dontcare),
-    {ok, Val} = m_read(F1, ProjNum2),
-    error_written = m_write(F1, ProjNum2, Val),
-    ok = m_trim(F1, ProjNum2),
-    error_trimmed = m_trim(F1, ProjNum2),
+    Epoch2 = Epoch1 + 1,
+    ok = m_proj_write(F1, Epoch2, dontcare),
+    {ok, Val} = m_read(F1, Epoch2),
+    error_written = m_write(F1, Epoch2, Val),
+    ok = m_trim(F1, Epoch2),
+    error_trimmed = m_trim(F1, Epoch2),
 
     ok = m_stop(F1),
     _XX = event_get_all(), io:format(user, "XX ~p\n", [_XX]),
     event_shutdown(),
     ok.
 
+proj0_test() ->
+    Me = self(),
+    event_setup(),
+    {ok, F1} = machi_flu0:start_link("one"),
+    {ok, F2} = machi_flu0:start_link("two"),
+    FLUs = [F1, F2],
+    FirstProj = machi_flu0:make_proj(1, FLUs),
+    Epoch1 = FirstProj#proj.epoch,
+    [ok = m_proj_write(F, Epoch1, FirstProj) || F <- FLUs],
+
+    Proj0 = machi_flu0:make_proj(-42, FLUs),
+    Val = <<"val!">>,
+    Pid1 = spawn(fun() ->
+                         {ok, _Proj1} = m_append_page(Proj0, Val),
+                         Me ! {self(), done}
+                 end),
+    %% Pids = [Pid1],
+
+    SecondProj = machi_flu0:make_proj(2, FLUs),
+    Epoch2 = SecondProj#proj.epoch,
+    Pid2 = spawn(fun() ->
+                         [ok = m_proj_write(F, Epoch2, SecondProj) || F <- FLUs],
+                         Me ! {self(), done}
+                 end),
+    Pids = [Pid1, Pid2],
+
+    [receive {Pid, _} -> ok end || Pid <- Pids],
+
+    [ok = m_stop(F) || F <- FLUs],
+    _XX = event_get_all(), %% io:format(user, "XX ~p\n", [_XX]),
+    event_shutdown(),
+    ok.
+
 %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%%
 
-m_write(Pid, ProjNum1, Val) ->
-    Res = machi_flu0:write(Pid, ProjNum1, Val),
+m_write(Pid, Epoch1, Val) ->
+    Res = machi_flu0:write(Pid, Epoch1, Val),
     event_add(write, Pid, Res),
     Res.
 
-m_read(Pid, ProjNum) ->
-    Res = machi_flu0:read(Pid, ProjNum),
+m_read(Pid, Epoch) ->
+    Res = machi_flu0:read(Pid, Epoch),
     event_add(get, Pid, Res),
     Res.
 
-m_trim(Pid, ProjNum) ->
-    Res = machi_flu0:trim(Pid, ProjNum),
+m_trim(Pid, Epoch) ->
+    Res = machi_flu0:trim(Pid, Epoch),
     event_add(trim, Pid, Res),
     Res.
 
@@ -133,13 +168,13 @@ m_stop(Pid) ->
     event_add(stop, Pid, Res),
     Res.
 
-m_proj_write(Pid, ProjNum, Proj) ->
-    Res = machi_flu0:proj_write(Pid, ProjNum, Proj),
+m_proj_write(Pid, Epoch, Proj) ->
+    Res = machi_flu0:proj_write(Pid, Epoch, Proj),
     event_add(proj_write, Pid, Res),
     Res.
 
-m_proj_read(Pid, ProjNum) ->
-    Res = machi_flu0:proj_read(Pid, ProjNum),
+m_proj_read(Pid, Epoch) ->
+    Res = machi_flu0:proj_read(Pid, Epoch),
     event_add(proj_read, Pid, Res),
     Res.
 
@@ -153,7 +188,114 @@ m_proj_read_latest(Pid) ->
     event_add(proj_read_latest, Pid, Res),
     Res.
 
+m_append_page(Proj, Bytes) ->
+    m_append_page(Proj, Bytes, 5).
+
+m_append_page(Proj, _Bytes, 0) ->
+    {{error_failed, ?MODULE, ?LINE}, Proj};
+m_append_page(Proj, Bytes, Retries) ->
+    Retry = fun() ->
+                    case poll_for_new_epoch_projection(Proj) of
+                        {ok, NewProj} ->
+                            m_append_page(NewProj, Bytes, Retries - 1);
+                        Else ->
+                            {Else, Proj}
+                    end
+            end,
+
+    case m_append_page2(Proj, Bytes) of
+        %% lost_race ->
+        %%     m_append_pageQQ(Proj, Bytes, Retries - 1);
+        {error_stale_projection, _} ->
+            Retry();
+        error_wedged ->
+            Retry();
+        Else ->
+            {Else, Proj}
+    end.
+
+m_append_page2(#proj{epoch=Epoch, active=Active}, Bytes) ->
+    m_append_page3(Active, Epoch, Bytes).
+
+m_append_page3([], _Epoch, _Bytes) ->
+    ok;
+m_append_page3([H|T], Epoch, Bytes) ->
+    Res =  (catch m_write(H, Epoch, Bytes)),
+    case Res of
+        ok ->
+            m_append_page3(T, Epoch, Bytes);
+        error_unwritten ->
+            exit({gack, line, ?LINE});
+        error_written ->
+            case m_read(H, Epoch) of
+                {ok, Present} when Present == Bytes ->
+                    m_append_page3(T, Epoch, Bytes);
+                {error_stale_projection, _}=ESP ->
+                    ESP;
+                Else ->
+                    Else
+            end;
+        Else ->
+            Else
+    end.
+    %%     L ->
+    %%         case [x || {error_stale_projection, _} <- L] of
+    %%             [] ->
+    %%                 UnwrittenP = lists:member(error_unwritten, L),
+    %%                 WrittenP = lists:member(error_written, L),
+    %%                 TrimmedP = lists:member(error_trimmed, L),
+    %%                 WedgedP = lists:member(error_wedged, L),
+    %%                 if UnwrittenP ->
+    %%                         error_unwritten;
+    %%                    WrittenP ->
+    %%                         error_written;
+    %%                    TrimmedP ->
+    %%                         error_trimmed;
+    %%                    WedgedP ->
+    %%                         error_wedged;
+    %%                    true ->
+    %%                         exit({gack, L})
+    %%                 end;
+    %%             _ ->
+    %%                 {error_stale_projection, caller_not_looking_here}
+    %%         end
+    %% end.
+
+get_poll_retries() ->
+    25.
+
+get_poll_sleep_time() ->
+    50.
+
+poll_for_new_epoch_projection(P) ->
+    poll_for_new_epoch_projection(P, get_poll_retries()).
+
+poll_for_new_epoch_projection(_P, 0) ->
+    exit({ouch, ?MODULE, ?LINE});
+poll_for_new_epoch_projection(#proj{all=All} = P, Tries) ->
+    case multi_call(All, ?MODULE, m_proj_read_latest, []) of
+        [] ->
+            timer:sleep(get_poll_sleep_time()),
+            poll_for_new_epoch_projection(P, Tries - 1);
+        L ->
+            Answer = lists:last(lists:sort(lists:flatten(L))),
+            {ok, Answer}
+    end.
+
+multi_call([], _Mod, _Fun, _ArgSuffix) ->
+    [];
+multi_call([H|T], Mod, Fun, ArgSuffix) ->
+    case erlang:apply(Mod,Fun, [H|ArgSuffix]) of
+        {ok, X} ->
+            [X|multi_call(T, Mod, Fun, ArgSuffix)];
+        _ ->
+            multi_call(T, Mod, Fun, ArgSuffix)
+    end.
+
+%%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%%
+
 event_setup() ->
+    lamport_clock:reset(),
     Tab = ?MODULE,
     ok = event_shutdown(),
     ets:new(Tab, [named_table, ordered_set, public]).
