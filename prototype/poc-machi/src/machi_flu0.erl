@@ -39,7 +39,7 @@ start_link(Name) when is_list(Name) ->
     gen_server:start_link(?MODULE, [Name], []).
 
 stop(Pid) ->
-    gen_server:call(Pid, stop, infinity).
+    g_call(Pid, stop, infinity).
 
 read(Pid, ProjNum) ->
     g_call(Pid, {reg_op, ProjNum, read}, ?LONG_TIME).
@@ -51,16 +51,16 @@ trim(Pid, ProjNum) ->
     g_call(Pid, {reg_op, ProjNum, trim}, ?LONG_TIME).
 
 proj_write(Pid, ProjNum, Proj) ->
-    gen_server:call(Pid, {proj_write, ProjNum, Proj}, ?LONG_TIME).
+    g_call(Pid, {proj_write, ProjNum, Proj}, ?LONG_TIME).
 
 proj_read(Pid, ProjNum) ->
-    gen_server:call(Pid, {proj_read, ProjNum}, ?LONG_TIME).
+    g_call(Pid, {proj_read, ProjNum}, ?LONG_TIME).
 
 proj_get_latest_num(Pid) ->
-    gen_server:call(Pid, {proj_get_latest_num}, ?LONG_TIME).
+    g_call(Pid, {proj_get_latest_num}, ?LONG_TIME).
 
 proj_read_latest(Pid) ->
-    gen_server:call(Pid, {proj_read_latest}, ?LONG_TIME).
+    g_call(Pid, {proj_read_latest}, ?LONG_TIME).
 
 g_call(Pid, Arg, Timeout) ->
     LC1 = lclock_get(),
@@ -119,25 +119,30 @@ handle_call({{reg_op, _ProjNum, trim}, LC1}, _From, #state{register=trimmed} = S
     LC2 = lclock_update(LC1),
     {reply, {error_trimmed, LC2}, S};
 
-handle_call({proj_write, ProjNum, Proj}, _From, S) ->
+handle_call({{proj_write, ProjNum, Proj}, LC1}, _From, S) ->
+    LC2 = lclock_update(LC1),
     {Reply, NewS} = do_proj_write(ProjNum, Proj, S),
-    {reply, Reply, NewS};
-handle_call({proj_read, ProjNum}, _From, S) ->
+    {reply, {Reply, LC2}, NewS};
+handle_call({{proj_read, ProjNum}, LC1}, _From, S) ->
+    LC2 = lclock_update(LC1),
     {Reply, NewS} = do_proj_read(ProjNum, S),
-    {reply, Reply, NewS};
-handle_call({proj_get_latest_num}, _From, S) ->
+    {reply, {Reply, LC2}, NewS};
+handle_call({{proj_get_latest_num}, LC1}, _From, S) ->
+    LC2 = lclock_update(LC1),
     {Reply, NewS} = do_proj_get_latest_num(S),
-    {reply, Reply, NewS};
-handle_call({proj_read_latest}, _From, S) ->
+    {reply, {Reply, LC2}, NewS};
+handle_call({{proj_read_latest}, LC1}, _From, S) ->
+    LC2 = lclock_update(LC1),
     case do_proj_get_latest_num(S) of
         {error_unwritten, _S} ->
-            {reply, error_unwritten, S};
+            {reply, {error_unwritten, LC2}, S};
         {{ok, ProjNum}, _S} ->
             Proj = orddict:fetch(ProjNum, S#state.proj_store),
-            {reply, {ok, Proj}, S}
+            {reply, {{ok, Proj}, LC2}, S}
     end;
-handle_call(stop, _From, MLP) ->
-    {stop, normal, ok, MLP};
+handle_call({stop, LC1}, _From, MLP) ->
+    LC2 = lclock_update(LC1),
+    {stop, normal, {ok, LC2}, MLP};
 handle_call(_Request, _From, MLP) ->
     Reply = whaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,
     {reply, Reply, MLP}.

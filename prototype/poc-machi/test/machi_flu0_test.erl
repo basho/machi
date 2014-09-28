@@ -30,22 +30,23 @@ concuerror3_test() ->
     ok.
 
 concuerror4_test() ->
+    event_setup(),
     {ok, F1} = machi_flu0:start_link("one"),
     ProjNum = 1,
-    ok = machi_flu0:proj_write(F1, ProjNum, dontcare),
+    ok = m_proj_write(F1, ProjNum, dontcare),
 
     Val = <<"val!">>,
-    ok = machi_flu0:write(F1, ProjNum, Val),
-    {error_stale_projection, ProjNum} = machi_flu0:write(F1, ProjNum - 1, Val),
+    ok = m_write(F1, ProjNum, Val),
+    {error_stale_projection, ProjNum} = m_write(F1, ProjNum - 1, Val),
 
     Me = self(),
-    TrimFun = fun() -> Res = machi_flu0:trim(F1, ProjNum),
+    TrimFun = fun() -> Res = m_trim(F1, ProjNum),
                        Me ! {self(), Res}
                end,
     TrimPids = [spawn(TrimFun), spawn(TrimFun), spawn(TrimFun)],
     TrimExpected = [error_trimmed,error_trimmed,ok],
 
-    GetFun = fun() -> Res = machi_flu0:read(F1, ProjNum),
+    GetFun = fun() -> Res = m_read(F1, ProjNum),
                       Me ! {self(), Res}
                end,
     GetPids = [spawn(GetFun)],
@@ -63,72 +64,108 @@ concuerror4_test() ->
                              end || GetPid <- GetPids]),
     ok = GetExpected(GetResults),
 
-    ok = machi_flu0:stop(F1),
+    ok = m_stop(F1),
     ok.
     
 proj_store_test() ->
+    event_setup(),
     {ok, F1} = machi_flu0:start_link("one"),
 
-    error_unwritten = machi_flu0:proj_get_latest_num(F1),
-    error_unwritten = machi_flu0:proj_read_latest(F1),
+    error_unwritten = m_proj_get_latest_num(F1),
+    error_unwritten = m_proj_read_latest(F1),
 
     Proj1 = whatever1,
-    ok = machi_flu0:proj_write(F1, 1, Proj1),
-    error_written = machi_flu0:proj_write(F1, 1, Proj1),
-    {ok, Proj1} = machi_flu0:proj_read(F1, 1),
-    {ok, 1} = machi_flu0:proj_get_latest_num(F1),
-    {ok, Proj1} = machi_flu0:proj_read_latest(F1),
+    ok = m_proj_write(F1, 1, Proj1),
+    error_written = m_proj_write(F1, 1, Proj1),
+    {ok, Proj1} = m_proj_read(F1, 1),
+    {ok, 1} = m_proj_get_latest_num(F1),
+    {ok, Proj1} = m_proj_read_latest(F1),
 
-    ok = machi_flu0:stop(F1),
+    ok = m_stop(F1),
     ok.
 
 wedge_test() ->
     event_setup(),
     {ok, F1} = machi_flu0:start_link("one"),
     ProjNum1 = 1,
-    ok = machi_flu0:proj_write(F1, ProjNum1, dontcare),
+    ok = m_proj_write(F1, ProjNum1, dontcare),
 
     Val = <<"val!">>,
-    ok = machi_flu0:write(F1, ProjNum1, Val),
-    {error_stale_projection, ProjNum1} = machi_flu0:write(F1, ProjNum1 - 1, Val),
-    error_wedged = machi_flu0:write(F1, ProjNum1 + 1, Val),
+    ok = m_write(F1, ProjNum1, Val),
+    {error_stale_projection, ProjNum1} = m_write(F1, ProjNum1 - 1, Val),
+    error_wedged = m_write(F1, ProjNum1 + 1, Val),
     %% Until we write a newer/bigger projection, all ops are error_wedged
-    error_wedged = read(F1, ProjNum1),
-    error_wedged = machi_flu0:write(F1, ProjNum1, Val),
-    error_wedged = machi_flu0:trim(F1, ProjNum1),
+    error_wedged = m_read(F1, ProjNum1),
+    error_wedged = m_write(F1, ProjNum1, Val),
+    error_wedged = m_trim(F1, ProjNum1),
 
     ProjNum2 = ProjNum1 + 1,
-    ok = machi_flu0:proj_write(F1, ProjNum2, dontcare),
-    {ok, Val} = read(F1, ProjNum2),
-    error_written = machi_flu0:write(F1, ProjNum2, Val),
-    ok = machi_flu0:trim(F1, ProjNum2),
-    error_trimmed = machi_flu0:trim(F1, ProjNum2),
+    ok = m_proj_write(F1, ProjNum2, dontcare),
+    {ok, Val} = m_read(F1, ProjNum2),
+    error_written = m_write(F1, ProjNum2, Val),
+    ok = m_trim(F1, ProjNum2),
+    error_trimmed = m_trim(F1, ProjNum2),
 
-    ok = machi_flu0:stop(F1),
-    XX = event_get_all(), io:format(user, "XX ~p\n", [XX]),
+    ok = m_stop(F1),
+    _XX = event_get_all(), io:format(user, "XX ~p\n", [_XX]),
     event_shutdown(),
     ok.
 
 %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%%
 
-read(Pid, ProjNum) ->
+m_write(Pid, ProjNum1, Val) ->
+    Res = machi_flu0:write(Pid, ProjNum1, Val),
+    event_add(write, Pid, Res),
+    Res.
+
+m_read(Pid, ProjNum) ->
     Res = machi_flu0:read(Pid, ProjNum),
-    event_add(get, Res),
+    event_add(get, Pid, Res),
+    Res.
+
+m_trim(Pid, ProjNum) ->
+    Res = machi_flu0:trim(Pid, ProjNum),
+    event_add(trim, Pid, Res),
+    Res.
+
+m_stop(Pid) ->
+    Res = machi_flu0:stop(Pid),
+    event_add(stop, Pid, Res),
+    Res.
+
+m_proj_write(Pid, ProjNum, Proj) ->
+    Res = machi_flu0:proj_write(Pid, ProjNum, Proj),
+    event_add(proj_write, Pid, Res),
+    Res.
+
+m_proj_read(Pid, ProjNum) ->
+    Res = machi_flu0:proj_read(Pid, ProjNum),
+    event_add(proj_read, Pid, Res),
+    Res.
+
+m_proj_get_latest_num(Pid) ->
+    Res = machi_flu0:proj_get_latest_num(Pid),
+    event_add(proj_get_latest_num, Pid, Res),
+    Res.
+
+m_proj_read_latest(Pid) ->
+    Res = machi_flu0:proj_read_latest(Pid),
+    event_add(proj_read_latest, Pid, Res),
     Res.
 
 event_setup() ->
     Tab = ?MODULE,
     ok = event_shutdown(),
-    ets:new(Tab, [named_table, ordered_set]).
+    ets:new(Tab, [named_table, ordered_set, public]).
 
 event_shutdown() ->
     Tab = ?MODULE,
     (catch ets:delete(Tab)),
     ok.
 
-event_add(Key, Description) ->
+event_add(Key, Who, Description) ->
     Tab = ?MODULE,
-    ets:insert(Tab, {lamport_clock:get(), Key, Description}).
+    ets:insert(Tab, {lamport_clock:get(), Key, Who, Description}).
 
 event_get_all() ->
     Tab = ?MODULE,
