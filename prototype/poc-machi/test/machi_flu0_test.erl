@@ -45,7 +45,7 @@ concuerror4_test() ->
     TrimPids = [spawn(TrimFun), spawn(TrimFun), spawn(TrimFun)],
     TrimExpected = [error_trimmed,error_trimmed,ok],
 
-    GetFun = fun() -> Res = machi_flu0:get(F1, ProjNum),
+    GetFun = fun() -> Res = machi_flu0:read(F1, ProjNum),
                       Me ! {self(), Res}
                end,
     GetPids = [spawn(GetFun)],
@@ -92,13 +92,13 @@ wedge_test() ->
     {error_stale_projection, ProjNum1} = machi_flu0:write(F1, ProjNum1 - 1, Val),
     error_wedged = machi_flu0:write(F1, ProjNum1 + 1, Val),
     %% Until we write a newer/bigger projection, all ops are error_wedged
-    error_wedged = machi_flu0:get(F1, ProjNum1),
+    error_wedged = machi_flu0:read(F1, ProjNum1),
     error_wedged = machi_flu0:write(F1, ProjNum1, Val),
     error_wedged = machi_flu0:trim(F1, ProjNum1),
 
     ProjNum2 = ProjNum1 + 1,
     ok = machi_flu0:proj_write(F1, ProjNum2, dontcare),
-    {ok, Val} = machi_flu0:get(F1, ProjNum2),
+    {ok, Val} = machi_flu0:read(F1, ProjNum2),
     error_written = machi_flu0:write(F1, ProjNum2, Val),
     ok = machi_flu0:trim(F1, ProjNum2),
     error_trimmed = machi_flu0:trim(F1, ProjNum2),

@@ -3,7 +3,7 @@
 -behaviour(gen_server).
 
 -export([start_link/1, stop/1,
-         write/3, get/2, trim/2,
+         write/3, read/2, trim/2,
          proj_write/3, proj_read/2, proj_get_latest_num/1, proj_read_latest/1]).
 -ifdef(TEST).
 -compile(export_all).
@@ -41,8 +41,8 @@ start_link(Name) when is_list(Name) ->
 stop(Pid) ->
     gen_server:call(Pid, stop, infinity).
 
-get(Pid, ProjNum) ->
-    gen_server:call(Pid, {reg_op, ProjNum, get}, ?LONG_TIME).
+read(Pid, ProjNum) ->
+    gen_server:call(Pid, {reg_op, ProjNum, read}, ?LONG_TIME).
 
 write(Pid, ProjNum, Bin) when is_binary(Bin) ->
     gen_server:call(Pid, {reg_op, ProjNum, {write, Bin}}, ?LONG_TIME).
@@ -88,10 +88,10 @@ handle_call({reg_op, _ProjNum, {write, _Bin}}, _From,
             #state{register=trimmed} = S) ->
     {reply, error_trimmed, S};
 
-handle_call({reg_op, ProjNum, get}, _From, #state{proj_num=MyProjNum} = S)
+handle_call({reg_op, ProjNum, read}, _From, #state{proj_num=MyProjNum} = S)
   when ProjNum /= MyProjNum ->
     {reply, {error_stale_projection, MyProjNum}, S};
-handle_call({reg_op, _ProjNum, get}, _From, #state{register=Reg} = S) ->
+handle_call({reg_op, _ProjNum, read}, _From, #state{register=Reg} = S) ->
     {reply, {ok, Reg}, S};
 
 handle_call({reg_op, _ProjNum, trim}, _From, #state{register=unwritten} = S) ->
