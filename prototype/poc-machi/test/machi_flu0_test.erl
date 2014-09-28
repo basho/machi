@@ -61,6 +61,21 @@ concuerror4_test() ->
     ok = machi_flu0:stop(F1),
     ok.
     
+proj_store_test() ->
+    {ok, F1} = machi_flu0:start_link("one"),
+
+    error_unwritten = machi_flu0:proj_get_latest_num(F1),
+    error_unwritten = machi_flu0:proj_read_latest(F1),
+
+    Proj1 = whatever1,
+    ok = machi_flu0:proj_write(F1, 1, Proj1),
+    error_written = machi_flu0:proj_write(F1, 1, Proj1),
+    {ok, Proj1} = machi_flu0:proj_read(F1, 1),
+    {ok, 1} = machi_flu0:proj_get_latest_num(F1),
+    {ok, Proj1} = machi_flu0:proj_read_latest(F1),
+
+    ok = machi_flu0:stop(F1),
+    ok.
 
 -endif.
 -endif.
