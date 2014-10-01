@@ -209,6 +209,8 @@ m_append_page(Proj, Bytes, Retries) ->
         {error_stale_projection, _} ->
             Retry();
         error_wedged ->
+            TODO left off here: read-repair the projection store across all
+                participants, then retry.............
             Retry();
         Else ->
             {Else, Proj}
