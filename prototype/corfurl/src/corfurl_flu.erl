@@ -213,6 +213,7 @@ handle_call({{fill, ClientEpoch, _LogicalPN}, LC1}, _From,
     {reply, {error_badepoch, LC2}, State};
 handle_call({{fill, _ClientEpoch, LogicalPN}, LC1}, _From, State) ->
     LC2 = lclock_update(LC1),
+    io:format(user, "~s.erl line ~w: TODO: this 'fill or trim' logic is probably stupid, due to mis-remembering the CORFU paper, sorry!  Commenting out this warning line is OK, if you wish to proceed with testing Corfurl.  This code can change a fill into a trim.  Those things are supposed to be separate, silly me, a fill should never automagically change to a trim.\n", [?MODULE, ?LINE]),
     {Reply, NewState} = do_trim_or_fill(fill, LogicalPN, State),
     ?EVENT_LOG({flu, fill, self(), LogicalPN, Reply}),
     {reply, {Reply, LC2}, NewState};

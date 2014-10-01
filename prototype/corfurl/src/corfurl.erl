@@ -261,6 +261,7 @@ trim_page(#proj{epoch=Epoch} = P, LPN) ->
 fill_or_trim_page([], _Epoch, _LPN, _Func) ->
     ok;
 fill_or_trim_page([H|T], Epoch, LPN, Func) ->
+    %% io:format(user, "~s.erl line ~w: TODO: this 'fill or trim' logic is probably stupid, due to mis-remembering the CORFU paper, sorry!  Commenting out this warning line is OK, if you wish to proceed with testing Corfurl.  This code can change a fill into a trim.  Those things are supposed to be separate, silly me, a fill should never automagically change to a trim.\n", [?MODULE, ?LINE]),
     case corfurl_flu:Func(flu_pid(H), Epoch, LPN) of
         Res when Res == ok; Res == error_trimmed ->
             %% Detecting a race here between fills and trims is too crazy,
