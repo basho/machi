@@ -109,7 +109,7 @@ wedge_test() ->
     error_trimmed = m_trim(F1, Epoch2),
 
     ok = m_stop(F1),
-    _XX = event_get_all(), io:format(user, "XX ~p\n", [_XX]),
+    _XX = event_get_all(), %% io:format(user, "XX ~p\n", [_XX]),
     event_shutdown(),
     ok.
 
@@ -134,7 +134,8 @@ proj0_test() ->
     SecondProj = machi_flu0:make_proj(2, FLUs),
     Epoch2 = SecondProj#proj.epoch,
     Pid2 = spawn(fun() ->
-                         [ok = m_proj_write(F, Epoch2, SecondProj) || F <- FLUs],
+                         [ok = m_proj_write_with_check(F, Epoch2, SecondProj) ||
+                             F <- FLUs],
                          Me ! {self(), done}
                  end),
     Pids = [Pid1, Pid2],
@@ -142,7 +143,7 @@ proj0_test() ->
     [receive {Pid, _} -> ok end || Pid <- Pids],
 
     [ok = m_stop(F) || F <- FLUs],
-    _XX = event_get_all(), %% io:format(user, "XX ~p\n", [_XX]),
+    _XX = event_get_all(), %%io:format(user, "XX ~p\n", [_XX]),
     event_shutdown(),
     ok.
 
@@ -172,6 +173,21 @@ m_proj_write(Pid, Epoch, Proj) ->
     Res = machi_flu0:proj_write(Pid, Epoch, Proj),
     event_add(proj_write, Pid, Res),
     Res.
+
+m_proj_write_with_check(Pid, Epoch, Proj) ->
+    case m_proj_write(Pid, Epoch, Proj) of
+        ok ->
+            ok;
+        error_written ->
+            case m_proj_read(Pid, Epoch) of
+                {ok, Proj} ->
+                    ok;
+                {ok, OtherProj} ->
+                    {bummer, other_proj, OtherProj};
+                Else ->
+                    Else
+            end
+    end.
 
 m_proj_read(Pid, Epoch) ->
     Res = machi_flu0:proj_read(Pid, Epoch),
@@ -209,8 +225,7 @@ m_append_page(Proj, Bytes, Retries) ->
         {error_stale_projection, _} ->
             Retry();
         error_wedged ->
-            TODO left off here: read-repair the projection store across all
-                participants, then retry.............
+            youbetcha = m_repair_projection_store(Proj),
             Retry();
         Else ->
             {Else, Proj}
@@ -294,6 +309,12 @@ multi_call([H|T], Mod, Fun, ArgSuffix) ->
             multi_call(T, Mod, Fun, ArgSuffix)
     end.
 
+m_repair_projection_store(Proj) ->
+    [begin
+         catch m_proj_write(FLU, Proj#proj.epoch, Proj)
+     end || FLU <- Proj#proj.all],
+    youbetcha.
+
 %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%%
 
 event_setup() ->
@@ -309,7 +330,9 @@ event_shutdown() ->
 
 event_add(Key, Who, Description) ->
     Tab = ?MODULE,
-    ets:insert(Tab, {lamport_clock:get(), Key, Who, Description}).
+    E = {lamport_clock:get(), Key, Who, Description},
+    %%io:format(user, "E = ~p\n", [E]),
+    ets:insert(Tab, E).
 
 event_get_all() ->
     Tab = ?MODULE,
