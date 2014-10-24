@@ -27,12 +27,17 @@ pulse: compile
 
 CONC_ARGS = --pz ./.eunit --treat_as_normal shutdown --after_timeout 1000
 
-concuerror: deps compile eunit
+concuerror: deps compile
 	$(REBAR_BIN) -v skip_deps=true eunit suites=do_not_exist
-	concuerror -m machi_flu0_test -t concuerror1_test $(CONC_ARGS) && \
-	concuerror -m machi_flu0_test -t concuerror2_test $(CONC_ARGS) && \
-	concuerror -m machi_flu0_test -t concuerror3_test $(CONC_ARGS) && \
-	concuerror -m machi_flu0_test -t concuerror4_test $(CONC_ARGS) && \
-	concuerror -m machi_flu0_test -t proj_store_test $(CONC_ARGS) && \
-	concuerror -m machi_flu0_test -t wedge_test $(CONC_ARGS) && \
+	@echo "We recommend not running this test on battery power."
+	@echo "Get yourself some coffee, here goes......"
+	concuerror -m machi_flu0_test -t concuerror1_test $(CONC_ARGS)
+	concuerror -m machi_flu0_test -t concuerror2_test $(CONC_ARGS)
+	concuerror -m machi_flu0_test -t concuerror3_test $(CONC_ARGS)
+	@echo ""
+	@echo "Expect about 31K interleavings for the next test."
+	@echo ""
+	concuerror -m machi_flu0_test -t concuerror4_test $(CONC_ARGS)
+	concuerror -m machi_flu0_test -t proj_store_test $(CONC_ARGS)
+	concuerror -m machi_flu0_test -t wedge_test $(CONC_ARGS)
 	concuerror -m machi_flu0_test -t proj0_test $(CONC_ARGS)
