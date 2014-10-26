@@ -237,7 +237,7 @@ calc_projection_prop() ->
        {Seed, OldThreshold, NoPartitionThreshold},
        {gen_rand_seed(), choose(0, 101), choose(0,101)},
        begin
-           Steps = 100,
+           Steps = 200,
            S0 = ?MODULE:make_initial_state(a, [a,b,c,d], Seed),
            F = fun(_, {S, Acc}) ->
                        {P1, S1} = calc_projection(OldThreshold,
@@ -253,7 +253,7 @@ calc_projection_prop() ->
 calc_projection_test_() ->
     {timeout, 60,
      fun() ->
-             true = eqc:quickcheck(eqc:numtests(500,
+           true = eqc:quickcheck(eqc:numtests(1000,
                                               ?QC_OUT(calc_projection_prop())))
      end}.
 
@@ -307,17 +307,55 @@ projection_transition_is_sane(
 
     true = Epoch2 > Epoch1,
     true = PrevEpoch2 > PrevEpoch1,
-    All_list1 = All_list2,
+    All_list1 = All_list2,                 % todo will probably change
 
+    %% No duplicates
     true = lists:sort(Down_list2) == lists:usort(Down_list2),
-    [] = [X || X <- Down_list2, not lists:member(X, All_list2)],
     true = lists:sort(UPI_list2) == lists:usort(UPI_list2),
-    [] = [X || X <- UPI_list2, not lists:member(X, All_list2)],
     true = lists:sort(Repairing_list2) == lists:usort(Repairing_list2),
-    [] = [X || X <- Repairing_list2, not lists:member(X, All_list2)],
 
+    %% Disjoint-ness
     true = lists:sort(All_list2) == lists:sort(Down_list2 ++ UPI_list2 ++
                                                    Repairing_list2),
+    [] = [X || X <- Down_list2, not lists:member(X, All_list2)],
+    [] = [X || X <- UPI_list2, not lists:member(X, All_list2)],
+    [] = [X || X <- Repairing_list2, not lists:member(X, All_list2)],
+    DownS2 = sets:from_list(Down_list2),
+    UPIS2 = sets:from_list(UPI_list2),
+    RepairingS2 = sets:from_list(Repairing_list2),
+    true = sets:is_disjoint(DownS2, UPIS2),
+    true = sets:is_disjoint(DownS2, RepairingS2),
+    true = sets:is_disjoint(UPIS2, RepairingS2),
+
+    %% Additions to the UPI chain may only be at the tail
+    UPI_common_prefix =
+        lists:takewhile(fun(X) -> sets:is_element(X, UPIS2) end, UPI_list1),
+    %% If the common prefix is empty, then one of the inputs must be empty.
+    if UPI_common_prefix == [] ->
+            true = UPI_list1 == [] orelse UPI_list2 == [];
+       true ->
+            true
+    end,
+    true = lists:prefix(UPI_common_prefix, UPI_list1), % sanity
+    true = lists:prefix(UPI_common_prefix, UPI_list2), % sanity
+    UPI_2_suffix = UPI_list2 -- UPI_common_prefix,
+
+    %% Where did elements in UPI_2_suffix come from?
+    %% Only two sources are permitted.
+    [true = lists:member(X, Repairing_list1) % X added after repair done
+            orelse
+            lists:member(X, UPI_list1)       % X in UPI_list1 after common pref
+     || X <- UPI_2_suffix],
+
+    %% The UPI_2_suffix must exactly be equal to: ordered items from
+    %% UPI_list1 concat'ed with ordered items from Repairing_list1.
+    %% Both temp vars below preserve relative order!
+    UPI_2_suffix_from_UPI1 = [X || X <- UPI_2_suffix,
+                                   lists:member(X, UPI_list1)],
+    UPI_2_suffix_from_Repairing1 = [X || X <- UPI_2_suffix,
+                                         lists:member(X, Repairing_list1)],
+    %% true?
+    UPI_2_suffix = UPI_2_suffix_from_UPI1 ++ UPI_2_suffix_from_Repairing1,
 
     true.
 
