@@ -22,12 +22,15 @@
 -module(machi_chain_manager).
 
 -export([]).
+-compile(export_all).
 
 -ifdef(TEST).
 -compile(export_all).
 
 -ifdef(EQC).
 -include_lib("eqc/include/eqc.hrl").
+-define(QC_OUT(P),
+        eqc:on_output(fun(Str, Args) -> io:format(user, Str, Args) end, P)).
 -endif.
 -ifdef(PULSE).
 -compile({parse_transform, pulse_instrument}).
@@ -49,15 +52,15 @@
             creation_time   :: timestamp(),
             author_server   :: m_server(),
             all_members     :: [m_server()],
-            active_upi      :: [m_server()],
-            active_repairing:: [m_server()],
+            down            :: [m_server()],
+            upi             :: [m_server()],
+            repairing       :: [m_server()],
             dbg             :: list() %proplist()
         }).
 
 -record(state, {
           name :: m_server(),
           proj :: #projection{},
-          last_up :: list(m_server()),
           %%
           runenv :: list() %proplist()
          }).
@@ -67,15 +70,14 @@ make_initial_state(MyName, All_list, Seed) ->
               {network_partitions, []}],
     #state{name=MyName,
            proj=make_initial_projection(MyName, All_list, All_list, [], []),
-           last_up=All_list,
            runenv=RunEnv}.
 
 make_initial_projection(MyName, All_list, UPI_list, Repairing_list, Ps) ->
     make_projection(1, 0, <<>>,
-                    MyName, All_list, UPI_list, Repairing_list, Ps).
+                    MyName, All_list, [], UPI_list, Repairing_list, Ps).
 
 make_projection(EpochNum, PrevEpochNum, PrevEpochCSum,
-                MyName, All_list, UPI_list, Repairing_list, Ps) ->
+                MyName, All_list, Down_list, UPI_list, Repairing_list, Ps) ->
     P = #projection{epoch_number=EpochNum,
                     epoch_csum= <<>>,
                     prev_epoch_num=PrevEpochNum,
@@ -83,25 +85,57 @@ make_projection(EpochNum, PrevEpochNum, PrevEpochCSum,
                     creation_time=now(),
                     author_server=MyName,
                     all_members=All_list,
-                    active_upi=UPI_list,
-                    active_repairing=Repairing_list,
+                    down=Down_list,
+                    upi=UPI_list,
+                    repairing=Repairing_list,
                     dbg=Ps},
     CSum = crypto:hash(sha, term_to_binary(P)),
     P#projection{epoch_csum=CSum}.
 
+%% OldThreshold: Percent chance of using the old/previous network partition list
+%% NoPartitionThreshold: If the network partition changes, what are the odds
+%%                       that there are no partitions at all?
+
 calc_projection(OldThreshold, NoPartitionThreshold,
-                #state{name=MyName, last_up=_LastUp, proj=LastProj,
-                       runenv=RunEnv1} = S) ->
+                #state{name=MyName, proj=LastProj, runenv=RunEnv1} = S) ->
     #projection{epoch_number=OldEpochNum,
                 epoch_csum=OldEpochCsum,
-                all_members=All_list
+                all_members=All_list,
+                upi=OldUPI_list,
+                repairing=OldRepairing_list
                } = LastProj,
+    LastUp = lists:usort(OldUPI_list ++ OldRepairing_list),
     AllMembers = (S#state.proj)#projection.all_members,
     {Up, RunEnv2} = calc_up_nodes(MyName, OldThreshold, NoPartitionThreshold,
                                   AllMembers, RunEnv1),
+    NewUp = Up -- LastUp,
+    Down = AllMembers -- Up,
+
+    NewUPI_list = [X || X <- OldUPI_list, lists:member(X, Up)],
+    Repairing_list2 = [X || X <- OldRepairing_list, lists:member(X, Up)],
+    {NewUPI_list3, Repairing_list3, RunEnv3} =
+        case {NewUp, Repairing_list2} of
+            {[], []} ->
+                {NewUPI_list, [], RunEnv2};
+            {[], [H|T]} ->
+                {Prob, RunEnvX} = roll_dice(100, RunEnv2),
+                if Prob =< 50 ->
+                        {NewUPI_list ++ [H], T, RunEnvX};
+                   true ->
+                        {NewUPI_list, OldRepairing_list, RunEnvX}
+                end;
+            {_, _} ->
+                {NewUPI_list, OldRepairing_list, RunEnv2}
+        end,
+    Repairing_list4 = case NewUp of
+                          []    -> Repairing_list3;
+                          NewUp -> Repairing_list3 ++ NewUp
+                      end,
+    Repairing_list5 = Repairing_list4 -- Down,
     P = make_projection(OldEpochNum + 1, OldEpochNum, OldEpochCsum,
-                        MyName, All_list, Up, [], [{fubar,true}]),
-    {P, S#state{runenv=RunEnv2}}.
+                        MyName, All_list, Down, NewUPI_list3, Repairing_list5,
+                        [goo]),
+    {P, S#state{runenv=RunEnv3}}.
 
 calc_up_nodes(MyName, OldThreshold, NoPartitionThreshold,
               AllMembers, RunEnv1) ->
@@ -121,18 +155,17 @@ calc_up_nodes(MyName, OldThreshold, NoPartitionThreshold,
 
 calc_network_partitions(Nodes, Seed1, OldPartition,
                         OldThreshold, NoPartitionThreshold) ->
-    {F2, Seed2} = random:uniform_s(Seed1),
-    Cutoff2 = trunc(F2 * 100),
+    {Cutoff2, Seed2} = random:uniform_s(100,Seed1),
     if Cutoff2 < OldThreshold ->
+            {Seed2, OldPartition};
+       true ->
             {F3, Seed3} = random:uniform_s(Seed1),
             Cutoff3 = trunc(F3 * 100),
             if Cutoff3 < NoPartitionThreshold ->
                     {Seed3, []};
                true ->
                     make_network_partition_locations(Nodes, Seed3)
-            end;
-       true ->
-            {Seed2, OldPartition}
+            end
     end.
 
 replace(PropList, Items) ->
@@ -141,10 +174,19 @@ replace(PropList, Items) ->
                 end, PropList, Items).
 
 make_projection_summary(#projection{epoch_number=EpochNum,
-                                    all_members=All_list,
-                                    active_upi=UPI_list,
-                                    active_repairing=Repairing_list}) ->
-    [{epoch,EpochNum},{all,All_list},{upi,UPI_list},{repair,Repairing_list}].
+                                    all_members=_All_list,
+                                    down=Down_list,
+                                    upi=UPI_list,
+                                    repairing=Repairing_list}) ->
+    [{epoch,EpochNum},
+     {upi,UPI_list},{repair,Repairing_list},{down,Down_list}].
+    %% [{epoch,EpochNum},{all,All_list},{down,Down_list},
+    %%  {upi,UPI_list},{repair,Repairing_list}].
+
+roll_dice(N, RunEnv) ->
+    Seed1 = proplists:get_value(seed, RunEnv),
+    {Val, Seed2} = random:uniform_s(N, Seed1),
+    {Val, replace(RunEnv, [{seed, Seed2}])}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -175,12 +217,112 @@ make_all_pairs2([H1|T]) ->
 -ifdef(TEST).
 
 smoke0_test() ->
-    S0 = ?MODULE:make_initial_state(a, [a,b,c], {4,5,6}),
+    S0 = ?MODULE:make_initial_state(a, [a,b,c,d], {4,5,6}),
     lists:foldl(fun(_, S) ->
-                        {P1, S1} = calc_projection(555, 0, S),
+                        {P1, S1} = calc_projection(20, 1, S),
                         io:format(user, "~p\n", [make_projection_summary(P1)]),
                         S1#state{proj=P1}
                 end, S0, lists:seq(1,10)).
+
+-ifdef(EQC).
+gen_rand_seed() ->
+    noshrink({gen_num(), gen_num(), gen_num()}).
+
+gen_num() ->
+    ?LET(I, oneof([int(), largeint()]),
+         erlang:abs(I)).
+
+calc_projection_prop() ->
+    ?FORALL(
+       {Seed, OldThreshold, NoPartitionThreshold},
+       {gen_rand_seed(), choose(0, 101), choose(0,101)},
+       begin
+           Steps = 100,
+           S0 = ?MODULE:make_initial_state(a, [a,b,c,d], Seed),
+           F = fun(_, {S, Acc}) ->
+                       {P1, S1} = calc_projection(OldThreshold,
+                                                  NoPartitionThreshold, S),
+                       %%io:format(user, "~p\n", [make_projection_summary(P1)]),
+                       {S1#state{proj=P1}, [P1|Acc]}
+               end,
+           {_, Projs0} = lists:foldl(F, {S0, []}, lists:seq(1,Steps)),
+           Projs = lists:reverse(Projs0),
+           true = projection_transitions_are_sane(Projs)
+       end).
+
+calc_projection_test_() ->
+    {timeout, 60,
+     fun() ->
+             true = eqc:quickcheck(eqc:numtests(500,
+                                              ?QC_OUT(calc_projection_prop())))
+     end}.
+
+projection_transitions_are_sane([]) ->
+    true;
+projection_transitions_are_sane([_]) ->
+    true;
+projection_transitions_are_sane([P1, P2|T]) ->
+    case projection_transition_is_sane(P1, P2) of
+        true ->
+            projection_transitions_are_sane([P2|T]);
+        Else ->
+            Else
+    end.
+
+projection_transition_is_sane(
+  #projection{epoch_number=Epoch1,
+              epoch_csum=CSum1,
+              prev_epoch_num=PrevEpoch1,
+              prev_epoch_csum=PrevCSum1,
+              creation_time=CreationTime1,
+              author_server=AuthorServer1,
+              all_members=All_list1,
+              down=Down_list1,
+              upi=UPI_list1,
+              repairing=Repairing_list1,
+              dbg=Dbg1} = _P1,
+  #projection{epoch_number=Epoch2,
+              epoch_csum=CSum2,
+              prev_epoch_num=PrevEpoch2,
+              prev_epoch_csum=PrevCSum2,
+              creation_time=CreationTime2,
+              author_server=AuthorServer2,
+              all_members=All_list2,
+              down=Down_list2,
+              upi=UPI_list2,
+              repairing=Repairing_list2,
+              dbg=Dbg2} = _P2) ->
+    true = is_integer(Epoch1) andalso is_integer(Epoch2),
+    true = is_binary(CSum1) andalso is_binary(CSum2),
+    true = is_integer(PrevEpoch1) andalso is_integer(PrevEpoch2),
+    true = is_binary(PrevCSum1) andalso is_binary(PrevCSum2),
+    {_,_,_} = CreationTime1,
+    {_,_,_} = CreationTime2,
+    true = is_atom(AuthorServer1) andalso is_atom(AuthorServer2), % todo will probably change
+    true = is_list(All_list1) andalso is_list(All_list2),
+    true = is_list(Down_list1) andalso is_list(Down_list2),
+    true = is_list(UPI_list1) andalso is_list(UPI_list2),
+    true = is_list(Repairing_list1) andalso is_list(Repairing_list2),
+    true = is_list(Dbg1) andalso is_list(Dbg2),
+
+    true = Epoch2 > Epoch1,
+    true = PrevEpoch2 > PrevEpoch1,
+    All_list1 = All_list2,
+
+    true = lists:sort(Down_list2) == lists:usort(Down_list2),
+    [] = [X || X <- Down_list2, not lists:member(X, All_list2)],
+    true = lists:sort(UPI_list2) == lists:usort(UPI_list2),
+    [] = [X || X <- UPI_list2, not lists:member(X, All_list2)],
+    true = lists:sort(Repairing_list2) == lists:usort(Repairing_list2),
+    [] = [X || X <- Repairing_list2, not lists:member(X, All_list2)],
+
+    true = lists:sort(All_list2) == lists:sort(Down_list2 ++ UPI_list2 ++
+                                                   Repairing_list2),
+
+    true.
+
+-endif. % EQC
+
 %% [begin
 %%     %%io:format(user, "S0 ~p\n", [S0]),
 %%     {P1, _S1} = calc_projection(555, 0, S0),

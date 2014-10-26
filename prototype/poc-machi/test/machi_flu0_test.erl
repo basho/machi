@@ -29,6 +29,18 @@
 -endif.
 
 -ifdef(TEST).
+
+repair_status_test() ->
+    {ok, F} = machi_flu0:start_link("one"),
+    try
+        ok = machi_flu0:set_fake_repairing_status(F, true),
+        true = machi_flu0:get_fake_repairing_status(F),
+        ok = machi_flu0:set_fake_repairing_status(F, false),
+        false = machi_flu0:get_fake_repairing_status(F)
+    after
+        ok = machi_flu0:stop(F)
+    end.
+
 -ifndef(PULSE).
 
 concuerror1_test() ->

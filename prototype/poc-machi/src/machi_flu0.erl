@@ -28,6 +28,7 @@
 -export([start_link/1, stop/1,
          write/3, read/2, trim/2,
          proj_write/3, proj_read/2, proj_get_latest_num/1, proj_read_latest/1]).
+-export([set_fake_repairing_status/2, get_fake_repairing_status/1]).
 -export([make_proj/1, make_proj/2]).
 
 -ifdef(TEST).
@@ -56,6 +57,7 @@
           name :: list(),
           wedged = false :: boolean(),
           register = 'unwritten' :: register(),
+          fake_repairing = false :: boolean(),
           proj_epoch :: non_neg_integer(),
           proj_store :: dict()
          }).
@@ -86,6 +88,12 @@ proj_get_latest_num(Pid) ->
 
 proj_read_latest(Pid) ->
     g_call(Pid, {proj_read_latest}, ?LONG_TIME).
+
+set_fake_repairing_status(Pid, Status) ->
+    gen_server:call(Pid, {set_fake_repairing_status, Status}, ?LONG_TIME).
+
+get_fake_repairing_status(Pid) ->
+    gen_server:call(Pid, {get_fake_repairing_status}, ?LONG_TIME).
 
 g_call(Pid, Arg, Timeout) ->
     LC1 = lclock_get(),
@@ -176,6 +184,10 @@ handle_call({{proj_read_latest}, LC1}, _From, S) ->
 handle_call({stop, LC1}, _From, MLP) ->
     LC2 = lclock_update(LC1),
     {stop, normal, {ok, LC2}, MLP};
+handle_call({set_fake_repairing_status, Status}, _From, S) ->
+    {reply, ok, S#state{fake_repairing=Status}};
+handle_call({get_fake_repairing_status}, _From, S) ->
+    {reply, S#state.fake_repairing, S};
 handle_call(_Request, _From, MLP) ->
     Reply = whaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,
     {reply, Reply, MLP}.
