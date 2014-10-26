@@ -43,7 +43,7 @@ smoke0_test() ->
     S0 = ?MGR:make_initial_state(a, [a,b,c,d], {4,5,6}),
     lists:foldl(fun(_, S) ->
                         {P1, S1} = ?MGR:calc_projection(20, 1, S),
-                        io:format(user, "~p\n", [?MGR:make_projection_summary(P1)]),
+                        %% io:format(user, "~p\n", [?MGR:make_projection_summary(P1)]),
                         S1#ch_mgr{proj=P1}
                 end, S0, lists:seq(1,10)).
 
@@ -85,16 +85,23 @@ gen_rand_seed() ->
 
 gen_num() ->
     choose(1, 50000).
-    %% ?LET(I, oneof([int(), largeint()]),
-    %%      erlang:abs(I)).
 
 prop_calc_projection() ->
+    prop_calc_projection([a,b,c], false).
+
+prop_calc_projection(Nodes, TrackUseTab) ->
     ?FORALL(
-       {Seed, OldThreshold, NoPartitionThreshold, Steps},
-       {gen_rand_seed(), choose(0, 101), choose(0, 101), choose(500, 2000)},
+       {Seed, OldThreshold, NoPartitionThreshold, Steps, HeadNode},
+       {gen_rand_seed(),
+        oneof([0,15,35,55,75,85,100]),
+        oneof([0,15,35,55,75,85,100]),
+        choose(500, 2000),
+        oneof(Nodes)},
        begin
            erase(goofus),
-           S0 = ?MGR:make_initial_state(a, [a,b,c,d,e], Seed),
+           {RandN, _} = random:uniform_s(length(Nodes), Seed),
+           NodesShuffle = lists:nth(RandN, perms(Nodes)),
+           S0 = ?MGR:make_initial_state(HeadNode, NodesShuffle, Seed),
            F = fun(_, {S, Acc}) ->
                        {P1, S1} = ?MGR:calc_projection(
                                     OldThreshold, NoPartitionThreshold, S),
@@ -103,14 +110,80 @@ prop_calc_projection() ->
                end,
            {_, Projs0} = lists:foldl(F, {S0, []}, lists:seq(1,Steps)),
            Projs = lists:reverse(Projs0),
+           if TrackUseTab == false ->
+                   ok;
+              true ->
+                   Transitions = extract_upi_transitions(Projs),
+                   %% io:format(user, "\n~P\n", [lists:usort(Transitions), 10]),
+                   [ets:update_counter(TrackUseTab, Trans, 1) ||
+                       Trans <- Transitions]
+           end,
            true = projection_transitions_are_sane(Projs)
        end).
+
+extract_upi_transitions([]) ->
+    [];
+extract_upi_transitions([_]) ->
+    [];
+extract_upi_transitions([P1, P2|T]) ->
+    Trans = {P1#projection.upi, P2#projection.upi},
+    [Trans|extract_upi_transitions([P2|T])].
 
 calc_projection_test_() ->
     {timeout, 60,
      fun() ->
-           true = eqc:quickcheck(eqc:numtests(5,
-                                              ?QC_OUT(prop_calc_projection())))
+             %% Nodes = [a,b,c,d],
+             Nodes = [a,b],
+             Cs = combinations(Nodes),
+             Combos = lists:sort([{UPI1, UPI2} || UPI1 <- Cs, UPI2 <- Cs]),
+             timer:sleep(500),
+             io:format(user, "\n", []),
+             Rs = [begin
+                       P1 = ?MGR:make_projection(2, 1, <<>>, HdNd, Nodes,
+                                                 [], PsUPI1, Nodes -- PsUPI1, []),
+                       P2 = ?MGR:make_projection(3, 2, <<>>, HdNd, Nodes,
+                                                 [], PsUPI2, Nodes -- PsUPI2, []),
+                       Res = case (catch projection_transition_is_sane(P1, P2)) of
+                                 true -> true;
+                                 _    -> false
+                             end,
+                       {Res, UPI1, UPI2}
+                   end || HdNd <- Nodes,
+                          {UPI1,UPI2} <- Combos,
+                          %% We assume that the author appears in any 
+                          UPI1 /= [],
+                          UPI2 /= [],
+                          %% HdNd is the author for all of these
+                          %% tests, so it must be present in UPI1 & UPI2
+                          lists:member(HdNd, UPI1),
+                          lists:member(HdNd, UPI2),
+                          PsUPI1 <- perms(UPI1),
+                          PsUPI2 <- perms(UPI2)],
+             %% HeadNode = hd(Nodes),
+             OKs = [begin
+                        {UPI1,UPI2}
+                    end || {true, UPI1, UPI2} <- Rs],
+                             %% not sets:is_disjoint(sets:from_list(UPI1),
+                             %%                      sets:from_list(UPI2))
+                             %% orelse UPI1 == [] orelse UPI2 == []],
+             io:format(user, "OKs = ~p\n", [lists:usort(OKs)]),
+             %% OKs = [{UPI1,UPI2} || {true, UPI1, UPI2} <- Rs,
+             %%                 not sets:is_disjoint(sets:from_list(UPI1),
+             %%                                      sets:from_list(UPI2))],
+             Tab = ets:new(count, [public, set, {keypos, 1}]),
+             [ets:insert(Tab, {Transition, 0}) || Transition <- OKs],
+             true = eqc:quickcheck(
+                  eqc:numtests(500, ?QC_OUT(prop_calc_projection(Nodes, Tab)))),
+             NotCounted = [Transition || {Transition, 0} <- ets:tab2list(Tab)],
+             Counted = [X || {_, N}=X <- ets:tab2list(Tab),
+                             N > 0],
+             timer:sleep(100),
+             io:format(user, "OKs length = ~p\n", [length(OKs)]),
+             io:format(user, "Transitions hit = ~p\n", [length(OKs) - length(NotCounted)]),
+             io:format(user, "Transitions = ~p\n", [lists:sort(Counted)]),
+             io:format(user, "NotCounted length = ~p\n", [length(NotCounted)]),
+             io:format(user, "NotCounted = ~p\n", [NotCounted]),
+             ok
      end}.
 
 projection_transitions_are_sane([]) ->
@@ -183,6 +256,13 @@ projection_transition_is_sane(
     true = sets:is_disjoint(DownS2, UPIS2),
     true = sets:is_disjoint(DownS2, RepairingS2),
     true = sets:is_disjoint(UPIS2, RepairingS2),
+
+    %% The author must not be down.
+    false = lists:member(AuthorServer1, Down_list1),
+    false = lists:member(AuthorServer2, Down_list2),
+    %% The author must be in either the UPI or repairing list.
+    true = lists:member(AuthorServer1, UPI_list1 ++ Repairing_list1),
+    true = lists:member(AuthorServer2, UPI_list2 ++ Repairing_list2),
 
     %% Additions to the UPI chain may only be at the tail
     UPI_common_prefix =
@@ -277,5 +357,58 @@ fail1_smoke_test() ->
     true = projection_transition_is_sane(P2e, P3e) /= true,
 
     true.
+
+fail2_smoke_test() ->
+    AB = [a,b],
+    BadSets = [{1, [b,a],[a,b]},
+               {2, [b],[a,b]},
+               %% {3, [a],[b]},  % weird but valid: [a] means b is repairing;
+                                 % so if a fails and b finishes repairing,
+                                 % swapping both at the same time is "ok".
+               {4, [a,b],[b,a]},
+               %% {5, [b],[a]},  % weird but valid: see above
+               {6, [a],[b,a]}
+              ],
+    [begin
+         P2f= ?MGR:make_projection(2, 1, <<>>, a, AB,
+                                   [], Two,   AB -- Two, []),
+         P3f= ?MGR:make_projection(3, 2, <<>>, a, AB,
+                                   [], Three, AB -- Three, []),
+         {Label, true} =
+             {Label, (projection_transition_is_sane(P2f, P3f) /= true)}
+     end || {Label, Two, Three} <- BadSets],
+
+    true.
+
+%% aaa_smoke_test() ->
+%%     L = [a,b,c,d],
+%%     Cs = combinations(L),
+%%     Combos = lists:sort([{X, Y} || X <- Cs, Y <- Cs]),
+%%     timer:sleep(500),
+%%     io:format(user, "\n", []),
+%%     Rs = [begin
+%%               P1 = ?MGR:make_projection(2, 1, <<>>, a, L,
+%%                                         [], X, L -- X, []),
+%%               P2 = ?MGR:make_projection(3, 2, <<>>, a, L,
+%%                                         [], Y, L -- Y, []),
+%%               Res = case (catch projection_transition_is_sane(P1, P2)) of
+%%                         true -> true;
+%%                         _    -> false
+%%                     end,
+%%               {Res, P1, P2}
+%%           end || {X,Y} <- Combos],
+%%     OKs = [{X,Y} || {true, X, Y} <- Rs],
+%%     io:format(user, "Cs are ~p\n", [length(Cs)]),
+%%     io:format(user, "OKs are ~p\n", [length(OKs)]),
+%%     Bads = [{X,Y} || {false, X, Y} <- Rs],
+%%     io:format(user, "Bads are ~p\n", [length(Bads)]),
+%%     %% [io:format(user, "~p -> ~p: ~p\n", [X, Y, Res]);
+%%     ok.
+
+combinations(L) ->
+    lists:usort(perms(L) ++ lists:append([ combinations(L -- [X]) || X <- L])).
+
+perms([]) -> [[]];
+perms(L)  -> [[H|T] || H <- L, T <- perms(L--[H])].
 
 -endif.
