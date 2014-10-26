@@ -24,6 +24,7 @@
 -include("machi.hrl").
 
 -define(MGR, machi_chain_manager).
+-define(D(X), io:format(user, "~s ~p\n", [??X, X])).
 
 -export([]).
 
@@ -129,11 +130,20 @@ extract_upi_transitions([P1, P2|T]) ->
     Trans = {P1#projection.upi, P2#projection.upi},
     [Trans|extract_upi_transitions([P2|T])].
 
+find_common_prefix([], _) ->
+    [];
+find_common_prefix(_, []) ->
+    [];
+find_common_prefix([H|L1], [H|L2]) ->
+    [H|find_common_prefix(L1, L2)];
+find_common_prefix(_, _) ->
+    [].
+
 calc_projection_test_() ->
     {timeout, 60,
      fun() ->
              %% Nodes = [a,b,c,d],
-             Nodes = [a,b],
+             Nodes = [a,b,c],
              Cs = combinations(Nodes),
              Combos = lists:sort([{UPI1, UPI2} || UPI1 <- Cs, UPI2 <- Cs]),
              timer:sleep(500),
@@ -143,14 +153,14 @@ calc_projection_test_() ->
                                                  [], PsUPI1, Nodes -- PsUPI1, []),
                        P2 = ?MGR:make_projection(3, 2, <<>>, HdNd, Nodes,
                                                  [], PsUPI2, Nodes -- PsUPI2, []),
-                       Res = case (catch projection_transition_is_sane(P1, P2)) of
+                       Res = case projection_transition_is_sane(P1, P2) of
                                  true -> true;
                                  _    -> false
                              end,
-                       {Res, UPI1, UPI2}
+                       {Res, PsUPI1, PsUPI2}
                    end || HdNd <- Nodes,
                           {UPI1,UPI2} <- Combos,
-                          %% We assume that the author appears in any 
+                          %% We assume that the author appears in any UPI list
                           UPI1 /= [],
                           UPI2 /= [],
                           %% HdNd is the author for all of these
@@ -159,30 +169,24 @@ calc_projection_test_() ->
                           lists:member(HdNd, UPI2),
                           PsUPI1 <- perms(UPI1),
                           PsUPI2 <- perms(UPI2)],
-             %% HeadNode = hd(Nodes),
              OKs = [begin
                         {UPI1,UPI2}
                     end || {true, UPI1, UPI2} <- Rs],
-                             %% not sets:is_disjoint(sets:from_list(UPI1),
-                             %%                      sets:from_list(UPI2))
-                             %% orelse UPI1 == [] orelse UPI2 == []],
              io:format(user, "OKs = ~p\n", [lists:usort(OKs)]),
-             %% OKs = [{UPI1,UPI2} || {true, UPI1, UPI2} <- Rs,
-             %%                 not sets:is_disjoint(sets:from_list(UPI1),
-             %%                                      sets:from_list(UPI2))],
              Tab = ets:new(count, [public, set, {keypos, 1}]),
              [ets:insert(Tab, {Transition, 0}) || Transition <- OKs],
              true = eqc:quickcheck(
-                  eqc:numtests(500, ?QC_OUT(prop_calc_projection(Nodes, Tab)))),
+                  eqc:numtests(3500,
+                               ?QC_OUT(prop_calc_projection(Nodes, Tab)))),
              NotCounted = [Transition || {Transition, 0} <- ets:tab2list(Tab)],
-             Counted = [X || {_, N}=X <- ets:tab2list(Tab),
+             _Counted = [X || {_, N}=X <- ets:tab2list(Tab),
                              N > 0],
              timer:sleep(100),
-             io:format(user, "OKs length = ~p\n", [length(OKs)]),
-             io:format(user, "Transitions hit = ~p\n", [length(OKs) - length(NotCounted)]),
-             io:format(user, "Transitions = ~p\n", [lists:sort(Counted)]),
-             io:format(user, "NotCounted length = ~p\n", [length(NotCounted)]),
-             io:format(user, "NotCounted = ~p\n", [NotCounted]),
+             io:format(user, "\tNotCounted = ~p\n", [NotCounted]),
+             io:format(user, "\tOKs length = ~p\n", [length(OKs)]),
+             io:format(user, "\tTransitions hit = ~p\n", [length(OKs) - length(NotCounted)]),
+             %% io:format(user, "\tTransitions = ~p\n", [lists:sort(_Counted)]),
+             io:format(user, "\tNotCounted length = ~p\n", [length(NotCounted)]),
              ok
      end}.
 
@@ -265,16 +269,15 @@ projection_transition_is_sane(
     true = lists:member(AuthorServer2, UPI_list2 ++ Repairing_list2),
 
     %% Additions to the UPI chain may only be at the tail
-    UPI_common_prefix =
-        lists:takewhile(fun(X) -> sets:is_element(X, UPIS2) end, UPI_list1),
+    UPI_common_prefix = find_common_prefix(UPI_list1, UPI_list2),
     if UPI_common_prefix == [] ->
             if UPI_list1 == [] orelse UPI_list2 == [] ->
-                    %% If the common prefix is empty, then one of the inputs
-                    %% must be empty.
+                    %% If the common prefix is empty, then one of the
+                    %% inputs must be empty.
                     true;
                true ->
-                    %% Otherwise, we have a case of UPI changing from one
-                    %% of these two situations:
+                    %% Otherwise, we have a case of UPI changing from
+                    %% one of these two situations:
                     %%
                     %% UPI_list1 -> UPI_list2
                     %% [d,c,b,a] -> [c,a]
@@ -380,6 +383,26 @@ fail2_smoke_test() ->
 
     true.
 
+fail3_smoke_test() ->
+    Nodes = [a,b],
+    UPI1 = [a,b],
+    UPI2 = [b,a],
+    [begin
+         PsUPI1 = UPI1,
+         PsUPI2 = UPI2,
+         P1 = ?MGR:make_projection(2, 1, <<>>, HdNd, Nodes,
+                                   [], PsUPI1, Nodes -- PsUPI1, []),
+         P2 = ?MGR:make_projection(3, 2, <<>>, HdNd, Nodes,
+                                   [], PsUPI2, Nodes -- PsUPI2, []),
+         Res = case projection_transition_is_sane(P1, P2) of
+                   true -> true;
+                   _    -> false
+               end,
+         {Res, HdNd, PsUPI1, PsUPI2} = {false, HdNd, PsUPI1, PsUPI2}
+     end || HdNd <- Nodes],
+
+    true.
+
 %% aaa_smoke_test() ->
 %%     L = [a,b,c,d],
 %%     Cs = combinations(L),
@@ -391,7 +414,7 @@ fail2_smoke_test() ->
 %%                                         [], X, L -- X, []),
 %%               P2 = ?MGR:make_projection(3, 2, <<>>, a, L,
 %%                                         [], Y, L -- Y, []),
-%%               Res = case (catch projection_transition_is_sane(P1, P2)) of
+%%               Res = case projection_transition_is_sane(P1, P2) of
 %%                         true -> true;
 %%                         _    -> false
 %%                     end,
