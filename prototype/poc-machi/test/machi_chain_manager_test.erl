@@ -23,13 +23,15 @@
 
 -include("machi.hrl").
 
+-define(MGR, machi_chain_manager).
+
 -export([]).
 
 -ifdef(TEST).
 
 -ifdef(EQC).
 -include_lib("eqc/include/eqc.hrl").
--include_lib("eqc/include/eqc_statem.hrl").
+%% -include_lib("eqc/include/eqc_statem.hrl").
 -define(QC_OUT(P),
         eqc:on_output(fun(Str, Args) -> io:format(user, Str, Args) end, P)).
 -endif.
@@ -37,19 +39,20 @@
 -include_lib("eunit/include/eunit.hrl").
 -compile(export_all).
 
+smoke0_test() ->
+    S0 = ?MGR:make_initial_state(a, [a,b,c,d], {4,5,6}),
+    lists:foldl(fun(_, S) ->
+                        {P1, S1} = ?MGR:calc_projection(20, 1, S),
+                        io:format(user, "~p\n", [?MGR:make_projection_summary(P1)]),
+                        S1#ch_mgr{proj=P1}
+                end, S0, lists:seq(1,10)).
+
+-ifdef(CRUFT_DELETE_ME_MAYBE).
+
 -record(s, {
           step = 0 :: non_neg_integer(),
           seed :: {integer(), integer(), integer()}
          }).
-
-smoke0_test() ->
-    MGR = machi_chain_manager,
-    S0 = MGR:make_initial_state(a, [a,b,c,d], {4,5,6}),
-    lists:foldl(fun(_, S) ->
-                        {P1, S1} = MGR:calc_projection(20, 1, S),
-                        io:format(user, "~p\n", [MGR:make_projection_summary(P1)]),
-                        S1#ch_mgr{proj=P1}
-                end, S0, lists:seq(1,10)).
 
 gen_all_nodes() ->
     [a, b, c].
@@ -73,25 +76,27 @@ prop_m() ->
                 true
             end).
 
+-endif. % CRUFT_DELETE_ME_MAYBE
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 gen_rand_seed() ->
     noshrink({gen_num(), gen_num(), gen_num()}).
 
 gen_num() ->
-    ?LET(I, oneof([int(), largeint()]),
-         erlang:abs(I)).
+    choose(1, 50000).
+    %% ?LET(I, oneof([int(), largeint()]),
+    %%      erlang:abs(I)).
 
-calc_projection_prop() ->
-    MGR = machi_chain_manager,
+prop_calc_projection() ->
     ?FORALL(
-       {Seed, OldThreshold, NoPartitionThreshold},
-       {gen_rand_seed(), choose(0, 101), choose(0,101)},
+       {Seed, OldThreshold, NoPartitionThreshold, Steps},
+       {gen_rand_seed(), choose(0, 101), choose(0, 101), choose(500, 2000)},
        begin
-           Steps = 200,
-           S0 = MGR:make_initial_state(a, [a,b,c,d], Seed),
+           erase(goofus),
+           S0 = ?MGR:make_initial_state(a, [a,b,c,d,e], Seed),
            F = fun(_, {S, Acc}) ->
-                       {P1, S1} = MGR:calc_projection(
+                       {P1, S1} = ?MGR:calc_projection(
                                     OldThreshold, NoPartitionThreshold, S),
                        %%io:format(user, "~p\n", [make_projection_summary(P1)]),
                        {S1#ch_mgr{proj=P1}, [P1|Acc]}
@@ -104,8 +109,8 @@ calc_projection_prop() ->
 calc_projection_test_() ->
     {timeout, 60,
      fun() ->
-           true = eqc:quickcheck(eqc:numtests(500,
-                                              ?QC_OUT(calc_projection_prop())))
+           true = eqc:quickcheck(eqc:numtests(5,
+                                              ?QC_OUT(prop_calc_projection())))
      end}.
 
 projection_transitions_are_sane([]) ->
@@ -131,7 +136,7 @@ projection_transition_is_sane(
               down=Down_list1,
               upi=UPI_list1,
               repairing=Repairing_list1,
-              dbg=Dbg1} = _P1,
+              dbg=Dbg1} = P1,
   #projection{epoch_number=Epoch2,
               epoch_csum=CSum2,
               prev_epoch_num=PrevEpoch2,
@@ -142,7 +147,8 @@ projection_transition_is_sane(
               down=Down_list2,
               upi=UPI_list2,
               repairing=Repairing_list2,
-              dbg=Dbg2} = _P2) ->
+              dbg=Dbg2} = P2) ->
+ try
     true = is_integer(Epoch1) andalso is_integer(Epoch2),
     true = is_binary(CSum1) andalso is_binary(CSum2),
     true = is_integer(PrevEpoch1) andalso is_integer(PrevEpoch2),
@@ -181,14 +187,27 @@ projection_transition_is_sane(
     %% Additions to the UPI chain may only be at the tail
     UPI_common_prefix =
         lists:takewhile(fun(X) -> sets:is_element(X, UPIS2) end, UPI_list1),
-    %% If the common prefix is empty, then one of the inputs must be empty.
     if UPI_common_prefix == [] ->
-            true = UPI_list1 == [] orelse UPI_list2 == [];
+            if UPI_list1 == [] orelse UPI_list2 == [] ->
+                    %% If the common prefix is empty, then one of the inputs
+                    %% must be empty.
+                    true;
+               true ->
+                    %% Otherwise, we have a case of UPI changing from one
+                    %% of these two situations:
+                    %%
+                    %% UPI_list1 -> UPI_list2
+                    %% [d,c,b,a] -> [c,a]
+                    %% [d,c,b,a] -> [c,a,repair_finished_added_to_tail].
+                    NotUPI2 = (Down_list2 ++ Repairing_list2),
+                    true = lists:prefix(UPI_list1 -- NotUPI2,
+                                        UPI_list2)
+            end;
        true ->
             true
     end,
-    true = lists:prefix(UPI_common_prefix, UPI_list1), % sanity
-    true = lists:prefix(UPI_common_prefix, UPI_list2), % sanity
+    true = lists:prefix(UPI_common_prefix, UPI_list1),
+    true = lists:prefix(UPI_common_prefix, UPI_list2),
     UPI_2_suffix = UPI_list2 -- UPI_common_prefix,
 
     %% Where did elements in UPI_2_suffix come from?
@@ -207,6 +226,55 @@ projection_transition_is_sane(
                                          lists:member(X, Repairing_list1)],
     %% true?
     UPI_2_suffix = UPI_2_suffix_from_UPI1 ++ UPI_2_suffix_from_Repairing1,
+
+    true
+ catch
+     _Type:_Err ->
+         S1 = ?MGR:make_projection_summary(P1),
+         S2 = ?MGR:make_projection_summary(P2),
+         Trace = erlang:get_stacktrace(),
+         {err, from, S1, to, S2, stack, Trace}
+ end.
+
+pass1_smoke_test() ->
+    P2 = ?MGR:make_projection(2, 1, <<>>, a, [a,b,c,d],
+                              [],      [d,c,b,a], [], []),
+    P3 = ?MGR:make_projection(3, 2, <<>>, a, [a,b,c,d],
+                              [b,c,d], [a],       [], []),
+    true = projection_transition_is_sane(P2, P3),
+
+    P2b= ?MGR:make_projection(2, 1, <<>>, a, [a,b,c,d],
+                              [],      [d,c,b,a], [], []),
+    P3b= ?MGR:make_projection(3, 2, <<>>, a, [a,b,c,d],
+                              [b,d],   [c,a],       [], []),
+    true = projection_transition_is_sane(P2b, P3b),
+
+    P2c= ?MGR:make_projection(2, 1, <<>>, a, [a,b,c,d,e],
+                              [],      [e,d,c,b], [a], []),
+    P3c= ?MGR:make_projection(3, 2, <<>>, a, [a,b,c,d,e],
+                              [e,c],   [d,b,a],   [], []),
+    true = projection_transition_is_sane(P2c, P3c),
+
+    true.
+
+fail1_smoke_test() ->
+    P15 = ?MGR:make_projection(15, 14, <<>>, a, [a,b,c,d],
+                              [b,d], [a],   [c], []),
+    P16 = ?MGR:make_projection(16, 15, <<>>, a, [a,b,c,d],
+                              [b,d], [c,a], [],  []),
+    true = projection_transition_is_sane(P15, P16) /= true,
+
+    P2d= ?MGR:make_projection(2, 1, <<>>, a, [a,b,c,d,e],
+                              [],      [e,d,c,b], [a], []),
+    P3d= ?MGR:make_projection(3, 2, <<>>, a, [a,b,c,d,e],
+                              [e,c],   [d,a,b],   [], []),
+    true = projection_transition_is_sane(P2d, P3d) /= true,
+
+    P2e= ?MGR:make_projection(2, 1, <<>>, a, [a,b,c,d,e],
+                              [],      [e,d,c,b], [a], []),
+    P3e= ?MGR:make_projection(3, 2, <<>>, a, [a,b,c,d,e],
+                              [e,c],   [a,d,b],   [], []),
+    true = projection_transition_is_sane(P2e, P3e) /= true,
 
     true.
 

@@ -26,7 +26,7 @@
 -export([make_initial_state/3, calc_projection/3, make_projection_summary/1]).
 
 -ifdef(TEST).
-
+-compile(export_all).
 -ifdef(EQC).
 -include_lib("eqc/include/eqc.hrl").
 -endif.
@@ -133,6 +133,16 @@ calc_network_partitions(Nodes, Seed1, OldPartition,
             {Cutoff3, Seed3} = random:uniform_s(100, Seed1),
             if Cutoff3 < NoPartitionThreshold ->
                     {Seed3, []};
+               Cutoff3 rem 10 < 5 ->
+                    %% case get(goofus) of undefined -> put(goofus, true), io:format(user, "~w", [Cutoff3 rem 10]); _ -> ok end,
+                    OldSeed = case random:seed(Seed3) of undefined -> now();
+                                                         Else      -> Else
+                              end,
+                    {Down, _} = lists:partition(fun(_) -> random:uniform() < 0.5 end, Nodes),
+                    %% case get(goofus) of undefined -> put(goofus, true), io:format(user, "~w", [Down]); _ -> ok end,
+                    Partitions = [{X, Y} || X <- Nodes, Y <- Down],
+                    random:seed(OldSeed),
+                    {Seed3, Partitions};
                true ->
                     make_network_partition_locations(Nodes, Seed3)
             end
