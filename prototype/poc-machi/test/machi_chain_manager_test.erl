@@ -36,8 +36,7 @@
 
 -record(s, {
           step = 0 :: non_neg_integer(),
-          seed :: {integer(), integer(), integer()},
-          comm_weights = [] :: list()
+          seed :: {integer(), integer(), integer()}
          }).
 
 gen_all_nodes() ->
@@ -50,23 +49,6 @@ gen_num() ->
     ?LET(I, oneof([int(), largeint()]),
          erlang:abs(I)).
 
-gen_communicating_weights(Nodes) ->
-    Pairs = make_all_pairs(Nodes),
-    Num = length(Pairs),
-    ?LET(Weights, vector(Num, choose(1, 100)),
-         lists:zip(Weights, Pairs)).
-
-%% gen_communicating_nodes(Nodes) ->
-%%     ?LET(Pairs, make_all_pairs(Nodes),
-%%          frequency([{10, Pairs},
-%%                     { 8, gen_take_some(Pairs)}])).
-
-%% gen_take_some(L) ->
-%%     Num = length(L),
-%%     ?LET({Weights, Cutoff}, {vector(Num, choose(1, 100)), choose(1, 100)},
-%%          [X || {Weight, X} <- lists:zip(Weights, L),
-%%                Weight < Cutoff]).
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 initial_state() ->
@@ -74,7 +56,7 @@ initial_state() ->
 
 command(#s{step=0}) ->
     L = gen_all_nodes(),
-    {call, ?MODULE, init_run, [gen_rand_seed(), gen_communicating_weights(L)]};
+    {call, ?MODULE, init_run, [gen_rand_seed(), L]};
 command(_S) ->
     foo.
 
@@ -88,13 +70,3 @@ prop_m() ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-make_all_pairs(L) ->
-    lists:flatten(make_all_pairs2(lists:usort(L))).
-
-make_all_pairs2([]) ->
-    [];
-make_all_pairs2([_]) ->
-    [];
-make_all_pairs2([H1|T]) ->
-    [[{H1, X}, {X, H1}] || X <- T] ++ make_all_pairs(T).
-    %% [{H1, H2}, {H2, H1}|make_all_pairs([H2|T])].

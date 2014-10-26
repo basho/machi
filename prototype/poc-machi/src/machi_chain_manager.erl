@@ -51,21 +51,24 @@
             all_members     :: [m_server()],
             active_upi      :: [m_server()],
             active_repairing:: [m_server()],
-            dbg             :: list()%proplist()
+            dbg             :: list() %proplist()
         }).
 
 -record(state, {
           name :: m_server(),
           proj :: #projection{},
-          seed :: timestamp(),
-          last_up :: list(m_server())
+          last_up :: list(m_server()),
+          %%
+          runenv :: list() %proplist()
          }).
 
 make_initial_state(MyName, All_list, Seed) ->
+    RunEnv = [{seed, Seed},
+              {network_partitions, []}],
     #state{name=MyName,
            proj=make_initial_projection(MyName, All_list, All_list, [], []),
-           seed=Seed,
-           last_up=All_list}.
+           last_up=All_list,
+           runenv=RunEnv}.
 
 make_initial_projection(MyName, All_list, UPI_list, Repairing_list, Ps) ->
     make_projection(1, 0, <<>>,
@@ -86,41 +89,103 @@ make_projection(EpochNum, PrevEpochNum, PrevEpochCSum,
     CSum = crypto:hash(sha, term_to_binary(P)),
     P#projection{epoch_csum=CSum}.
 
-calc_projection(CurrentInfo, #state{name=MyName, proj=OldProj} = S) ->
-    {UpNodes, S2} = calc_up_nodes(CurrentInfo, S),
+calc_projection(OldThreshold, NoPartitionThreshold,
+                #state{name=MyName, last_up=_LastUp, proj=LastProj,
+                       runenv=RunEnv1} = S) ->
     #projection{epoch_number=OldEpochNum,
                 epoch_csum=OldEpochCsum,
                 all_members=All_list
-                %% active_upi=UPI_list,
-                %% active_repairing=Repairing_list,
-                %% dbg=Ps
-               } = OldProj,
-    P = make_projection(OldEpochNum + 1, OldEpochNum, OldEpochCsum,
-                        MyName, All_list, UpNodes, [], [{fubar,true}]),
-    {P, S2}.
-
-calc_up_nodes(CurrentInfo,
-              #state{name=MyName, seed=Seed, last_up=LastUp} = S) ->
+               } = LastProj,
     AllMembers = (S#state.proj)#projection.all_members,
-    {F, Seed2} = random:uniform_s(Seed),
-    Cutoff = trunc(F * 100),
-    if LastUp == undefined orelse Cutoff rem 3 == 0 ->
-            Up = calc_new_up_nodes(MyName, AllMembers, CurrentInfo, Cutoff),
-            {Up, S#state{seed=Seed2, last_up=Up}};
+    {Up, RunEnv2} = calc_up_nodes(MyName, OldThreshold, NoPartitionThreshold,
+                                  AllMembers, RunEnv1),
+    P = make_projection(OldEpochNum + 1, OldEpochNum, OldEpochCsum,
+                        MyName, All_list, Up, [], [{fubar,true}]),
+    {P, S#state{runenv=RunEnv2}}.
+
+calc_up_nodes(MyName, OldThreshold, NoPartitionThreshold,
+              AllMembers, RunEnv1) ->
+    Seed1 = proplists:get_value(seed, RunEnv1),
+    Partitions1 = proplists:get_value(network_partitions, RunEnv1),
+    {Seed2, Partitions2} =
+        calc_network_partitions(AllMembers, Seed1, Partitions1,
+                                OldThreshold, NoPartitionThreshold),
+    UpNodes = lists:sort(
+                [Node || Node <- AllMembers,
+                         not lists:member({MyName, Node}, Partitions2),
+                         not lists:member({Node, MyName}, Partitions2)]),
+    RunEnv2 = replace(RunEnv1,
+                      [{seed, Seed2}, {network_partitions, Partitions2}]),
+    {UpNodes, RunEnv2}.
+
+
+calc_network_partitions(Nodes, Seed1, OldPartition,
+                        OldThreshold, NoPartitionThreshold) ->
+    {F2, Seed2} = random:uniform_s(Seed1),
+    Cutoff2 = trunc(F2 * 100),
+    if Cutoff2 < OldThreshold ->
+            {F3, Seed3} = random:uniform_s(Seed1),
+            Cutoff3 = trunc(F3 * 100),
+            if Cutoff3 < NoPartitionThreshold ->
+                    {Seed3, []};
+               true ->
+                    make_network_partition_locations(Nodes, Seed3)
+            end;
        true ->
-            {LastUp, S#state{seed=Seed2}}
+            {Seed2, OldPartition}
     end.
 
-calc_new_up_nodes(MyName, Nodes, CurrentInfo, Cutoff) ->
-    C_weights = proplists:get_value(communicating_weights, CurrentInfo),
-    lists:usort([MyName] ++
-                    [Node || Node <- Nodes,
-                             Node /= MyName,
-                             Weight_to <- [element(1,
-                                                   lists:keyfind({MyName, Node},
-                                                                2, C_weights))],
-                             Weight_from <- [element(1,
-                                                 lists:keyfind({Node, MyName},
-                                                               2, C_weights))],
-                             Weight_to =< Cutoff,
-                             Weight_from =< Cutoff]).
+replace(PropList, Items) ->
+    lists:foldl(fun({Key, Val}, Ps) ->
+                        lists:keyreplace(Key, 1, Ps, {Key,Val})
+                end, PropList, Items).
+
+make_projection_summary(#projection{epoch_number=EpochNum,
+                                    all_members=All_list,
+                                    active_upi=UPI_list,
+                                    active_repairing=Repairing_list}) ->
+    [{epoch,EpochNum},{all,All_list},{upi,UPI_list},{repair,Repairing_list}].
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+make_network_partition_locations(Nodes, Seed1) ->
+    Pairs = make_all_pairs(Nodes),
+    Num = length(Pairs),
+    {Seed2, Weights} = lists:foldl(
+                         fun(_, {Seeda, Acc}) ->
+                                 {F, Seedb} = random:uniform_s(Seeda),
+                                 Cutoff = trunc(F * 100),
+                                 {Seedb, [Cutoff|Acc]}
+                         end, {Seed1, []}, lists:seq(1, Num)),
+    {F3, Seed3} = random:uniform_s(Seed2),
+    Cutoff3 = trunc(F3 * 100),
+    {Seed3, [X || {Weight, X} <- lists:zip(Weights, Pairs),
+                  Weight < Cutoff3]}.
+
+make_all_pairs(L) ->
+    lists:flatten(make_all_pairs2(lists:usort(L))).
+
+make_all_pairs2([]) ->
+    [];
+make_all_pairs2([_]) ->
+    [];
+make_all_pairs2([H1|T]) ->
+    [[{H1, X}, {X, H1}] || X <- T] ++ make_all_pairs(T).
+
+-ifdef(TEST).
+
+smoke0_test() ->
+    S0 = ?MODULE:make_initial_state(a, [a,b,c], {4,5,6}),
+    lists:foldl(fun(_, S) ->
+                        {P1, S1} = calc_projection(555, 0, S),
+                        io:format(user, "~p\n", [make_projection_summary(P1)]),
+                        S1#state{proj=P1}
+                end, S0, lists:seq(1,10)).
+%% [begin
+%%     %%io:format(user, "S0 ~p\n", [S0]),
+%%     {P1, _S1} = calc_projection(555, 0, S0),
+%%     io:format(user, "P1 ~p\n", [P1]),
+%%     ok % io:format(user, "S1 ~p\n", [S1]).
+%% end || X <- lists:seq(1, 10)].
+
+-endif. %TEST
