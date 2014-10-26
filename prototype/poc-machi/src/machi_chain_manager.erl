@@ -21,16 +21,14 @@
 %% -------------------------------------------------------------------
 -module(machi_chain_manager).
 
--export([]).
--compile(export_all).
+-include("machi.hrl").
+
+-export([make_initial_state/3, calc_projection/3, make_projection_summary/1]).
 
 -ifdef(TEST).
--compile(export_all).
 
 -ifdef(EQC).
 -include_lib("eqc/include/eqc.hrl").
--define(QC_OUT(P),
-        eqc:on_output(fun(Str, Args) -> io:format(user, Str, Args) end, P)).
 -endif.
 -ifdef(PULSE).
 -compile({parse_transform, pulse_instrument}).
@@ -38,37 +36,10 @@
 
 -endif. %TEST
 
--type m_csum()      :: {none | sha1 | sha1_excl_final_20, binary()}.
-%% -type m_epoch()     :: {m_epoch_n(), m_csum()}.
--type m_epoch_n()   :: non_neg_integer().
--type m_server()    :: atom().
--type timestamp()   :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
-
--record(projection, {
-            epoch_number    :: m_epoch_n(),
-            epoch_csum      :: m_csum(),
-            prev_epoch_num  :: m_epoch_n(),
-            prev_epoch_csum :: m_csum(),
-            creation_time   :: timestamp(),
-            author_server   :: m_server(),
-            all_members     :: [m_server()],
-            down            :: [m_server()],
-            upi             :: [m_server()],
-            repairing       :: [m_server()],
-            dbg             :: list() %proplist()
-        }).
-
--record(state, {
-          name :: m_server(),
-          proj :: #projection{},
-          %%
-          runenv :: list() %proplist()
-         }).
-
 make_initial_state(MyName, All_list, Seed) ->
     RunEnv = [{seed, Seed},
               {network_partitions, []}],
-    #state{name=MyName,
+    #ch_mgr{name=MyName,
            proj=make_initial_projection(MyName, All_list, All_list, [], []),
            runenv=RunEnv}.
 
@@ -97,7 +68,7 @@ make_projection(EpochNum, PrevEpochNum, PrevEpochCSum,
 %%                       that there are no partitions at all?
 
 calc_projection(OldThreshold, NoPartitionThreshold,
-                #state{name=MyName, proj=LastProj, runenv=RunEnv1} = S) ->
+                #ch_mgr{name=MyName, proj=LastProj, runenv=RunEnv1} = S) ->
     #projection{epoch_number=OldEpochNum,
                 epoch_csum=OldEpochCsum,
                 all_members=All_list,
@@ -105,7 +76,7 @@ calc_projection(OldThreshold, NoPartitionThreshold,
                 repairing=OldRepairing_list
                } = LastProj,
     LastUp = lists:usort(OldUPI_list ++ OldRepairing_list),
-    AllMembers = (S#state.proj)#projection.all_members,
+    AllMembers = (S#ch_mgr.proj)#projection.all_members,
     {Up, RunEnv2} = calc_up_nodes(MyName, OldThreshold, NoPartitionThreshold,
                                   AllMembers, RunEnv1),
     NewUp = Up -- LastUp,
@@ -135,7 +106,7 @@ calc_projection(OldThreshold, NoPartitionThreshold,
     P = make_projection(OldEpochNum + 1, OldEpochNum, OldEpochCsum,
                         MyName, All_list, Down, NewUPI_list3, Repairing_list5,
                         [goo]),
-    {P, S#state{runenv=RunEnv3}}.
+    {P, S#ch_mgr{runenv=RunEnv3}}.
 
 calc_up_nodes(MyName, OldThreshold, NoPartitionThreshold,
               AllMembers, RunEnv1) ->
@@ -208,159 +179,3 @@ make_all_pairs2([_]) ->
     [];
 make_all_pairs2([H1|T]) ->
     [[{H1, X}, {X, H1}] || X <- T] ++ make_all_pairs(T).
-
--ifdef(TEST).
-
-smoke0_test() ->
-    S0 = ?MODULE:make_initial_state(a, [a,b,c,d], {4,5,6}),
-    lists:foldl(fun(_, S) ->
-                        {P1, S1} = calc_projection(20, 1, S),
-                        io:format(user, "~p\n", [make_projection_summary(P1)]),
-                        S1#state{proj=P1}
-                end, S0, lists:seq(1,10)).
-
--ifdef(EQC).
-gen_rand_seed() ->
-    noshrink({gen_num(), gen_num(), gen_num()}).
-
-gen_num() ->
-    ?LET(I, oneof([int(), largeint()]),
-         erlang:abs(I)).
-
-calc_projection_prop() ->
-    ?FORALL(
-       {Seed, OldThreshold, NoPartitionThreshold},
-       {gen_rand_seed(), choose(0, 101), choose(0,101)},
-       begin
-           Steps = 200,
-           S0 = ?MODULE:make_initial_state(a, [a,b,c,d], Seed),
-           F = fun(_, {S, Acc}) ->
-                       {P1, S1} = calc_projection(OldThreshold,
-                                                  NoPartitionThreshold, S),
-                       %%io:format(user, "~p\n", [make_projection_summary(P1)]),
-                       {S1#state{proj=P1}, [P1|Acc]}
-               end,
-           {_, Projs0} = lists:foldl(F, {S0, []}, lists:seq(1,Steps)),
-           Projs = lists:reverse(Projs0),
-           true = projection_transitions_are_sane(Projs)
-       end).
-
-calc_projection_test_() ->
-    {timeout, 60,
-     fun() ->
-           true = eqc:quickcheck(eqc:numtests(1000,
-                                              ?QC_OUT(calc_projection_prop())))
-     end}.
-
-projection_transitions_are_sane([]) ->
-    true;
-projection_transitions_are_sane([_]) ->
-    true;
-projection_transitions_are_sane([P1, P2|T]) ->
-    case projection_transition_is_sane(P1, P2) of
-        true ->
-            projection_transitions_are_sane([P2|T]);
-        Else ->
-            Else
-    end.
-
-projection_transition_is_sane(
-  #projection{epoch_number=Epoch1,
-              epoch_csum=CSum1,
-              prev_epoch_num=PrevEpoch1,
-              prev_epoch_csum=PrevCSum1,
-              creation_time=CreationTime1,
-              author_server=AuthorServer1,
-              all_members=All_list1,
-              down=Down_list1,
-              upi=UPI_list1,
-              repairing=Repairing_list1,
-              dbg=Dbg1} = _P1,
-  #projection{epoch_number=Epoch2,
-              epoch_csum=CSum2,
-              prev_epoch_num=PrevEpoch2,
-              prev_epoch_csum=PrevCSum2,
-              creation_time=CreationTime2,
-              author_server=AuthorServer2,
-              all_members=All_list2,
-              down=Down_list2,
-              upi=UPI_list2,
-              repairing=Repairing_list2,
-              dbg=Dbg2} = _P2) ->
-    true = is_integer(Epoch1) andalso is_integer(Epoch2),
-    true = is_binary(CSum1) andalso is_binary(CSum2),
-    true = is_integer(PrevEpoch1) andalso is_integer(PrevEpoch2),
-    true = is_binary(PrevCSum1) andalso is_binary(PrevCSum2),
-    {_,_,_} = CreationTime1,
-    {_,_,_} = CreationTime2,
-    true = is_atom(AuthorServer1) andalso is_atom(AuthorServer2), % todo will probably change
-    true = is_list(All_list1) andalso is_list(All_list2),
-    true = is_list(Down_list1) andalso is_list(Down_list2),
-    true = is_list(UPI_list1) andalso is_list(UPI_list2),
-    true = is_list(Repairing_list1) andalso is_list(Repairing_list2),
-    true = is_list(Dbg1) andalso is_list(Dbg2),
-
-    true = Epoch2 > Epoch1,
-    true = PrevEpoch2 > PrevEpoch1,
-    All_list1 = All_list2,                 % todo will probably change
-
-    %% No duplicates
-    true = lists:sort(Down_list2) == lists:usort(Down_list2),
-    true = lists:sort(UPI_list2) == lists:usort(UPI_list2),
-    true = lists:sort(Repairing_list2) == lists:usort(Repairing_list2),
-
-    %% Disjoint-ness
-    true = lists:sort(All_list2) == lists:sort(Down_list2 ++ UPI_list2 ++
-                                                   Repairing_list2),
-    [] = [X || X <- Down_list2, not lists:member(X, All_list2)],
-    [] = [X || X <- UPI_list2, not lists:member(X, All_list2)],
-    [] = [X || X <- Repairing_list2, not lists:member(X, All_list2)],
-    DownS2 = sets:from_list(Down_list2),
-    UPIS2 = sets:from_list(UPI_list2),
-    RepairingS2 = sets:from_list(Repairing_list2),
-    true = sets:is_disjoint(DownS2, UPIS2),
-    true = sets:is_disjoint(DownS2, RepairingS2),
-    true = sets:is_disjoint(UPIS2, RepairingS2),
-
-    %% Additions to the UPI chain may only be at the tail
-    UPI_common_prefix =
-        lists:takewhile(fun(X) -> sets:is_element(X, UPIS2) end, UPI_list1),
-    %% If the common prefix is empty, then one of the inputs must be empty.
-    if UPI_common_prefix == [] ->
-            true = UPI_list1 == [] orelse UPI_list2 == [];
-       true ->
-            true
-    end,
-    true = lists:prefix(UPI_common_prefix, UPI_list1), % sanity
-    true = lists:prefix(UPI_common_prefix, UPI_list2), % sanity
-    UPI_2_suffix = UPI_list2 -- UPI_common_prefix,
-
-    %% Where did elements in UPI_2_suffix come from?
-    %% Only two sources are permitted.
-    [true = lists:member(X, Repairing_list1) % X added after repair done
-            orelse
-            lists:member(X, UPI_list1)       % X in UPI_list1 after common pref
-     || X <- UPI_2_suffix],
-
-    %% The UPI_2_suffix must exactly be equal to: ordered items from
-    %% UPI_list1 concat'ed with ordered items from Repairing_list1.
-    %% Both temp vars below preserve relative order!
-    UPI_2_suffix_from_UPI1 = [X || X <- UPI_2_suffix,
-                                   lists:member(X, UPI_list1)],
-    UPI_2_suffix_from_Repairing1 = [X || X <- UPI_2_suffix,
-                                         lists:member(X, Repairing_list1)],
-    %% true?
-    UPI_2_suffix = UPI_2_suffix_from_UPI1 ++ UPI_2_suffix_from_Repairing1,
-
-    true.
-
--endif. % EQC
-
-%% [begin
-%%     %%io:format(user, "S0 ~p\n", [S0]),
-%%     {P1, _S1} = calc_projection(555, 0, S0),
-%%     io:format(user, "P1 ~p\n", [P1]),
-%%     ok % io:format(user, "S1 ~p\n", [S1]).
-%% end || X <- lists:seq(1, 10)].
-
--endif. %TEST

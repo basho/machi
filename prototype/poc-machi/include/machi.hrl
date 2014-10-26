@@ -20,9 +20,36 @@
 %%
 %% -------------------------------------------------------------------
 
--record(proj, {                                 % Projection
+-record(proj, {                                 % Projection (OLD!)
           epoch :: non_neg_integer(),
           all :: list(pid()),
           active :: list(pid())
+         }).
+
+-type m_csum()      :: {none | sha1 | sha1_excl_final_20, binary()}.
+%% -type m_epoch()     :: {m_epoch_n(), m_csum()}.
+-type m_epoch_n()   :: non_neg_integer().
+-type m_server()    :: atom().
+-type timestamp()   :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
+
+-record(projection, {
+            epoch_number    :: m_epoch_n(),
+            epoch_csum      :: m_csum(),
+            prev_epoch_num  :: m_epoch_n(),
+            prev_epoch_csum :: m_csum(),
+            creation_time   :: timestamp(),
+            author_server   :: m_server(),
+            all_members     :: [m_server()],
+            down            :: [m_server()],
+            upi             :: [m_server()],
+            repairing       :: [m_server()],
+            dbg             :: list() %proplist()
+        }).
+
+-record(ch_mgr, {
+          name :: m_server(),
+          proj :: #projection{},
+          %%
+          runenv :: list() %proplist()
          }).
 
