@@ -155,12 +155,11 @@ calc_up_nodes(MyName, OldThreshold, NoPartitionThreshold,
 
 calc_network_partitions(Nodes, Seed1, OldPartition,
                         OldThreshold, NoPartitionThreshold) ->
-    {Cutoff2, Seed2} = random:uniform_s(100,Seed1),
+    {Cutoff2, Seed2} = random:uniform_s(100, Seed1),
     if Cutoff2 < OldThreshold ->
             {Seed2, OldPartition};
        true ->
-            {F3, Seed3} = random:uniform_s(Seed1),
-            Cutoff3 = trunc(F3 * 100),
+            {Cutoff3, Seed3} = random:uniform_s(100, Seed1),
             if Cutoff3 < NoPartitionThreshold ->
                     {Seed3, []};
                true ->
@@ -180,8 +179,6 @@ make_projection_summary(#projection{epoch_number=EpochNum,
                                     repairing=Repairing_list}) ->
     [{epoch,EpochNum},
      {upi,UPI_list},{repair,Repairing_list},{down,Down_list}].
-    %% [{epoch,EpochNum},{all,All_list},{down,Down_list},
-    %%  {upi,UPI_list},{repair,Repairing_list}].
 
 roll_dice(N, RunEnv) ->
     Seed1 = proplists:get_value(seed, RunEnv),
@@ -195,12 +192,10 @@ make_network_partition_locations(Nodes, Seed1) ->
     Num = length(Pairs),
     {Seed2, Weights} = lists:foldl(
                          fun(_, {Seeda, Acc}) ->
-                                 {F, Seedb} = random:uniform_s(Seeda),
-                                 Cutoff = trunc(F * 100),
+                                 {Cutoff, Seedb} = random:uniform_s(100, Seeda),
                                  {Seedb, [Cutoff|Acc]}
                          end, {Seed1, []}, lists:seq(1, Num)),
-    {F3, Seed3} = random:uniform_s(Seed2),
-    Cutoff3 = trunc(F3 * 100),
+    {Cutoff3, Seed3} = random:uniform_s(100, Seed2),
     {Seed3, [X || {Weight, X} <- lists:zip(Weights, Pairs),
                   Weight < Cutoff3]}.
 
