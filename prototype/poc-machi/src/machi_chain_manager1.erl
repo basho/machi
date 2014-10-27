@@ -73,7 +73,7 @@ init({MyName, All_list, Seed, OldThreshold, NoPartitionThreshold, MyFLUPid}) ->
               {no_partition_threshold, NoPartitionThreshold}],
     S = #ch_mgr{name=MyName,
                 proj=make_initial_projection(MyName, All_list, All_list,
-                                             [], []),
+                                             [{author_proc, init}], []),
                 myflu=MyFLUPid, % pid or atom local name
                 runenv=RunEnv},
     {ok, S}.
@@ -106,12 +106,20 @@ code_change(_OldVsn, S, _Extra) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-do_cl_write_current_proj(#ch_mgr{proj=Proj} = S) ->
+do_cl_write_current_proj(#ch_mgr{proj=Proj, myflu=MyFLU} = S) ->
     #projection{epoch_number=Epoch} = Proj,
     case cl_write_public_proj(Epoch, Proj, S) of
         {ok, S2} ->
             case cl_read_public_proj(S2) of
                 {ok, Proj2, S3} ->
+                    ?D(Proj2),
+                    ?D(machi_flu0:get_epoch(MyFLU)),
+                    Proj2b = update_projection_dbg2(
+                               Proj2, [{hooray, {date(), time()}}]),
+                    ok = machi_flu0:proj_write(MyFLU, Epoch, private, Proj2b),
+                    MyP = make_projection_summary(element(2,
+                                 machi_flu0:proj_read_latest(MyFLU, private))),
+                    ?D(MyP),
                     {ok, S3#ch_mgr{proj=Proj2}};
                 {_Other3, _S3}=Else3 ->
                     Else3
@@ -142,10 +150,9 @@ cl_write_public_proj_local(Epoch, Proj, #ch_mgr{myflu=MyFLU}=S) ->
 cl_write_public_proj_remote(FLUs, Partitions, Epoch, Proj, S) ->
     %% We're going to be very cavalier about this write because we'll rely
     %% on the read side to do any read repair.
-    Rs = 
-    [perhaps_call_t(S, Partitions, FLU,
-                fun() -> machi_flu0:proj_write(FLU, Epoch, public, Proj) end) ||
-        FLU <- FLUs],
+    DoIt = fun(X) -> machi_flu0:proj_write(X, Epoch, public, Proj) end,
+    Rs = [perhaps_call_t(S, Partitions, FLU, fun() -> DoIt(FLU) end) ||
+             FLU <- FLUs],
     case lists:usort(Rs) of
         [ok] ->
             {ok, S};
@@ -153,18 +160,40 @@ cl_write_public_proj_remote(FLUs, Partitions, Epoch, Proj, S) ->
             {{mixed_bag, lists:zip(FLUs, Rs)}, S}
     end.
 
-cl_read_public_proj(S) ->
+cl_read_public_proj(#ch_mgr{proj=Proj0}=S) ->
+    #projection{all_members=All_list} = Proj0,
+    {_UpNodes, Partitions, S2} = calc_up_nodes(S),
     %% todo
-    {ok, S#ch_mgr.proj, S}.
+    ?D({todo, All_list, Partitions}),
+    DoIt = fun(X) ->
+                   case machi_flu0:proj_read_latest(X, public) of
+                       {ok, P} -> P;
+                       Else    -> Else
+                   end
+           end,
+    Rs = [perhaps_call_t(S, Partitions, FLU, fun() -> DoIt(FLU) end) ||
+             FLU <- All_list],
+    case lists:usort(Rs) of
+        [P] when is_record(P, projection) ->
+            {ok, S#ch_mgr.proj, S2}
+    end.
 
 make_initial_projection(MyName, All_list, UPI_list, Repairing_list, Ps) ->
     make_projection(1, 0, <<>>,
                     MyName, All_list, [], UPI_list, Repairing_list, Ps).
 
 make_projection(EpochNum, PrevEpochNum, PrevEpochCSum,
-                MyName, All_list, Down_list, UPI_list, Repairing_list, Ps) ->
+                MyName, All_list, Down_list, UPI_list, Repairing_list,
+                Dbg) ->
+    make_projection(EpochNum, PrevEpochNum, PrevEpochCSum,
+                    MyName, All_list, Down_list, UPI_list, Repairing_list,
+                    Dbg, []).
+
+make_projection(EpochNum, PrevEpochNum, PrevEpochCSum,
+                MyName, All_list, Down_list, UPI_list, Repairing_list,
+                Dbg, Dbg2) ->
     P = #projection{epoch_number=EpochNum,
-                    epoch_csum= <<>>,
+                    epoch_csum= <<>>,           % always checksums as <<>>
                     prev_epoch_num=PrevEpochNum,
                     prev_epoch_csum=PrevEpochCSum,
                     creation_time=now(),
@@ -173,9 +202,15 @@ make_projection(EpochNum, PrevEpochNum, PrevEpochCSum,
                     down=Down_list,
                     upi=UPI_list,
                     repairing=Repairing_list,
-                    dbg=Ps},
+                    dbg=Dbg,
+                    dbg2=[]                     % always checksums as []
+                   },
     CSum = crypto:hash(sha, term_to_binary(P)),
-    P#projection{epoch_csum=CSum}.
+    P#projection{epoch_csum=CSum,
+                 dbg2=Dbg2}.
+
+update_projection_dbg2(P, Dbg2) when is_list(Dbg2) ->
+    P#projection{dbg2=Dbg2}.
 
 %% OldThreshold: Percent chance of using the old/previous network partition list
 %% NoPartitionThreshold: If the network partition changes, what are the odds
@@ -274,9 +309,11 @@ make_projection_summary(#projection{epoch_number=EpochNum,
                                     all_members=_All_list,
                                     down=Down_list,
                                     upi=UPI_list,
-                                    repairing=Repairing_list}) ->
+                                    repairing=Repairing_list,
+                                    dbg=Dbg, dbg2=Dbg2}) ->
     [{epoch,EpochNum},
-     {upi,UPI_list},{repair,Repairing_list},{down,Down_list}].
+     {upi,UPI_list},{repair,Repairing_list},{down,Down_list},
+     {d,Dbg}, {d2,Dbg2}].
 
 roll_dice(N, RunEnv) ->
     Seed1 = proplists:get_value(seed, RunEnv),

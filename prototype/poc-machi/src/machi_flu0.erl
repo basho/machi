@@ -27,6 +27,7 @@
 
 -export([start_link/1, stop/1,
          write/3, read/2, trim/2,
+         get_epoch/1,
          proj_write/4, proj_read/3, proj_get_latest_num/2, proj_read_latest/2]).
 -export([set_fake_repairing_status/2, get_fake_repairing_status/1]).
 -export([make_proj/1, make_proj/2]).
@@ -77,6 +78,9 @@ write(Pid, Epoch, Bin) ->
 
 trim(Pid, Epoch) ->
     g_call(Pid, {reg_op, Epoch, trim}, ?LONG_TIME).
+
+get_epoch(Pid) ->
+    g_call(Pid, {get_epoch}, ?LONG_TIME).
 
 proj_write(Pid, Epoch, StoreType, Proj)
   when StoreType == public; StoreType == private ->
@@ -169,6 +173,10 @@ handle_call({{reg_op, _Epoch, trim}, LC1}, _From, #state{register=trimmed} = S) 
     LC2 = lclock_update(LC1),
     {reply, {error_trimmed, LC2}, S};
 
+handle_call({{get_epoch}, LC1}, _From, S) ->
+    LC2 = lclock_update(LC1),
+    {Reply, NewS} = {S#state.proj_epoch, S},
+    {reply, {Reply, LC2}, NewS};
 handle_call({{proj_write, Epoch, StoreType, Proj}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
     {Reply, NewS} = do_proj_write(Epoch, StoreType, Proj, S),

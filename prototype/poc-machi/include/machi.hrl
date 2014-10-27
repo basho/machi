@@ -43,7 +43,8 @@
             down            :: [m_server()],
             upi             :: [m_server()],
             repairing       :: [m_server()],
-            dbg             :: list() %proplist()
+            dbg             :: list(), %proplist() checksummed
+            dbg2            :: list()  %proplist() not checksummed
         }).
 
 -record(ch_mgr, {
