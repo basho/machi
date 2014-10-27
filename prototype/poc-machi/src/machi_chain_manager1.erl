@@ -27,7 +27,7 @@
 -define(D(X), io:format(user, "~s ~p\n", [??X, X])).
 
 %% API
--export([start_link/6, stop/1,
+-export([start_link/6, stop/1, ping/1,
          calculate_projection_internal_old/1,
          cl_write_current_projection/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -58,6 +58,9 @@ start_link(MyName, All_list, Seed,
 stop(Pid) ->
     gen_server:call(Pid, {stop}, infinity).
 
+ping(Pid) ->
+    gen_server:call(Pid, {ping}, infinity).
+
 calculate_projection_internal_old(Pid) ->
     gen_server:call(Pid, {calculate_projection_internal_old}, infinity).
 
@@ -87,6 +90,8 @@ handle_call({calculate_projection_internal_old}, _From,
 handle_call({cl_write_current_projection}, _From, S) ->
     {Res, S2} = do_cl_write_current_proj(S),
     {reply, Res, S2};
+handle_call({ping}, _From, S) ->
+    {reply, pong, S};
 handle_call({stop}, _From, S) ->
     {stop, normal, ok, S};
 handle_call(_Call, _From, S) ->
@@ -120,6 +125,7 @@ do_cl_write_current_proj(#ch_mgr{proj=Proj, myflu=MyFLU} = S) ->
                     MyP = make_projection_summary(element(2,
                                  machi_flu0:proj_read_latest(MyFLU, private))),
                     ?D(MyP),
+                    ?D(S3#ch_mgr.runenv),
                     {ok, S3#ch_mgr{proj=Proj2}};
                 {_Other3, _S3}=Else3 ->
                     Else3
