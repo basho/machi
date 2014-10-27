@@ -140,7 +140,7 @@ find_common_prefix(_, _) ->
     [].
 
 calc_projection_test_() ->
-    Runtime = 15, %% Runtime = 60*60,
+    Runtime = 2, %% Runtime = 60*60,
     {timeout, Runtime * 500,
      fun() ->
              Nodes = [a,b,c],
