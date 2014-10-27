@@ -118,6 +118,8 @@ make_proj(Epoch, FLUs) ->
 
 init([Name]) ->
     lclock_init(),
+    [(catch exit(whereis(Name), kill)) || _ <- lists:seq(1,2)],
+    erlang:yield(),
     {ok, #state{name=Name,
                 proj_epoch=-42,
                 proj_store_pub=orddict:new(),
@@ -218,7 +220,9 @@ do_proj_write(Epoch, StoreType, Proj, #state{proj_epoch=MyEpoch,
     case orddict:find(Epoch, D) of
         error ->
             D2 = orddict:store(Epoch, Proj, D),
-            {NewEpoch, NewWedged} = if Epoch > MyEpoch ->
+            {NewEpoch, NewWedged} = if StoreType == public ->
+                                            {MyEpoch, MyWedged};
+                                       Epoch > MyEpoch ->
                                             {Epoch, false};
                                        true ->
                                             {MyEpoch, MyWedged}

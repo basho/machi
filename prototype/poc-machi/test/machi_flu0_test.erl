@@ -207,7 +207,7 @@ m_stop(Pid) ->
     Res.
 
 m_proj_write(Pid, Epoch, Proj) ->
-    Res = machi_flu0:proj_write(Pid, Epoch, public, Proj),
+    Res = machi_flu0:proj_write(Pid, Epoch, private, Proj),
     event_add(proj_write, Pid, Res),
     Res.
 
@@ -227,17 +227,17 @@ m_proj_write_with_check(Pid, Epoch, Proj) ->
     end.
 
 m_proj_read(Pid, Epoch) ->
-    Res = machi_flu0:proj_read(Pid, Epoch, public),
+    Res = machi_flu0:proj_read(Pid, Epoch, private),
     event_add(proj_read, Pid, Res),
     Res.
 
 m_proj_get_latest_num(Pid) ->
-    Res = machi_flu0:proj_get_latest_num(Pid, public),
+    Res = machi_flu0:proj_get_latest_num(Pid, private),
     event_add(proj_get_latest_num, Pid, Res),
     Res.
 
 m_proj_read_latest(Pid) ->
-    Res = machi_flu0:proj_read_latest(Pid, public),
+    Res = machi_flu0:proj_read_latest(Pid, private),
     event_add(proj_read_latest, Pid, Res),
     Res.
 
