@@ -28,7 +28,8 @@
 
 %% API
 -export([start_link/4, stop/1,
-         calculate_projection_internal_old/3]).
+         calculate_projection_internal_old/3,
+         cl_write_current_projection/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
@@ -50,11 +51,14 @@
 start_link(MyName, All_list, Seed, MyFLUPid) ->
     gen_server:start_link(?MODULE, {MyName, All_list, Seed, MyFLUPid}, []).
 
+stop(Pid) ->
+    gen_server:call(Pid, {stop}, infinity).
+
 calculate_projection_internal_old(Pid, OldThreshold, NoPartitionThreshold) ->
     gen_server:call(Pid, {calculate_projection_internal_old, OldThreshold, NoPartitionThreshold}, infinity).
 
-stop(Pid) ->
-    gen_server:call(Pid, {stop}, infinity).
+cl_write_current_projection(Pid) ->
+    gen_server:call(Pid, {cl_write_current_projection}, infinity).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -71,6 +75,9 @@ init({MyName, All_list, Seed, MyFLUPid}) ->
 handle_call({calculate_projection_internal_old, OldThreshold, NoPartitionThreshold}, _From, S) ->
     {Reply, S2} = calc_projection(OldThreshold, NoPartitionThreshold, S),
     {reply, Reply, S2};
+handle_call({cl_write_current_projection}, _From, S) ->
+    {Res, S2} = do_cl_write_current_proj(S),
+    {reply, Res, S2};
 handle_call({stop}, _From, S) ->
     {stop, normal, ok, S};
 handle_call(_Call, _From, S) ->
@@ -89,6 +96,35 @@ code_change(_OldVsn, S, _Extra) ->
     {ok, S}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+do_cl_write_current_proj(#ch_mgr{proj=Proj} = S) ->
+    #projection{epoch_number=Epoch} = Proj,
+    case cl_write_public_proj(Epoch, Proj, S) of
+        {ok, S2} ->
+            case cl_read_public_proj(S2) of
+                {ok, Proj2, S3} ->
+                    {ok, S3#ch_mgr{proj=Proj2}};
+                {_Other3, _S3}=Else3 ->
+                    Else3
+            end;
+        {_Other2, _S2}=Else2 ->
+            Else2
+    end.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+cl_write_current_proj(#ch_mgr{proj=Proj, myflu=MyFLU, runenv=RunEnv1} = S) ->
+    #projection{epoch_number=Epoch} = Proj,
+    Epoch=Epoch,MyFLU=MyFLU,RunEnv1=RunEnv1,
+    {todo, S}.
+
+cl_write_public_proj(_Epoch, _Proj, S) ->
+    %% todo
+    {ok, S}.
+
+cl_read_public_proj(S) ->
+    %% todo
+    {ok, S#ch_mgr.proj, S}.
 
 make_initial_projection(MyName, All_list, UPI_list, Repairing_list, Ps) ->
     make_projection(1, 0, <<>>,
@@ -184,16 +220,6 @@ calc_network_partitions(Nodes, Seed1, OldPartition,
             {Cutoff3, Seed3} = random:uniform_s(100, Seed1),
             if Cutoff3 < NoPartitionThreshold ->
                     {Seed3, []};
-               %% Cutoff3 rem 10 < 5 ->
-               %%      %% case get(goofus) of undefined -> put(goofus, true), io:format(user, "~w", [Cutoff3 rem 10]); _ -> ok end,
-               %%      OldSeed = case random:seed(Seed3) of undefined -> now();
-               %%                                           Else      -> Else
-               %%                end,
-               %%      {Down, _} = lists:partition(fun(X) -> X /= 'a' andalso random:uniform() < 0.5 end, Nodes),
-               %%      %% case get(goofus) of undefined -> put(goofus, true), io:format(user, "~w", [Down]); _ -> ok end,
-               %%      Partitions = [{X, Y} || X <- Nodes, Y <- Down],
-               %%      random:seed(OldSeed),
-               %%      {Seed3, Partitions};
                true ->
                     make_network_partition_locations(Nodes, Seed3)
             end
@@ -251,7 +277,17 @@ smoke0_test() ->
         [begin
              Proj = ?MGR:calculate_projection_internal_old(M0, 50, 50),
              io:format(user, "~p\n", [?MGR:make_projection_summary(Proj)])
-         end || _ <- lists:seq(1,5)]
+         end || _ <- lists:seq(1,5)],
+        ?D(cl_write_current_projection(M0))
+    after
+        ok = ?MGR:stop(M0)
+    end.
+
+smoke1_test() ->
+    {ok, FLUa} = machi_flu0:start_link(a),
+    {ok, M0} = ?MGR:start_link(a, [a,b,c], {1,2,3}, FLUa),
+    try
+        ok = cl_write_current_projection(M0)
     after
         ok = ?MGR:stop(M0)
     end.
