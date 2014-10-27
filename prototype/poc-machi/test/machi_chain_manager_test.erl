@@ -96,7 +96,7 @@ prop_calc_projection(Nodes, TrackUseTab) ->
        {gen_rand_seed(),
         oneof([0,15,35,55,75,85,100]),
         oneof([0,15,35,55,75,85,100]),
-        choose(500, 2000),
+        5000,
         oneof(Nodes)},
        begin
            erase(goofus),
@@ -140,15 +140,17 @@ find_common_prefix(_, _) ->
     [].
 
 calc_projection_test_() ->
-    {timeout, 60,
+    Runtime = 15, %% Runtime = 60*60,
+    {timeout, Runtime * 500,
      fun() ->
-             %% Nodes = [a,b,c,d],
              Nodes = [a,b,c],
              Cs = combinations(Nodes),
              Combos = lists:sort([{UPI1, UPI2} || UPI1 <- Cs, UPI2 <- Cs]),
+             put(hack, 0),
              timer:sleep(500),
              io:format(user, "\n", []),
              Rs = [begin
+                       Hack = get(hack),if Hack rem 10000 == 0 -> ?D({time(), Hack}); true -> ok end,put(hack, Hack + 1),
                        P1 = ?MGR:make_projection(2, 1, <<>>, HdNd, Nodes,
                                                  [], PsUPI1, Nodes -- PsUPI1, []),
                        P2 = ?MGR:make_projection(3, 2, <<>>, HdNd, Nodes,
@@ -159,34 +161,49 @@ calc_projection_test_() ->
                              end,
                        {Res, PsUPI1, PsUPI2}
                    end || HdNd <- Nodes,
-                          {UPI1,UPI2} <- Combos,
+                          {PsUPI1,PsUPI2} <- Combos,
                           %% We assume that the author appears in any UPI list
-                          UPI1 /= [],
-                          UPI2 /= [],
+                          PsUPI1 /= [],
+                          PsUPI2 /= [],
                           %% HdNd is the author for all of these
                           %% tests, so it must be present in UPI1 & UPI2
-                          lists:member(HdNd, UPI1),
-                          lists:member(HdNd, UPI2),
-                          PsUPI1 <- perms(UPI1),
-                          PsUPI2 <- perms(UPI2)],
+                          lists:member(HdNd, PsUPI1),
+                          lists:member(HdNd, PsUPI2)],
              OKs = [begin
                         {UPI1,UPI2}
                     end || {true, UPI1, UPI2} <- Rs],
-             io:format(user, "OKs = ~p\n", [lists:usort(OKs)]),
+             %% io:format(user, "OKs = ~p\n", [lists:usort(OKs)]),
              Tab = ets:new(count, [public, set, {keypos, 1}]),
              [ets:insert(Tab, {Transition, 0}) || Transition <- OKs],
+
              true = eqc:quickcheck(
-                  eqc:numtests(3500,
-                               ?QC_OUT(prop_calc_projection(Nodes, Tab)))),
-             NotCounted = [Transition || {Transition, 0} <- ets:tab2list(Tab)],
-             _Counted = [X || {_, N}=X <- ets:tab2list(Tab),
+                        eqc:testing_time(Runtime,
+                        ?QC_OUT(prop_calc_projection(Nodes, Tab)))),
+
+             NotCounted = lists:sort([Transition || {Transition, 0} <- ets:tab2list(Tab)]),
+             Counted = [X || {_, N}=X <- ets:tab2list(Tab),
                              N > 0],
+             CountedX = lists:sort(fun(X, Y) ->
+                                           element(2, X) < element(2, Y)
+                                   end, Counted),
              timer:sleep(100),
-             io:format(user, "\tNotCounted = ~p\n", [NotCounted]),
+             File = io_lib:format("/tmp/manager-test.~w.~w.~w",
+                                  tuple_to_list(time())),
+             {ok, FH} = file:open(File, [write]),
+             io:format(FH, "% NotCounted =\n~p.\n", [NotCounted]),
+             file:close(FH),
+             %% io:format(user, "\tNotCounted = ~p\n", [NotCounted]),
+             io:format(user, "\n\tNotCounted list was written to ~s\n", [File]),
              io:format(user, "\tOKs length = ~p\n", [length(OKs)]),
-             io:format(user, "\tTransitions hit = ~p\n", [length(OKs) - length(NotCounted)]),
+             io:format(user, "\tTransitions hit = ~p\n",
+                       [length(OKs) - length(NotCounted)]),
              %% io:format(user, "\tTransitions = ~p\n", [lists:sort(_Counted)]),
-             io:format(user, "\tNotCounted length = ~p\n", [length(NotCounted)]),
+             io:format(user, "\tNotCounted length = ~p\n",
+                       [length(NotCounted)]),
+             io:format(user, "\tLeast-counted transition = ~p\n",
+                       [hd(CountedX)]),
+             io:format(user, "\tMost-counted transition  = ~p\n",
+                       [lists:last(CountedX)]),
              ok
      end}.
 
@@ -291,6 +308,7 @@ projection_transition_is_sane(
     end,
     true = lists:prefix(UPI_common_prefix, UPI_list1),
     true = lists:prefix(UPI_common_prefix, UPI_list2),
+    UPI_1_suffix = UPI_list1 -- UPI_common_prefix,
     UPI_2_suffix = UPI_list2 -- UPI_common_prefix,
 
     %% Where did elements in UPI_2_suffix come from?
@@ -303,8 +321,8 @@ projection_transition_is_sane(
     %% The UPI_2_suffix must exactly be equal to: ordered items from
     %% UPI_list1 concat'ed with ordered items from Repairing_list1.
     %% Both temp vars below preserve relative order!
-    UPI_2_suffix_from_UPI1 = [X || X <- UPI_2_suffix,
-                                   lists:member(X, UPI_list1)],
+    UPI_2_suffix_from_UPI1 = [X || X <- UPI_1_suffix,
+                                   lists:member(X, UPI_list2)],
     UPI_2_suffix_from_Repairing1 = [X || X <- UPI_2_suffix,
                                          lists:member(X, Repairing_list1)],
     %% true?
@@ -402,6 +420,19 @@ fail3_smoke_test() ->
      end || HdNd <- Nodes],
 
     true.
+
+fail4_smoke_test() ->
+    Nodes = [a,b,c],
+    Two = [c,b,a],
+    Three = [c,a,b],
+    P2a= ?MGR:make_projection(2, 1, <<>>, a, Nodes,
+                              [], Two,   Nodes -- Two, []),
+    P3a= ?MGR:make_projection(3, 2, <<>>, a, Nodes,
+                              [], Three, Nodes -- Three, []),
+    true = (projection_transition_is_sane(P2a, P3a) /= true),
+
+    true.
+
 
 %% aaa_smoke_test() ->
 %%     L = [a,b,c,d],
