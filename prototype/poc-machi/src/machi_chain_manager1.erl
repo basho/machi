@@ -30,6 +30,7 @@
 -export([start_link/6, stop/1, ping/1,
          calculate_projection_internal_old/1,
          cl_write_current_projection/1]).
+-export([trigger_projection_calculation/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
@@ -67,6 +68,9 @@ calculate_projection_internal_old(Pid) ->
 cl_write_current_projection(Pid) ->
     gen_server:call(Pid, {cl_write_current_projection}, infinity).
 
+trigger_projection_calculation(Pid) ->
+    gen_server:cast(Pid, {trigger_projection_calculation}).
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init({MyName, All_list, Seed, OldThreshold, NoPartitionThreshold, MyFLUPid}) ->
@@ -98,6 +102,7 @@ handle_call(_Call, _From, S) ->
     {reply, whaaaaaaaaaa, S}.
 
 handle_cast(_Cast, S) ->
+    ?D({cast_whaaaaaaaaaaa, _Cast}),
     {noreply, S}.
 
 handle_info(_Msg, S) ->
@@ -117,8 +122,8 @@ do_cl_write_current_proj(#ch_mgr{proj=Proj, myflu=MyFLU} = S) ->
         {ok, S2} ->
             case cl_read_public_proj(S2) of
                 {ok, Proj2, S3} ->
-                    ?D(Proj2),
-                    ?D(machi_flu0:get_epoch(MyFLU)),
+                    %% ?D(Proj2),
+                    %% ?D(machi_flu0:get_epoch(MyFLU)),
                     Proj2b = update_projection_dbg2(
                                Proj2, [{hooray, {date(), time()}}]),
                     ok = machi_flu0:proj_write(MyFLU, Epoch, private, Proj2b),
@@ -169,8 +174,6 @@ cl_write_public_proj_remote(FLUs, Partitions, Epoch, Proj, S) ->
 cl_read_public_proj(#ch_mgr{proj=Proj0}=S) ->
     #projection{all_members=All_list} = Proj0,
     {_UpNodes, Partitions, S2} = calc_up_nodes(S),
-    %% todo
-    ?D({todo, All_list, Partitions}),
     DoIt = fun(X) ->
                    case machi_flu0:proj_read_latest(X, public) of
                        {ok, P} -> P;
@@ -182,6 +185,7 @@ cl_read_public_proj(#ch_mgr{proj=Proj0}=S) ->
     case lists:usort(Rs) of
         [P] when is_record(P, projection) ->
             {ok, S#ch_mgr.proj, S2}
+    %% todo finish other cases here.
     end.
 
 make_initial_projection(MyName, All_list, UPI_list, Repairing_list, Ps) ->
@@ -396,7 +400,9 @@ smoke1_test() ->
     I_represent = I_am = a,
     {ok, M0} = ?MGR:start_link(I_represent, [a,b,c], {1,2,3}, 50, 50, I_am),
     try
-        ok = cl_write_current_projection(M0)
+        ok = cl_write_current_projection(M0),
+        trigger_projection_calculation(M0),
+        pong = ping(M0)
     after
         ok = ?MGR:stop(M0),
         ok = machi_flu0:stop(FLUa),
