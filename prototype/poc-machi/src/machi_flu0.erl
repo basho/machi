@@ -120,6 +120,7 @@ init([Name]) ->
     lclock_init(),
     [(catch exit(whereis(Name), kill)) || _ <- lists:seq(1,2)],
     erlang:yield(),
+    register(Name, self()),
     {ok, #state{name=Name,
                 proj_epoch=-42,
                 proj_store_pub=orddict:new(),

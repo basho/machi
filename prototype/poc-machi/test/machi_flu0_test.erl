@@ -53,12 +53,12 @@ concuerror2_test() ->
 
 concuerror3_test() ->
     Me = self(),
-    Fun = fun() -> {ok, F1} = machi_flu0:start_link(one),
-                        ok = machi_flu0:stop(F1),
-                        Me ! done
-               end,
-    P1 = spawn(Fun),
-    P2 = spawn(Fun),
+    Inner = fun(Name) -> {ok, F1} = machi_flu0:start_link(Name),
+                         ok = machi_flu0:stop(F1),
+                         Me ! done
+            end,
+    P1 = spawn(fun() -> Inner(one) end),
+    P2 = spawn(fun() -> Inner(two) end),
     [receive done -> ok end || _ <- [P1, P2]],
     
     ok.
