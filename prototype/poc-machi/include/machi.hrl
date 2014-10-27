@@ -49,6 +49,7 @@
 -record(ch_mgr, {
           name :: m_server(),
           proj :: #projection{},
+          myflu :: pid() | atom(),
           %%
           runenv :: list() %proplist()
          }).
