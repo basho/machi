@@ -27,7 +27,7 @@
 
 -export([start_link/1, stop/1,
          write/3, read/2, trim/2,
-         proj_write/3, proj_read/2, proj_get_latest_num/1, proj_read_latest/1]).
+         proj_write/4, proj_read/3, proj_get_latest_num/2, proj_read_latest/2]).
 -export([set_fake_repairing_status/2, get_fake_repairing_status/1]).
 -export([make_proj/1, make_proj/2]).
 
@@ -54,15 +54,16 @@
 -type register() :: 'unwritten' | binary() | 'trimmed'.
 
 -record(state, {
-          name :: list(),
+          name :: atom(),
           wedged = false :: boolean(),
           register = 'unwritten' :: register(),
           fake_repairing = false :: boolean(),
           proj_epoch :: non_neg_integer(),
-          proj_store :: dict()
+          proj_store_pub :: dict(),
+          proj_store_priv :: dict()
          }).
 
-start_link(Name) when is_list(Name) ->
+start_link(Name) when is_atom(Name) ->
     gen_server:start_link(?MODULE, [Name], []).
 
 stop(Pid) ->
@@ -77,17 +78,21 @@ write(Pid, Epoch, Bin) ->
 trim(Pid, Epoch) ->
     g_call(Pid, {reg_op, Epoch, trim}, ?LONG_TIME).
 
-proj_write(Pid, Epoch, Proj) ->
-    g_call(Pid, {proj_write, Epoch, Proj}, ?LONG_TIME).
+proj_write(Pid, Epoch, StoreType, Proj)
+  when StoreType == public; StoreType == private ->
+    g_call(Pid, {proj_write, Epoch, StoreType, Proj}, ?LONG_TIME).
 
-proj_read(Pid, Epoch) ->
-    g_call(Pid, {proj_read, Epoch}, ?LONG_TIME).
+proj_read(Pid, Epoch, StoreType)
+  when StoreType == public; StoreType == private ->
+    g_call(Pid, {proj_read, Epoch, StoreType}, ?LONG_TIME).
 
-proj_get_latest_num(Pid) ->
-    g_call(Pid, {proj_get_latest_num}, ?LONG_TIME).
+proj_get_latest_num(Pid, StoreType)
+  when StoreType == public; StoreType == private ->
+    g_call(Pid, {proj_get_latest_num, StoreType}, ?LONG_TIME).
 
-proj_read_latest(Pid) ->
-    g_call(Pid, {proj_read_latest}, ?LONG_TIME).
+proj_read_latest(Pid, StoreType)
+  when StoreType == public; StoreType == private ->
+    g_call(Pid, {proj_read_latest, StoreType}, ?LONG_TIME).
 
 set_fake_repairing_status(Pid, Status) ->
     gen_server:call(Pid, {set_fake_repairing_status, Status}, ?LONG_TIME).
@@ -115,7 +120,8 @@ init([Name]) ->
     lclock_init(),
     {ok, #state{name=Name,
                 proj_epoch=-42,
-                proj_store=orddict:new()}}.
+                proj_store_pub=orddict:new(),
+                proj_store_priv=orddict:new()}}.
 
 handle_call({{reg_op, _Epoch, _}, LC1}, _From, #state{wedged=true} = S) ->
     LC2 = lclock_update(LC1),
@@ -160,25 +166,25 @@ handle_call({{reg_op, _Epoch, trim}, LC1}, _From, #state{register=trimmed} = S) 
     LC2 = lclock_update(LC1),
     {reply, {error_trimmed, LC2}, S};
 
-handle_call({{proj_write, Epoch, Proj}, LC1}, _From, S) ->
+handle_call({{proj_write, Epoch, StoreType, Proj}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
-    {Reply, NewS} = do_proj_write(Epoch, Proj, S),
+    {Reply, NewS} = do_proj_write(Epoch, StoreType, Proj, S),
     {reply, {Reply, LC2}, NewS};
-handle_call({{proj_read, Epoch}, LC1}, _From, S) ->
+handle_call({{proj_read, Epoch, StoreType}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
-    {Reply, NewS} = do_proj_read(Epoch, S),
+    {Reply, NewS} = do_proj_read(Epoch, StoreType, S),
     {reply, {Reply, LC2}, NewS};
-handle_call({{proj_get_latest_num}, LC1}, _From, S) ->
+handle_call({{proj_get_latest_num, StoreType}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
-    {Reply, NewS} = do_proj_get_latest_num(S),
+    {Reply, NewS} = do_proj_get_latest_num(StoreType, S),
     {reply, {Reply, LC2}, NewS};
-handle_call({{proj_read_latest}, LC1}, _From, S) ->
+handle_call({{proj_read_latest, StoreType}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
-    case do_proj_get_latest_num(S) of
+    case do_proj_get_latest_num(StoreType, S) of
         {error_unwritten, _S} ->
             {reply, {error_unwritten, LC2}, S};
         {{ok, Epoch}, _S} ->
-            Proj = orddict:fetch(Epoch, S#state.proj_store),
+            Proj = orddict:fetch(Epoch, get_store_dict(StoreType, S)),
             {reply, {{ok, Proj}, LC2}, S}
     end;
 handle_call({stop, LC1}, _From, MLP) ->
@@ -206,24 +212,25 @@ code_change(_OldVsn, MLP, _Extra) ->
 
 %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%% %%%%
 
-do_proj_write(Epoch, Proj, #state{proj_epoch=MyEpoch, proj_store=D,
-                                    wedged=MyWedged} = S) ->
+do_proj_write(Epoch, StoreType, Proj, #state{proj_epoch=MyEpoch,
+                                             wedged=MyWedged} = S) ->
+    D = get_store_dict(StoreType, S),
     case orddict:find(Epoch, D) of
         error ->
             D2 = orddict:store(Epoch, Proj, D),
             {NewEpoch, NewWedged} = if Epoch > MyEpoch ->
-                                              {Epoch, false};
-                                         true ->
-                                              {MyEpoch, MyWedged}
-                                      end,
-            {ok, S#state{wedged=NewWedged,
-                         proj_epoch=NewEpoch,
-                         proj_store=D2}};
+                                            {Epoch, false};
+                                       true ->
+                                            {MyEpoch, MyWedged}
+                                    end,
+            {ok, set_store_dict(StoreType, D2, S#state{wedged=NewWedged,
+                                                       proj_epoch=NewEpoch})};
         {ok, _} ->
             {error_written, S}
     end.
 
-do_proj_read(Epoch, #state{proj_store=D} = S) ->
+do_proj_read(Epoch, StoreType, S) ->
+    D = get_store_dict(StoreType, S),
     case orddict:find(Epoch, D) of
         error ->
             {error_unwritten, S};
@@ -231,7 +238,8 @@ do_proj_read(Epoch, #state{proj_store=D} = S) ->
             {{ok, Proj}, S}
     end.
 
-do_proj_get_latest_num(#state{proj_store=D} = S) ->
+do_proj_get_latest_num(StoreType, S) ->
+    D = get_store_dict(StoreType, S),
     case lists:sort(orddict:to_list(D)) of
         [] ->
             {error_unwritten, S};
@@ -239,6 +247,16 @@ do_proj_get_latest_num(#state{proj_store=D} = S) ->
             {Epoch, _Proj} = lists:last(L),
             {{ok, Epoch}, S}
     end.
+
+get_store_dict(public, #state{proj_store_pub=D}) ->
+    D;
+get_store_dict(private, #state{proj_store_priv=D}) ->
+    D.
+
+set_store_dict(public, D, S) ->
+    S#state{proj_store_pub=D};
+set_store_dict(private, D, S) ->
+    S#state{proj_store_priv=D}.
 
 -ifdef(TEST).
 

@@ -31,7 +31,7 @@
 -ifdef(TEST).
 
 repair_status_test() ->
-    {ok, F} = machi_flu0:start_link("one"),
+    {ok, F} = machi_flu0:start_link(one),
     try
         ok = machi_flu0:set_fake_repairing_status(F, true),
         true = machi_flu0:get_fake_repairing_status(F),
@@ -47,13 +47,13 @@ concuerror1_test() ->
     ok.
 
 concuerror2_test() ->
-    {ok, F} = machi_flu0:start_link("one"),
+    {ok, F} = machi_flu0:start_link(one),
     ok = machi_flu0:stop(F),
     ok.
 
 concuerror3_test() ->
     Me = self(),
-    Fun = fun() -> {ok, F1} = machi_flu0:start_link("one"),
+    Fun = fun() -> {ok, F1} = machi_flu0:start_link(one),
                         ok = machi_flu0:stop(F1),
                         Me ! done
                end,
@@ -65,7 +65,7 @@ concuerror3_test() ->
 
 concuerror4_test() ->
     event_setup(),
-    {ok, F1} = machi_flu0:start_link("one"),
+    {ok, F1} = machi_flu0:start_link(one),
     Epoch = 1,
     ok = m_proj_write(F1, Epoch, dontcare),
 
@@ -103,7 +103,7 @@ concuerror4_test() ->
     
 proj_store_test() ->
     event_setup(),
-    {ok, F1} = machi_flu0:start_link("one"),
+    {ok, F1} = machi_flu0:start_link(one),
 
     error_unwritten = m_proj_get_latest_num(F1),
     error_unwritten = m_proj_read_latest(F1),
@@ -120,7 +120,7 @@ proj_store_test() ->
 
 wedge_test() ->
     event_setup(),
-    {ok, F1} = machi_flu0:start_link("one"),
+    {ok, F1} = machi_flu0:start_link(one),
     Epoch1 = 1,
     ok = m_proj_write(F1, Epoch1, dontcare),
 
@@ -148,8 +148,8 @@ wedge_test() ->
 proj0_test() ->
     Me = self(),
     event_setup(),
-    {ok, F1} = machi_flu0:start_link("one"),
-    {ok, F2} = machi_flu0:start_link("two"),
+    {ok, F1} = machi_flu0:start_link(one),
+    {ok, F2} = machi_flu0:start_link(two),
     FLUs = [F1, F2],
     FirstProj = machi_flu0:make_proj(1, FLUs),
     Epoch1 = FirstProj#proj.epoch,
@@ -207,7 +207,7 @@ m_stop(Pid) ->
     Res.
 
 m_proj_write(Pid, Epoch, Proj) ->
-    Res = machi_flu0:proj_write(Pid, Epoch, Proj),
+    Res = machi_flu0:proj_write(Pid, Epoch, public, Proj),
     event_add(proj_write, Pid, Res),
     Res.
 
@@ -227,17 +227,17 @@ m_proj_write_with_check(Pid, Epoch, Proj) ->
     end.
 
 m_proj_read(Pid, Epoch) ->
-    Res = machi_flu0:proj_read(Pid, Epoch),
+    Res = machi_flu0:proj_read(Pid, Epoch, public),
     event_add(proj_read, Pid, Res),
     Res.
 
 m_proj_get_latest_num(Pid) ->
-    Res = machi_flu0:proj_get_latest_num(Pid),
+    Res = machi_flu0:proj_get_latest_num(Pid, public),
     event_add(proj_get_latest_num, Pid, Res),
     Res.
 
 m_proj_read_latest(Pid) ->
-    Res = machi_flu0:proj_read_latest(Pid),
+    Res = machi_flu0:proj_read_latest(Pid, public),
     event_add(proj_read_latest, Pid, Res),
     Res.
 
