@@ -37,14 +37,14 @@
             epoch_csum      :: m_csum(),
             prev_epoch_num  :: m_epoch_n(),
             prev_epoch_csum :: m_csum(),
-            creation_time   :: timestamp(),
-            author_server   :: m_server(),
             all_members     :: [m_server()],
             down            :: [m_server()],
+            creation_time   :: timestamp(),
+            author_server   :: m_server(),
             upi             :: [m_server()],
             repairing       :: [m_server()],
-            dbg             :: list(), %proplist() checksummed
-            dbg2            :: list()  %proplist() not checksummed
+            dbg             :: list(), %proplist(), is checksummed
+            dbg2            :: list()  %proplist(), is not checksummed
         }).
 
 -record(ch_mgr, {
