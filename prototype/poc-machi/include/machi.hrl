@@ -51,7 +51,7 @@
           init_finished   :: boolean(),
           name            :: m_server(),
           proj            :: #projection{},
-          proj_proposed   :: #projection{},
+          proj_proposed   :: 'none' | #projection{},
           myflu           :: pid() | atom(),
           %%
           runenv          :: list() %proplist()
