@@ -48,10 +48,12 @@
         }).
 
 -record(ch_mgr, {
-          name :: m_server(),
-          proj :: #projection{},
-          myflu :: pid() | atom(),
+          init_finished   :: boolean(),
+          name            :: m_server(),
+          proj            :: #projection{},
+          proj_proposed   :: #projection{},
+          myflu           :: pid() | atom(),
           %%
-          runenv :: list() %proplist()
+          runenv          :: list() %proplist()
          }).
 
