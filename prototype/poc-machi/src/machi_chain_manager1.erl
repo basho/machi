@@ -68,12 +68,12 @@ ping(Pid) ->
 calculate_projection_internal_old(Pid) ->
     gen_server:call(Pid, {calculate_projection_internal_old}, infinity).
 
-test_write_proposed_projection(Pid) ->
-    gen_server:call(Pid, {test_write_proposed_projection}, infinity).
-
 -ifdef(TEST).
 
 %% Test/debugging code only.
+
+test_write_proposed_projection(Pid) ->
+    gen_server:call(Pid, {test_write_proposed_projection}, infinity).
 
 %% Calculate a projection and return it to us.
 %% If KeepRunenvP is true, the server will retain its change in its
@@ -459,7 +459,7 @@ rank_and_sort_projections(Ps, CurrentProj) ->
                      Proj#projection.epoch_number == Epoch],
     %% Sort with highest rank first (custom sort)
     lists:sort(fun({RankA,_}, {RankB,_}) -> RankA > RankB end,
-               rank_projections(MaxPs, CurrentProj)).    
+               rank_projections(MaxPs, CurrentProj)).
 
 %% Caller must ensure all Projs are of the same epoch number.
 
