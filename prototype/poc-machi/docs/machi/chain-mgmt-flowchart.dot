@@ -1,0 +1,109 @@
+digraph {
+    compound=true
+    label="Machi chain management flowchart (sample)";
+ 
+    node[shape="box", style="rounded"] 
+        start;
+    node[shape="box", style="rounded", label="stop1"] 
+        stop1;
+    node[shape="box", style="rounded", label="stop2"] 
+        stop2;
+    node[shape="box", style="rounded"] 
+        crash;
+
+ subgraph clustera {
+    node[shape="parallelogram", style="", label="Set retry counter = 0"] 
+        a05_retry;
+    node[shape="parallelogram", style="", label="Create P_newprop @ epoch E+1\nbased on P_current @ epoch E"] 
+        a10_create;
+    node[shape="parallelogram", style="", label="Get latest public projection, P_latest"] 
+        a20_get;
+    node[shape="diamond", style="", label="Epoch(P_latest) > Epoch(P_current)\norelse\nP_latest was not unanimous"]
+        a30_epoch;
+    node[shape="diamond", style="", label="Epoch(P_latest) == Epoch(P_current)"]
+        a40_epochequal;
+    node[shape="diamond", style="", label="P_latest == P_current"]
+        a50_equal;
+ }
+
+ subgraph clustera100 {
+    node[shape="diamond", style="", label="Write P_newprop to everyone"]
+        a100_write;
+ }
+
+ subgraph clusterb {
+    node[shape="diamond", style="", label="P_latest was unanimous?"]
+        b10_unanimous;
+    node[shape="diamond", style="", label="Retry counter too big?"]
+        b20_counter;
+    node[shape="diamond", style="", label="Rank(P_latest) >= Rank(P_newprop)"]
+        b30_rank;
+    node[shape="diamond", style="", label="P_latest.upi == P_newprop.upi\nand also\nPlatest.repairing == P_newprop.repairing"]
+        b40_condc;
+    node[shape="square", style="", label="P_latest author is\ntoo slow, let's try!"]
+        b45_lets;
+    node[shape="parallelogram", style="", label="P_newprop is better than P_latest.\nSet P_newprop.epoch = P_latest.epoch + 1."]
+        b50_better;
+ }
+
+ subgraph clusterc {
+    node[shape="diamond", style="", label="Is Move(P_current, P_latest) ok?"]
+        c10_move;
+    node[shape="parallelogram", style="", label="Tell Author(P_latest) to rewrite\nwith a bigger epoch number"]
+        c20_tell;
+}
+
+ subgraph clusterd {
+    node[shape="diamond", style="", label="Use P_latest as the\nnew P_current"]
+        d10_use;
+}        
+
+    start -> a05_retry;
+
+    a05_retry -> a10_create;
+    a10_create -> a20_get;
+    a20_get -> a30_epoch;
+    a30_epoch -> a40_epochequal[label="false"];
+    a30_epoch -> b10_unanimous[label="true"];
+    a40_epochequal -> a50_equal[label="true"];
+    a40_epochequal -> crash[label="falseXX"];
+    a50_equal -> stop1[label="true"];
+    a50_equal -> b20_counter[label="false"];
+
+    a100_write -> a10_create;
+
+    b10_unanimous -> c10_move[label="yes"];
+    b10_unanimous -> b20_counter[label="no"];
+    b20_counter -> b45_lets[label="true"];
+    b20_counter -> b30_rank[label="false"];
+    b30_rank -> b40_condc[label="false"];
+    b30_rank -> c20_tell[label="true"];
+    b40_condc -> b50_better[label="false"];
+    b40_condc -> c20_tell[label="true"];
+    b45_lets -> b50_better;
+    b50_better -> a100_write;
+
+    c10_move -> d10_use[label="yes"];
+    c10_move -> a100_write[label="no"];
+    c20_tell -> b50_better;
+
+    d10_use -> stop2;
+
+    {rank=same; clustera clusterb clusterc clusterd};
+
+//    {rank=same; a10_create b10_unanimous c10_move d10_use stop2};
+//    {rank=same; a20_get b20_counter c20_tell};
+//    {rank=same; a30_epoch b40_condc};
+//    {rank=same; a40_epochequal b40_condc crash};
+//    {rank=same; stop1 a50_equal b50_better};
+
+//       if_valid;
+// 
+//    start -> input;
+//    input -> if_valid;
+//    if_valid -> message[label="no"];
+//    if_valid -> end[label="yes"];
+//    message -> input;     
+ 
+//    {rank=same; message input}
+}

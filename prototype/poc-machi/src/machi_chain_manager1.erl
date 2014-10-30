@@ -36,6 +36,81 @@
 -export([make_projection_summary/1]).
 
 -ifdef(TEST).
+
+%% NOTE NOTE NOTE NOTE NOTE NOTE
+%% The sketch below is old ... the flowchart is newer.
+%% TODO todo delete these comments when the flowchart
+%%           and its implementation have been debugged
+%% NOTE NOTE NOTE NOTE NOTE NOTE
+
+%% Sketch for chain management simulator: the 'monitor'
+%%
+%% Principles:
+%% * Monitor based on only one dimension of the FLU's inherent state:
+%%   up or down
+%% * Plus one additional aspect that is experienced by the external
+%%   repair coordinator: not_started, in_progress, finished_ok, or
+%%                       finished_failed
+%% * For simulation purposes, start first with the repair coordinator
+%%   happening completely by magic, e.g., an oracle implemented by the
+%%   test harness.
+%%       - Then add more complexity, slowly, and only when necessary.
+%% * Assumption for ease-of-implementation: assume that the repair
+%%   coordinator will be the head of the chain (or some process that
+%%   is managed by the head).
+%%       - So the simulator need only worry about the head making any
+%%         decisions about changes in repair state.
+%%
+%% Implementation:
+%%
+%% A. Calculate a local projection, P_{newprop} @ epoch E+1 that is
+%%    based on the current projection P_{current} @ epoch E.
+%%        - NOTE: This has side-effects in the current simulator:
+%%                e.g., newenv changing perception of up/down state
+%%                and other network partition effects.
+%%
+%% B. Get the latest public projection, P_{latest}.  Then consider:
+%%
+%%    B1a). If Epoch(P_{latest}) == Epoch(P_{current}), then goto step C.
+%%
+%%    B1b). If Epoch(P_{latest}) < Epoch(P_{current}), then we have a
+%%          serious invariant violation/logic problem.  Shouldn't happen,
+%%          but keep an eye out for it anyway.
+%%
+%%    B1c). If Epoch(P_{latest}) > Epoch(P_{current}), then some other
+%%          manager has noticed a change.
+%%
+%%    If we haven't stopped yet, then continue:
+%%
+%%    B2a). If P_{latest} was read unanimously, then use it as the new
+%%          P_{current}.  Then stop.
+%%
+%%    B2b). If P_{latest} is not unanimous, then compare rank.
+%%
+%%          - If Rank(P_{latest}) >= Rank(P_{newprop}), then we encourage
+%%            the author to re-write this projection with a bigger epoch
+%%            number.
+%%            - If the counter has exceeded some # of tries, F=2?, then
+%%              goto Step D instead.
+%%            - Set a counter of the # of times that we've encouraged
+%%              the author to re-write.
+%%            - Sleep a while, then goto A.
+%%
+%%          - If Rank(P_{latest}) < Rank(P_{newprop}) and also
+%%            P_{latest}.upi == P_{newprop}.upi and also
+%%            P_{latest}.repairing == P_{newprop}.repairing, then our
+%%            proposal P_{newprop} isn't anything substantially new.
+%%            - Use the same encouragement & retry loop as described above.
+%%
+%%          - If Rank(P_{latest}) < Rank(P_{newprop}) (last case)...
+%%            ... our proposal is better.  Goto step D.
+%%
+%% C. If P_{latest}.upi == P_{newprop}.upi and also
+%%    P_{latest}.repairing == P_{newprop}.repairing, then our proposal
+%%    P_{newprop} isn't anything substantially new.  Stop.
+%%
+%% D. Write P_{newprop} to everyone.  Then goto A.
+
 -export([test_calc_projection/2,
          test_calc_proposed_projection/1,
          test_write_proposed_projection/1,
