@@ -268,16 +268,15 @@ cl_read_latest_public_projection(#ch_mgr{proj=Proj}=S) ->
            end,
     Rs = [perhaps_call_t(S, Partitions, FLU, fun() -> DoIt(FLU) end) ||
              FLU <- All_list],
+    FLUsRs = lists:zip(All_list, Rs),
     case lists:usort(Rs) of
         [P] when is_record(P, projection) ->
-            Extra = [{all_replied, length(Rs) == length(All_list)}],
-            {unanimous, P, [{unanimous,true}|Extra], S2};
+            U_FLUs = [FLU || {FLU, Projx} <- FLUsRs, Projx == P],
+            Extra = [{all_members_replied, length(Rs) == length(All_list)}],
+            {unanimous, P, [{unanimous_flus,U_FLUs}|Extra], S2};
         _ ->
-            FLUsRs = lists:zip(All_list, Rs),
             {needs_work, FLUsRs, [flarfus], S2} % todo?
     end.
-
-% {_Status, S4} = do_read_repair(FLUsRs, Extra, S3),
 
 %% 1. Do the results contain a projection?
 %%    perhaps figure that in cl_read_latest_public_projection()?
@@ -538,6 +537,9 @@ smoke0_test() ->
     try
         pong = ping(M0),
 
+        %% If/when calculate_projection_internal_old() disappears, then
+        %% get rid of the comprehension below ... start/ping/stop is
+        %% good enough for smoke0.
         [begin
              Proj = ?MGR:calculate_projection_internal_old(M0),
              io:format(user, "~w\n", [?MGR:make_projection_summary(Proj)])
