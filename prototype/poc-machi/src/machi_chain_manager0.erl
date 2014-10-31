@@ -47,12 +47,10 @@ make_initial_projection(MyName, All_list, UPI_list, Repairing_list, Ps) ->
     make_projection(1, 0, <<>>,
                     MyName, All_list, [], UPI_list, Repairing_list, Ps).
 
-make_projection(EpochNum, PrevEpochNum, PrevEpochCSum,
+make_projection(EpochNum, _PrevEpochNum, _PrevEpochCSum,
                 MyName, All_list, Down_list, UPI_list, Repairing_list, Ps) ->
     P = #projection{epoch_number=EpochNum,
                     epoch_csum= <<>>,
-                    prev_epoch_num=PrevEpochNum,
-                    prev_epoch_csum=PrevEpochCSum,
                     creation_time=now(),
                     author_server=MyName,
                     all_members=All_list,

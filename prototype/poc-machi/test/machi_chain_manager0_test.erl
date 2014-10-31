@@ -222,8 +222,6 @@ projection_transitions_are_sane([P1, P2|T]) ->
 projection_transition_is_sane(
   #projection{epoch_number=Epoch1,
               epoch_csum=CSum1,
-              prev_epoch_num=PrevEpoch1,
-              prev_epoch_csum=PrevCSum1,
               creation_time=CreationTime1,
               author_server=AuthorServer1,
               all_members=All_list1,
@@ -233,8 +231,6 @@ projection_transition_is_sane(
               dbg=Dbg1} = P1,
   #projection{epoch_number=Epoch2,
               epoch_csum=CSum2,
-              prev_epoch_num=PrevEpoch2,
-              prev_epoch_csum=PrevCSum2,
               creation_time=CreationTime2,
               author_server=AuthorServer2,
               all_members=All_list2,
@@ -245,8 +241,6 @@ projection_transition_is_sane(
  try
     true = is_integer(Epoch1) andalso is_integer(Epoch2),
     true = is_binary(CSum1) andalso is_binary(CSum2),
-    true = is_integer(PrevEpoch1) andalso is_integer(PrevEpoch2),
-    true = is_binary(PrevCSum1) andalso is_binary(PrevCSum2),
     {_,_,_} = CreationTime1,
     {_,_,_} = CreationTime2,
     true = is_atom(AuthorServer1) andalso is_atom(AuthorServer2), % todo will probably change
@@ -257,7 +251,6 @@ projection_transition_is_sane(
     true = is_list(Dbg1) andalso is_list(Dbg2),
 
     true = Epoch2 > Epoch1,
-    true = PrevEpoch2 > PrevEpoch1,
     All_list1 = All_list2,                 % todo will probably change
 
     %% No duplicates

@@ -320,23 +320,20 @@ do_read_repair(FLUsRs, _Extra, #ch_mgr{proj=CurrentProj} = S) ->
     end.
 
 make_initial_projection(MyName, All_list, UPI_list, Repairing_list, Ps) ->
-    make_projection(0, -1, <<>>,
-                    MyName, All_list, [], UPI_list, Repairing_list, Ps).
+    make_projection(0, MyName, All_list, [], UPI_list, Repairing_list, Ps).
 
-make_projection(EpochNum, PrevEpochNum, PrevEpochCSum,
+make_projection(EpochNum,
                 MyName, All_list, Down_list, UPI_list, Repairing_list,
                 Dbg) ->
-    make_projection(EpochNum, PrevEpochNum, PrevEpochCSum,
+    make_projection(EpochNum,
                     MyName, All_list, Down_list, UPI_list, Repairing_list,
                     Dbg, []).
 
-make_projection(EpochNum, PrevEpochNum, PrevEpochCSum,
+make_projection(EpochNum,
                 MyName, All_list, Down_list, UPI_list, Repairing_list,
                 Dbg, Dbg2) ->
     P = #projection{epoch_number=EpochNum,
                     epoch_csum= <<>>,           % always checksums as <<>>
-                    prev_epoch_num=PrevEpochNum,
-                    prev_epoch_csum=PrevEpochCSum,
                     creation_time=now(),
                     author_server=MyName,
                     all_members=All_list,
@@ -368,7 +365,6 @@ calc_projection(#ch_mgr{proj=LastProj, runenv=RunEnv} = S, Dbg) ->
 calc_projection(OldThreshold, NoPartitionThreshold, LastProj, Dbg,
                 #ch_mgr{name=MyName, runenv=RunEnv1} = S) ->
     #projection{epoch_number=OldEpochNum,
-                epoch_csum=OldEpochCsum,
                 all_members=All_list,
                 upi=OldUPI_list,
                 repairing=OldRepairing_list
@@ -401,7 +397,7 @@ calc_projection(OldThreshold, NoPartitionThreshold, LastProj, Dbg,
                           NewUp -> Repairing_list3 ++ NewUp
                       end,
     Repairing_list5 = Repairing_list4 -- Down,
-    P = make_projection(OldEpochNum + 1, OldEpochNum, OldEpochCsum,
+    P = make_projection(OldEpochNum + 1,
                         MyName, All_list, Down, NewUPI_list3, Repairing_list5,
                         Dbg ++ [{nodes_up, Up}]),
     {P, S#ch_mgr{runenv=RunEnv3}}.

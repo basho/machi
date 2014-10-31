@@ -35,8 +35,6 @@
 -record(projection, {
             epoch_number    :: m_epoch_n(),
             epoch_csum      :: m_csum(),
-            prev_epoch_num  :: m_epoch_n(),
-            prev_epoch_csum :: m_csum(),
             all_members     :: [m_server()],
             down            :: [m_server()],
             creation_time   :: timestamp(),
