@@ -133,8 +133,10 @@ handle_call({test_calc_projection, KeepRunenvP}, _From, S) ->
                         true        -> S
                      end};
 handle_call({test_read_latest_public_projection, ReadRepairP}, _From, S) ->
-    {Res, ExtraInfo, S2} = do_cl_read_latest_public_projection(ReadRepairP, S),
-    {reply, {Res, ExtraInfo}, S2};
+    {Perhaps, Val, ExtraInfo, S2} =
+        do_cl_read_latest_public_projection(ReadRepairP, S),
+    Res = {Perhaps, Val, ExtraInfo},
+    {reply, Res, S2};
 handle_call(_Call, _From, S) ->
     {reply, whaaaaaaaaaa, S}.
 
@@ -237,29 +239,30 @@ do_cl_read_latest_public_projection(ReadRepairP,
                                     #ch_mgr{proj=Proj1, myflu=MyFLU} = S) ->
     Epoch1 = Proj1#projection.epoch_number,
     case cl_read_latest_public_projection(S) of
+        {needs_repair, FLUsRs, Extra, S3} ->
+            if not ReadRepairP ->
+                    {not_unanimous, todoxyz, [{results, FLUsRs}|Extra], S3};
+               true ->
+                    {_Status, S4} = do_read_repair(FLUsRs, Extra, S3),
+                    do_cl_read_latest_public_projection(ReadRepairP, S4)
+            end;
         {unanimous, Proj2, Extra, S3} when Proj2 == Proj1 ->
-            {Proj2, Extra, S3};
+            {unanimous, Proj2, Extra, S3};
         {unanimous, #projection{epoch_number=Epoch2}=Proj2, Extra, _S3}
           when Epoch2 < Epoch1 orelse
                (Epoch2 == Epoch1 andalso Proj2 /= Proj1) ->
             exit({invariant_error, mine, Proj1, cl_unanimous, Proj2, extra, Extra});
         {unanimous, #projection{epoch_number=Epoch2}=Proj2, Extra, S3}
           when Epoch2 > Epoch1 ->
+            io:format(user, "\nHEY! This probably needs an update!\n\n", []),
             Proj2b = update_projection_dbg2(
                        Proj2, [{hooray, {date(), time()}}|Extra]),
             ok = machi_flu0:proj_write(MyFLU, Epoch2, private, Proj2b),
-            {Proj2, Extra, S3#ch_mgr{proj=Proj2b}};
-        {needs_work, FLUsRs, Extra, S3} ->
-            if not ReadRepairP ->
-                    {not_unanimous, [{results, FLUsRs}|Extra], S3};
-               true ->
-                    {_Status, S4} = do_read_repair(FLUsRs, Extra, S3),
-                    {not_unanimous, Extra, S4}
-            end
+            {unanimous, Proj2, Extra, S3#ch_mgr{proj=Proj2b}}
     end.
 
-cl_read_latest_public_projection(#ch_mgr{proj=Proj}=S) ->
-    #projection{all_members=All_list} = Proj,
+cl_read_latest_public_projection(#ch_mgr{proj=CurrentProj}=S) ->
+    #projection{all_members=All_list} = CurrentProj,
     {_UpNodes, Partitions, S2} = calc_up_nodes(S),
     DoIt = fun(X) ->
                    case machi_flu0:proj_read_latest(X, public) of
@@ -270,13 +273,19 @@ cl_read_latest_public_projection(#ch_mgr{proj=Proj}=S) ->
     Rs = [perhaps_call_t(S, Partitions, FLU, fun() -> DoIt(FLU) end) ||
              FLU <- All_list],
     FLUsRs = lists:zip(All_list, Rs),
-    case lists:usort(Rs) of
-        [P] when is_record(P, projection) ->
-            U_FLUs = [FLU || {FLU, Projx} <- FLUsRs, Projx == P],
+    UnwrittenP = ([x || error_unwritten <- Rs] == []),
+    Ps = [Proj || {_FLU, Proj} <- FLUsRs, is_record(Proj, projection)],
+    if UnwrittenP ->
+            {needs_repair, FLUsRs, [flarfus], S2};
+       true ->
+            [{_Rank, BestProj}|Rest] = rank_and_sort_projections(
+                                                              Ps, CurrentProj),
+            UnanimousTag = if Rest == [] -> unanimous;
+                              true       -> not_unanimous
+                           end,
             Extra = [{all_members_replied, length(Rs) == length(All_list)}],
-            {unanimous, P, [{unanimous_flus,U_FLUs}|Extra], S2};
-        _ ->
-            {needs_work, FLUsRs, [flarfus], S2} % todo?
+            Best_FLUs = [FLU || {FLU, Projx} <- FLUsRs, Projx == BestProj],
+            {UnanimousTag, BestProj, [{best_flus,Best_FLUs}|Extra], S2}
     end.
 
 %% 1. Do the results contain a projection?
@@ -291,19 +300,22 @@ cl_read_latest_public_projection(#ch_mgr{proj=Proj}=S) ->
 %% repeat do_cl_read_latest_public_projection() ??
 
 do_read_repair(FLUsRs, _Extra, #ch_mgr{proj=CurrentProj} = S) ->
+    Unwrittens = [x || {_FLU, error_unwritten} <- FLUsRs],
     Ps = [Proj || {_FLU, Proj} <- FLUsRs, is_record(Proj, projection)],
-    if Ps == [] ->
+    if Unwrittens == [] orelse Ps == [] ->
             {nothing_to_do, S};
        true ->
+            %% We have at least one unwritten and also at least one proj.
+            %% Pick the best one, then spam it everywhere.
+
             [{_Rank, BestProj}|_] = rank_and_sort_projections(Ps, CurrentProj),
             Epoch = BestProj#projection.epoch_number,
-            %% We're doing repair, so use the flavor that will skip an
-            %% error on the local FLU, which if it happens is almost
-            %% certainly error_written ... that or any other error on
-            %% the local projection store should not interfere with
-            %% attempting to write the other projection stores.
+
+            %% We're doing repair, so use the flavor that will
+            %% continue to all others even if there is an
+            %% error_written on the local FLU.
             {_DontCare, _S2}=Res = cl_write_public_proj_skip_local_error(
-                                     Epoch, BestProj, S),
+                                                           Epoch, BestProj, S),
             Res
     end.
 
@@ -592,13 +604,13 @@ nonunanimous_read_setup_test() ->
         ok = machi_flu0:proj_write(FLUb, P1Epoch, public, P1b),
 
         ?D(x),
-        {not_unanimous, _}=_XX = test_read_latest_public_projection(Ma, false),
+        {not_unanimous,_,_}=_XX = test_read_latest_public_projection(Ma, false),
         ?Dw(_XX),
-        {not_unanimous, _}=_YY = test_read_latest_public_projection(Ma, true),
+        {not_unanimous,_,_}=_YY = test_read_latest_public_projection(Ma, true),
         %% The read repair here doesn't automatically trigger the creation of
         %% a new projection (to try to create a unanimous projection).  So
         %% we expect nothing to change when called again.
-        {not_unanimous, _}=_YY = test_read_latest_public_projection(Ma, true),
+        {not_unanimous,_,_}=_YY = test_read_latest_public_projection(Ma, true),
 
         ok
 
