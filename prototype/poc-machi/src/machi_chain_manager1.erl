@@ -113,6 +113,18 @@ init({MyName, All_list, Seed, OldThreshold, NoPartitionThreshold, MyFLUPid}) ->
                 proj=NoneProj,
                 myflu=MyFLUPid, % pid or atom local name
                 runenv=RunEnv},
+
+    %% TODO: There is a bootstrapping problem there that needs to be
+    %% solved eventually: someone/something needs to set the initial
+    %% state for the chain.
+    %%
+    %% The PoC hack here will set the chain to all members.  That may
+    %% be fine for testing purposes, but it won't work for real life.
+    %% For example, if chain C has been running with [a,b] for a
+    %% while, then we start c.  We don't want c to immediately say,
+    %% hey, let's do [a,b,c] immediately ... UPI invariant requires
+    %% repair, etc. etc.
+
     self() ! {finish_init, BestProj},
     {ok, S}.
 
