@@ -41,7 +41,8 @@
          test_calc_proposed_projection/1,
          test_write_proposed_projection/1,
          test_read_latest_public_projection/2,
-         test_react_to_env/1]).
+         test_react_to_env/1,
+         test_reset_thresholds/3]).
 
 -ifdef(EQC).
 -include_lib("eqc/include/eqc.hrl").
@@ -95,6 +96,9 @@ test_read_latest_public_projection(Pid, ReadRepairP) ->
 test_react_to_env(Pid) ->
     gen_server:call(Pid, {test_react_to_env}, infinity).
 
+test_reset_thresholds(Pid, OldThreshold, NoPartitionThreshold) ->
+    gen_server:call(Pid, {test_reset_thresholds, OldThreshold, NoPartitionThreshold}, infinity).
+
 -endif. % TEST
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -103,11 +107,12 @@ init({MyName, All_list, Seed, OldThreshold, NoPartitionThreshold, MyFLUPid}) ->
     RunEnv = [{seed, Seed},
               {network_partitions, []},
               {old_threshold, OldThreshold},
-              {no_partition_threshold, NoPartitionThreshold}],
+              {no_partition_threshold, NoPartitionThreshold},
+              {up_nodes, not_init_yet}],
     BestProj = make_initial_projection(MyName, All_list, All_list,
-                                       [{author_proc, init_best}], []),
+                                       [], [{author_proc, init_best}]),
     NoneProj = make_initial_projection(MyName, All_list, [],
-                                       [{author_proc, init_none}], []),
+                                       [], [{author_proc, init_none}]),
     S = #ch_mgr{init_finished=false,
                 name=MyName,
                 proj=NoneProj,
@@ -157,6 +162,12 @@ handle_call({test_read_latest_public_projection, ReadRepairP}, _From, S) ->
 handle_call({test_react_to_env}, _From, S) ->
     {TODOtodo, S2} =  do_react_to_env(S),
     {reply, TODOtodo, S2};
+handle_call({test_reset_thresholds, OldThreshold, NoPartitionThreshold}, _From,
+            #ch_mgr{runenv=RunEnv} = S) ->
+    RunEnv2 = replace(RunEnv, [{old_threshold, OldThreshold},
+                               {no_partition_threshold, NoPartitionThreshold}]),
+
+    {reply, ok, S#ch_mgr{runenv=RunEnv2}};
 handle_call(_Call, _From, S) ->
     {reply, whaaaaaaaaaa, S}.
 
@@ -266,7 +277,7 @@ do_cl_read_latest_public_projection(ReadRepairP,
                     {_Status, S4} = do_read_repair(FLUsRs, Extra, S3),
                     do_cl_read_latest_public_projection(ReadRepairP, S4)
             end;
-        {UnanimousTag, Proj2, Extra, S3} ->
+        {UnanimousTag, Proj2, Extra, S3}=_Else ->
             {UnanimousTag, Proj2, Extra, S3}
     end.
 
@@ -434,7 +445,8 @@ calc_up_nodes(MyName, OldThreshold, NoPartitionThreshold,
                          not lists:member({MyName, Node}, Partitions2),
                          not lists:member({Node, MyName}, Partitions2)]),
     RunEnv2 = replace(RunEnv1,
-                      [{seed, Seed2}, {network_partitions, Partitions2}]),
+                      [{seed, Seed2}, {network_partitions, Partitions2},
+                       {up_nodes, UpNodes}]),
     {UpNodes, Partitions2, RunEnv2}.
 
 
@@ -457,13 +469,19 @@ replace(PropList, Items) ->
                         lists:keyreplace(Key, 1, Ps, {Key,Val})
                 end, PropList, Items).
 
+-ifdef(TEST).
+mps(P) ->
+    make_projection_summary(P).
+-endif. % TEST
+
 make_projection_summary(#projection{epoch_number=EpochNum,
                                     all_members=_All_list,
                                     down=Down_list,
+                                    author_server=Author,
                                     upi=UPI_list,
                                     repairing=Repairing_list,
                                     dbg=Dbg, dbg2=Dbg2}) ->
-    [{epoch,EpochNum},
+    [{epoch,EpochNum},{author,Author},
      {upi,UPI_list},{repair,Repairing_list},{down,Down_list},
      {d,Dbg}, {d2,Dbg2}].
 
@@ -515,14 +533,19 @@ react_to_env_A30(Retries, P_newprop, S) ->
     {UnanimousTag, P_latest, _Extra, S2} =
         do_cl_read_latest_public_projection(true, S),
     LatestUnanimousP = if UnanimousTag == unanimous     -> true;
-                          UnanimousTag == not_unanimous -> false
+                          UnanimousTag == not_unanimous -> false;
+                          true -> exit({badbad, UnanimousTag})
                        end,
     react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP, S2).
 
 react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
-                 #ch_mgr{proj=P_current}=S) ->
+                 #ch_mgr{myflu=MyFLU, proj=P_current}=S) ->
     [{Rank_newprop, _}] = rank_projections([P_newprop], P_current),
     [{Rank_latest, _}] = rank_projections([P_latest], P_current),
+    LatestAuthorDownP = lists:member(P_latest#projection.author_server,
+                                     P_newprop#projection.down),
+
+    %% Proj = S#ch_mgr.proj, if Proj#projection.epoch_number >= 7 -> ?Dw({Rank_newprop,Rank_latest}); true -> ok end,
 
     if
         P_latest#projection.epoch_number > P_current#projection.epoch_number
@@ -560,7 +583,40 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
             react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                              Rank_newprop, Rank_latest, S);
 
+        %% A40a (see flowchart)
         Rank_newprop > Rank_latest ->
+            react_to_env_C300(P_newprop, S);
+
+        %% A40b (see flowchart)
+        P_latest#projection.author_server == MyFLU
+        andalso
+        (P_newprop#projection.upi /= P_latest#projection.upi
+         orelse
+         P_newprop#projection.repairing /= P_latest#projection.repairing) ->
+            react_to_env_C300(P_newprop, S);
+
+        %% A40c (see flowchart)
+        LatestAuthorDownP ->
+
+            %% TODO: I believe that membership in the
+            %% P_newprop#projection.down is not sufficient for long
+            %% chains.  Rather, we ought to be using a full broadcast
+            %% gossip of server up status.
+            %%
+            %% Imagine 5 servers in an "Olympic Rings" style
+            %% overlapping network paritition, where ring1 = upper
+            %% leftmost and ring5 = upper rightmost.  It's both
+            %% possible and desirable for ring5's projection to be
+            %% seen (public) by ring1.  Ring5's projection's rank is
+            %% definitely higher than ring1's proposed projection's
+            %% rank ... but we're in a crazy netsplit where:
+            %%  * if we accept ring5's proj: only one functioning chain
+            %%    ([ring4,ring5] but stable
+            %%  * if we accept ring1's proj: two functioning chains
+            %%    ([ring1,ring2] and [ring4,ring5] indepependently)
+            %%    but unstable: we're probably going to flap back & forth?!
+
+            ?D({{{{{yoyoyo_A40c}}}}}),
             react_to_env_C300(P_newprop, S);
 
         true ->
@@ -594,11 +650,12 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
             react_to_env_C300(P_newprop, S)
     end.
 
-react_to_env_C100(P_newprop, P_latest, #ch_mgr{proj=P_current}=S) ->
-    case projection_transition_is_sane(P_current, P_latest) of
+react_to_env_C100(P_newprop, P_latest,
+                  #ch_mgr{myflu=MyFLU, proj=P_current}=S) ->
+    case projection_transition_is_sane(P_current, P_latest, MyFLU) of
         true ->
             react_to_env_C110(P_latest, S);
-        false ->
+        _AnyOtherReturnValue ->
             %% P_latest is known to be crap.
             %% By process of elimination, P_newprop is best,
             %% so let's write it.
@@ -609,9 +666,11 @@ react_to_env_C110(P_latest, #ch_mgr{myflu=MyFLU} = S) ->
     %% TOOD: Should we carry along any extra info that that would be useful
     %%       in the dbg2 list?
     Extra_todo = [],
+    RunEnv = S#ch_mgr.runenv,
+    UpNodes = proplists:get_value(up_nodes, RunEnv),
     P_latest2 = update_projection_dbg2(
                   P_latest,
-                  [{hooray, {v2, date(), time()}}|Extra_todo]),
+                  [{up_nodz, UpNodes},{hooray, {v2, date(), time()}}|Extra_todo]),
     Epoch = P_latest2#projection.epoch_number,
     ok = machi_flu0:proj_write(MyFLU, Epoch, private, P_latest2),
     react_to_env_C120(P_latest, S).
@@ -632,6 +691,9 @@ react_to_env_C200(Retries, P_latest, S) ->
 react_to_env_C210(Retries, S) ->
     %% TODO: implement the ranked sleep thingie?
     timer:sleep(10),
+    react_to_env_C220(Retries, S).
+
+react_to_env_C220(Retries, S) ->
     react_to_env_A20(Retries + 1, S).
 
 react_to_env_C300(#projection{epoch_number=Epoch}=P_newprop, S) ->
@@ -640,9 +702,13 @@ react_to_env_C300(#projection{epoch_number=Epoch}=P_newprop, S) ->
 
 react_to_env_C310(P_newprop, S) ->
     Epoch = P_newprop#projection.epoch_number,
-    {_Res, S2} = cl_write_public_proj(Epoch, P_newprop, S),
-    ?D({c310, _Res}),
+    {_Res, S2} = cl_write_public_proj_skip_local_error(Epoch, P_newprop, S),
+MyFLU=S#ch_mgr.myflu,
+    ?D({c310, MyFLU, Epoch, _Res}),
     react_to_env_A10(S2).
+
+projection_transition_is_sane(P1, P2) ->
+    projection_transition_is_sane(P1, P2, undefined).
 
 projection_transition_is_sane(
   #projection{epoch_number=Epoch1,
@@ -662,7 +728,8 @@ projection_transition_is_sane(
               down=Down_list2,
               upi=UPI_list2,
               repairing=Repairing_list2,
-              dbg=Dbg2} = P2) ->
+              dbg=Dbg2} = P2,
+  RelativeToServer) ->
  try
     true = is_integer(Epoch1) andalso is_integer(Epoch2),
     true = is_binary(CSum1) andalso is_binary(CSum2),
@@ -715,11 +782,33 @@ projection_transition_is_sane(
                     %% one of these two situations:
                     %%
                     %% UPI_list1 -> UPI_list2
+                    %% -------------------------------------------------
                     %% [d,c,b,a] -> [c,a]
                     %% [d,c,b,a] -> [c,a,repair_finished_added_to_tail].
                     NotUPI2 = (Down_list2 ++ Repairing_list2),
-                    true = lists:prefix(UPI_list1 -- NotUPI2,
-                                        UPI_list2)
+                    case lists:prefix(UPI_list1 -- NotUPI2, UPI_list2) of
+                        true ->
+                            true;
+                        false ->
+                            %% Here's a possible failure scenario:
+                            %% UPI_list1        -> UPI_list2
+                            %% Repairing_list1  -> Repairing_list2
+                            %% -----------------------------------
+                            %% [a,b,c] author=a -> [c,a] author=c
+                            %% []                  [b]
+                            %% 
+                            %% ... where RelativeToServer=b.  In this case, b
+                            %% has been partitions for a while and has only
+                            %% now just learned of several epoch transitions.
+                            %% If the author of both is also in the UPI of
+                            %% both, then those authors would not have allowed
+                            %% a bad transition, so we will assume this
+                            %% transition is OK.
+?D(aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa),
+                            lists:member(AuthorServer1, UPI_list1)
+                            andalso
+                            lists:member(AuthorServer2, UPI_list2)
+                    end
             end;
        true ->
             true
@@ -729,30 +818,45 @@ projection_transition_is_sane(
     UPI_1_suffix = UPI_list1 -- UPI_common_prefix,
     UPI_2_suffix = UPI_list2 -- UPI_common_prefix,
 
-    %% Where did elements in UPI_2_suffix come from?
-    %% Only two sources are permitted.
-    [true = lists:member(X, Repairing_list1) % X added after repair done
-            orelse
-            lists:member(X, UPI_list1)       % X in UPI_list1 after common pref
-     || X <- UPI_2_suffix],
+    MoreCheckingP =
+        RelativeToServer == undefined
+        orelse
+        not (lists:member(RelativeToServer, Down_list2) orelse
+             lists:member(RelativeToServer, Repairing_list2)),
+    
+    if not MoreCheckingP ->
+            ok;
+        MoreCheckingP ->
+            %% Where did elements in UPI_2_suffix come from?
+            %% Only two sources are permitted.
+            [true = lists:member(X, Repairing_list1) % X added after repair done
+             orelse
+             lists:member(X, UPI_list1)       % X in UPI_list1 after common pref
+             || X <- UPI_2_suffix],
 
-    %% The UPI_2_suffix must exactly be equal to: ordered items from
-    %% UPI_list1 concat'ed with ordered items from Repairing_list1.
-    %% Both temp vars below preserve relative order!
-    UPI_2_suffix_from_UPI1 = [X || X <- UPI_1_suffix,
-                                   lists:member(X, UPI_list2)],
-    UPI_2_suffix_from_Repairing1 = [X || X <- UPI_2_suffix,
-                                         lists:member(X, Repairing_list1)],
-    %% true?
-    UPI_2_suffix = UPI_2_suffix_from_UPI1 ++ UPI_2_suffix_from_Repairing1,
-
+            %% The UPI_2_suffix must exactly be equal to: ordered items from
+            %% UPI_list1 concat'ed with ordered items from Repairing_list1.
+            %% Both temp vars below preserve relative order!
+            UPI_2_suffix_from_UPI1 = [X || X <- UPI_1_suffix,
+                                           lists:member(X, UPI_list2)],
+            UPI_2_suffix_from_Repairing1 = [X || X <- UPI_2_suffix,
+                                                 lists:member(X, Repairing_list1)],
+            %% true?
+            %% ?D(UPI_2_suffix),
+            %% ?D(UPI_2_suffix_from_UPI1),
+            %% ?D(UPI_2_suffix_from_Repairing1),
+            %% ?D(UPI_2_suffix_from_UPI1 ++ UPI_2_suffix_from_Repairing1),
+            UPI_2_suffix = UPI_2_suffix_from_UPI1 ++ UPI_2_suffix_from_Repairing1,
+            ok
+    end,
     true
  catch
      _Type:_Err ->
          S1 = make_projection_summary(P1),
          S2 = make_projection_summary(P2),
          Trace = erlang:get_stacktrace(),
-         {err, from, S1, to, S2, stack, Trace}
+         {err, _Type, _Err, from, S1, to, S2, relative_to, RelativeToServer,
+          stack, Trace}
  end.
 
 find_common_prefix([], _) ->
@@ -793,7 +897,7 @@ perhaps_call_t(S, Partitions, FLU, DoIt) ->
         perhaps_call(S, Partitions, FLU, DoIt)
     catch
         exit:timeout ->
-            ?D({perhaps_call, S#ch_mgr.myflu, FLU, Partitions}),
+            %% ?D({perhaps_call, S#ch_mgr.myflu, FLU, Partitions}),
             t_timeout
     end.
 
@@ -867,7 +971,7 @@ nonunanimous_setup_and_fix_test() ->
     {ok, FLUb} = machi_flu0:start_link(b),
     I_represent = I_am = a,
     {ok, Ma} = ?MGR:start_link(I_represent, [a,b], {1,2,3}, 0, 100, I_am),
-    {ok, Mb} = ?MGR:start_link(b, [a,b], {1,2,3}, 0, 100, b),
+    {ok, Mb} = ?MGR:start_link(b, [a,b], {4,5,6}, 0, 100, b),
     try
         {ok, P1} = test_calc_projection(Ma, false),
 
@@ -903,6 +1007,100 @@ nonunanimous_setup_and_fix_test() ->
         {now_using, _} = test_react_to_env(Mb),
         {ok, P2pb} = machi_flu0:proj_read_latest(FLUb, private),
         P2 = P2pb#projection{dbg2=[]},
+
+        ok
+    after
+        ok = ?MGR:stop(Ma),
+        ok = ?MGR:stop(Mb),
+        ok = machi_flu0:stop(FLUa),
+        ok = machi_flu0:stop(FLUb)
+    end.
+
+zoof_test() ->
+    {ok, FLUa} = machi_flu0:start_link(a),
+    {ok, FLUb} = machi_flu0:start_link(b),
+    {ok, FLUc} = machi_flu0:start_link(c),
+    I_represent = I_am = a,
+    {ok, Ma} = ?MGR:start_link(I_represent, [a,b,c], {1,2,3}, 50, 90, I_am),
+    {ok, Mb} = ?MGR:start_link(b, [a,b,c], {4,5,6}, 50, 90, b),
+    {ok, Mc} = ?MGR:start_link(c, [a,b,c], {4,5,6}, 50, 90, c),
+?D(x),
+    try
+        {ok, P1} = test_calc_projection(Ma, false),
+        P1Epoch = P1#projection.epoch_number,
+        ok = machi_flu0:proj_write(FLUa, P1Epoch, public, P1),
+        ok = machi_flu0:proj_write(FLUb, P1Epoch, public, P1),
+        ok = machi_flu0:proj_write(FLUc, P1Epoch, public, P1),
+
+        {now_using, XX1} = test_react_to_env(Ma),
+        ?D(XX1),
+        {QQ,QQP2,QQE2} = test_read_latest_public_projection(Ma, false),
+        ?D(QQ),
+        ?Dw(make_projection_summary(QQP2)),
+        ?D(QQE2),
+        %% {unanimous,P2,E2} = test_read_latest_public_projection(Ma, false),
+
+        Parent = self(),
+        DoIt = fun() ->
+                       Pids = [spawn(fun() ->
+                                             [begin
+                                                  erlang:yield(),
+                                                  Res = test_react_to_env(MMM),
+                                                  Res=Res %% ?D({self(), Res})
+                                              end || _ <- lists:seq(1,7)],
+                                             Parent ! done
+                                     end) || MMM <- [Ma, Mb, Mc] ],
+                       [receive
+                            done ->
+                                ok
+                        after 5000 ->
+                                exit(icky_timeout)
+                        end || _ <- Pids]
+               end,
+
+        DoIt(),
+        [test_reset_thresholds(M, 0, 100) || M <- [Ma, Mb, Mc]],
+        DoIt(),
+
+        %% [begin
+        %%      La = machi_flu0:proj_list_all(FLU, Type),
+        %%      [io:format(user, "~p ~p ~p: ~w\n", [FLUName, Type, Epoch, make_projection_summary(catch element(2,machi_flu0:proj_read(FLU, Epoch, Type)))]) || Epoch <- La]
+        %%  end || {FLUName, FLU} <- [{a, FLUa}, {b, FLUb}],
+        %%         Type <- [public, private] ],
+
+        %% Dump the public
+        [begin
+             La = machi_flu0:proj_list_all(FLU, Type),
+             [io:format(user, "~p ~p ~p: ~w\n", [FLUName, Type, Epoch, make_projection_summary(catch element(2,machi_flu0:proj_read(FLU, Epoch, Type)))]) || Epoch <- La]
+         end || {FLUName, FLU} <- [{a, FLUa}, {b, FLUb}, {c, FLUc}],
+                Type <- [public] ],
+
+        Namez = [{a, FLUa}, {b, FLUb}, {c, FLUc}],
+        UniquePrivateEs =
+            lists:usort(lists:flatten(
+                          [machi_flu0:proj_list_all(FLU, private) ||
+                              {_FLUName, FLU} <- Namez])),
+        DumbFinderBackward =
+            fun(FLU) ->
+                    fun(E, error_unwritten) ->
+                            case machi_flu0:proj_read(FLU, E, private) of
+                                {ok, T} -> T;
+                                Else    -> Else
+                            end;
+                       (_E, Acc) ->
+                            Acc
+                    end
+            end,
+                             
+        [begin
+             io:format(user, "~p private: ~w\n",
+                       [FLUName,
+                        make_projection_summary(
+                          lists:foldl(DumbFinderBackward(FLU),
+                                      error_unwritten,
+                                      lists:seq(Epoch, 0, -1)))]),
+             if FLUName == c -> io:format(user, "\n", []); true -> ok end
+         end || Epoch <- UniquePrivateEs, {FLUName, FLU} <- Namez],
 
         ok
     after
