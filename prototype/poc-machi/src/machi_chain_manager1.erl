@@ -166,6 +166,7 @@ handle_call({test_reset_thresholds, OldThreshold, NoPartitionThreshold}, _From,
             #ch_mgr{runenv=RunEnv} = S) ->
     RunEnv2 = replace(RunEnv, [{old_threshold, OldThreshold},
                                {no_partition_threshold, NoPartitionThreshold}]),
+    ?D({cc,RunEnv2}),
 
     {reply, ok, S#ch_mgr{runenv=RunEnv2}};
 handle_call(_Call, _From, S) ->
@@ -395,8 +396,10 @@ calc_projection(OldThreshold, NoPartitionThreshold, LastProj, Dbg,
     AllMembers = (S#ch_mgr.proj)#projection.all_members,
     {Up, _, RunEnv2} = calc_up_nodes(MyName, OldThreshold, NoPartitionThreshold,
                                      AllMembers, RunEnv1),
-    NewUp = Up -- LastUp,
-    Down = AllMembers -- Up,
+
+    %% Assumption: MyName is a local FLU and is always up & available.
+    NewUp = lists:usort([MyName] ++ (Up -- LastUp)),
+    Down = lists:usort((AllMembers -- Up) -- [MyName]),
 
     NewUPI_list = [X || X <- OldUPI_list, lists:member(X, Up)],
     Repairing_list2 = [X || X <- OldRepairing_list, lists:member(X, Up)],
@@ -526,12 +529,13 @@ react_to_env_A10(S) ->
 react_to_env_A20(Retries, S) ->
     %% io:format(user, "current:  ~w\n", [make_projection_summary(S#ch_mgr.proj)]),
     {P_newprop, S2} = calc_projection(S, [{author_proc, react}]),
-    %% io:format(user, "proposed: ~w\n", [make_projection_summary(Proposed)]),
+    %% if P_newprop#projection.upi == [] -> io:format(user, "current: ~w\n", [make_projection_summary(S#ch_mgr.proj)]),io:format(user, "proposed: ~w\n", [make_projection_summary(P_newprop)]), timer:sleep(100); true -> ok end,
     react_to_env_A30(Retries, P_newprop, S2).
 
 react_to_env_A30(Retries, P_newprop, S) ->
     {UnanimousTag, P_latest, _Extra, S2} =
         do_cl_read_latest_public_projection(true, S),
+    LatestEpoch = P_latest#projection.epoch_number, ?D({UnanimousTag, LatestEpoch}),
     LatestUnanimousP = if UnanimousTag == unanimous     -> true;
                           UnanimousTag == not_unanimous -> false;
                           true -> exit({badbad, UnanimousTag})
@@ -585,7 +589,7 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
 
         %% A40a (see flowchart)
         Rank_newprop > Rank_latest ->
-            react_to_env_C300(P_newprop, S);
+            react_to_env_C300(P_newprop, P_latest, S);
 
         %% A40b (see flowchart)
         P_latest#projection.author_server == MyFLU
@@ -593,7 +597,7 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
         (P_newprop#projection.upi /= P_latest#projection.upi
          orelse
          P_newprop#projection.repairing /= P_latest#projection.repairing) ->
-            react_to_env_C300(P_newprop, S);
+            react_to_env_C300(P_newprop, P_latest, S);
 
         %% A40c (see flowchart)
         LatestAuthorDownP ->
@@ -617,7 +621,7 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
             %%    but unstable: we're probably going to flap back & forth?!
 
             ?D({{{{{yoyoyo_A40c}}}}}),
-            react_to_env_C300(P_newprop, S);
+            react_to_env_C300(P_newprop, P_latest, S);
 
         true ->
             {{no_change, P_latest#projection.epoch_number}, S}
@@ -633,7 +637,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
 
             %% The author of P_latest is too slow or crashed.
             %% Let's try to write P_newprop and see what happens!
-            react_to_env_C300(P_newprop, S);
+            react_to_env_C300(P_newprop, P_latest, S);
 
         Rank_latest >= Rank_newprop
         andalso
@@ -647,7 +651,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         true ->
 
             %% P_newprop is best, so let's write it.
-            react_to_env_C300(P_newprop, S)
+            react_to_env_C300(P_newprop, P_latest, S)
     end.
 
 react_to_env_C100(P_newprop, P_latest,
@@ -659,7 +663,7 @@ react_to_env_C100(P_newprop, P_latest,
             %% P_latest is known to be crap.
             %% By process of elimination, P_newprop is best,
             %% so let's write it.
-            react_to_env_C300(P_newprop, S)
+            react_to_env_C300(P_newprop, P_latest, S)
     end.
 
 react_to_env_C110(P_latest, #ch_mgr{myflu=MyFLU} = S) ->
@@ -696,15 +700,18 @@ react_to_env_C210(Retries, S) ->
 react_to_env_C220(Retries, S) ->
     react_to_env_A20(Retries + 1, S).
 
-react_to_env_C300(#projection{epoch_number=Epoch}=P_newprop, S) ->
-    P_newprop2 = P_newprop#projection{epoch_number=Epoch + 1},
+react_to_env_C300(#projection{epoch_number=Epoch_newprop}=P_newprop,
+                  #projection{epoch_number=Epoch_latest}=_P_latest, S) ->
+    NewEpoch = erlang:max(Epoch_newprop, Epoch_latest) + 1,
+    P_newprop2 = P_newprop#projection{epoch_number=NewEpoch},
     react_to_env_C310(update_projection_checksum(P_newprop2), S).
 
 react_to_env_C310(P_newprop, S) ->
     Epoch = P_newprop#projection.epoch_number,
     {_Res, S2} = cl_write_public_proj_skip_local_error(Epoch, P_newprop, S),
-MyFLU=S#ch_mgr.myflu,
-    ?D({c310, MyFLU, Epoch, _Res}),
+MyFLU=S#ch_mgr.myflu, ?D({c310, MyFLU, Epoch, _Res}), timer:sleep(200),
+MPS = mps(P_newprop), ?D(MPS),
+    
     react_to_env_A10(S2).
 
 projection_transition_is_sane(P1, P2) ->
@@ -1047,7 +1054,7 @@ zoof_test() ->
                                                   erlang:yield(),
                                                   Res = test_react_to_env(MMM),
                                                   Res=Res %% ?D({self(), Res})
-                                              end || _ <- lists:seq(1,7)],
+                                              end || _ <- lists:seq(1,20)],
                                              Parent ! done
                                      end) || MMM <- [Ma, Mb, Mc] ],
                        [receive
