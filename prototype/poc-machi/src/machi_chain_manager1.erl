@@ -924,10 +924,10 @@ perhaps_call_t(S, Partitions, FLU, DoIt) ->
 
 perhaps_call(#ch_mgr{name=MyName, myflu=MyFLU}, Partitions, FLU, DoIt) ->
     RemoteFLU_p = FLU /= MyFLU,
-    case RemoteFLU_p andalso lists:keyfind(FLU, 1, Partitions) of
+    case RemoteFLU_p andalso lists:member({MyName, FLU}, Partitions) of
         false ->
             Res = DoIt(),
-            case RemoteFLU_p andalso lists:keyfind(MyName, 2, Partitions) of
+            case RemoteFLU_p andalso lists:member({FLU, MyName}, Partitions) of
                 false ->
                     Res;
                 _ ->
