@@ -519,8 +519,8 @@ rank_projection(#projection{author_server=Author,
                             repairing=Repairing_list}, MemberRank, N) ->
     AuthorRank = orddict:fetch(Author, MemberRank),
     AuthorRank +
-        (1*N + length(Repairing_list)) +
-        (2*N + length(UPI_list)).
+        (  N * length(Repairing_list)) +
+        (N*N * length(UPI_list)).
 
 do_react_to_env(S) ->
     put(react, []),
