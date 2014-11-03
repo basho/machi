@@ -135,8 +135,9 @@ init({MyName, All_list, Seed, OldThreshold, NoPartitionThreshold, MyFLUPid}) ->
 
 handle_call(_Call, _From, #ch_mgr{init_finished=false} = S) ->
     {reply, not_initialized, S};
-handle_call({calculate_projection_internal_old}, _From, S) ->
-    {Reply, S2} = calc_projection(S, [{author_proc, call}]),
+handle_call({calculate_projection_internal_old}, _From, #ch_mgr{myflu=MyFLU}=S) ->
+    RelativeToServer = MyFLU,
+    {Reply, S2} = calc_projection(S, RelativeToServer, [{author_proc, call}]),
     {reply, Reply, S2};
 handle_call({test_write_proposed_projection}, _From, S) ->
     if S#ch_mgr.proj_proposed == none ->
@@ -149,8 +150,9 @@ handle_call({ping}, _From, S) ->
     {reply, pong, S};
 handle_call({stop}, _From, S) ->
     {stop, normal, ok, S};
-handle_call({test_calc_projection, KeepRunenvP}, _From, S) ->
-    {P, S2} = calc_projection(S, [{author_proc, call}]),
+handle_call({test_calc_projection, KeepRunenvP}, _From, #ch_mgr{myflu=MyFLU}=S) ->
+    RelativeToServer = MyFLU,
+    {P, S2} = calc_projection(S, RelativeToServer, [{author_proc, call}]),
     {reply, {ok, P}, if KeepRunenvP -> S2;
                         true        -> S
                      end};
@@ -174,8 +176,9 @@ handle_call(_Call, _From, S) ->
 
 handle_cast(_Cast, #ch_mgr{init_finished=false} = S) ->
     {noreply, S};
-handle_cast({test_calc_proposed_projection}, S) ->
-    {Proj, S2} = calc_projection(S, [{author_proc, cast}]),
+handle_cast({test_calc_proposed_projection}, #ch_mgr{myflu=MyFLU}=S) ->
+    RelativeToServer = MyFLU,
+    {Proj, S2} = calc_projection(S, RelativeToServer, [{author_proc, cast}]),
     %% ?Dw({?LINE,make_projection_summary(Proj)}),
     {noreply, S2#ch_mgr{proj_proposed=Proj}};
 handle_cast(_Cast, S) ->
@@ -376,17 +379,19 @@ update_projection_checksum(P) ->
 update_projection_dbg2(P, Dbg2) when is_list(Dbg2) ->
     P#projection{dbg2=Dbg2}.
 
-calc_projection(#ch_mgr{proj=LastProj, runenv=RunEnv} = S, Dbg) ->
+calc_projection(#ch_mgr{proj=LastProj, runenv=RunEnv} = S, RelativeToServer,
+                Dbg) ->
     OldThreshold = proplists:get_value(old_threshold, RunEnv),
     NoPartitionThreshold = proplists:get_value(no_partition_threshold, RunEnv),
-    calc_projection(OldThreshold, NoPartitionThreshold, LastProj, Dbg, S).
+    calc_projection(OldThreshold, NoPartitionThreshold, LastProj,
+                    RelativeToServer, Dbg, S).
 
 %% OldThreshold: Percent chance of using the old/previous network partition list
 %% NoPartitionThreshold: If the network partition changes, what are the odds
 %%                       that there are no partitions at all?
 
-calc_projection(OldThreshold, NoPartitionThreshold, LastProj, Dbg,
-                #ch_mgr{name=MyName, runenv=RunEnv1} = S) ->
+calc_projection(OldThreshold, NoPartitionThreshold, LastProj,
+                RelativeToServer, Dbg, #ch_mgr{name=MyName,runenv=RunEnv1}=S) ->
     #projection{epoch_number=OldEpochNum,
                 all_members=All_list,
                 upi=OldUPI_list,
@@ -397,9 +402,15 @@ calc_projection(OldThreshold, NoPartitionThreshold, LastProj, Dbg,
     {Up, _, RunEnv2} = calc_up_nodes(MyName, OldThreshold, NoPartitionThreshold,
                                      AllMembers, RunEnv1),
 
-    %% Assumption: MyName is a local FLU and is always up & available.
-    NewUp = lists:usort([MyName] ++ (Up -- LastUp)),
-    Down = lists:usort((AllMembers -- Up) -- [MyName]),
+    NewUp = Up -- LastUp,
+    Down = AllMembers -- Up,
+
+    %% HRRRRRRRmmm buggy icky ... causes things like:
+    %% ...,to,[{epoch,8},{author,a},{upi,[a,b]},{repair,[a]}, oops!
+
+    %% %% Assumption: MyName is a local FLU and is always up & available.
+    %% NewUp = lists:usort([MyName] ++ (Up -- LastUp)),
+    %% Down = lists:usort((AllMembers -- Up) -- [MyName]),
 
     NewUPI_list = [X || X <- OldUPI_list, lists:member(X, Up)],
     Repairing_list2 = [X || X <- OldRepairing_list, lists:member(X, Up)],
@@ -409,7 +420,9 @@ calc_projection(OldThreshold, NoPartitionThreshold, LastProj, Dbg,
                 {NewUPI_list, [], RunEnv2};
             {[], [H|T]} ->
                 {Prob, RunEnvX} = roll_dice(100, RunEnv2),
-                if Prob =< 50 ->
+                if Prob =< 50 andalso (NewUPI_list == []
+                                       orelse
+                                       (RelativeToServer == hd(NewUPI_list))) ->
                         {NewUPI_list ++ [H], T, RunEnvX};
                    true ->
                         {NewUPI_list, OldRepairing_list, RunEnvX}
@@ -422,9 +435,22 @@ calc_projection(OldThreshold, NoPartitionThreshold, LastProj, Dbg,
                           NewUp -> Repairing_list3 ++ NewUp
                       end,
     Repairing_list5 = Repairing_list4 -- Down,
+
+    TentativeUPI = NewUPI_list3,
+    TentativeRepairing = Repairing_list5,
+
+    {NewUPI, NewRepairing} =
+        if TentativeUPI == [] andalso TentativeRepairing /= [] ->
+                [FirstRepairing|TailRepairing] = TentativeRepairing,
+                {[FirstRepairing], TailRepairing};
+           true ->
+                {TentativeUPI, TentativeRepairing}
+        end,
+
     P = make_projection(OldEpochNum + 1,
-                        MyName, All_list, Down, NewUPI_list3, Repairing_list5,
+                        MyName, All_list, Down, NewUPI, NewRepairing,
                         Dbg ++ [{nodes_up, Up}]),
+    if P#projection.upi == [] -> io:format(user, "old: ~w\n", [make_projection_summary(LastProj)]), io:format(user, "new: ~w\n", [make_projection_summary(P)]), exit(zoozoo); true -> ok end,
     {P, S#ch_mgr{runenv=RunEnv3}}.
 
 calc_up_nodes(#ch_mgr{name=MyName, proj=Proj, runenv=RunEnv1}=S) ->
@@ -526,9 +552,11 @@ do_react_to_env(S) ->
 react_to_env_A10(S) ->
     react_to_env_A20(0, S).
 
-react_to_env_A20(Retries, S) ->
+react_to_env_A20(Retries, #ch_mgr{myflu=MyFLU} = S) ->
     %% io:format(user, "current:  ~w\n", [make_projection_summary(S#ch_mgr.proj)]),
-    {P_newprop, S2} = calc_projection(S, [{author_proc, react}]),
+    RelativeToServer = MyFLU,
+    {P_newprop, S2} = calc_projection(S, RelativeToServer,
+                                      [{author_proc, react}]),
     %% if P_newprop#projection.upi == [] -> io:format(user, "current: ~w\n", [make_projection_summary(S#ch_mgr.proj)]),io:format(user, "proposed: ~w\n", [make_projection_summary(P_newprop)]), timer:sleep(100); true -> ok end,
     react_to_env_A30(Retries, P_newprop, S2).
 
@@ -555,6 +583,10 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
         P_latest#projection.epoch_number > P_current#projection.epoch_number
         orelse
         not LatestUnanimousP ->
+?D({a40,?LINE}),
+?D(P_latest#projection.epoch_number),
+?D(P_current#projection.epoch_number),
+?D(LatestUnanimousP),
 
             %% 1st clause: someone else has written a newer projection
             %% 2nd clause: a network partition has healed, revealing a
@@ -565,6 +597,7 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
         P_latest#projection.epoch_number < P_current#projection.epoch_number
         orelse
         P_latest /= P_current ->
+?D({a40,?LINE}),
 
             %% Both of these cases are rare.  Elsewhere, the code
             %% assumes that the local FLU's projection store is always
@@ -589,6 +622,7 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
 
         %% A40a (see flowchart)
         Rank_newprop > Rank_latest ->
+?D({a40,?LINE}),
             react_to_env_C300(P_newprop, P_latest, S);
 
         %% A40b (see flowchart)
@@ -597,10 +631,12 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
         (P_newprop#projection.upi /= P_latest#projection.upi
          orelse
          P_newprop#projection.repairing /= P_latest#projection.repairing) ->
+?D({a40,?LINE}),
             react_to_env_C300(P_newprop, P_latest, S);
 
         %% A40c (see flowchart)
         LatestAuthorDownP ->
+?D({a40,?LINE}),
 
             %% TODO: I believe that membership in the
             %% P_newprop#projection.down is not sufficient for long
@@ -624,6 +660,7 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
             react_to_env_C300(P_newprop, P_latest, S);
 
         true ->
+?D({a40,?LINE}),
             {{no_change, P_latest#projection.epoch_number}, S}
     end.
 
@@ -631,9 +668,11 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                  Rank_newprop, Rank_latest, #ch_mgr{name=MyName}=S) ->
     if
         LatestUnanimousP ->
+?D({b10, ?LINE}),
             react_to_env_C100(P_newprop, P_latest, S);
 
         Retries > 2 ->
+?D({b10, ?LINE}),
 
             %% The author of P_latest is too slow or crashed.
             %% Let's try to write P_newprop and see what happens!
@@ -642,6 +681,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         Rank_latest >= Rank_newprop
         andalso
         P_latest#projection.author_server /= MyName ->
+?D({b10, ?LINE}),
 
             %% Give the author of P_latest an opportunite to write a
             %% new projection in a new epoch to resolve this mixed
@@ -649,6 +689,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
             react_to_env_C200(Retries, P_latest, S);
 
         true ->
+?D({b10, ?LINE}),
 
             %% P_newprop is best, so let's write it.
             react_to_env_C300(P_newprop, P_latest, S)
@@ -658,11 +699,18 @@ react_to_env_C100(P_newprop, P_latest,
                   #ch_mgr{myflu=MyFLU, proj=P_current}=S) ->
     case projection_transition_is_sane(P_current, P_latest, MyFLU) of
         true ->
+?D({c100, ?LINE}),
             react_to_env_C110(P_latest, S);
         _AnyOtherReturnValue ->
-            %% P_latest is known to be crap.
-            %% By process of elimination, P_newprop is best,
-            %% so let's write it.
+?D({c100, ?LINE, _AnyOtherReturnValue}), timer:sleep(50),
+            %% %% P_latest is known to be crap.
+            %% %% By process of elimination, P_newprop is best,
+            %% %% so let's write it.
+            %% MaxEpoch = erlang:max(P_newprop#projection.epoch_number,
+            %%                       P_latest#projection.epoch_number) + 1,
+            %% P_newprop2 = update_projection_checksum(
+            %%                P_newprop#projection{epoch_number=MaxEpoch}),
+            %% react_to_env_C300(P_newprop2, P_latest, S)
             react_to_env_C300(P_newprop, P_latest, S)
     end.
 
@@ -701,16 +749,19 @@ react_to_env_C220(Retries, S) ->
     react_to_env_A20(Retries + 1, S).
 
 react_to_env_C300(#projection{epoch_number=Epoch_newprop}=P_newprop,
-                  #projection{epoch_number=Epoch_latest}=_P_latest, S) ->
-    NewEpoch = erlang:max(Epoch_newprop, Epoch_latest) + 1,
-    P_newprop2 = P_newprop#projection{epoch_number=NewEpoch},
+                  #projection{epoch_number=_Epoch_latest}=_P_latest, S) ->
+    %% NewEpoch = erlang:max(Epoch_newprop, Epoch_latest) + 1,
+    %% P_newprop2 = P_newprop#projection{epoch_number=NewEpoch},
+    %% Let's return to the old epoch thingie and see what happens.........
+    Epoch = Epoch_newprop,
+    P_newprop2 = P_newprop#projection{epoch_number=Epoch + 1},
     react_to_env_C310(update_projection_checksum(P_newprop2), S).
 
 react_to_env_C310(P_newprop, S) ->
     Epoch = P_newprop#projection.epoch_number,
     {_Res, S2} = cl_write_public_proj_skip_local_error(Epoch, P_newprop, S),
-MyFLU=S#ch_mgr.myflu, ?D({c310, MyFLU, Epoch, _Res}), timer:sleep(200),
-MPS = mps(P_newprop), ?D(MPS),
+%% MyFLU=S#ch_mgr.myflu, ?D({c310, MyFLU, Epoch, _Res}), timer:sleep(200),
+%% MPS = mps(P_newprop), ?D(MPS),
     
     react_to_env_A10(S2).
 
@@ -811,7 +862,7 @@ projection_transition_is_sane(
                             %% both, then those authors would not have allowed
                             %% a bad transition, so we will assume this
                             %% transition is OK.
-?D(aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa),
+%% ?D(aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa), timer:sleep(200),
                             lists:member(AuthorServer1, UPI_list1)
                             andalso
                             lists:member(AuthorServer2, UPI_list2)
@@ -1054,7 +1105,7 @@ zoof_test() ->
                                                   erlang:yield(),
                                                   Res = test_react_to_env(MMM),
                                                   Res=Res %% ?D({self(), Res})
-                                              end || _ <- lists:seq(1,20)],
+                                              end || _ <- lists:seq(1,10)],
                                              Parent ! done
                                      end) || MMM <- [Ma, Mb, Mc] ],
                        [receive
@@ -1067,6 +1118,7 @@ zoof_test() ->
 
         DoIt(),
         [test_reset_thresholds(M, 0, 100) || M <- [Ma, Mb, Mc]],
+        DoIt(),
         DoIt(),
 
         %% [begin
