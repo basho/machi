@@ -34,7 +34,7 @@
 -define(Dw(X), io:format(user, "~s ~w\n", [??X, X])).
 
 %% API
--export([start_link/6, stop/1, ping/1,
+-export([start_link/3, stop/1, ping/1,
          calculate_projection_internal_old/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
@@ -47,8 +47,7 @@
          test_calc_proposed_projection/1,
          test_write_proposed_projection/1,
          test_read_latest_public_projection/2,
-         test_react_to_env/1,
-         test_reset_thresholds/3]).
+         test_react_to_env/1]).
 
 -ifdef(EQC).
 -include_lib("eqc/include/eqc.hrl").
@@ -61,12 +60,8 @@
 -compile(export_all).
 -endif. %TEST
 
-start_link(MyName, All_list, Seed,
-           OldThreshold, NoPartitionThreshold,
-           MyFLUPid) ->
-    gen_server:start_link(?MODULE, {MyName, All_list, Seed,
-                                    OldThreshold, NoPartitionThreshold,
-                                    MyFLUPid}, []).
+start_link(MyName, All_list, MyFLUPid) ->
+    gen_server:start_link(?MODULE, {MyName, All_list, MyFLUPid}, []).
 
 stop(Pid) ->
     gen_server:call(Pid, {stop}, infinity).
@@ -102,18 +97,16 @@ test_read_latest_public_projection(Pid, ReadRepairP) ->
 test_react_to_env(Pid) ->
     gen_server:call(Pid, {test_react_to_env}, infinity).
 
-test_reset_thresholds(Pid, OldThreshold, NoPartitionThreshold) ->
-    gen_server:call(Pid, {test_reset_thresholds, OldThreshold, NoPartitionThreshold}, infinity).
-
 -endif. % TEST
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init({MyName, All_list, Seed, OldThreshold, NoPartitionThreshold, MyFLUPid}) ->
-    RunEnv = [{seed, Seed},
+init({MyName, All_list, MyFLUPid}) ->
+    RunEnv = [%% {seed, Seed},
+              {seed, now()},
               {network_partitions, []},
-              {old_threshold, OldThreshold},
-              {no_partition_threshold, NoPartitionThreshold},
+              %% {old_threshold, OldThreshold},
+              %% {no_partition_threshold, NoPartitionThreshold},
               {up_nodes, not_init_yet}],
     BestProj = make_initial_projection(MyName, All_list, All_list,
                                        [], [{author_proc, init_best}]),
@@ -170,13 +163,6 @@ handle_call({test_read_latest_public_projection, ReadRepairP}, _From, S) ->
 handle_call({test_react_to_env}, _From, S) ->
     {TODOtodo, S2} =  do_react_to_env(S),
     {reply, TODOtodo, S2};
-handle_call({test_reset_thresholds, OldThreshold, NoPartitionThreshold}, _From,
-            #ch_mgr{runenv=RunEnv} = S) ->
-    RunEnv2 = replace(RunEnv, [{old_threshold, OldThreshold},
-                               {no_partition_threshold, NoPartitionThreshold}]),
-    ?D({cc,RunEnv2}),
-
-    {reply, ok, S#ch_mgr{runenv=RunEnv2}};
 handle_call(_Call, _From, S) ->
     {reply, whaaaaaaaaaa, S}.
 
@@ -398,7 +384,7 @@ calc_projection(#ch_mgr{proj=LastProj, runenv=RunEnv} = S, RelativeToServer,
 %% NoPartitionThreshold: If the network partition changes, what are the odds
 %%                       that there are no partitions at all?
 
-calc_projection(OldThreshold, NoPartitionThreshold, LastProj,
+calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                 RelativeToServer, Dbg, #ch_mgr{name=MyName,runenv=RunEnv1}=S) ->
     #projection{epoch_number=OldEpochNum,
                 all_members=All_list,
@@ -407,7 +393,7 @@ calc_projection(OldThreshold, NoPartitionThreshold, LastProj,
                } = LastProj,
     LastUp = lists:usort(OldUPI_list ++ OldRepairing_list),
     AllMembers = (S#ch_mgr.proj)#projection.all_members,
-    {Up, _, RunEnv2} = calc_up_nodes(MyName, OldThreshold, NoPartitionThreshold,
+    {Up, _, RunEnv2} = calc_up_nodes(MyName, %OldThreshold, NoPartitionThreshold,
                                      AllMembers, RunEnv1),
 
     NewUp = Up -- LastUp,
@@ -462,43 +448,23 @@ calc_projection(OldThreshold, NoPartitionThreshold, LastProj,
     {P, S#ch_mgr{runenv=RunEnv3}}.
 
 calc_up_nodes(#ch_mgr{name=MyName, proj=Proj, runenv=RunEnv1}=S) ->
-    OldThreshold = proplists:get_value(old_threshold, RunEnv1),
-    NoPartitionThreshold = proplists:get_value(no_partition_threshold, RunEnv1),
     AllMembers = Proj#projection.all_members,
     {UpNodes, Partitions, RunEnv2} =
-        calc_up_nodes(MyName, OldThreshold, NoPartitionThreshold,
-                      AllMembers, RunEnv1),
+        calc_up_nodes(MyName, AllMembers, RunEnv1),
     {UpNodes, Partitions, S#ch_mgr{runenv=RunEnv2}}.
 
-calc_up_nodes(MyName, OldThreshold, NoPartitionThreshold,
-              AllMembers, RunEnv1) ->
-    Seed1 = proplists:get_value(seed, RunEnv1),
-    Partitions1 = proplists:get_value(network_partitions, RunEnv1),
-    {Seed2, Partitions2} =
-        calc_network_partitions(AllMembers, Seed1, Partitions1,
-                                OldThreshold, NoPartitionThreshold),
+calc_up_nodes(MyName, AllMembers, RunEnv1) ->
+    %% Seed1 = proplists:get_value(seed, RunEnv1),
+    Partitions2 = machi_partition_simulator:get(AllMembers),
     UpNodes = lists:sort(
                 [Node || Node <- AllMembers,
                          not lists:member({MyName, Node}, Partitions2),
                          not lists:member({Node, MyName}, Partitions2)]),
     RunEnv2 = replace(RunEnv1,
-                      [{seed, Seed2}, {network_partitions, Partitions2},
+                      [%% {seed, Seed2},
+                       {network_partitions, Partitions2},
                        {up_nodes, UpNodes}]),
     {UpNodes, Partitions2, RunEnv2}.
-
-calc_network_partitions(Nodes, Seed1, OldPartition,
-                        OldThreshold, NoPartitionThreshold) ->
-    {Cutoff2, Seed2} = random:uniform_s(100, Seed1),
-    if Cutoff2 < OldThreshold ->
-            {Seed2, OldPartition};
-       true ->
-            {Cutoff3, Seed3} = random:uniform_s(100, Seed1),
-            if Cutoff3 < NoPartitionThreshold ->
-                    {Seed3, []};
-               true ->
-                    make_network_partition_locations(Nodes, Seed3)
-            end
-    end.
 
 replace(PropList, Items) ->
     lists:foldl(fun({Key, Val}, Ps) ->
@@ -947,34 +913,6 @@ find_common_prefix(_, _) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-make_network_partition_locations(Nodes, Seed1) ->
-    %% TODO: To simplify debugging a bit, I'm switching to partitions that are
-    %%       bi-directional only.
-    Num = length(Nodes),
-    {Seed2, WeightsNodes} = lists:foldl(
-                              fun(Node, {Seeda, Acc}) ->
-                                      {Cutoff, Seedb} =
-                                                  random:uniform_s(100, Seeda),
-                                      {Seedb, [{Cutoff, Node}|Acc]}
-                              end, {Seed1, []}, Nodes),
-    IslandSep = 100 div Num,
-    Islands = [
-               [Nd || {Weight, Nd} <- WeightsNodes,
-                      (Max - IslandSep) =< Weight, Weight < Max]
-               || Max <- lists:seq(IslandSep + 1, 101, IslandSep)],
-    {Seed2, lists:usort(make_islands(Islands))}.
-
-make_islands([]) ->
-    [];
-make_islands([Island|Rest]) ->
-    [{X,Y} || X <- Island,
-              Y <- lists:append(Rest), X /= Y]
-    ++
-    [{Y,X} || X <- Island,
-              Y <- lists:append(Rest), X /= Y]
-    ++
-    make_islands(Rest).
-
 perhaps_call_t(S, Partitions, FLU, DoIt) ->
     try
         perhaps_call(S, Partitions, FLU, DoIt)
@@ -1006,8 +944,9 @@ perhaps_call(#ch_mgr{name=MyName, myflu=MyFLU}, Partitions, FLU, DoIt) ->
 -define(MGR, machi_chain_manager1).
 
 smoke0_test() ->
+    machi_partition_simulator:start_link({1,2,3}, 50, 50),
     {ok, FLUa} = machi_flu0:start_link(a),
-    {ok, M0} = ?MGR:start_link(a, [a,b,c], {1,2,3}, 50, 50, a),
+    {ok, M0} = ?MGR:start_link(a, [a,b,c], a),
     try
         pong = ping(M0),
 
@@ -1020,16 +959,17 @@ smoke0_test() ->
          end || _ <- lists:seq(1,5)]
     after
         ok = ?MGR:stop(M0),
-        ok = machi_flu0:stop(FLUa)
+        ok = machi_flu0:stop(FLUa),
+        ok = machi_partition_simulator:stop()
     end.
 
 smoke1_test() ->
+    machi_partition_simulator:start_link({1,2,3}, 100, 0),
     {ok, FLUa} = machi_flu0:start_link(a),
     {ok, FLUb} = machi_flu0:start_link(b),
     {ok, FLUc} = machi_flu0:start_link(c),
     I_represent = I_am = a,
-    %% {ok, M0} = ?MGR:start_link(I_represent, [a,b,c], {1,2,3}, 50, 50, I_am),
-    {ok, M0} = ?MGR:start_link(I_represent, [a,b,c], {1,2,3}, 0, 100, I_am),
+    {ok, M0} = ?MGR:start_link(I_represent, [a,b,c], I_am),
     try
         %% ?D(x),
         {ok, _P1} = test_calc_projection(M0, false),
@@ -1046,15 +986,17 @@ smoke1_test() ->
         ok = ?MGR:stop(M0),
         ok = machi_flu0:stop(FLUa),
         ok = machi_flu0:stop(FLUb),
-        ok = machi_flu0:stop(FLUc)        
+        ok = machi_flu0:stop(FLUc),
+        ok = machi_partition_simulator:stop()
     end.
 
 nonunanimous_setup_and_fix_test() ->
+    machi_partition_simulator:start_link({1,2,3}, 100, 0),
     {ok, FLUa} = machi_flu0:start_link(a),
     {ok, FLUb} = machi_flu0:start_link(b),
     I_represent = I_am = a,
-    {ok, Ma} = ?MGR:start_link(I_represent, [a,b], {1,2,3}, 0, 100, I_am),
-    {ok, Mb} = ?MGR:start_link(b, [a,b], {4,5,6}, 0, 100, b),
+    {ok, Ma} = ?MGR:start_link(I_represent, [a,b], I_am),
+    {ok, Mb} = ?MGR:start_link(b, [a,b], b),
     try
         {ok, P1} = test_calc_projection(Ma, false),
 
@@ -1096,17 +1038,20 @@ nonunanimous_setup_and_fix_test() ->
         ok = ?MGR:stop(Ma),
         ok = ?MGR:stop(Mb),
         ok = machi_flu0:stop(FLUa),
-        ok = machi_flu0:stop(FLUb)
+        ok = machi_flu0:stop(FLUb),
+        ok = machi_partition_simulator:stop()
     end.
 
 zoof_test() ->
+    machi_partition_simulator:start_link({1,2,3}, 50, 50),
+
     {ok, FLUa} = machi_flu0:start_link(a),
     {ok, FLUb} = machi_flu0:start_link(b),
     {ok, FLUc} = machi_flu0:start_link(c),
     I_represent = I_am = a,
-    {ok, Ma} = ?MGR:start_link(I_represent, [a,b,c], {1,2,3}, 50, 50, I_am),
-    {ok, Mb} = ?MGR:start_link(b, [a,b,c], {4,5,6}, 50, 50, b),
-    {ok, Mc} = ?MGR:start_link(c, [a,b,c], {7,8,9}, 50, 50, c),
+    {ok, Ma} = ?MGR:start_link(I_represent, [a,b,c], I_am),
+    {ok, Mb} = ?MGR:start_link(b, [a,b,c], b),
+    {ok, Mc} = ?MGR:start_link(c, [a,b,c], c),
 ?D(x),
     try
         {ok, P1} = test_calc_projection(Ma, false),
@@ -1142,7 +1087,7 @@ zoof_test() ->
                end,
 
         DoIt(),
-        [test_reset_thresholds(M, 100, 0) || M <- [Ma, Mb, Mc]],
+        machi_partition_simulator:reset_thresholds(100, 0),
         DoIt(),
         DoIt(),
 
@@ -1191,7 +1136,8 @@ zoof_test() ->
         ok = ?MGR:stop(Ma),
         ok = ?MGR:stop(Mb),
         ok = machi_flu0:stop(FLUa),
-        ok = machi_flu0:stop(FLUb)
+        ok = machi_flu0:stop(FLUb),
+        ok = machi_partition_simulator:stop()
     end.
 
 -endif.
