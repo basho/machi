@@ -64,7 +64,7 @@ reset_thresholds(OldThreshold, NoPartitionThreshold) ->
 
 init({Seed, OldThreshold, NoPartitionThreshold}) ->
     {ok, #state{seed=Seed,
-                old_partitions={[],[]},
+                old_partitions={[],[[]]},
                 old_threshold=OldThreshold,
                 no_partition_threshold=NoPartitionThreshold}}.
 
@@ -117,27 +117,33 @@ make_network_partition_locations(Nodes, Seed1) ->
     Num = length(Nodes),
     {Seed2, WeightsNodes} = lists:foldl(
                               fun(Node, {Seeda, Acc}) ->
-                                      {Cutoff, Seedb} =
+                                      {Cutoff0, Seedb} =
                                                   random:uniform_s(100, Seeda),
+                                      Cutoff = erlang:max(
+                                                 2, if Cutoff0 rem 4 == 0 ->
+                                                            0;
+                                                       true ->
+                                                            Cutoff0
+                                                    end),
                                       {Seedb, [{Cutoff, Node}|Acc]}
                               end, {Seed1, []}, Nodes),
     IslandSep = 100 div Num,
     Islands = [
                [Nd || {Weight, Nd} <- WeightsNodes,
                       (Max - IslandSep) =< Weight, Weight < Max]
-               || Max <- lists:seq(IslandSep + 1, 101, IslandSep)],
-    {Seed2, {lists:usort(make_islands(Islands)), Islands}}.
+               || Max <- lists:seq(IslandSep + 1, 105, IslandSep)],
+    {Seed2, {lists:usort(islands2partitions(Islands)), Islands}}.
 
-make_islands([]) ->
+islands2partitions([]) ->
     [];
-make_islands([Island|Rest]) ->
+islands2partitions([Island|Rest]) ->
     [{X,Y} || X <- Island,
               Y <- lists:append(Rest), X /= Y]
     ++
     [{Y,X} || X <- Island,
               Y <- lists:append(Rest), X /= Y]
     ++
-    make_islands(Rest).
+    islands2partitions(Rest).
 
 
 
