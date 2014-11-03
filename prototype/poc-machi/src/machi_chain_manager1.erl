@@ -171,7 +171,6 @@ handle_cast(_Cast, #ch_mgr{init_finished=false} = S) ->
 handle_cast({test_calc_proposed_projection}, #ch_mgr{myflu=MyFLU}=S) ->
     RelativeToServer = MyFLU,
     {Proj, S2} = calc_projection(S, RelativeToServer, [{author_proc, cast}]),
-    %% ?Dw({?LINE,make_projection_summary(Proj)}),
     {noreply, S2#ch_mgr{proj_proposed=Proj}};
 handle_cast(_Cast, S) ->
     ?D({cast_whaaaaaaaaaaa, _Cast}),
@@ -413,8 +412,6 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                 F = fun() -> machi_flu0:proj_read_latest(H, private) end,
                 case perhaps_call_t(S, Partitions, MyFLU, F) of
                     {ok, RemotePrivateProj} ->
-                        MySumm = make_projection_summary(S#ch_mgr.proj),
-                        FarSumm = make_projection_summary(RemotePrivateProj),
                         if (S#ch_mgr.proj)#projection.epoch_number ==
                            RemotePrivateProj#projection.epoch_number
                            andalso
@@ -467,6 +464,19 @@ calc_up_nodes(MyName, AllMembers, RunEnv1) ->
                 [Node || Node <- AllMembers,
                          not lists:member({MyName, Node}, Partitions2),
                          not lists:member({Node, MyName}, Partitions2)]),
+    %% UpViaIslands = lists:sort(lists:flatten([Island ||
+    %%                                             Island <- _Islands,
+    %%                                             lists:member(MyName, Island)])),
+    %% try
+    %%     case get(hack_island) of
+    %%         undefined ->
+    %%             ok;
+    %%         _ ->
+    %%             UpNodes = UpViaIslands
+    %%     end
+    %% catch _:_ ->
+    %%         exit({damn, MyName, UpNodes, Partitions2, _Islands})
+    %% end,
     RunEnv2 = replace(RunEnv1,
                       [%% {seed, Seed2},
                        {network_partitions, Partitions2},
@@ -493,11 +503,6 @@ make_projection_summary(#projection{epoch_number=EpochNum,
     [{epoch,EpochNum},{author,Author},
      {upi,UPI_list},{repair,Repairing_list},{down,Down_list},
      {d,Dbg}, {d2,Dbg2}].
-
-roll_dice(N, RunEnv) ->
-    Seed1 = proplists:get_value(seed, RunEnv),
-    {Val, Seed2} = random:uniform_s(N, Seed1),
-    {Val, replace(RunEnv, [{seed, Seed2}])}.
 
 rank_and_sort_projections(Ps, CurrentProj) ->
     Epoch = lists:max([Proj#projection.epoch_number || Proj <- Ps]),
@@ -547,12 +552,9 @@ react_to_env_A30(Retries, P_newprop, S) ->
     put(react, [a30|get(react)]),
     {UnanimousTag, P_latest, ReadExtra, S2} =
         do_cl_read_latest_public_projection(true, S),
-    LatestEpoch = P_latest#projection.epoch_number, ?D({UnanimousTag, LatestEpoch}),
     UnanimousFLUs = lists:sort(proplists:get_value(unanimous_flus, ReadExtra)),
     UPI_Repairing_FLUs = lists:sort(P_latest#projection.upi ++
                                     P_latest#projection.repairing),
-%% ?D(UPI_Repairing_FLUs),
-%% ?D(UnanimousFLUs), timer:sleep(100),
     All_UPI_Repairing_were_unanimous = UPI_Repairing_FLUs == UnanimousFLUs,
     LatestUnanimousP =
         if UnanimousTag == unanimous
@@ -581,18 +583,11 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
             ok
     end,
 
-    %% Proj = S#ch_mgr.proj, if Proj#projection.epoch_number >= 7 -> ?Dw({Rank_newprop,Rank_latest}); true -> ok end,
-
     if
         P_latest#projection.epoch_number > P_current#projection.epoch_number
         orelse
         not LatestUnanimousP ->
             put(react, [{a40, ?LINE, P_latest#projection.epoch_number > P_current#projection.epoch_number, not LatestUnanimousP}|get(react)]),
-
-?D({a40,?LINE}),
-?D(P_latest#projection.epoch_number),
-?D(P_current#projection.epoch_number),
-?D(LatestUnanimousP),
 
             %% 1st clause: someone else has written a newer projection
             %% 2nd clause: a network partition has healed, revealing a
@@ -604,7 +599,6 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
         orelse
         P_latest /= P_current ->
             put(react, [{a40, ?LINE}|get(react)]),
-?D({a40,?LINE}),
 
             %% Both of these cases are rare.  Elsewhere, the code
             %% assumes that the local FLU's projection store is always
@@ -630,7 +624,6 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
         %% A40a (see flowchart)
         Rank_newprop > Rank_latest ->
             put(react, [{a40, ?LINE}|get(react)]),
-?D({a40,?LINE}),
             react_to_env_C300(P_newprop, P_latest, S);
 
         %% A40b (see flowchart)
@@ -640,13 +633,11 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
          orelse
          P_newprop#projection.repairing /= P_latest#projection.repairing) ->
             put(react, [{a40, ?LINE}|get(react)]),
-?D({a40,?LINE}),
             react_to_env_C300(P_newprop, P_latest, S);
 
         %% A40c (see flowchart)
         LatestAuthorDownP ->
             put(react, [{a40, ?LINE}|get(react)]),
-?D({a40,?LINE}),
 
             %% TODO: I believe that membership in the
             %% P_newprop#projection.down is not sufficient for long
@@ -671,7 +662,6 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
 
         true ->
             put(react, [{a40, ?LINE}|get(react)]),
-?D({a40,?LINE}),
             {{no_change, P_latest#projection.epoch_number}, S}
     end.
 
@@ -681,12 +671,10 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
     if
         LatestUnanimousP ->
             put(react, [{b10, ?LINE}|get(react)]),
-?D({b10, ?LINE}),
             react_to_env_C100(P_newprop, P_latest, S);
 
         Retries > 2 ->
             put(react, [{b10, ?LINE}|get(react)]),
-?D({b10, ?LINE}),
 
             %% The author of P_latest is too slow or crashed.
             %% Let's try to write P_newprop and see what happens!
@@ -696,7 +684,6 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         andalso
         P_latest#projection.author_server /= MyName ->
             put(react, [{b10, ?LINE}|get(react)]),
-?D({b10, ?LINE}),
 
             %% Give the author of P_latest an opportunite to write a
             %% new projection in a new epoch to resolve this mixed
@@ -705,7 +692,6 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
 
         true ->
             put(react, [{b10, ?LINE}|get(react)]),
-?D({b10, ?LINE}),
 
             %% P_newprop is best, so let's write it.
             react_to_env_C300(P_newprop, P_latest, S)
@@ -729,13 +715,10 @@ react_to_env_C100(P_newprop, P_latest,
             %% Someone else believes that I am repairing.  We assume
             %% that nobody is being Byzantine, so we'll believe it.
             %% We ignore our proposal and try to go with the latest.
-?D(short_circuitshort_circuitshort_circuitshort_circuitshort_circuit),
             react_to_env_C110(P_latest, S);
         {_, true} ->
-?D({c100, ?LINE}),
             react_to_env_C110(P_latest, S);
         {_, _AnyOtherReturnValue} ->
-?D({c100, ?LINE, _AnyOtherReturnValue}),
             %% %% P_latest is known to be crap.
             %% %% By process of elimination, P_newprop is best,
             %% %% so let's write it.
@@ -800,15 +783,9 @@ react_to_env_C310(P_newprop, S) ->
     put(react, [{c310,make_projection_summary(P_newprop)}|get(react)]),
     Epoch = P_newprop#projection.epoch_number,
     {_Res, S2} = cl_write_public_proj_skip_local_error(Epoch, P_newprop, S),
-%% MyFLU=S#ch_mgr.myflu, ?D({c310, MyFLU, Epoch, _Res}), timer:sleep(200),
-%% MPS = mps(P_newprop), ?D(MPS),
-?D({c310, _Res}),
     put(react, [{c310,_Res}|get(react)]),
     
     react_to_env_A10(S2).
-
-projection_transition_is_sane(P1, P2) ->
-    projection_transition_is_sane(P1, P2, undefined).
 
 projection_transition_is_sane(
   #projection{epoch_number=Epoch1,
@@ -904,7 +881,6 @@ projection_transition_is_sane(
                             %% both, then those authors would not have allowed
                             %% a bad transition, so we will assume this
                             %% transition is OK.
-%% ?D(aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa), timer:sleep(200),
                             lists:member(AuthorServer1, UPI_list1)
                             andalso
                             lists:member(AuthorServer2, UPI_list2)
@@ -942,10 +918,6 @@ projection_transition_is_sane(
             UPI_2_suffix_from_Repairing1 = [X || X <- UPI_2_suffix,
                                                  lists:member(X, Repairing_list1)],
             %% true?
-            %% ?D(UPI_2_suffix),
-            %% ?D(UPI_2_suffix_from_UPI1),
-            %% ?D(UPI_2_suffix_from_Repairing1),
-            %% ?D(UPI_2_suffix_from_UPI1 ++ UPI_2_suffix_from_Repairing1),
             UPI_2_suffix = UPI_2_suffix_from_UPI1 ++ UPI_2_suffix_from_Repairing1,
             ok
     end,
@@ -975,7 +947,6 @@ perhaps_call_t(S, Partitions, FLU, DoIt) ->
         perhaps_call(S, Partitions, FLU, DoIt)
     catch
         exit:timeout ->
-            %% ?D({perhaps_call, S#ch_mgr.myflu, FLU, Partitions}),
             t_timeout
     end.
 
@@ -1030,15 +1001,12 @@ smoke1_test() ->
     I_represent = I_am = a,
     {ok, M0} = ?MGR:start_link(I_represent, [a,b,c], I_am),
     try
-        %% ?D(x),
         {ok, _P1} = test_calc_projection(M0, false),
 
         _ = test_calc_proposed_projection(M0),
         {remote_write_results,
          [{b,ok},{c,ok}]} = test_write_proposed_projection(M0),
         {unanimous, P1, Extra1} = test_read_latest_public_projection(M0, false),
-        %% ?Dw(make_projection_summary(P1)),
-        %% ?D(Extra1),
 
         ok
     after
@@ -1103,6 +1071,7 @@ nonunanimous_setup_and_fix_test() ->
 
 zoof_test() ->
     machi_partition_simulator:start_link({111,222,333}, 50, 10),
+    _ = machi_partition_simulator:get([a,b,c]),
 
     {ok, FLUa} = machi_flu0:start_link(a),
     {ok, FLUb} = machi_flu0:start_link(b),
@@ -1111,7 +1080,6 @@ zoof_test() ->
     {ok, Ma} = ?MGR:start_link(I_represent, [a,b,c], I_am),
     {ok, Mb} = ?MGR:start_link(b, [a,b,c], b),
     {ok, Mc} = ?MGR:start_link(c, [a,b,c], c),
-?D(x),
     try
         {ok, P1} = test_calc_projection(Ma, false),
         P1Epoch = P1#projection.epoch_number,
