@@ -64,18 +64,19 @@ reset_thresholds(OldThreshold, NoPartitionThreshold) ->
 
 init({Seed, OldThreshold, NoPartitionThreshold}) ->
     {ok, #state{seed=Seed,
-                old_partitions=[],
+                old_partitions={[],[]},
                 old_threshold=OldThreshold,
                 no_partition_threshold=NoPartitionThreshold}}.
 
 handle_call({get, Nodes}, _From, S) ->
-    {Seed2, Partitions2} =
+    {Seed2, Partitions} =
         calc_network_partitions(Nodes,
                                 S#state.seed,
                                 S#state.old_partitions,
                                 S#state.old_threshold,
                                 S#state.no_partition_threshold),
-    {reply, Partitions2, S#state{seed=Seed2}};
+    {reply, Partitions, S#state{seed=Seed2,
+                                old_partitions=Partitions}};
 handle_call({reset_thresholds, OldThreshold, NoPartitionThreshold}, _From, S) ->
     {reply, ok, S#state{old_threshold=OldThreshold,
                         no_partition_threshold=NoPartitionThreshold}};
@@ -125,7 +126,7 @@ make_network_partition_locations(Nodes, Seed1) ->
                [Nd || {Weight, Nd} <- WeightsNodes,
                       (Max - IslandSep) =< Weight, Weight < Max]
                || Max <- lists:seq(IslandSep + 1, 101, IslandSep)],
-    {Seed2, lists:usort(make_islands(Islands))}.
+    {Seed2, {lists:usort(make_islands(Islands)), Islands}}.
 
 make_islands([]) ->
     [];
