@@ -21,6 +21,12 @@
 %% -------------------------------------------------------------------
 -module(machi_chain_manager1).
 
+%% TODO: I am going to sever the connection between the flowchart and the
+%%       code.  That diagram is really valuable, but it also takes a long time
+%%       to make any kind of edit; the process is too slow.  This is a todo
+%%       item a reminder that the flowchart is important documentation and
+%%       must be brought back into sync with the code soon.
+
 -behaviour(gen_server).
 
 -include("machi.hrl").
