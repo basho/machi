@@ -935,26 +935,32 @@ find_common_prefix(_, _) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 make_network_partition_locations(Nodes, Seed1) ->
-    Pairs = make_all_pairs(Nodes),
-    Num = length(Pairs),
-    {Seed2, Weights} = lists:foldl(
-                         fun(_, {Seeda, Acc}) ->
-                                 {Cutoff, Seedb} = random:uniform_s(100, Seeda),
-                                 {Seedb, [Cutoff|Acc]}
-                         end, {Seed1, []}, lists:seq(1, Num)),
-    {Cutoff3, Seed3} = random:uniform_s(100, Seed2),
-    {Seed3, [X || {Weight, X} <- lists:zip(Weights, Pairs),
-                  Weight < Cutoff3]}.
+    %% TODO: To simplify debugging a bit, I'm switching to partitions that are
+    %%       bi-directional only.
+    Num = length(Nodes),
+    {Seed2, WeightsNodes} = lists:foldl(
+                              fun(Node, {Seeda, Acc}) ->
+                                      {Cutoff, Seedb} =
+                                                  random:uniform_s(100, Seeda),
+                                      {Seedb, [{Cutoff, Node}|Acc]}
+                              end, {Seed1, []}, Nodes),
+    IslandSep = 100 div Num,
+    Islands = [
+               [Nd || {Weight, Nd} <- WeightsNodes,
+                      (Max - IslandSep) =< Weight, Weight < Max]
+               || Max <- lists:seq(IslandSep + 1, 101, IslandSep)],
+    {Seed2, lists:usort(make_islands(Islands))}.
 
-make_all_pairs(L) ->
-    lists:flatten(make_all_pairs2(lists:usort(L))).
-
-make_all_pairs2([]) ->
+make_islands([]) ->
     [];
-make_all_pairs2([_]) ->
-    [];
-make_all_pairs2([H1|T]) ->
-    [[{H1, X}, {X, H1}] || X <- T] ++ make_all_pairs(T).
+make_islands([Island|Rest]) ->
+    [{X,Y} || X <- Island,
+              Y <- lists:append(Rest), X /= Y]
+    ++
+    [{Y,X} || X <- Island,
+              Y <- lists:append(Rest), X /= Y]
+    ++
+    make_islands(Rest).
 
 perhaps_call_t(S, Partitions, FLU, DoIt) ->
     try
