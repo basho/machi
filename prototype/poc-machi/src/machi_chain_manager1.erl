@@ -317,7 +317,9 @@ cl_read_latest_public_projection(#ch_mgr{proj=CurrentProj}=S) ->
                            end,
             Extra = [{all_members_replied, length(Rs) == length(All_list)}],
             Best_FLUs = [FLU || {FLU, Projx} <- FLUsRs, Projx == BestProj],
-            {UnanimousTag, BestProj, [{best_flus,Best_FLUs}|Extra], S2}
+            Extra2 = [{unanimous_flus,Best_FLUs},
+                      {not_unanimous_flus, NotBestPs}|Extra],
+            {UnanimousTag, BestProj, Extra2, S2}
     end.
 
 %% 1. Do the results contain a projection?
@@ -484,7 +486,6 @@ calc_up_nodes(MyName, OldThreshold, NoPartitionThreshold,
                        {up_nodes, UpNodes}]),
     {UpNodes, Partitions2, RunEnv2}.
 
-
 calc_network_partitions(Nodes, Seed1, OldPartition,
                         OldThreshold, NoPartitionThreshold) ->
     {Cutoff2, Seed2} = random:uniform_s(100, Seed1),
@@ -567,14 +568,25 @@ react_to_env_A20(Retries, #ch_mgr{myflu=MyFLU} = S) ->
     react_to_env_A30(Retries, P_newprop, S2).
 
 react_to_env_A30(Retries, P_newprop, S) ->
-    {UnanimousTag, P_latest, _Extra, S2} =
+    {UnanimousTag, P_latest, ReadExtra, S2} =
         do_cl_read_latest_public_projection(true, S),
     LatestEpoch = P_latest#projection.epoch_number, ?D({UnanimousTag, LatestEpoch}),
-    LatestUnanimousP = if UnanimousTag == unanimous     -> true;
-                          UnanimousTag == not_unanimous -> false;
-                          true -> exit({badbad, UnanimousTag})
-                       end,
-    react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP, S2).
+    UnanimousFLUs = lists:sort(proplists:get_value(unanimous_flus, ReadExtra)),
+    UPI_Repairing_FLUs = lists:sort(P_latest#projection.upi ++
+                                    P_latest#projection.repairing),
+%% ?D(UPI_Repairing_FLUs),
+%% ?D(UnanimousFLUs), timer:sleep(100),
+    All_UPI_Repairing_were_unanimous = UPI_Repairing_FLUs == UnanimousFLUs,
+    LatestUnanimousP =
+        if UnanimousTag == unanimous
+           andalso
+           All_UPI_Repairing_were_unanimous -> true;
+           UnanimousTag == unanimous        -> false;
+           UnanimousTag == not_unanimous    -> false;
+           true -> exit({badbad, UnanimousTag})
+        end,
+    react_to_env_A40(Retries, P_newprop, P_latest,
+                     LatestUnanimousP, S2).
 
 react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                  #ch_mgr{myflu=MyFLU, proj=P_current}=S) ->
@@ -756,11 +768,11 @@ react_to_env_C220(Retries, S) ->
 
 react_to_env_C300(#projection{epoch_number=Epoch_newprop}=P_newprop,
                   #projection{epoch_number=_Epoch_latest}=_P_latest, S) ->
-    %% NewEpoch = erlang:max(Epoch_newprop, Epoch_latest) + 1,
-    %% P_newprop2 = P_newprop#projection{epoch_number=NewEpoch},
-    %% Let's return to the old epoch thingie and see what happens.........
-    Epoch = Epoch_newprop,
-    P_newprop2 = P_newprop#projection{epoch_number=Epoch + 1},
+    NewEpoch = erlang:max(Epoch_newprop, _Epoch_latest) + 1,
+    P_newprop2 = P_newprop#projection{epoch_number=NewEpoch},
+    %% %% Let's return to the old epoch thingie and see what happens.........
+    %% Epoch = Epoch_newprop,
+    %% P_newprop2 = P_newprop#projection{epoch_number=Epoch + 1},
     react_to_env_C310(update_projection_checksum(P_newprop2), S).
 
 react_to_env_C310(P_newprop, S) ->
@@ -768,6 +780,7 @@ react_to_env_C310(P_newprop, S) ->
     {_Res, S2} = cl_write_public_proj_skip_local_error(Epoch, P_newprop, S),
 %% MyFLU=S#ch_mgr.myflu, ?D({c310, MyFLU, Epoch, _Res}), timer:sleep(200),
 %% MPS = mps(P_newprop), ?D(MPS),
+?D({c310, _Res}),
     
     react_to_env_A10(S2).
 
@@ -1091,9 +1104,9 @@ zoof_test() ->
     {ok, FLUb} = machi_flu0:start_link(b),
     {ok, FLUc} = machi_flu0:start_link(c),
     I_represent = I_am = a,
-    {ok, Ma} = ?MGR:start_link(I_represent, [a,b,c], {1,2,3}, 50, 90, I_am),
-    {ok, Mb} = ?MGR:start_link(b, [a,b,c], {4,5,6}, 50, 90, b),
-    {ok, Mc} = ?MGR:start_link(c, [a,b,c], {4,5,6}, 50, 90, c),
+    {ok, Ma} = ?MGR:start_link(I_represent, [a,b,c], {1,2,3}, 50, 50, I_am),
+    {ok, Mb} = ?MGR:start_link(b, [a,b,c], {4,5,6}, 50, 50, b),
+    {ok, Mc} = ?MGR:start_link(c, [a,b,c], {7,8,9}, 50, 50, c),
 ?D(x),
     try
         {ok, P1} = test_calc_projection(Ma, false),
@@ -1129,7 +1142,7 @@ zoof_test() ->
                end,
 
         DoIt(),
-        [test_reset_thresholds(M, 0, 100) || M <- [Ma, Mb, Mc]],
+        [test_reset_thresholds(M, 100, 0) || M <- [Ma, Mb, Mc]],
         DoIt(),
         DoIt(),
 
