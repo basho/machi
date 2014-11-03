@@ -385,7 +385,8 @@ calc_projection(#ch_mgr{proj=LastProj, runenv=RunEnv} = S, RelativeToServer,
 %%                       that there are no partitions at all?
 
 calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
-                _RelativeToServer, Dbg, #ch_mgr{name=MyName,runenv=RunEnv1}=S) ->
+                RelativeToServer, Dbg,
+                #ch_mgr{name=MyName, myflu=MyFLU, runenv=RunEnv1}=S) ->
     #projection{epoch_number=OldEpochNum,
                 all_members=All_list,
                 upi=OldUPI_list,
@@ -393,18 +394,11 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                } = LastProj,
     LastUp = lists:usort(OldUPI_list ++ OldRepairing_list),
     AllMembers = (S#ch_mgr.proj)#projection.all_members,
-    {Up, _, RunEnv2} = calc_up_nodes(MyName, %OldThreshold, NoPartitionThreshold,
-                                     AllMembers, RunEnv1),
+    {Up, Partitions, RunEnv2} = calc_up_nodes(MyName,
+                                              AllMembers, RunEnv1),
 
     NewUp = Up -- LastUp,
     Down = AllMembers -- Up,
-
-    %% HRRRRRRRmmm buggy icky ... causes things like:
-    %% ...,to,[{epoch,8},{author,a},{upi,[a,b]},{repair,[a]}, oops!
-
-    %% %% Assumption: MyName is a local FLU and is always up & available.
-    %% NewUp = lists:usort([MyName] ++ (Up -- LastUp)),
-    %% Down = lists:usort((AllMembers -- Up) -- [MyName]),
 
     NewUPI_list = [X || X <- OldUPI_list, lists:member(X, Up)],
     Repairing_list2 = [X || X <- OldRepairing_list, lists:member(X, Up)],
@@ -412,16 +406,26 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
         case {NewUp, Repairing_list2} of
             {[], []} ->
                 {NewUPI_list, [], RunEnv2};
-            {[], [H|T]} ->
-                {Prob, RunEnvX} = roll_dice(100, RunEnv2),
-                if Prob =< 50 andalso (NewUPI_list == []
-                                       orelse
-                                       true) ->
-                                       %% TODO fix
-                                       %% (RelativeToServer == hd(NewUPI_list))) ->
-                        {NewUPI_list ++ [H], T, RunEnvX};
-                   true ->
-                        {NewUPI_list, OldRepairing_list, RunEnvX}
+            {[], [H|T]} when RelativeToServer == hd(NewUPI_list) ->
+                %% The author is head of the UPI list.  Let's see if the
+                %% head of the repairing list is using our projection.
+                %% TODO create a real API call for fetching this info.
+                F = fun() -> machi_flu0:proj_read_latest(H, private) end,
+                case perhaps_call_t(S, Partitions, MyFLU, F) of
+                    {ok, RemotePrivateProj} ->
+                        MySumm = make_projection_summary(S#ch_mgr.proj),
+                        FarSumm = make_projection_summary(RemotePrivateProj),
+                        if (S#ch_mgr.proj)#projection.epoch_number ==
+                           RemotePrivateProj#projection.epoch_number
+                           andalso
+                           (S#ch_mgr.proj)#projection.epoch_csum ==
+                           RemotePrivateProj#projection.epoch_csum ->
+                                {NewUPI_list ++ [H], T, RunEnv2};
+                           true ->
+                                {NewUPI_list, OldRepairing_list, RunEnv2}
+                        end;
+                    _ ->
+                        {NewUPI_list, OldRepairing_list, RunEnv2}
                 end;
             {_, _} ->
                 {NewUPI_list, OldRepairing_list, RunEnv2}
