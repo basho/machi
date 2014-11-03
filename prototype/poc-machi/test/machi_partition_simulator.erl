@@ -105,7 +105,7 @@ calc_network_partitions(Nodes, Seed1, OldPartition,
        true ->
             {Cutoff3, Seed3} = random:uniform_s(100, Seed1),
             if Cutoff3 < NoPartitionThreshold ->
-                    {Seed3, []};
+                    {Seed3, {[], [Nodes]}};
                true ->
                     make_network_partition_locations(Nodes, Seed3)
             end
@@ -129,10 +129,10 @@ make_network_partition_locations(Nodes, Seed1) ->
                               end, {Seed1, []}, Nodes),
     IslandSep = 100 div Num,
     Islands = [
-               [Nd || {Weight, Nd} <- WeightsNodes,
-                      (Max - IslandSep) =< Weight, Weight < Max]
+               lists:sort([Nd || {Weight, Nd} <- WeightsNodes,
+                                 (Max - IslandSep) =< Weight, Weight < Max])
                || Max <- lists:seq(IslandSep + 1, 105, IslandSep)],
-    {Seed2, {lists:usort(islands2partitions(Islands)), Islands}}.
+    {Seed2, {lists:usort(islands2partitions(Islands)), lists:sort(Islands)}}.
 
 islands2partitions([]) ->
     [];

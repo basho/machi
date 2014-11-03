@@ -105,8 +105,7 @@ init({MyName, All_list, MyFLUPid}) ->
     RunEnv = [%% {seed, Seed},
               {seed, now()},
               {network_partitions, []},
-              %% {old_threshold, OldThreshold},
-              %% {no_partition_threshold, NoPartitionThreshold},
+              {network_islands, []},
               {up_nodes, not_init_yet}],
     BestProj = make_initial_projection(MyName, All_list, All_list,
                                        [], [{author_proc, init_best}]),
@@ -458,28 +457,15 @@ calc_up_nodes(#ch_mgr{name=MyName, proj=Proj, runenv=RunEnv1}=S) ->
 
 calc_up_nodes(MyName, AllMembers, RunEnv1) ->
     %% Seed1 = proplists:get_value(seed, RunEnv1),
-    {Partitions2, _Islands} = machi_partition_simulator:get(AllMembers),
-    catch put(react, [{partitions,Partitions2},{islands,_Islands}|get(react)]),
+    {Partitions2, Islands2} = machi_partition_simulator:get(AllMembers),
+    catch put(react, [{partitions,Partitions2},{islands,Islands2}|get(react)]),
     UpNodes = lists:sort(
                 [Node || Node <- AllMembers,
                          not lists:member({MyName, Node}, Partitions2),
                          not lists:member({Node, MyName}, Partitions2)]),
-    %% UpViaIslands = lists:sort(lists:flatten([Island ||
-    %%                                             Island <- _Islands,
-    %%                                             lists:member(MyName, Island)])),
-    %% try
-    %%     case get(hack_island) of
-    %%         undefined ->
-    %%             ok;
-    %%         _ ->
-    %%             UpNodes = UpViaIslands
-    %%     end
-    %% catch _:_ ->
-    %%         exit({damn, MyName, UpNodes, Partitions2, _Islands})
-    %% end,
     RunEnv2 = replace(RunEnv1,
-                      [%% {seed, Seed2},
-                       {network_partitions, Partitions2},
+                      [{network_partitions, Partitions2},
+                       {network_islands, Islands2},
                        {up_nodes, UpNodes}]),
     {UpNodes, Partitions2, RunEnv2}.
 
@@ -736,10 +722,10 @@ react_to_env_C110(P_latest, #ch_mgr{myflu=MyFLU} = S) ->
     %%       in the dbg2 list?
     Extra_todo = [],
     RunEnv = S#ch_mgr.runenv,
-    UpNodes = proplists:get_value(up_nodes, RunEnv),
+    Islands = proplists:get_value(network_islands, RunEnv),
     P_latest2 = update_projection_dbg2(
                   P_latest,
-                  [{up_nodz, UpNodes},{hooray, {v2, date(), time()}}|Extra_todo]),
+                  [{network_islands, Islands},{hooray, {v2, date(), time()}}|Extra_todo]),
     Epoch = P_latest2#projection.epoch_number,
     ok = machi_flu0:proj_write(MyFLU, Epoch, private, P_latest2),
     react_to_env_C120(P_latest, S).
@@ -1070,7 +1056,7 @@ nonunanimous_setup_and_fix_test() ->
     end.
 
 zoof_test() ->
-    machi_partition_simulator:start_link({111,222,333}, 50, 10),
+    machi_partition_simulator:start_link({111,222,333}, 0, 100),
     _ = machi_partition_simulator:get([a,b,c]),
 
     {ok, FLUa} = machi_flu0:start_link(a),
@@ -1089,11 +1075,16 @@ zoof_test() ->
 
         {now_using, XX1} = test_react_to_env(Ma),
         ?D(XX1),
+        {now_using, _} = test_react_to_env(Mb),
+        {now_using, _} = test_react_to_env(Mc),
         {QQ,QQP2,QQE2} = test_read_latest_public_projection(Ma, false),
         ?D(QQ),
         ?Dw(make_projection_summary(QQP2)),
         ?D(QQE2),
         %% {unanimous,P2,E2} = test_read_latest_public_projection(Ma, false),
+
+        machi_partition_simulator:reset_thresholds(10, 50),
+        _ = machi_partition_simulator:get([a,b,c]),
 
         Parent = self(),
         DoIt = fun() ->
@@ -1102,7 +1093,7 @@ zoof_test() ->
                                                   erlang:yield(),
                                                   Res = test_react_to_env(MMM),
                                                   Res=Res %% ?D({self(), Res})
-                                              end || _ <- lists:seq(1,10)],
+                                              end || _ <- lists:seq(1,20)],
                                              Parent ! done
                                      end) || MMM <- [Ma, Mb, Mc] ],
                        [receive
