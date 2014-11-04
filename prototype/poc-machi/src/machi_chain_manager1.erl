@@ -745,10 +745,10 @@ react_to_env_C200(Retries, P_latest, S) ->
     end,
     react_to_env_C210(Retries, S).
 
-react_to_env_C210(Retries, S) ->
+react_to_env_C210(Retries, #ch_mgr{myflu=MyFLU, proj=Proj} = S) ->
     put(react, [c210|get(react)]),
     %% TODO: implement the ranked sleep thingie?
-    timer:sleep(100),
+    sleep_ranked_order(10, 100, MyFLU, Proj#projection.all_members),
     react_to_env_C220(Retries, S).
 
 react_to_env_C220(Retries, S) ->
@@ -925,6 +925,14 @@ find_common_prefix([H|L1], [H|L2]) ->
     [H|find_common_prefix(L1, L2)];
 find_common_prefix(_, _) ->
     [].
+
+sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list) ->
+    Front = lists:takewhile(fun(X) -> X /=FLU end, FLU_list),
+    Index = length(Front) + 1,
+    NumNodes = length(FLU_list),
+    SleepIndex = NumNodes - Index,
+    SleepChunk = MaxSleep div NumNodes,
+    timer:sleep(MinSleep + (SleepChunk * SleepIndex)).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
