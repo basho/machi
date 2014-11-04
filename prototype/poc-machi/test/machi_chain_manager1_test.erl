@@ -189,14 +189,14 @@ zoof_test() ->
 
         DoIt(),
         machi_partition_simulator:reset_thresholds(999, 0),
+        [DoIt() || _ <- [1,2,3]],
+        %% TODO: We should be stable now ... analyze it.
+
+        machi_partition_simulator:reset_thresholds(10, 50),
         DoIt(),
-
-
-        %% [begin
-        %%      La = machi_flu0:proj_list_all(FLU, Type),
-        %%      [io:format(user, "~p ~p ~p: ~w\n", [FLUName, Type, Epoch, make_projection_summary(catch element(2,machi_flu0:proj_read(FLU, Epoch, Type)))]) || Epoch <- La]
-        %%  end || {FLUName, FLU} <- [{a, FLUa}, {b, FLUb}],
-        %%         Type <- [public, private] ],
+        machi_partition_simulator:reset_thresholds(999, 0),
+        [DoIt() || _ <- [1,2,3]],
+        %% TODO: We should be stable now ... analyze it.
 
         %% Dump the public
         [begin
@@ -232,6 +232,9 @@ zoof_test() ->
              if FLUName == c -> io:format(user, "\n", []); true -> ok end
          end || Epoch <- UniquePrivateEs, {FLUName, FLU} <- Namez],
 
+        R = unanimous_report(Namez),
+        ?D(R),
+
         ok
     after
         ok = ?MGR:stop(Ma),
@@ -240,5 +243,61 @@ zoof_test() ->
         ok = machi_flu0:stop(FLUb),
         ok = machi_partition_simulator:stop()
     end.
+
+unanimous_report(Namez) ->
+    UniquePrivateEs =
+        lists:usort(lists:flatten(
+                      [machi_flu0:proj_list_all(FLU, private) ||
+                          {_FLUName, FLU} <- Namez])),
+    [unanimous_report(Epoch, Namez) || Epoch <- UniquePrivateEs].
+
+unanimous_report(Epoch, Namez) ->
+    %% AllFLUNames = lists:sort([FLU || {FLUName, _FLU} <- Namez}
+
+    %% Projs = lists:append([case machi_flu0:proj_read(FLU, Epoch, private) of
+    %%                            {ok, T} -> [T];
+    %%                            _Else   -> []
+    %%                        end || {_FLUName, FLU} <- Namez]),
+    %% UPI_Sums = [{Proj#projection.upi, Proj#projection.epoch_csum} ||
+    %%                Proj <- Projs],
+    Projs = [{FLUName, case machi_flu0:proj_read(FLU, Epoch, private) of
+                           {ok, T} -> T;
+                           _Else   -> not_in_this_epoch
+                       end} || {FLUName, FLU} <- Namez],
+    UPI_Sums = [{Proj#projection.upi, Proj#projection.epoch_csum} ||
+                   {_FLUname, Proj} <- Projs,
+                   is_record(Proj, projection)],
+    UniqueUPIs = lists:usort([UPI || {UPI, _CSum} <- UPI_Sums]),
+    Res =
+        [begin
+             case lists:usort([CSum || {U, CSum} <- UPI_Sums, U == UPI]) of
+                 [_] ->
+                     %% Yay, there's only 1 checksum.  Let's check
+                     %% that all FLUs are in agreement.
+                     Tmp = [{FLU, case proplists:get_value(FLU, Projs) of
+                                      P when is_record(P, projection) ->
+                                          P#projection.epoch_csum;
+                                      Else ->
+                                          Else
+                                  end} || FLU <- UPI],
+                     case lists:usort([CSum || {_FLU, CSum} <- Tmp]) of
+                         [_] ->
+                             {agreed_membership, UPI};
+                         Else2 ->
+                             {not_agreed, UPI, Else2}
+                     end;
+                 _Else ->
+                     {UPI, not_unique, Epoch, _Else}
+             end
+         end || UPI <- UniqueUPIs],
+    UniqueResUPIs = [UPI || {unique, UPI} <- Res],
+    Tag = case lists:usort(lists:flatten(UniqueResUPIs)) ==
+               lists:sort(lists:flatten(UniqueResUPIs)) of
+              true ->
+                  ok_disjoint;
+              false ->
+                  bummer_NOT_DISJOINT
+          end,
+    {Epoch, {Tag, Res}}.
 
 -endif.
