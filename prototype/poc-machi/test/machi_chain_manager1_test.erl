@@ -139,16 +139,18 @@ nonunanimous_setup_and_fix_test() ->
     end.
 
 zoof_test() ->
+    All_list = [a,b,c],
     machi_partition_simulator:start_link({111,222,333}, 0, 100),
-    _ = machi_partition_simulator:get([a,b,c]),
+    _ = machi_partition_simulator:get(All_list),
 
     {ok, FLUa} = machi_flu0:start_link(a),
     {ok, FLUb} = machi_flu0:start_link(b),
     {ok, FLUc} = machi_flu0:start_link(c),
+    Namez = [{a, FLUa}, {b, FLUb}, {c, FLUc}],
     I_represent = I_am = a,
-    {ok, Ma} = ?MGR:start_link(I_represent, [a,b,c], I_am),
-    {ok, Mb} = ?MGR:start_link(b, [a,b,c], b),
-    {ok, Mc} = ?MGR:start_link(c, [a,b,c], c),
+    {ok, Ma} = ?MGR:start_link(I_represent, All_list, I_am),
+    {ok, Mb} = ?MGR:start_link(b, All_list, b),
+    {ok, Mc} = ?MGR:start_link(c, All_list, c),
     try
         {ok, P1} = ?MGR:test_calc_projection(Ma, false),
         P1Epoch = P1#projection.epoch_number,
@@ -167,7 +169,7 @@ zoof_test() ->
         %% {unanimous,P2,E2} = test_read_latest_public_projection(Ma, false),
 
         machi_partition_simulator:reset_thresholds(10, 50),
-        _ = machi_partition_simulator:get([a,b,c]),
+        _ = machi_partition_simulator:get(All_list),
 
         Parent = self(),
         DoIt = fun() ->
@@ -205,7 +207,6 @@ zoof_test() ->
          end || {FLUName, FLU} <- [{a, FLUa}, {b, FLUb}, {c, FLUc}],
                 Type <- [public] ],
 
-        Namez = [{a, FLUa}, {b, FLUb}, {c, FLUc}],
         UniquePrivateEs =
             lists:usort(lists:flatten(
                           [machi_flu0:proj_list_all(FLU, private) ||
@@ -232,8 +233,17 @@ zoof_test() ->
              if FLUName == c -> io:format(user, "\n", []); true -> ok end
          end || Epoch <- UniquePrivateEs, {FLUName, FLU} <- Namez],
 
-        R = unanimous_report(Namez),
-        ?D(R),
+        Report = unanimous_report(Namez),
+        ?D(Report),
+        true = all_reports_are_disjoint(Report),
+        R_Chains = [extract_chains_relative_to_flu(FLU, Report) ||
+                       FLU <- All_list],
+        ?D(R_Chains),
+        R_Projs = [{FLU, [chain_to_projection(FLU, Epoch, Chain, All_list) ||
+                             {Epoch, Chain} <- E_Chains]} ||
+                      {FLU, E_Chains} <- R_Chains],
+        [{FLU, true} = {FLU, machi_chain_manager0_test:projection_transitions_are_sane(Ps)} || {FLU, Ps} <- R_Projs],
+        ?D(R_Projs),
 
         ok
     after
@@ -252,14 +262,6 @@ unanimous_report(Namez) ->
     [unanimous_report(Epoch, Namez) || Epoch <- UniquePrivateEs].
 
 unanimous_report(Epoch, Namez) ->
-    %% AllFLUNames = lists:sort([FLU || {FLUName, _FLU} <- Namez}
-
-    %% Projs = lists:append([case machi_flu0:proj_read(FLU, Epoch, private) of
-    %%                            {ok, T} -> [T];
-    %%                            _Else   -> []
-    %%                        end || {_FLUName, FLU} <- Namez]),
-    %% UPI_Sums = [{Proj#projection.upi, Proj#projection.epoch_csum} ||
-    %%                Proj <- Projs],
     Projs = [{FLUName, case machi_flu0:proj_read(FLU, Epoch, private) of
                            {ok, T} -> T;
                            _Else   -> not_in_this_epoch
@@ -299,5 +301,19 @@ unanimous_report(Epoch, Namez) ->
                   bummer_NOT_DISJOINT
           end,
     {Epoch, {Tag, Res}}.
+
+all_reports_are_disjoint(Report) ->
+    [] == [X || {_Epoch, Tuple}=X <- Report,
+                element(1, Tuple) /= ok_disjoint].
+
+extract_chains_relative_to_flu(FLU, Report) ->
+    {FLU, [{Epoch, UPI} || {Epoch, {ok_disjoint, Es}} <- Report,
+                           {agreed_membership, UPI} <- Es,
+                           lists:member(FLU, UPI)]}.
+
+chain_to_projection(MyName, Epoch, UPI_list, All_list) ->
+    ?MGR:make_projection(Epoch, MyName, All_list,
+                         All_list -- UPI_list, % hack for down list
+                         UPI_list, [], []).
 
 -endif.
