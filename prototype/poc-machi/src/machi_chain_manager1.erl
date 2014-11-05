@@ -797,6 +797,18 @@ react_to_env_C310(P_newprop, S) ->
     
     react_to_env_A10(S2).
 
+projection_transitions_are_sane([], _RelativeToServer) ->
+    true;
+projection_transitions_are_sane([_], _RelativeToServer) ->
+    true;
+projection_transitions_are_sane([P1, P2|T], RelativeToServer) ->
+    case projection_transition_is_sane(P1, P2, RelativeToServer) of
+        true ->
+            projection_transitions_are_sane([P2|T], RelativeToServer);
+        Else ->
+            Else
+    end.
+
 projection_transition_is_sane(
   #projection{epoch_number=Epoch1,
               epoch_csum=CSum1,

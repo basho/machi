@@ -200,51 +200,65 @@ zoof_test() ->
         [DoIt() || _ <- [1,2,3]],
         %% TODO: We should be stable now ... analyze it.
 
-        %% Dump the public
-        [begin
-             La = machi_flu0:proj_list_all(FLU, Type),
-             [io:format(user, "~p ~p ~p: ~w\n", [FLUName, Type, Epoch, ?MGR:make_projection_summary(catch element(2,machi_flu0:proj_read(FLU, Epoch, Type)))]) || Epoch <- La]
-         end || {FLUName, FLU} <- [{a, FLUa}, {b, FLUb}, {c, FLUc}],
-                Type <- [public] ],
+        %% %% Dump the public
+        %% [begin
+        %%      La = machi_flu0:proj_list_all(FLU, Type),
+        %%      [io:format(user, "~p ~p ~p: ~w\n", [FLUName, Type, Epoch, ?MGR:make_projection_summary(catch element(2,machi_flu0:proj_read(FLU, Epoch, Type)))]) || Epoch <- La]
+        %%  end || {FLUName, FLU} <- [{a, FLUa}, {b, FLUb}, {c, FLUc}],
+        %%         Type <- [public] ],
 
-        UniquePrivateEs =
-            lists:usort(lists:flatten(
-                          [machi_flu0:proj_list_all(FLU, private) ||
-                              {_FLUName, FLU} <- Namez])),
-        DumbFinderBackward =
-            fun(FLU) ->
-                    fun(E, error_unwritten) ->
-                            case machi_flu0:proj_read(FLU, E, private) of
-                                {ok, T} -> T;
-                                Else    -> Else
-                            end;
-                       (_E, Acc) ->
-                            Acc
-                    end
-            end,
+        %% UniquePrivateEs =
+        %%     lists:usort(lists:flatten(
+        %%                   [machi_flu0:proj_list_all(FLU, private) ||
+        %%                       {_FLUName, FLU} <- Namez])),
+        %% DumbFinderBackward =
+        %%     fun(FLU) ->
+        %%             fun(E, error_unwritten) ->
+        %%                     case machi_flu0:proj_read(FLU, E, private) of
+        %%                         {ok, T} -> T;
+        %%                         Else    -> Else
+        %%                     end;
+        %%                (_E, Acc) ->
+        %%                     Acc
+        %%             end
+        %%     end,
                              
-        [begin
-             io:format(user, "~p private: ~w\n",
-                       [FLUName,
-                        ?MGR:make_projection_summary(
-                          lists:foldl(DumbFinderBackward(FLU),
-                                      error_unwritten,
-                                      lists:seq(Epoch, 0, -1)))]),
-             if FLUName == c -> io:format(user, "\n", []); true -> ok end
-         end || Epoch <- UniquePrivateEs, {FLUName, FLU} <- Namez],
+        %% [begin
+        %%      io:format(user, "~p private: ~w\n",
+        %%                [FLUName,
+        %%                 ?MGR:make_projection_summary(
+        %%                   lists:foldl(DumbFinderBackward(FLU),
+        %%                               error_unwritten,
+        %%                               lists:seq(Epoch, 0, -1)))]),
+        %%      if FLUName == c -> io:format(user, "\n", []); true -> ok end
+        %%  end || Epoch <- UniquePrivateEs, {FLUName, FLU} <- Namez],
 
+        %% Create a report where at least one FLU has written a
+        %% private projection.
         Report = unanimous_report(Namez),
-        ?D(Report),
+        %% ?D(Report),
+
+        %% Report is ordered by Epoch.  For each private projection
+        %% written during any given epoch, confirm that all chain
+        %% members appear in only one unique chain, i.e., the sets of
+        %% unique chains are disjoint.
         true = all_reports_are_disjoint(Report),
+
+        %% Given the report, we flip it around so that we observe the
+        %% sets of chain transitions relative to each FLU.
         R_Chains = [extract_chains_relative_to_flu(FLU, Report) ||
                        FLU <- All_list],
-        ?D(R_Chains),
+        %% ?D(R_Chains),
         R_Projs = [{FLU, [chain_to_projection(FLU, Epoch, UPI, Repairing,
                                               All_list) ||
                              {Epoch, UPI, Repairing} <- E_Chains]} ||
                       {FLU, E_Chains} <- R_Chains],
-        [{FLU, true} = {FLU, machi_chain_manager0_test:projection_transitions_are_sane(Ps)} || {FLU, Ps} <- R_Projs],
-        ?D(R_Projs),
+
+        %% For each chain transition experienced by a particular FLU,
+        %% confirm that each state transition is OK.
+        [{FLU, true} = {FLU, ?MGR:projection_transitions_are_sane(Ps, FLU)} ||
+            {FLU, Ps} <- R_Projs],
+        %% ?D(R_Projs),
 
         ok
     after
@@ -316,7 +330,7 @@ extract_chains_relative_to_flu(FLU, Report) ->
     {FLU, [{Epoch, UPI, Repairing} ||
               {Epoch, {ok_disjoint, Es}} <- Report,
               {agreed_membership, {UPI, Repairing}} <- Es,
-              lists:member(FLU, UPI)]}.
+              lists:member(FLU, UPI) orelse lists:member(FLU, Repairing)]}.
 
 chain_to_projection(MyName, Epoch, UPI_list, Repairing_list, All_list) ->
     ?MGR:make_projection(Epoch, MyName, All_list,
