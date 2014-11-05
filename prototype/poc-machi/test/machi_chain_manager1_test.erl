@@ -297,9 +297,10 @@ unanimous_report(Epoch, Namez) ->
                      {UPI, not_unique, Epoch, _Else}
              end
          end || UPI <- UniqueUPIs],
-    UniqueResUPIs = [UPI || {unique, UPI} <- Res],
-    Tag = case lists:usort(lists:flatten(UniqueResUPIs)) ==
-               lists:sort(lists:flatten(UniqueResUPIs)) of
+    AgreedResUPI_Rs = [UPI++Repairing ||
+                          {agreed_membership, {UPI, Repairing}} <- Res],
+    Tag = case lists:usort(lists:flatten(AgreedResUPI_Rs)) ==
+               lists:sort(lists:flatten(AgreedResUPI_Rs)) of
               true ->
                   ok_disjoint;
               false ->
