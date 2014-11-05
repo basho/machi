@@ -239,8 +239,9 @@ zoof_test() ->
         R_Chains = [extract_chains_relative_to_flu(FLU, Report) ||
                        FLU <- All_list],
         ?D(R_Chains),
-        R_Projs = [{FLU, [chain_to_projection(FLU, Epoch, Chain, All_list) ||
-                             {Epoch, Chain} <- E_Chains]} ||
+        R_Projs = [{FLU, [chain_to_projection(FLU, Epoch, UPI, Repairing,
+                                              All_list) ||
+                             {Epoch, UPI, Repairing} <- E_Chains]} ||
                       {FLU, E_Chains} <- R_Chains],
         [{FLU, true} = {FLU, machi_chain_manager0_test:projection_transitions_are_sane(Ps)} || {FLU, Ps} <- R_Projs],
         ?D(R_Projs),
@@ -266,13 +267,15 @@ unanimous_report(Epoch, Namez) ->
                            {ok, T} -> T;
                            _Else   -> not_in_this_epoch
                        end} || {FLUName, FLU} <- Namez],
-    UPI_Sums = [{Proj#projection.upi, Proj#projection.epoch_csum} ||
-                   {_FLUname, Proj} <- Projs,
-                   is_record(Proj, projection)],
-    UniqueUPIs = lists:usort([UPI || {UPI, _CSum} <- UPI_Sums]),
+    UPI_R_Sums = [{Proj#projection.upi, Proj#projection.repairing,
+                   Proj#projection.epoch_csum} ||
+                     {_FLUname, Proj} <- Projs,
+                     is_record(Proj, projection)],
+    UniqueUPIs = lists:usort([UPI || {UPI, _Repairing, _CSum} <- UPI_R_Sums]),
     Res =
         [begin
-             case lists:usort([CSum || {U, CSum} <- UPI_Sums, U == UPI]) of
+             case lists:usort([CSum || {U, _Repairing, CSum} <- UPI_R_Sums,
+                                       U == UPI]) of
                  [_] ->
                      %% Yay, there's only 1 checksum.  Let's check
                      %% that all FLUs are in agreement.
@@ -282,11 +285,13 @@ unanimous_report(Epoch, Namez) ->
                                       Else ->
                                           Else
                                   end} || FLU <- UPI],
+                     {UPI, Repairing, _CSum} =
+                         lists:keyfind(UPI, 1, UPI_R_Sums),
                      case lists:usort([CSum || {_FLU, CSum} <- Tmp]) of
                          [_] ->
-                             {agreed_membership, UPI};
+                             {agreed_membership, {UPI, Repairing}};
                          Else2 ->
-                             {not_agreed, UPI, Else2}
+                             {not_agreed, {UPI, Repairing}, Else2}
                      end;
                  _Else ->
                      {UPI, not_unique, Epoch, _Else}
@@ -307,13 +312,14 @@ all_reports_are_disjoint(Report) ->
                 element(1, Tuple) /= ok_disjoint].
 
 extract_chains_relative_to_flu(FLU, Report) ->
-    {FLU, [{Epoch, UPI} || {Epoch, {ok_disjoint, Es}} <- Report,
-                           {agreed_membership, UPI} <- Es,
-                           lists:member(FLU, UPI)]}.
+    {FLU, [{Epoch, UPI, Repairing} ||
+              {Epoch, {ok_disjoint, Es}} <- Report,
+              {agreed_membership, {UPI, Repairing}} <- Es,
+              lists:member(FLU, UPI)]}.
 
-chain_to_projection(MyName, Epoch, UPI_list, All_list) ->
+chain_to_projection(MyName, Epoch, UPI_list, Repairing_list, All_list) ->
     ?MGR:make_projection(Epoch, MyName, All_list,
-                         All_list -- UPI_list, % hack for down list
-                         UPI_list, [], []).
+                         All_list -- (UPI_list ++ Repairing_list),
+                         UPI_list, Repairing_list, []).
 
 -endif.

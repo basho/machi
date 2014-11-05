@@ -398,6 +398,7 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
     {NewUPI_list3, Repairing_list3, RunEnv3} =
         case {NewUp, Repairing_list2} of
             {[], []} ->
+D_foo=[],
                 {NewUPI_list, [], RunEnv2};
             {[], [H|T]} when RelativeToServer == hd(NewUPI_list) ->
                 %% The author is head of the UPI list.  Let's see if the
@@ -411,14 +412,18 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                            andalso
                            (S#ch_mgr.proj)#projection.epoch_csum ==
                            RemotePrivateProj#projection.epoch_csum ->
+D_foo=[{repair_airquote_done, {we_agree, RemotePrivateProj#projection.epoch_number}}],
                                 {NewUPI_list ++ [H], T, RunEnv2};
                            true ->
+D_foo=[],
                                 {NewUPI_list, OldRepairing_list, RunEnv2}
                         end;
                     _ ->
+D_foo=[],
                         {NewUPI_list, OldRepairing_list, RunEnv2}
                 end;
             {_, _} ->
+D_foo=[],
                 {NewUPI_list, OldRepairing_list, RunEnv2}
         end,
     Repairing_list4 = case NewUp of
@@ -440,6 +445,7 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
 
     P = make_projection(OldEpochNum + 1,
                         MyName, All_list, Down, NewUPI, NewRepairing,
+                        D_foo ++
                         Dbg ++ [{nodes_up, Up}]),
     {P, S#ch_mgr{runenv=RunEnv3}}.
 
