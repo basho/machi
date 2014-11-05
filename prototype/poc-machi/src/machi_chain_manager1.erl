@@ -33,6 +33,9 @@
 -define(D(X), io:format(user, "~s ~p\n", [??X, X])).
 -define(Dw(X), io:format(user, "~s ~w\n", [??X, X])).
 
+%% Keep a history of our flowchart execution in the process dictionary.
+-define(REACT(T), put(react, [T|get(react)])).
+
 %% API
 -export([start_link/3, stop/1, ping/1,
          calculate_projection_internal_old/1]).
@@ -92,7 +95,8 @@ test_calc_proposed_projection(Pid) ->
     gen_server:cast(Pid, {test_calc_proposed_projection}).
 
 test_read_latest_public_projection(Pid, ReadRepairP) ->
-    gen_server:call(Pid, {test_read_latest_public_projection, ReadRepairP}, infinity).
+    gen_server:call(Pid, {test_read_latest_public_projection, ReadRepairP},
+                    infinity).
 
 test_react_to_env(Pid) ->
     gen_server:call(Pid, {test_react_to_env}, infinity).
@@ -133,7 +137,8 @@ init({MyName, All_list, MyFLUPid}) ->
 
 handle_call(_Call, _From, #ch_mgr{init_finished=false} = S) ->
     {reply, not_initialized, S};
-handle_call({calculate_projection_internal_old}, _From, #ch_mgr{myflu=MyFLU}=S) ->
+handle_call({calculate_projection_internal_old}, _From,
+            #ch_mgr{myflu=MyFLU}=S) ->
     RelativeToServer = MyFLU,
     {Reply, S2} = calc_projection(S, RelativeToServer, [{author_proc, call}]),
     {reply, Reply, S2};
@@ -148,7 +153,8 @@ handle_call({ping}, _From, S) ->
     {reply, pong, S};
 handle_call({stop}, _From, S) ->
     {stop, normal, ok, S};
-handle_call({test_calc_projection, KeepRunenvP}, _From, #ch_mgr{myflu=MyFLU}=S) ->
+handle_call({test_calc_projection, KeepRunenvP}, _From,
+            #ch_mgr{myflu=MyFLU}=S) ->
     RelativeToServer = MyFLU,
     {P, S2} = calc_projection(S, RelativeToServer, [{author_proc, call}]),
     {reply, {ok, P}, if KeepRunenvP -> S2;
@@ -253,7 +259,7 @@ cl_write_public_proj_local(Epoch, Proj, SkipLocalWriteErrorP,
     end.
 
 cl_write_public_proj_remote(FLUs, Partitions, Epoch, Proj, S) ->
-    %% We're going to be very cavalier about this write because we'll rely
+    %% We're going to be very care-free about this write because we'll rely
     %% on the read side to do any read repair.
     DoIt = fun(X) -> machi_flu0:proj_write(X, Epoch, public, Proj) end,
     Rs = [{FLU, perhaps_call_t(S, Partitions, FLU, fun() -> DoIt(FLU) end)} ||
@@ -305,17 +311,6 @@ cl_read_latest_public_projection(#ch_mgr{proj=CurrentProj}=S) ->
                       {not_unanimous_flus, NotBestPs}|Extra],
             {UnanimousTag, BestProj, Extra2, S2}
     end.
-
-%% 1. Do the results contain a projection?
-%%    perhaps figure that in cl_read_latest_public_projection()?
-%% 2. Were there any error_unwritten?
-%% 3. Repair the unwritten FLUs.
-%% 4. Nothing to do with timeouts, right?  They're
-%%    hopeless for the moment, need to wait.
-%%
-%% For read-repair, just choose the best and then brute-
-%% force write, don't care about write status, then
-%% repeat do_cl_read_latest_public_projection() ??
 
 do_read_repair(FLUsRs, _Extra, #ch_mgr{proj=CurrentProj} = S) ->
     Unwrittens = [x || {_FLU, error_unwritten} <- FLUsRs],
@@ -379,7 +374,7 @@ calc_projection(#ch_mgr{proj=LastProj, runenv=RunEnv} = S, RelativeToServer,
                     RelativeToServer, Dbg, S).
 
 %% OldThreshold: Percent chance of using the old/previous network partition list
-%% NoPartitionThreshold: If the network partition changes, what are the odds
+%% NoPartitionThreshold: If the network partition changes, what percent chance
 %%                       that there are no partitions at all?
 
 calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
@@ -446,7 +441,6 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
     P = make_projection(OldEpochNum + 1,
                         MyName, All_list, Down, NewUPI, NewRepairing,
                         Dbg ++ [{nodes_up, Up}]),
-    if P#projection.upi == [] -> io:format(user, "old: ~w\n", [make_projection_summary(LastProj)]), io:format(user, "new: ~w\n", [make_projection_summary(P)]), exit(zoozoo); true -> ok end,
     {P, S#ch_mgr{runenv=RunEnv3}}.
 
 calc_up_nodes(#ch_mgr{name=MyName, proj=Proj, runenv=RunEnv1}=S) ->
@@ -456,9 +450,9 @@ calc_up_nodes(#ch_mgr{name=MyName, proj=Proj, runenv=RunEnv1}=S) ->
     {UpNodes, Partitions, S#ch_mgr{runenv=RunEnv2}}.
 
 calc_up_nodes(MyName, AllMembers, RunEnv1) ->
-    %% Seed1 = proplists:get_value(seed, RunEnv1),
     {Partitions2, Islands2} = machi_partition_simulator:get(AllMembers),
-    catch put(react, [{partitions,Partitions2},{islands,Islands2}|get(react)]),
+    catch ?REACT({partitions,Partitions2}),
+    catch ?REACT({islands,Islands2}),
     UpNodes = lists:sort(
                 [Node || Node <- AllMembers,
                          not lists:member({MyName, Node}, Partitions2),
@@ -473,11 +467,6 @@ replace(PropList, Items) ->
     lists:foldl(fun({Key, Val}, Ps) ->
                         lists:keyreplace(Key, 1, Ps, {Key,Val})
                 end, PropList, Items).
-
--ifdef(TEST).
-mps(P) ->
-    make_projection_summary(P).
--endif. % TEST
 
 make_projection_summary(#projection{epoch_number=EpochNum,
                                     all_members=_All_list,
@@ -522,22 +511,24 @@ do_react_to_env(S) ->
     react_to_env_A10(S).
 
 react_to_env_A10(S) ->
-    put(react, [a10|get(react)]),
+    ?REACT(a10),
     react_to_env_A20(0, S).
 
 react_to_env_A20(Retries, #ch_mgr{myflu=MyFLU} = S) ->
-    put(react, [a20|get(react)]),
-    %% io:format(user, "current:  ~w\n", [make_projection_summary(S#ch_mgr.proj)]),
+    ?REACT(a20),
     RelativeToServer = MyFLU,
     {P_newprop, S2} = calc_projection(S, RelativeToServer,
                                       [{author_proc, react}]),
-    %% if P_newprop#projection.upi == [] -> io:format(user, "current: ~w\n", [make_projection_summary(S#ch_mgr.proj)]),io:format(user, "proposed: ~w\n", [make_projection_summary(P_newprop)]), timer:sleep(100); true -> ok end,
     react_to_env_A30(Retries, P_newprop, S2).
 
 react_to_env_A30(Retries, P_newprop, S) ->
-    put(react, [a30|get(react)]),
+    ?REACT(a30),
     {UnanimousTag, P_latest, ReadExtra, S2} =
         do_cl_read_latest_public_projection(true, S),
+
+    %% The UnanimousTag isn't quite sufficient for our needs.  We need
+    %% to determine if *all* of the UPI+Repairing FLUs are members of
+    %% the unanimous server replies.
     UnanimousFLUs = lists:sort(proplists:get_value(unanimous_flus, ReadExtra)),
     UPI_Repairing_FLUs = lists:sort(P_latest#projection.upi ++
                                     P_latest#projection.repairing),
@@ -545,35 +536,34 @@ react_to_env_A30(Retries, P_newprop, S) ->
     LatestUnanimousP =
         if UnanimousTag == unanimous
            andalso
-           All_UPI_Repairing_were_unanimous -> put(react, [{a30,?LINE}|get(react)]),true;
-           UnanimousTag == unanimous        -> put(react, [{a30,?LINE,UPI_Repairing_FLUs, UnanimousFLUs}|get(react)]),false;
-           UnanimousTag == not_unanimous    -> put(react, [{a30,?LINE}|get(react)]),false;
-           true -> exit({badbad, UnanimousTag})
+           All_UPI_Repairing_were_unanimous ->
+                ?REACT({a30,?LINE}),
+                true;
+           UnanimousTag == unanimous ->
+                ?REACT({a30,?LINE,UPI_Repairing_FLUs,UnanimousFLUs}),
+                false;
+           UnanimousTag == not_unanimous ->
+                ?REACT({a30,?LINE}),
+                false;
+           true ->
+                exit({badbad, UnanimousTag})
         end,
     react_to_env_A40(Retries, P_newprop, P_latest,
                      LatestUnanimousP, S2).
 
 react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                  #ch_mgr{myflu=MyFLU, proj=P_current}=S) ->
-    put(react, [a40|get(react)]),
+    ?REACT(a40),
     [{Rank_newprop, _}] = rank_projections([P_newprop], P_current),
     [{Rank_latest, _}] = rank_projections([P_latest], P_current),
     LatestAuthorDownP = lists:member(P_latest#projection.author_server,
                                      P_newprop#projection.down),
 
-    if P_newprop#projection.epoch_number == 666
-       orelse P_latest#projection.epoch_number == 666 ->
-            io:format(user, "\nBUMMER\nLatest  ~p\nNewprop ~p\nRunenv ~p\nTsns ~w", [make_projection_summary(P_newprop), make_projection_summary(P_latest), S#ch_mgr.runenv, lists:reverse(get(react))]),
-            exit(bummer);
-       true ->
-            ok
-    end,
-
     if
         P_latest#projection.epoch_number > P_current#projection.epoch_number
         orelse
         not LatestUnanimousP ->
-            put(react, [{a40, ?LINE, P_latest#projection.epoch_number > P_current#projection.epoch_number, not LatestUnanimousP}|get(react)]),
+            ?REACT({a40, ?LINE,P_latest#projection.epoch_number > P_current#projection.epoch_number, not LatestUnanimousP}),
 
             %% 1st clause: someone else has written a newer projection
             %% 2nd clause: a network partition has healed, revealing a
@@ -584,7 +574,7 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
         P_latest#projection.epoch_number < P_current#projection.epoch_number
         orelse
         P_latest /= P_current ->
-            put(react, [{a40, ?LINE}|get(react)]),
+            ?REACT({a40, ?LINE}),
 
             %% Both of these cases are rare.  Elsewhere, the code
             %% assumes that the local FLU's projection store is always
@@ -609,7 +599,16 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
 
         %% A40a (see flowchart)
         Rank_newprop > Rank_latest ->
-            put(react, [{a40, ?LINE}|get(react)]),
+            ?REACT({a40, ?LINE}),
+
+            %% TODO: There may be an "improvement" here.  If we're the
+            %% highest-ranking FLU in the all_members list, then if we make a
+            %% projection where our UPI list is the same as P_latest's, and
+            %% our repairing list is the same as P_latest's, then it may not
+            %% be necessary to write our projection: it doesn't "improve"
+            %% anything UPI-wise or repairing-wise.  But it isn't clear to me
+            %% if it's 100% correct to "improve" here and skip writing
+            %% P_newprop, yet.
             react_to_env_C300(P_newprop, P_latest, S);
 
         %% A40b (see flowchart)
@@ -618,12 +617,13 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
         (P_newprop#projection.upi /= P_latest#projection.upi
          orelse
          P_newprop#projection.repairing /= P_latest#projection.repairing) ->
-            put(react, [{a40, ?LINE}|get(react)]),
+            ?REACT({a40, ?LINE}),
+
             react_to_env_C300(P_newprop, P_latest, S);
 
         %% A40c (see flowchart)
         LatestAuthorDownP ->
-            put(react, [{a40, ?LINE}|get(react)]),
+            ?REACT({a40, ?LINE}),
 
             %% TODO: I believe that membership in the
             %% P_newprop#projection.down is not sufficient for long
@@ -642,25 +642,25 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
             %%  * if we accept ring1's proj: two functioning chains
             %%    ([ring1,ring2] and [ring4,ring5] indepependently)
             %%    but unstable: we're probably going to flap back & forth?!
-
-            ?D({{{{{yoyoyo_A40c}}}}}),
             react_to_env_C300(P_newprop, P_latest, S);
 
         true ->
-            put(react, [{a40, ?LINE}|get(react)]),
+            ?REACT({a40, ?LINE}),
+
             {{no_change, P_latest#projection.epoch_number}, S}
     end.
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                  Rank_newprop, Rank_latest, #ch_mgr{name=MyName}=S) ->
-    put(react, [b10|get(react)]),
+    ?REACT(b10),
     if
         LatestUnanimousP ->
-            put(react, [{b10, ?LINE}|get(react)]),
+            ?REACT({b10, ?LINE}),
+
             react_to_env_C100(P_newprop, P_latest, S);
 
         Retries > 2 ->
-            put(react, [{b10, ?LINE}|get(react)]),
+            ?REACT({b10, ?LINE}),
 
             %% The author of P_latest is too slow or crashed.
             %% Let's try to write P_newprop and see what happens!
@@ -669,7 +669,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         Rank_latest >= Rank_newprop
         andalso
         P_latest#projection.author_server /= MyName ->
-            put(react, [{b10, ?LINE}|get(react)]),
+            ?REACT({b10, ?LINE}),
 
             %% Give the author of P_latest an opportunite to write a
             %% new projection in a new epoch to resolve this mixed
@@ -677,7 +677,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
             react_to_env_C200(Retries, P_latest, S);
 
         true ->
-            put(react, [{b10, ?LINE}|get(react)]),
+            ?REACT({b10, ?LINE}),
 
             %% P_newprop is best, so let's write it.
             react_to_env_C300(P_newprop, P_latest, S)
@@ -685,9 +685,10 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
 
 react_to_env_C100(P_newprop, P_latest,
                   #ch_mgr{myflu=MyFLU, proj=P_current}=S) ->
-    put(react, [c100|get(react)]),
+    ?REACT(c100),
     I_am_UPI_in_newprop_p = lists:member(MyFLU, P_newprop#projection.upi),
-    I_am_Repairing_in_latest_p = lists:member(MyFLU, P_latest#projection.repairing),
+    I_am_Repairing_in_latest_p = lists:member(MyFLU,
+                                              P_latest#projection.repairing),
     ShortCircuit_p =
         P_latest#projection.epoch_number > P_current#projection.epoch_number
         andalso
@@ -698,26 +699,25 @@ react_to_env_C100(P_newprop, P_latest,
     case {ShortCircuit_p, projection_transition_is_sane(P_current, P_latest,
                                                         MyFLU)} of
         {true, _} ->
+            ?REACT({c100, repairing_short_circuit}),
             %% Someone else believes that I am repairing.  We assume
-            %% that nobody is being Byzantine, so we'll believe it.
-            %% We ignore our proposal and try to go with the latest.
+            %% that nobody is being Byzantine, so we'll believe that I
+            %% am/should be repairing.  We ignore our proposal and try
+            %% to go with the latest.
             react_to_env_C110(P_latest, S);
         {_, true} ->
+            ?REACT({c100, sane}),
             react_to_env_C110(P_latest, S);
         {_, _AnyOtherReturnValue} ->
-            %% %% P_latest is known to be crap.
-            %% %% By process of elimination, P_newprop is best,
-            %% %% so let's write it.
-            %% MaxEpoch = erlang:max(P_newprop#projection.epoch_number,
-            %%                       P_latest#projection.epoch_number) + 1,
-            %% P_newprop2 = update_projection_checksum(
-            %%                P_newprop#projection{epoch_number=MaxEpoch}),
-            %% react_to_env_C300(P_newprop2, P_latest, S)
+            ?REACT({c100, not_sane}),
+            %% P_latest is not sane.
+            %% By process of elimination, P_newprop is best,
+            %% so let's write it.
             react_to_env_C300(P_newprop, P_latest, S)
     end.
 
 react_to_env_C110(P_latest, #ch_mgr{myflu=MyFLU} = S) ->
-    put(react, [c110|get(react)]),
+    ?REACT(c110),
     %% TOOD: Should we carry along any extra info that that would be useful
     %%       in the dbg2 list?
     Extra_todo = [],
@@ -725,18 +725,19 @@ react_to_env_C110(P_latest, #ch_mgr{myflu=MyFLU} = S) ->
     Islands = proplists:get_value(network_islands, RunEnv),
     P_latest2 = update_projection_dbg2(
                   P_latest,
-                  [{network_islands, Islands},{hooray, {v2, date(), time()}}|Extra_todo]),
+                  [{network_islands, Islands},
+                   {hooray, {v2, date(), time()}}|Extra_todo]),
     Epoch = P_latest2#projection.epoch_number,
     ok = machi_flu0:proj_write(MyFLU, Epoch, private, P_latest2),
     react_to_env_C120(P_latest, S).
 
 react_to_env_C120(P_latest, S) ->
-    put(react, [c120|get(react)]),
+    ?REACT(c120),
     {{now_using, P_latest#projection.epoch_number},
      S#ch_mgr{proj=P_latest, proj_proposed=none}}.
 
 react_to_env_C200(Retries, P_latest, S) ->
-    put(react, [c200|get(react)]),
+    ?REACT(c200),
     try
         yo:tell_author_yo(P_latest#projection.author_server)
     catch Type:Err ->
@@ -746,30 +747,27 @@ react_to_env_C200(Retries, P_latest, S) ->
     react_to_env_C210(Retries, S).
 
 react_to_env_C210(Retries, #ch_mgr{myflu=MyFLU, proj=Proj} = S) ->
-    put(react, [c210|get(react)]),
-    %% TODO: implement the ranked sleep thingie?
+    ?REACT(c210),
     sleep_ranked_order(10, 100, MyFLU, Proj#projection.all_members),
     react_to_env_C220(Retries, S).
 
 react_to_env_C220(Retries, S) ->
-    put(react, [c220|get(react)]),
+    ?REACT(c220),
     react_to_env_A20(Retries + 1, S).
 
 react_to_env_C300(#projection{epoch_number=Epoch_newprop}=P_newprop,
-                  #projection{epoch_number=_Epoch_latest}=_P_latest, S) ->
-    put(react, [c300|get(react)]),
-    NewEpoch = erlang:max(Epoch_newprop, _Epoch_latest) + 1,
+                  #projection{epoch_number=Epoch_latest}=_P_latest, S) ->
+    ?REACT(c300),
+    NewEpoch = erlang:max(Epoch_newprop, Epoch_latest) + 1,
     P_newprop2 = P_newprop#projection{epoch_number=NewEpoch},
-    %% %% Let's return to the old epoch thingie and see what happens.........
-    %% Epoch = Epoch_newprop,
-    %% P_newprop2 = P_newprop#projection{epoch_number=Epoch + 1},
     react_to_env_C310(update_projection_checksum(P_newprop2), S).
 
 react_to_env_C310(P_newprop, S) ->
-    put(react, [{c310,make_projection_summary(P_newprop)}|get(react)]),
+    ?REACT(c310),
     Epoch = P_newprop#projection.epoch_number,
     {_Res, S2} = cl_write_public_proj_skip_local_error(Epoch, P_newprop, S),
-    put(react, [{c310,_Res}|get(react)]),
+    ?REACT({c310,make_projection_summary(P_newprop)}),
+    ?REACT({c310,_Res}),
     
     react_to_env_A10(S2).
 
@@ -794,6 +792,16 @@ projection_transition_is_sane(
               dbg=Dbg2} = P2,
   RelativeToServer) ->
  try
+    %% General notes:
+    %%
+    %% I'm making no attempt to be "efficient" here.  All of these data
+    %% structures are small, and they're not called zillions of times per
+    %% second.
+    %%
+    %% The chain sequence/order checks at the bottom of this function aren't
+    %% as easy-to-read as they ought to be.  However, I'm moderately confident
+    %% that it isn't buggy.  TODO: refactor them for clarity.
+
     true = is_integer(Epoch1) andalso is_integer(Epoch2),
     true = is_binary(CSum1) andalso is_binary(CSum2),
     {_,_,_} = CreationTime1,
