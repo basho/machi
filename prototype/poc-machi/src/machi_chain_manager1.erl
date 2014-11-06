@@ -138,8 +138,8 @@ init({MyName, All_list, MyFLUPid}) ->
 handle_call(_Call, _From, #ch_mgr{init_finished=false} = S) ->
     {reply, not_initialized, S};
 handle_call({calculate_projection_internal_old}, _From,
-            #ch_mgr{myflu=MyFLU}=S) ->
-    RelativeToServer = MyFLU,
+            #ch_mgr{name=MyName}=S) ->
+    RelativeToServer = MyName,
     {Reply, S2} = calc_projection(S, RelativeToServer, [{author_proc, call}]),
     {reply, Reply, S2};
 handle_call({test_write_proposed_projection}, _From, S) ->
@@ -154,8 +154,8 @@ handle_call({ping}, _From, S) ->
 handle_call({stop}, _From, S) ->
     {stop, normal, ok, S};
 handle_call({test_calc_projection, KeepRunenvP}, _From,
-            #ch_mgr{myflu=MyFLU}=S) ->
-    RelativeToServer = MyFLU,
+            #ch_mgr{name=MyName}=S) ->
+    RelativeToServer = MyName,
     {P, S2} = calc_projection(S, RelativeToServer, [{author_proc, call}]),
     {reply, {ok, P}, if KeepRunenvP -> S2;
                         true        -> S
@@ -173,8 +173,8 @@ handle_call(_Call, _From, S) ->
 
 handle_cast(_Cast, #ch_mgr{init_finished=false} = S) ->
     {noreply, S};
-handle_cast({test_calc_proposed_projection}, #ch_mgr{myflu=MyFLU}=S) ->
-    RelativeToServer = MyFLU,
+handle_cast({test_calc_proposed_projection}, #ch_mgr{name=MyName}=S) ->
+    RelativeToServer = MyName,
     {Proj, S2} = calc_projection(S, RelativeToServer, [{author_proc, cast}]),
     {noreply, S2#ch_mgr{proj_proposed=Proj}};
 handle_cast(_Cast, S) ->
@@ -540,9 +540,9 @@ react_to_env_A10(S) ->
     ?REACT(a10),
     react_to_env_A20(0, S).
 
-react_to_env_A20(Retries, #ch_mgr{myflu=MyFLU} = S) ->
+react_to_env_A20(Retries, #ch_mgr{name=MyName} = S) ->
     ?REACT(a20),
-    RelativeToServer = MyFLU,
+    RelativeToServer = MyName,
     {P_newprop, S2} = calc_projection(S, RelativeToServer,
                                       [{author_proc, react}]),
     react_to_env_A30(Retries, P_newprop, S2).
@@ -578,7 +578,7 @@ react_to_env_A30(Retries, P_newprop, S) ->
                      LatestUnanimousP, S2).
 
 react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
-                 #ch_mgr{myflu=MyFLU, proj=P_current}=S) ->
+                 #ch_mgr{name=MyName, proj=P_current}=S) ->
     ?REACT(a40),
     [{Rank_newprop, _}] = rank_projections([P_newprop], P_current),
     [{Rank_latest, _}] = rank_projections([P_latest], P_current),
@@ -638,7 +638,7 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
             react_to_env_C300(P_newprop, P_latest, S);
 
         %% A40b (see flowchart)
-        P_latest#projection.author_server == MyFLU
+        P_latest#projection.author_server == MyName
         andalso
         (P_newprop#projection.upi /= P_latest#projection.upi
          orelse
@@ -710,10 +710,10 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
     end.
 
 react_to_env_C100(P_newprop, P_latest,
-                  #ch_mgr{myflu=MyFLU, proj=P_current}=S) ->
+                  #ch_mgr{name=MyName, proj=P_current}=S) ->
     ?REACT(c100),
-    I_am_UPI_in_newprop_p = lists:member(MyFLU, P_newprop#projection.upi),
-    I_am_Repairing_in_latest_p = lists:member(MyFLU,
+    I_am_UPI_in_newprop_p = lists:member(MyName, P_newprop#projection.upi),
+    I_am_Repairing_in_latest_p = lists:member(MyName,
                                               P_latest#projection.repairing),
     ShortCircuit_p =
         P_latest#projection.epoch_number > P_current#projection.epoch_number
@@ -723,7 +723,7 @@ react_to_env_C100(P_newprop, P_latest,
         I_am_Repairing_in_latest_p,
 
     case {ShortCircuit_p, projection_transition_is_sane(P_current, P_latest,
-                                                        MyFLU)} of
+                                                        MyName)} of
         {true, _} ->
             ?REACT({c100, repairing_short_circuit}),
             %% Someone else believes that I am repairing.  We assume
@@ -773,9 +773,9 @@ react_to_env_C200(Retries, P_latest, S) ->
     end,
     react_to_env_C210(Retries, S).
 
-react_to_env_C210(Retries, #ch_mgr{myflu=MyFLU, proj=Proj} = S) ->
+react_to_env_C210(Retries, #ch_mgr{name=MyName, proj=Proj} = S) ->
     ?REACT(c210),
-    sleep_ranked_order(10, 100, MyFLU, Proj#projection.all_members),
+    sleep_ranked_order(10, 100, MyName, Proj#projection.all_members),
     react_to_env_C220(Retries, S).
 
 react_to_env_C220(Retries, S) ->
