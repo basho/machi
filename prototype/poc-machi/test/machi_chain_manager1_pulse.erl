@@ -214,7 +214,7 @@ prop_pulse() ->
         %% FLU a might need one more tick to write its private projection, but
         %% it isn't given a chance at the end of the PULSE run.  So we cheat
         LastTriggerTicks = {set,{var,99999997},
-                            {call, ?MODULE, do_ticks, [20, undefined, no, no]}},
+                            {call, ?MODULE, do_ticks, [110, undefined, no, no]}},
         Cmds1 = lists:duplicate(length(all_list()), LastTriggerTicks),
         Cmds = Cmds0 ++
                Cmds1 ++ [{set,{var,99999999},

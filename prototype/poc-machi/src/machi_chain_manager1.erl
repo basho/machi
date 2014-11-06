@@ -775,7 +775,8 @@ react_to_env_C200(Retries, P_latest, S) ->
 
 react_to_env_C210(Retries, #ch_mgr{name=MyName, proj=Proj} = S) ->
     ?REACT(c210),
-    sleep_ranked_order(10, 100, MyName, Proj#projection.all_members),
+    sleep_ranked_order(2, 25, MyName, Proj#projection.all_members),
+    %% sleep_ranked_order(10, 100, MyName, Proj#projection.all_members),
     react_to_env_C220(Retries, S).
 
 react_to_env_C220(Retries, S) ->
