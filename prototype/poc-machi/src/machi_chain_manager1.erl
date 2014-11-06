@@ -42,7 +42,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--export([make_projection_summary/1]).
+-export([make_projection_summary/1, projection_transitions_are_sane/2]).
 
 -ifdef(TEST).
 
@@ -766,9 +766,10 @@ react_to_env_C200(Retries, P_latest, S) ->
     ?REACT(c200),
     try
         yo:tell_author_yo(P_latest#projection.author_server)
-    catch Type:Err ->
-            io:format(user, "TODO: tell_author_yo is broken: ~p ~p\n",
-                      [Type, Err])
+    catch _Type:_Err ->
+            %% io:format(user, "TODO: tell_author_yo is broken: ~p ~p\n",
+            %%           [_Type, _Err]),
+            ok
     end,
     react_to_env_C210(Retries, S).
 
