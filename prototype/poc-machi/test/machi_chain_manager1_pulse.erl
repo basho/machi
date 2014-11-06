@@ -101,14 +101,13 @@ postcondition(_S, {call, _, _Func, _Args}, _Res) ->
     true.
 
 all_list() ->
-    [a,b].
+    [a,b,c].
     %% [a,b,c,d,e].
 
 setup(_Num, Seed) ->
     All_list = all_list(),
     _ = machi_partition_simulator:start_link(Seed, 0, 100),
     _Partitions = machi_partition_simulator:get(All_list),
-    ?QC_FMT("1st Partitions ~p\n", [_Partitions]),
 
     FLU_pids = [begin
                     {ok, FLUPid} = machi_flu0:start_link(Name),
@@ -150,9 +149,9 @@ do_ticks(Num, PidsMaybe, OldThreshold, NoPartitionThreshold) ->
 
 dump_state() ->
 %% try
+    ?QC_FMT("dump_state(", []),
     {FLU_pids, _Mgr_pids} = get(manager_pids_hack),
     Namez = zip(all_list(), FLU_pids),
-    ?QC_FMT("dump_state(", []),
     Report = ?MGRTEST:unanimous_report(Namez),
     %% ?QC_FMT("Report ~p\n", [Report]),
 
@@ -206,12 +205,19 @@ dump_state() ->
 
 prop_pulse() ->
     ?FORALL({Cmds0, Seed}, {non_empty(commands(?MODULE)), pulse:seed()},
-    ?IMPLIES(length(Cmds0) < 5,
+    ?IMPLIES(1 < length(Cmds0) andalso length(Cmds0) < 5,
     begin
         ok = shutdown_hard(),
-        Cmds = Cmds0 ++ [{set,{var,99999998},
-                          {call, ?MODULE, do_ticks, [88, undefined, no, no]}},
-                         {set,{var,99999999},
+        %% PULSE can be really unfair, of course, including having exec_ticks
+        %% run where all of FLU a does its ticks then FLU b.  Such a situation
+        %% doesn't always allow unanimous private projection store values:
+        %% FLU a might need one more tick to write its private projection, but
+        %% it isn't given a chance at the end of the PULSE run.  So we cheat
+        LastTriggerTicks = {set,{var,99999997},
+                            {call, ?MODULE, do_ticks, [20, undefined, no, no]}},
+        Cmds1 = lists:duplicate(length(all_list()), LastTriggerTicks),
+        Cmds = Cmds0 ++
+               Cmds1 ++ [{set,{var,99999999},
                           {call, ?MODULE, dump_state, []}}],
         {_H2, S2, Res} = pulse:run(
                            fun() ->
@@ -244,16 +250,16 @@ prop_pulse() ->
         Sane =
           [{FLU,_Bool} = {FLU,?MGR:projection_transitions_are_sane(Ps, FLU)} ||
               {FLU, Ps} <- R_Projs],
-        ?QC_FMT("Sane ~p\n", [Sane]),
+%% ?QC_FMT("Sane ~p\n", [Sane]),
         SaneP = lists:all(fun({_FLU, Bool}) -> Bool end, Sane),
 
         %% The final report item should say that all are agreed_membership.
         {_LastEpoch, {ok_disjoint, LastRepXs}} = lists:last(Report),
-?QC_FMT("LastEpoch=~p,", [_LastEpoch]),
-?QC_FMT("Report ~P\n", [Report, 5000]),
-?QC_FMT("Diag ~s\n", [Diag]),
+%% ?QC_FMT("LastEpoch=~p,", [_LastEpoch]),
+%% ?QC_FMT("Report ~P\n", [Report, 5000]),
+%% ?QC_FMT("Diag ~s\n", [Diag]),
         AgreedOrNot = lists:usort([element(1, X) || X <- LastRepXs]),
-?QC_FMT("LastRepXs ~p", [LastRepXs]),
+%% ?QC_FMT("LastRepXs ~p", [LastRepXs]),
         
         %% TODO: Check that we've converged to a single chain with no repairs.
         SingleChainNoRepair = case LastRepXs of
@@ -269,7 +275,7 @@ prop_pulse() ->
             ?QC_FMT("Diag = ~s\n", [Diag]),
             ?QC_FMT("Report = ~p\n", [Report]),
             ?QC_FMT("Sane = ~p\n", [Sane]),
-            ?QC_FMT("SingleChainNoRepair = ~p\n", [SingleChainNoRepair])
+            ?QC_FMT("SingleChainNoRepair failure =\n    ~p\n", [SingleChainNoRepair])
         end,
         conjunction([{res, Res == true orelse Res == ok},
                      {all_disjoint, ?MGRTEST:all_reports_are_disjoint(Report)},
