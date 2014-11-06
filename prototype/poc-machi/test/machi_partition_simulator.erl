@@ -33,7 +33,7 @@
 -endif.
 
 -export([start_link/3, stop/0,
-         get/1, reset_thresholds/2]).
+         get/1, reset_thresholds/2, no_partitions/0]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
@@ -59,6 +59,8 @@ get(Nodes) ->
 reset_thresholds(OldThreshold, NoPartitionThreshold) ->
     gen_server:call(?MODULE, {reset_thresholds, OldThreshold, NoPartitionThreshold}, infinity).
 
+no_partitions() ->
+    reset_thresholds(-999, 999).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

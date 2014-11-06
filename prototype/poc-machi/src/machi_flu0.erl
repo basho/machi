@@ -28,7 +28,7 @@
 -export([start_link/1, stop/1,
          write/3, read/2, trim/2,
          get_epoch/1,
-         proj_write/4, proj_read/3, proj_list_all/2,
+         proj_write/4, proj_read/3, proj_list_all/2, proj_get_all/2,
          proj_get_latest_num/2, proj_read_latest/2]).
 -export([set_fake_repairing_status/2, get_fake_repairing_status/1]).
 -export([make_proj/1, make_proj/2]).
@@ -94,6 +94,10 @@ proj_read(Pid, Epoch, StoreType)
 proj_list_all(Pid, StoreType)
   when StoreType == public; StoreType == private ->
     g_call(Pid, {proj_list_all, StoreType}, ?LONG_TIME).
+
+proj_get_all(Pid, StoreType)
+  when StoreType == public; StoreType == private ->
+    g_call(Pid, {proj_get_all, StoreType}, ?LONG_TIME).
 
 proj_get_latest_num(Pid, StoreType)
   when StoreType == public; StoreType == private ->
@@ -194,6 +198,10 @@ handle_call({{proj_list_all, StoreType}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
     {Reply, NewS} = do_proj_list_all(StoreType, S),
     {reply, {Reply, LC2}, NewS};
+handle_call({{proj_get_all, StoreType}, LC1}, _From, S) ->
+    LC2 = lclock_update(LC1),
+    {Reply, NewS} = do_proj_get_all(StoreType, S),
+    {reply, {Reply, LC2}, NewS};
 handle_call({{proj_get_latest_num, StoreType}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
     {Reply, NewS} = do_proj_get_latest_num(StoreType, S),
@@ -264,6 +272,11 @@ do_proj_list_all(StoreType, S) ->
     D = get_store_dict(StoreType, S),
     Ps = orddict:to_list(D),
     {lists:sort([Epoch || {Epoch, _P} <- Ps]), S}.
+
+do_proj_get_all(StoreType, S) ->
+    D = get_store_dict(StoreType, S),
+    Ps = orddict:to_list(D),
+    {lists:sort([P || {_Epoch, P} <- Ps]), S}.
 
 do_proj_get_latest_num(StoreType, S) ->
     D = get_store_dict(StoreType, S),
