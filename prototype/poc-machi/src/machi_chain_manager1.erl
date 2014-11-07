@@ -961,7 +961,12 @@ projection_transition_is_sane(
          S1 = make_projection_summary(P1),
          S2 = make_projection_summary(P2),
          Trace = erlang:get_stacktrace(),
+         H = [{FLUName, Type, P#projection.epoch_number, make_projection_summary(P)} ||
+                 FLUName <- P1#projection.all_members,
+                 Type <- [public,private],
+                 P <- machi_flu0:proj_get_all(FLUName, Type)],
          {err, _Type, _Err, from, S1, to, S2, relative_to, RelativeToServer,
+          history, lists:sort(H),
           stack, Trace}
  end.
 
