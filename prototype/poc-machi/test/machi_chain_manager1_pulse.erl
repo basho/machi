@@ -68,10 +68,10 @@ gen_seed() ->
     noshrink({choose(1, 10000), choose(1, 10000), choose(1, 10000)}).
 
 gen_old_threshold() ->
-    choose(1, 100).
+    noshrink(choose(1, 100)).
 
 gen_no_partition_threshold() ->
-    choose(1, 100).
+    noshrink(choose(1, 100)).
 
 command(#state{step=0}) ->
     {call, ?MODULE, setup, [gen_num_pids(), gen_seed()]};
@@ -105,6 +105,7 @@ all_list() ->
     %% [a,b,c,d,e].
 
 setup(_Num, Seed) ->
+    ?QC_FMT("\nsetup,", []),
     All_list = all_list(),
     _ = machi_partition_simulator:start_link(Seed, 0, 100),
     _Partitions = machi_partition_simulator:get(All_list),
@@ -143,9 +144,23 @@ do_ticks(Num, PidsMaybe, OldThreshold, NoPartitionThreshold) ->
             machi_partition_simulator:reset_thresholds(OldThreshold,
                                                        NoPartitionThreshold);
        true ->
+            ?QC_FMT("{e=~w},", [get_biggest_private_epoch_number()]),
             machi_partition_simulator:no_partitions()
     end,
-    exec_ticks(Num, Mgr_pids).
+    Res = exec_ticks(Num, Mgr_pids),
+    if not is_integer(OldThreshold) ->
+            ?QC_FMT("{e=~w},", [get_biggest_private_epoch_number()]);
+       true ->
+            ok
+    end,
+    Res.
+
+get_biggest_private_epoch_number() ->
+    lists:last(
+      lists:usort(
+        lists:flatten(
+          [machi_flu0:proj_list_all(FLU, private) ||
+              FLU <- all_list()]))).
 
 dump_state() ->
 %% try
@@ -214,8 +229,8 @@ prop_pulse() ->
         %% FLU a might need one more tick to write its private projection, but
         %% it isn't given a chance at the end of the PULSE run.  So we cheat
         LastTriggerTicks = {set,{var,99999997},
-                            {call, ?MODULE, do_ticks, [110, undefined, no, no]}},
-        Cmds1 = lists:duplicate(length(all_list()), LastTriggerTicks),
+                            {call, ?MODULE, do_ticks, [25, undefined, no, no]}},
+        Cmds1 = lists:duplicate(length(all_list())*2, LastTriggerTicks),
         Cmds = Cmds0 ++
                Cmds1 ++ [{set,{var,99999999},
                           {call, ?MODULE, dump_state, []}}],
