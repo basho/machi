@@ -265,7 +265,8 @@ prop_pulse() ->
         %% For each chain transition experienced by a particular FLU,
         %% confirm that each state transition is OK.
         Sane =
-          [{FLU,_SaneRes} = {FLU,?MGR:projection_transitions_are_sane(Ps, FLU)} ||
+          [{FLU,_SaneRes} = {FLU,?MGR:projection_transitions_are_sane_retrospective(
+                                    Ps, FLU)} ||
               {FLU, Ps} <- R_Projs],
 %% ?QC_FMT("Sane ~p\n", [Sane]),
         SaneP = lists:all(fun({_FLU, SaneRes}) -> SaneRes == true end, Sane),

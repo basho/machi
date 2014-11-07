@@ -768,9 +768,9 @@ react_to_env_C120(P_latest, S) ->
             {_,_,C} = os:timestamp(),
             MSec = trunc(C / 1000),
             {HH,MM,SS} = time(),
-            io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses: ~w\n",
+            io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses: ~w\nPrev was:            ~w\n",
                       [HH,MM,SS,MSec, S#ch_mgr.name,
-                       make_projection_summary(P_latest)]);
+                       make_projection_summary(P_latest), make_projection_summary(S#ch_mgr.proj)]);
         _ ->
             ok
     end,
@@ -813,17 +813,31 @@ react_to_env_C310(P_newprop, S) ->
     
     react_to_env_A10(S2).
 
-projection_transitions_are_sane([], _RelativeToServer) ->
+projection_transitions_are_sane(Ps, RelativeToServer) ->
+    projection_transitions_are_sane(Ps, RelativeToServer, false).
+
+projection_transitions_are_sane_retrospective(Ps, RelativeToServer) ->
+    projection_transitions_are_sane(Ps, RelativeToServer, true).
+
+projection_transitions_are_sane([], _RelativeToServer, _RetrospectiveP) ->
     true;
-projection_transitions_are_sane([_], _RelativeToServer) ->
+projection_transitions_are_sane([_], _RelativeToServer, _RetrospectiveP) ->
     true;
-projection_transitions_are_sane([P1, P2|T], RelativeToServer) ->
-    case projection_transition_is_sane(P1, P2, RelativeToServer) of
+projection_transitions_are_sane([P1, P2|T], RelativeToServer, RetrospectiveP) ->
+    case projection_transition_is_sane(P1, P2, RelativeToServer,
+                                       RetrospectiveP) of
         true ->
-            projection_transitions_are_sane([P2|T], RelativeToServer);
+            projection_transitions_are_sane([P2|T], RelativeToServer,
+                                           RetrospectiveP);
         Else ->
             Else
     end.
+
+projection_transition_is_sane(P1, P2, RelativeToServer) ->
+    projection_transition_is_sane(P1, P2, RelativeToServer, false).
+
+projection_transition_is_sane_retrospective(P1, P2, RelativeToServer) ->
+    projection_transition_is_sane(P1, P2, RelativeToServer, true).
 
 projection_transition_is_sane(
   #projection{epoch_number=Epoch1,
@@ -844,7 +858,7 @@ projection_transition_is_sane(
               upi=UPI_list2,
               repairing=Repairing_list2,
               dbg=Dbg2} = P2,
-  RelativeToServer) ->
+  RelativeToServer, RetrospectiveP) ->
  try
     %% General notes:
     %%
@@ -966,8 +980,67 @@ projection_transition_is_sane(
             UPI_2_suffix_from_Repairing1 = [X || X <- UPI_2_suffix,
                                                  lists:member(X, Repairing_list1)],
             %% true?
-            UPI_2_suffix = UPI_2_suffix_from_UPI1 ++ UPI_2_suffix_from_Repairing1,
-            ok
+            UPI_2_concat = (UPI_2_suffix_from_UPI1 ++ UPI_2_suffix_from_Repairing1),
+            if UPI_2_suffix == UPI_2_concat ->
+                    ok;
+               true ->
+                    if RetrospectiveP ->
+                            %% We are in retrospective mode.  But there are
+                            %% some transitions that are difficult to find
+                            %% when standing outside of all of the FLUs and
+                            %% examining their behavior.  (In contrast to
+                            %% this same function being called "in the path"
+                            %% of a projection transition by a particular FLU
+                            %% which knows exactly its prior projection and
+                            %% exactly what it intends to do.)  Perhaps this
+                            %% exception clause here can go away with
+                            %% better/more clever retrospection analysis?
+                            %%
+                            %% Here's a case that PULSE found:
+                            %% FLU B:
+                            %%   E=257: UPI=[c,a], REPAIRING=[b]
+                            %%   E=284: UPI=[c,a], REPAIRING=[b]
+                            %% FLU a:
+                            %%   E=251: UPI=[c], REPAIRING=[a,b]
+                            %%   E=284: UPI=[c,a], REPAIRING=[b]
+                            %% FLU c:
+                            %%   E=282: UPI=[c], REPAIRING=[a,b]
+                            %%   E=284: UPI=[c,a], REPAIRING=[b]
+                            %%
+                            %% From the perspective of each individual FLU,
+                            %% the unanimous transition at epoch #284 is
+                            %% good.  The repair that is done by FLU c -> a
+                            %% is likewise good.
+                            %%
+                            %% From a retrospective point of view (and the
+                            %% current implementation), there's a bad-looking
+                            %% transition from epoch #269 to #284.  This is
+                            %% from the point of view of the last two
+                            %% unanimous private projection store epochs:
+                            %%
+                            %%   E=269: UPI=[c], REPAIRING=[], DOWN=[a,b]
+                            %%   E=284: UPI=[c,a], REPAIRING=[b]
+                            %%
+                            %% The retrospective view by
+                            %% machi_chain_manager1_pulse.erl just can't
+                            %% reason correctly about this situation.  We
+                            %% will instead rely on the non-introspective
+                            %% sanity checking that each FLU does before it
+                            %% writes to its private projection store and
+                            %% then adopts that projection (and unwedges
+                            %% itself, etc etc).
+
+                            %% io:format(user, "QQQ: RetrospectiveP ~p\n", [RetrospectiveP]),
+                            %% io:format(user, "QQQ: UPI_2_suffix ~p\n", [UPI_2_suffix]),
+                            %% io:format(user, "QQQ: UPI_2_suffix_from_UPI1 ~p\n", [UPI_2_suffix_from_UPI1]),
+                            %% io:format(user, "QQQ: UPI_2_suffix_from_Repairing1 ~p\n", [UPI_2_suffix_from_Repairing1]),
+                            io:format(user, "|~p,~p TODO revisit|",
+                                      [?MODULE, ?LINE]),
+                            ok;
+                        not RetrospectiveP ->
+                            exit({upi_2_suffix_error})
+                    end
+            end
     end,
     true
  catch
