@@ -164,12 +164,31 @@ unanimous_report(Epoch, Namez) ->
                      %% that all FLUs are in agreement.
                      {UPI, Repairing, _CSum} =
                          lists:keyfind(UPI, 1, UPI_R_Sums),
+                     %% TODO: make certain that this subtlety doesn't get
+                     %%       last in later implementations.
+
+                     %% So, this is a bit of a tricky thing.  If we're at
+                     %% upi=[c] and repairing=[a,b], then the transition
+                     %% (eventually!) to upi=[c,a] does not currently depend
+                     %% on b being an active participant in the repair.
+                     %%
+                     %% Yes, b's state is very important for making certain
+                     %% that all repair operations succeed both to a & b.
+                     %% However, in this simulation, we only consider that
+                     %% the head(Repairing) is sane.  Therefore, we use only
+                     %% the "HeadOfRepairing" in our considerations here.
+                     HeadOfRepairing = case Repairing of
+                                          [H_Rep|_] ->
+                                              [H_Rep];
+                                          _ ->
+                                              []
+                                      end,
                      Tmp = [{FLU, case proplists:get_value(FLU, Projs) of
                                       P when is_record(P, projection) ->
                                           P#projection.epoch_csum;
                                       Else ->
                                           Else
-                                  end} || FLU <- UPI ++ Repairing],
+                                  end} || FLU <- UPI ++ HeadOfRepairing],
                      case lists:usort([CSum || {_FLU, CSum} <- Tmp]) of
                          [_] ->
                              {agreed_membership, {UPI, Repairing}};
