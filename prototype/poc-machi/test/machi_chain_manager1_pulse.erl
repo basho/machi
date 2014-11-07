@@ -163,7 +163,7 @@ get_biggest_private_epoch_number() ->
               FLU <- all_list()]))).
 
 dump_state() ->
-%% try
+  try
     ?QC_FMT("dump_state(", []),
     {FLU_pids, _Mgr_pids} = get(manager_pids_hack),
     Namez = zip(all_list(), FLU_pids),
@@ -203,20 +203,21 @@ dump_state() ->
                         Acc
                 end
         end,
-    Diag2 = [begin
+    Diag2 = [[
                 io_lib:format("~p private: ~w\n",
                               [FLUName,
                                ?MGR:make_projection_summary(
                                   lists:foldl(DumbFinderBackward(FLUName),
                                               error_unwritten,
                                               lists:seq(Epoch, 0, -1)))])
-            end || Epoch <- UniquePrivateEs, {FLUName, _FLU} <- Namez],
+              || {FLUName, _FLU} <- Namez]
+             || Epoch <- UniquePrivateEs],
 
     ?QC_FMT(")", []),
-    {Report, lists:flatten([Diag1, Diag2])}.
-%% catch XX:YY ->
-%%         ?QC_FMT("OUCH: ~p ~p @ ~p\n", [XX, YY, erlang:get_stacktrace()])
-%% end.
+    {Report, lists:flatten([Diag1, Diag2])}
+  catch XX:YY ->
+        ?QC_FMT("OUCH: ~p ~p @ ~p\n", [XX, YY, erlang:get_stacktrace()])
+  end.
 
 prop_pulse() ->
     ?FORALL({Cmds0, Seed}, {non_empty(commands(?MODULE)), pulse:seed()},
@@ -230,7 +231,8 @@ prop_pulse() ->
         %% it isn't given a chance at the end of the PULSE run.  So we cheat
         LastTriggerTicks = {set,{var,99999997},
                             {call, ?MODULE, do_ticks, [25, undefined, no, no]}},
-        Cmds1 = lists:duplicate(length(all_list())*2, LastTriggerTicks),
+        Cmds1 = lists:duplicate(2, LastTriggerTicks),
+        %% Cmds1 = lists:duplicate(length(all_list())*2, LastTriggerTicks),
         Cmds = Cmds0 ++
                Cmds1 ++ [{set,{var,99999999},
                           {call, ?MODULE, dump_state, []}}],
@@ -263,10 +265,10 @@ prop_pulse() ->
         %% For each chain transition experienced by a particular FLU,
         %% confirm that each state transition is OK.
         Sane =
-          [{FLU,_Bool} = {FLU,?MGR:projection_transitions_are_sane(Ps, FLU)} ||
+          [{FLU,_SaneRes} = {FLU,?MGR:projection_transitions_are_sane(Ps, FLU)} ||
               {FLU, Ps} <- R_Projs],
 %% ?QC_FMT("Sane ~p\n", [Sane]),
-        SaneP = lists:all(fun({_FLU, Bool}) -> Bool end, Sane),
+        SaneP = lists:all(fun({_FLU, SaneRes}) -> SaneRes == true end, Sane),
 
         %% The final report item should say that all are agreed_membership.
         {_LastEpoch, {ok_disjoint, LastRepXs}} = lists:last(Report),
@@ -309,7 +311,7 @@ prop_pulse_test_() ->
                   false -> 0;
                   Val2  -> list_to_integer(Val2)
               end,
-    {timeout, (Timeout+ExtraTO+120),     % 120 = a bit more fudge time
+    {timeout, (Timeout+ExtraTO+300),     % 300 = a bit more fudge time
      fun() ->
              ?assert(eqc:quickcheck(eqc:testing_time(Timeout,
                                                      ?QC_OUT(prop_pulse()))))
@@ -329,11 +331,15 @@ exec_ticks(Num, Mgr_pids) ->
     Pids = [spawn(fun() ->
                           [begin
                                erlang:yield(),
+                               Max = 10,
+                               Elapsed =
+                                   ?MGR:sleep_ranked_order(1, Max, M_name, all_list()),
                                Res = ?MGR:test_react_to_env(MMM),
+                               timer:sleep(erlang:max(0, Max - Elapsed)),
                                Res=Res %% ?D({self(), Res})
                            end || _ <- lists:seq(1,Num)],
                           Parent ! done
-                  end) || MMM <- Mgr_pids ],
+                  end) || {M_name, MMM} <- lists:zip(all_list(), Mgr_pids) ],
     [receive
          done ->
              ok

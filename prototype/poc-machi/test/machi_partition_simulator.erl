@@ -33,7 +33,8 @@
 -endif.
 
 -export([start_link/3, stop/0,
-         get/1, reset_thresholds/2, no_partitions/0]).
+         get/1, reset_thresholds/2,
+         no_partitions/0, always_last_partitions/0]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
@@ -61,6 +62,9 @@ reset_thresholds(OldThreshold, NoPartitionThreshold) ->
 
 no_partitions() ->
     reset_thresholds(-999, 999).
+
+always_last_partitions() ->
+    reset_thresholds(999, 0).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

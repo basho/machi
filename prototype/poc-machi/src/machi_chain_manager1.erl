@@ -37,7 +37,7 @@
 -define(REACT(T), put(react, [T|get(react)])).
 
 %% API
--export([start_link/3, stop/1, ping/1,
+-export([start_link/3, start_link/4, stop/1, ping/1,
          calculate_projection_internal_old/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
@@ -64,7 +64,10 @@
 -endif. %TEST
 
 start_link(MyName, All_list, MyFLUPid) ->
-    gen_server:start_link(?MODULE, {MyName, All_list, MyFLUPid}, []).
+    start_link(MyName, All_list, MyFLUPid, []).
+
+start_link(MyName, All_list, MyFLUPid, MgrOpts) ->
+    gen_server:start_link(?MODULE, {MyName, All_list, MyFLUPid, MgrOpts}, []).
 
 stop(Pid) ->
     gen_server:call(Pid, {stop}, infinity).
@@ -105,7 +108,7 @@ test_react_to_env(Pid) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init({MyName, All_list, MyFLUPid}) ->
+init({MyName, All_list, MyFLUPid, MgrOpts}) ->
     RunEnv = [%% {seed, Seed},
               {seed, now()},
               {network_partitions, []},
@@ -119,7 +122,8 @@ init({MyName, All_list, MyFLUPid}) ->
                 name=MyName,
                 proj=NoneProj,
                 myflu=MyFLUPid, % pid or atom local name
-                runenv=RunEnv},
+                runenv=RunEnv,
+                opts=MgrOpts},
 
     %% TODO: There is a bootstrapping problem there that needs to be
     %% solved eventually: someone/something needs to set the initial
@@ -759,6 +763,17 @@ react_to_env_C110(P_latest, #ch_mgr{myflu=MyFLU} = S) ->
 
 react_to_env_C120(P_latest, S) ->
     ?REACT(c120),
+    case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
+        true ->
+            {_,_,C} = os:timestamp(),
+            MSec = trunc(C / 1000),
+            {HH,MM,SS} = time(),
+            io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses: ~w\n",
+                      [HH,MM,SS,MSec, S#ch_mgr.name,
+                       make_projection_summary(P_latest)]);
+        _ ->
+            ok
+    end,
     {{now_using, P_latest#projection.epoch_number},
      S#ch_mgr{proj=P_latest, proj_proposed=none}}.
 
@@ -775,8 +790,7 @@ react_to_env_C200(Retries, P_latest, S) ->
 
 react_to_env_C210(Retries, #ch_mgr{name=MyName, proj=Proj} = S) ->
     ?REACT(c210),
-    sleep_ranked_order(2, 25, MyName, Proj#projection.all_members),
-    %% sleep_ranked_order(10, 100, MyName, Proj#projection.all_members),
+    sleep_ranked_order(10, 100, MyName, Proj#projection.all_members),
     react_to_env_C220(Retries, S).
 
 react_to_env_C220(Retries, S) ->
@@ -961,12 +975,14 @@ projection_transition_is_sane(
          S1 = make_projection_summary(P1),
          S2 = make_projection_summary(P2),
          Trace = erlang:get_stacktrace(),
-         H = [{FLUName, Type, P#projection.epoch_number, make_projection_summary(P)} ||
+         %% TODO: this history goop is useful sometimes for debugging but
+         %% not for any "real" use.  Get rid of it, for the long term.
+         H = (catch [{FLUName, Type, P#projection.epoch_number, make_projection_summary(P)} ||
                  FLUName <- P1#projection.all_members,
                  Type <- [public,private],
-                 P <- machi_flu0:proj_get_all(FLUName, Type)],
+                 P <- machi_flu0:proj_get_all(FLUName, Type)]),
          {err, _Type, _Err, from, S1, to, S2, relative_to, RelativeToServer,
-          history, lists:sort(H),
+          history, (catch lists:sort(H)),
           stack, Trace}
  end.
 
@@ -985,7 +1001,9 @@ sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list) ->
     NumNodes = length(FLU_list),
     SleepIndex = NumNodes - Index,
     SleepChunk = MaxSleep div NumNodes,
-    timer:sleep(MinSleep + (SleepChunk * SleepIndex)).
+    SleepTime = MinSleep + (SleepChunk * SleepIndex),
+    timer:sleep(SleepTime),
+    SleepTime.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

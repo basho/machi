@@ -52,6 +52,7 @@
           proj_proposed   :: 'none' | #projection{},
           myflu           :: pid() | atom(),
           %%
-          runenv          :: list() %proplist()
+          runenv          :: list(), %proplist()
+          opts            :: list()  %proplist()
          }).
 
