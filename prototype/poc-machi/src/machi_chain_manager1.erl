@@ -939,7 +939,7 @@ projection_transition_is_sane(
         MoreCheckingP ->
             %% Where did elements in UPI_2_suffix come from?
             %% Only two sources are permitted.
-            [true = lists:member(X, Repairing_list1) % X added after repair done
+            [lists:member(X, Repairing_list1) % X added after repair done
              orelse
              lists:member(X, UPI_list1)       % X in UPI_list1 after common pref
              || X <- UPI_2_suffix],
