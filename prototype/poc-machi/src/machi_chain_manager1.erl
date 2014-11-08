@@ -681,19 +681,39 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
         true ->
             ?REACT({a40, ?LINE}),
 
-            {{no_change, P_latest#projection.epoch_number}, S}
+            react_to_env_A50(P_latest, S)
     end.
+
+react_to_env_A50(P_latest, S) ->
+    ?REACT({a50, ?LINE}),
+
+    {{no_change, P_latest#projection.epoch_number}, S}.
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                  Rank_newprop, Rank_latest, #ch_mgr{name=MyName}=S0) ->
     ?REACT(b10),
 
     S = calculate_flaps(P_newprop, S0),
+    FlapLimit = 3,                              % todo tweak
     if
         LatestUnanimousP ->
             ?REACT({b10, ?LINE}),
 
             react_to_env_C100(P_newprop, P_latest, S);
+
+        S#ch_mgr.flaps > FlapLimit
+        andalso
+        Rank_latest =< Rank_newprop ->
+            if S#ch_mgr.flaps - FlapLimit - 3 =< 0 -> io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, S#ch_mgr.flaps]); true -> ok end,
+            {_, _, USec} = os:timestamp(),
+            %% If we always go to C200, then we can deadlock sometimes.
+            %% So we roll the dice.
+            %% TODO: make this PULSE-friendly!
+            if USec rem 3 == 0 ->
+                    react_to_env_A50(P_latest, S);
+               true ->
+                    react_to_env_C200(Retries, P_latest, S)
+            end;
 
         Retries > 2 ->
             ?REACT({b10, ?LINE}),
@@ -701,12 +721,6 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
             %% The author of P_latest is too slow or crashed.
             %% Let's try to write P_newprop and see what happens!
             react_to_env_C300(P_newprop, P_latest, S);
-
-        S#ch_mgr.flaps > 5
-        andalso
-        Rank_latest >= Rank_newprop ->
-            io:format(user, "{FLAP: ~w flaps ~w, goto C200}!", [S#ch_mgr.name, S#ch_mgr.flaps]),
-            react_to_env_C200(Retries, P_latest, S);
 
         Rank_latest >= Rank_newprop
         andalso
@@ -833,7 +847,7 @@ react_to_env_C310(P_newprop, S) ->
     
     react_to_env_A10(S2).
 
-calculate_flaps(P_newprop, #ch_mgr{name=MyName,
+calculate_flaps(P_newprop, #ch_mgr{name=_MyName,
                                    proj_history=H, flaps=Flaps} = S) ->
     Ps = queue:to_list(H) ++ [P_newprop],
     UPI_Repairing_combos =
@@ -844,7 +858,7 @@ calculate_flaps(P_newprop, #ch_mgr{name=MyName,
             S#ch_mgr{flaps=0};
         %% {_, URs=_URs, 1=_Ds} when URs < 3 ->
         {_, 1=_URs, 1=_Ds} ->
-            io:format(user, "F{~w,~w,~w..~w}!", [MyName, _URs, _Ds, Flaps]),
+            %%%%%% io:format(user, "F{~w,~w,~w..~w}!", [_MyName, _URs, _Ds, Flaps]),
             S#ch_mgr{flaps=Flaps + 1};
             %% todo_flapping;
         _ ->

@@ -288,23 +288,28 @@ convergence_demo_test(_) ->
                end,
 
         DoIt(30, 0, 0),
-        io:format(user, "SET always_last_partitions ON ... we should see convergence to correct chains.\n", []),
+        io:format(user, "\nSET always_last_partitions ON ... we should see convergence to correct chains.\n", []),
         %% machi_partition_simulator:always_these_partitions([{b,a}]),
+        machi_partition_simulator:always_these_partitions([{a,b}]),
         %% machi_partition_simulator:always_these_partitions([{b,c}]),
-        %% machi_partition_simulator:always_these_partitions([{a,c}]),
-        machi_partition_simulator:always_these_partitions([{a,c},{c,b}]),
+        %% machi_partition_simulator:always_these_partitions([{a,c},{c,b}]),
         %% machi_partition_simulator:always_last_partitions(),
-        [DoIt(20, 40, 400) || _ <- [1]],
+        [DoIt(25, 40, 400) || _ <- [1]],
         %% TODO: We should be stable now ... analyze it.
 
-        io:format(user, "SET always_last_partitions OFF ... let loose the dogs of war!\n", []),
+        io:format(user, "\nSET always_last_partitions OFF ... let loose the dogs of war!\n", []),
         machi_partition_simulator:reset_thresholds(10, 50),
         DoIt(30, 0, 0),
-        io:format(user, "SET always_last_partitions ON ... we should see convergence to correct chains2.\n", []),
-        machi_partition_simulator:always_last_partitions(),
+        io:format(user, "\nSET always_last_partitions ON ... we should see convergence to correct chains2.\n", []),
+        %% machi_partition_simulator:always_last_partitions(),
+        machi_partition_simulator:always_these_partitions([{a,c}]),
+        [DoIt(25, 40, 400) || _ <- [1]],
+
+        io:format(user, "\nSET always_last_partitions ON ... we should see convergence to correct chains3.\n", []),
+        machi_partition_simulator:no_partitions(),
         [DoIt(20, 40, 400) || _ <- [1]],
-        io:format(user, "~s\n", [os:cmd("date")]),
         %% TODO: We should be stable now ... analyze it.
+        io:format(user, "~s\n", [os:cmd("date")]),
 
         %% Create a report where at least one FLU has written a
         %% private projection.
