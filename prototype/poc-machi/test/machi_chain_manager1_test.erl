@@ -231,25 +231,28 @@ convergence_demo_test_() ->
     {timeout, 300, fun() -> convergence_demo_test(x) end}.
 
 convergence_demo_test(_) ->
-    All_list = [a,b,c],
+    All_list = [a,b,c,d],
     machi_partition_simulator:start_link({111,222,33}, 0, 100),
     _ = machi_partition_simulator:get(All_list),
 
     {ok, FLUa} = machi_flu0:start_link(a),
     {ok, FLUb} = machi_flu0:start_link(b),
     {ok, FLUc} = machi_flu0:start_link(c),
-    Namez = [{a, FLUa}, {b, FLUb}, {c, FLUc}],
+    {ok, FLUd} = machi_flu0:start_link(d),
+    Namez = [{a, FLUa}, {b, FLUb}, {c, FLUc}, {d, FLUd}],
     I_represent = I_am = a,
     MgrOpts = [private_write_verbose],
     {ok, Ma} = ?MGR:start_link(I_represent, All_list, I_am, MgrOpts),
     {ok, Mb} = ?MGR:start_link(b, All_list, b, MgrOpts),
     {ok, Mc} = ?MGR:start_link(c, All_list, c, MgrOpts),
+    {ok, Md} = ?MGR:start_link(d, All_list, d, MgrOpts),
     try
         {ok, P1} = ?MGR:test_calc_projection(Ma, false),
         P1Epoch = P1#projection.epoch_number,
         ok = machi_flu0:proj_write(FLUa, P1Epoch, public, P1),
         ok = machi_flu0:proj_write(FLUb, P1Epoch, public, P1),
         ok = machi_flu0:proj_write(FLUc, P1Epoch, public, P1),
+        ok = machi_flu0:proj_write(FLUd, P1Epoch, public, P1),
 
         {now_using, XX1} = ?MGR:test_react_to_env(Ma),
         ?D(XX1),
@@ -278,7 +281,8 @@ convergence_demo_test(_) ->
                                              Parent ! done
                                      end) || {M_name, MMM} <- [{a, Ma},
                                                                {b, Mb},
-                                                               {c, Mc}] ],
+                                                               {c, Mc},
+                                                               {d, Md}] ],
                        [receive
                             done ->
                                 ok
