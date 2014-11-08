@@ -49,10 +49,12 @@
           init_finished   :: boolean(),
           name            :: m_server(),
           proj            :: #projection{},
-          proj_proposed   :: 'none' | #projection{},
           myflu           :: pid() | atom(),
           %%
           runenv          :: list(), %proplist()
-          opts            :: list()  %proplist()
+          opts            :: list(),  %proplist()
+
+          %% Deprecated ... TODO: remove when old test unit test code is removed
+          proj_proposed   :: 'none' | #projection{}
          }).
 
