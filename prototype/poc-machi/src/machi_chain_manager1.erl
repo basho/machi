@@ -768,9 +768,12 @@ react_to_env_C120(P_latest, S) ->
             {_,_,C} = os:timestamp(),
             MSec = trunc(C / 1000),
             {HH,MM,SS} = time(),
-            io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses: ~w\nPrev was:            ~w\n",
+            io:format(user, "~2..0w:~2..0w:~2..0w.~3..0w ~p uses: ~w\n",
                       [HH,MM,SS,MSec, S#ch_mgr.name,
-                       make_projection_summary(P_latest), make_projection_summary(S#ch_mgr.proj)]);
+                       make_projection_summary(P_latest)]);
+            %% io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses: ~w\nPrev was:            ~w\n",
+            %%           [HH,MM,SS,MSec, S#ch_mgr.name,
+            %%            make_projection_summary(P_latest), make_projection_summary(S#ch_mgr.proj)]);
         _ ->
             ok
     end,
