@@ -44,7 +44,8 @@
           seed,
           old_partitions,
           old_threshold,
-          no_partition_threshold
+          no_partition_threshold,
+          method=oneway_partitions :: 'island' | 'oneway_partitions'
          }).
 
 start_link(Seed, OldThreshold, NoPartitionThreshold) ->
@@ -76,7 +77,8 @@ init({Seed, OldThreshold, NoPartitionThreshold}) ->
 
 handle_call({get, Nodes}, _From, S) ->
     {Seed2, Partitions} =
-        calc_network_partitions(Nodes,
+        calc_network_partitions(S#state.method,
+                                Nodes,
                                 S#state.seed,
                                 S#state.old_partitions,
                                 S#state.old_threshold,
@@ -103,7 +105,7 @@ code_change(_OldVsn, S, _Extra) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-calc_network_partitions(Nodes, Seed1, OldPartition,
+calc_network_partitions(Method, Nodes, Seed1, OldPartition,
                         OldThreshold, NoPartitionThreshold) ->
     {Cutoff2, Seed2} = random:uniform_s(100, Seed1),
     if Cutoff2 < OldThreshold ->
@@ -113,13 +115,11 @@ calc_network_partitions(Nodes, Seed1, OldPartition,
             if Cutoff3 < NoPartitionThreshold ->
                     {Seed3, {[], [Nodes]}};
                true ->
-                    make_network_partition_locations(Nodes, Seed3)
+                    make_network_partition_locations(Method, Nodes, Seed3)
             end
     end.
 
-make_network_partition_locations(Nodes, Seed1) ->
-    %% TODO: To simplify debugging a bit, I'm switching to partitions that are
-    %%       bi-directional only.
+make_network_partition_locations(island=_Method, Nodes, Seed1) ->
     Num = length(Nodes),
     {Seed2, WeightsNodes} = lists:foldl(
                               fun(Node, {Seeda, Acc}) ->
@@ -138,7 +138,28 @@ make_network_partition_locations(Nodes, Seed1) ->
                lists:sort([Nd || {Weight, Nd} <- WeightsNodes,
                                  (Max - IslandSep) =< Weight, Weight < Max])
                || Max <- lists:seq(IslandSep + 1, 105, IslandSep)],
-    {Seed2, {lists:usort(islands2partitions(Islands)), lists:sort(Islands)}}.
+    {Seed2, {lists:usort(islands2partitions(Islands)), lists:sort(Islands)}};
+make_network_partition_locations(oneway_partitions=_Method, Nodes, Seed1) ->
+    Pairs = make_all_pairs(Nodes),
+    Num = length(Pairs),
+    {Seed2, Weights} = lists:foldl(
+                         fun(_, {Seeda, Acc}) ->
+                                 {Cutoff, Seedb} = random:uniform_s(100, Seeda),
+                                 {Seedb, [Cutoff|Acc]}
+                         end, {Seed1, []}, lists:seq(1, Num)),
+    {Cutoff3, Seed3} = random:uniform_s(100, Seed2),
+    {Seed3, {[X || {Weight, X} <- lists:zip(Weights, Pairs),
+                   Weight < Cutoff3], [islands_not_supported]}}.
+
+make_all_pairs(L) ->
+    lists:flatten(make_all_pairs2(lists:usort(L))).
+
+make_all_pairs2([]) ->
+    [];
+make_all_pairs2([_]) ->
+    [];
+make_all_pairs2([H1|T]) ->
+    [[{H1, X}, {X, H1}] || X <- T] ++ make_all_pairs(T).
 
 islands2partitions([]) ->
     [];
