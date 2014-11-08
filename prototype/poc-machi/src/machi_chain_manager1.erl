@@ -685,8 +685,10 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
     end.
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
-                 Rank_newprop, Rank_latest, #ch_mgr{name=MyName}=S) ->
+                 Rank_newprop, Rank_latest, #ch_mgr{name=MyName}=S0) ->
     ?REACT(b10),
+
+    S = calculate_flaps(P_newprop, S0),
     if
         LatestUnanimousP ->
             ?REACT({b10, ?LINE}),
@@ -699,6 +701,12 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
             %% The author of P_latest is too slow or crashed.
             %% Let's try to write P_newprop and see what happens!
             react_to_env_C300(P_newprop, P_latest, S);
+
+        S#ch_mgr.flaps > 5
+        andalso
+        Rank_latest >= Rank_newprop ->
+            io:format(user, "{FLAP: ~w flaps ~w, goto C200}!", [S#ch_mgr.name, S#ch_mgr.flaps]),
+            react_to_env_C200(Retries, P_latest, S);
 
         Rank_latest >= Rank_newprop
         andalso
@@ -713,44 +721,8 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         true ->
             ?REACT({b10, ?LINE}),
 
-            react_to_env_B20(Retries, P_newprop, P_latest, LatestUnanimousP,
-                             Rank_newprop, Rank_latest, S)
-    end.
-
-react_to_env_B20(Retries, P_newprop, P_latest, _LatestUnanimousP,
-                 Rank_newprop, Rank_latest, S0) ->
-    ?REACT(b10),
-    S = calculate_flaps(P_newprop, S0),
-
-    if S#ch_mgr.flaps > 1
-       andalso
-       Rank_newprop =< Rank_latest ->
-            io:format(user, "{FLAP: ~w flaps ~w, goto C200}!", [S#ch_mgr.name, S#ch_mgr.flaps]),
-            react_to_env_C200(Retries, P_latest, S);
-
-       true ->
-            ?REACT({b20, ?LINE}),
-
             %% P_newprop is best, so let's write it.
             react_to_env_C300(P_newprop, P_latest, S)
-    end.
-
-calculate_flaps(P_newprop, #ch_mgr{name=MyName,
-                                   proj_history=H, flaps=Flaps} = S) ->
-    Ps = queue:to_list(H) ++ [P_newprop],
-    UPI_Repairing_combos =
-        lists:usort([{P#projection.upi, P#projection.repairing} || P <- Ps]),
-    Down_combos = lists:usort([P#projection.down || P <- Ps]),
-    case {queue:len(H), length(UPI_Repairing_combos), length(Down_combos)} of
-        {N, _, _} when N < length(P_newprop#projection.all_members) ->
-            S#ch_mgr{flaps=0};
-        %% {_, URs=_URs, 1=_Ds} when URs < 3 ->
-        {_, 1=_URs, 1=_Ds} ->
-            io:format(user, "F{~w,~w,~w..~w}!", [MyName, _URs, _Ds, Flaps]),
-            S#ch_mgr{flaps=Flaps + 1};
-            %% todo_flapping;
-        _ ->
-            S#ch_mgr{flaps=0}
     end.
 
 react_to_env_C100(P_newprop, P_latest,
@@ -860,6 +832,24 @@ react_to_env_C310(P_newprop, S) ->
     ?REACT({c310,_Res}),
     
     react_to_env_A10(S2).
+
+calculate_flaps(P_newprop, #ch_mgr{name=MyName,
+                                   proj_history=H, flaps=Flaps} = S) ->
+    Ps = queue:to_list(H) ++ [P_newprop],
+    UPI_Repairing_combos =
+        lists:usort([{P#projection.upi, P#projection.repairing} || P <- Ps]),
+    Down_combos = lists:usort([P#projection.down || P <- Ps]),
+    case {queue:len(H), length(UPI_Repairing_combos), length(Down_combos)} of
+        {N, _, _} when N < length(P_newprop#projection.all_members) ->
+            S#ch_mgr{flaps=0};
+        %% {_, URs=_URs, 1=_Ds} when URs < 3 ->
+        {_, 1=_URs, 1=_Ds} ->
+            io:format(user, "F{~w,~w,~w..~w}!", [MyName, _URs, _Ds, Flaps]),
+            S#ch_mgr{flaps=Flaps + 1};
+            %% todo_flapping;
+        _ ->
+            S#ch_mgr{flaps=0}
+    end.
 
 projection_transitions_are_sane(Ps, RelativeToServer) ->
     projection_transitions_are_sane(Ps, RelativeToServer, false).
