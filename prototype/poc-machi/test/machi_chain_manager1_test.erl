@@ -289,8 +289,10 @@ convergence_demo_test(_) ->
 
         DoIt(30, 0, 0),
         io:format(user, "SET always_last_partitions ON ... we should see convergence to correct chains.\n", []),
-        machi_partition_simulator:always_these_partitions([{b,a}]),
+        %% machi_partition_simulator:always_these_partitions([{b,a}]),
         %% machi_partition_simulator:always_these_partitions([{b,c}]),
+        %% machi_partition_simulator:always_these_partitions([{a,c}]),
+        machi_partition_simulator:always_these_partitions([{a,c},{c,b}]),
         %% machi_partition_simulator:always_last_partitions(),
         [DoIt(20, 40, 400) || _ <- [1]],
         %% TODO: We should be stable now ... analyze it.
@@ -298,9 +300,10 @@ convergence_demo_test(_) ->
         io:format(user, "SET always_last_partitions OFF ... let loose the dogs of war!\n", []),
         machi_partition_simulator:reset_thresholds(10, 50),
         DoIt(30, 0, 0),
-        io:format(user, "SET always_last_partitions ON ... we should see convergence to correct chains.\n", []),
+        io:format(user, "SET always_last_partitions ON ... we should see convergence to correct chains2.\n", []),
         machi_partition_simulator:always_last_partitions(),
         [DoIt(20, 40, 400) || _ <- [1]],
+        io:format(user, "~s\n", [os:cmd("date")]),
         %% TODO: We should be stable now ... analyze it.
 
         %% Create a report where at least one FLU has written a

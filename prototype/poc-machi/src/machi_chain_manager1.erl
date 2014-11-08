@@ -121,6 +121,7 @@ init({MyName, All_list, MyFLUPid, MgrOpts}) ->
     S = #ch_mgr{init_finished=false,
                 name=MyName,
                 proj=NoneProj,
+                proj_history=queue:new(),
                 myflu=MyFLUPid, % pid or atom local name
                 runenv=RunEnv,
                 opts=MgrOpts},
@@ -712,8 +713,44 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         true ->
             ?REACT({b10, ?LINE}),
 
+            react_to_env_B20(Retries, P_newprop, P_latest, LatestUnanimousP,
+                             Rank_newprop, Rank_latest, S)
+    end.
+
+react_to_env_B20(Retries, P_newprop, P_latest, _LatestUnanimousP,
+                 Rank_newprop, Rank_latest, S0) ->
+    ?REACT(b10),
+    S = calculate_flaps(P_newprop, S0),
+
+    if S#ch_mgr.flaps > 1
+       andalso
+       Rank_newprop =< Rank_latest ->
+            io:format(user, "{FLAP: ~w flaps ~w, goto C200}!", [S#ch_mgr.name, S#ch_mgr.flaps]),
+            react_to_env_C200(Retries, P_latest, S);
+
+       true ->
+            ?REACT({b20, ?LINE}),
+
             %% P_newprop is best, so let's write it.
             react_to_env_C300(P_newprop, P_latest, S)
+    end.
+
+calculate_flaps(P_newprop, #ch_mgr{name=MyName,
+                                   proj_history=H, flaps=Flaps} = S) ->
+    Ps = queue:to_list(H) ++ [P_newprop],
+    UPI_Repairing_combos =
+        lists:usort([{P#projection.upi, P#projection.repairing} || P <- Ps]),
+    Down_combos = lists:usort([P#projection.down || P <- Ps]),
+    case {queue:len(H), length(UPI_Repairing_combos), length(Down_combos)} of
+        {N, _, _} when N < length(P_newprop#projection.all_members) ->
+            S#ch_mgr{flaps=0};
+        %% {_, URs=_URs, 1=_Ds} when URs < 3 ->
+        {_, 1=_URs, 1=_Ds} ->
+            io:format(user, "F{~w,~w,~w..~w}!", [MyName, _URs, _Ds, Flaps]),
+            S#ch_mgr{flaps=Flaps + 1};
+            %% todo_flapping;
+        _ ->
+            S#ch_mgr{flaps=0}
     end.
 
 react_to_env_C100(P_newprop, P_latest,
@@ -775,10 +812,18 @@ react_to_env_C110(P_latest, #ch_mgr{myflu=MyFLU} = S) ->
     end,
     react_to_env_C120(P_latest, S).
 
-react_to_env_C120(P_latest, S) ->
+react_to_env_C120(P_latest, #ch_mgr{proj_history=H} = S) ->
     ?REACT(c120),
+    H2 = queue:in(P_latest, H),
+    H3 = case queue:len(H2) of
+             X when X > length(P_latest#projection.all_members) * 2 ->
+                 {_V, Hxx} = queue:out(H2),
+                 Hxx;
+             _ ->
+                 H2
+         end,
     {{now_using, P_latest#projection.epoch_number},
-     S#ch_mgr{proj=P_latest, proj_proposed=none}}.
+     S#ch_mgr{proj=P_latest, proj_history=H3, proj_proposed=none}}.
 
 react_to_env_C200(Retries, P_latest, S) ->
     ?REACT(c200),
