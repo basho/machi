@@ -34,7 +34,7 @@
 
 -export([start_link/3, stop/0,
          get/1, reset_thresholds/2,
-         no_partitions/0, always_last_partitions/0]).
+         no_partitions/0, always_last_partitions/0, always_these_partitions/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
@@ -67,6 +67,10 @@ no_partitions() ->
 always_last_partitions() ->
     reset_thresholds(999, 0).
 
+always_these_partitions(Parts) ->
+    reset_thresholds(999, 0),
+    gen_server:call(?MODULE, {always_these_partitions, Parts}, infinity).
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init({Seed, OldThreshold, NoPartitionThreshold}) ->
@@ -88,6 +92,8 @@ handle_call({get, Nodes}, _From, S) ->
 handle_call({reset_thresholds, OldThreshold, NoPartitionThreshold}, _From, S) ->
     {reply, ok, S#state{old_threshold=OldThreshold,
                         no_partition_threshold=NoPartitionThreshold}};
+handle_call({always_these_partitions, Parts}, _From, S) ->
+    {reply, ok, S#state{old_partitions={Parts,[na_reset_by_always]}}};
 handle_call({stop}, _From, S) ->
     {stop, normal, ok, S}.
 

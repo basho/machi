@@ -232,7 +232,7 @@ convergence_demo_test_() ->
 
 convergence_demo_test(_) ->
     All_list = [a,b,c],
-    machi_partition_simulator:start_link({1,22,33}, 0, 100),
+    machi_partition_simulator:start_link({111,222,33}, 0, 100),
     _ = machi_partition_simulator:get(All_list),
 
     {ok, FLUa} = machi_flu0:start_link(a),
@@ -289,8 +289,9 @@ convergence_demo_test(_) ->
 
         DoIt(30, 0, 0),
         io:format(user, "SET always_last_partitions ON ... we should see convergence to correct chains.\n", []),
-        machi_partition_simulator:always_last_partitions(),
-        [DoIt(20, 40, 400) || _ <- [1]],
+        machi_partition_simulator:always_these_partitions([{b,a}]),
+        %% machi_partition_simulator:always_last_partitions(),
+        [DoIt(20, 40, 400) || _ <- [1,2,3]],
         %% TODO: We should be stable now ... analyze it.
 
         io:format(user, "SET always_last_partitions OFF ... let loose the dogs of war!\n", []),

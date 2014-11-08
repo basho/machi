@@ -446,7 +446,7 @@ D_foo=[],
     P = make_projection(OldEpochNum + 1,
                         MyName, All_list, Down, NewUPI, NewRepairing,
                         D_foo ++
-                        Dbg ++ [{nodes_up, Up}]),
+                        Dbg ++ [{ps, Partitions},{nodes_up, Up}]),
     {P, S#ch_mgr{runenv=RunEnv3}}.
 
 check_latest_private_projections(FLUs, MyProj, Partitions, S) ->
@@ -532,7 +532,8 @@ rank_projection(#projection{author_server=Author,
                             upi=UPI_list,
                             repairing=Repairing_list}, MemberRank, N) ->
     AuthorRank = orddict:fetch(Author, MemberRank),
-    AuthorRank +
+    %% (AuthorRank-AuthorRank) +                   % feels unstable????
+    AuthorRank +                                % feels stable
         (  N * length(Repairing_list)) +
         (N*N * length(UPI_list)).
 
