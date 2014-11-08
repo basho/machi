@@ -290,8 +290,9 @@ convergence_demo_test(_) ->
         DoIt(30, 0, 0),
         io:format(user, "SET always_last_partitions ON ... we should see convergence to correct chains.\n", []),
         machi_partition_simulator:always_these_partitions([{b,a}]),
+        %% machi_partition_simulator:always_these_partitions([{b,c}]),
         %% machi_partition_simulator:always_last_partitions(),
-        [DoIt(20, 40, 400) || _ <- [1,2,3]],
+        [DoIt(20, 40, 400) || _ <- [1]],
         %% TODO: We should be stable now ... analyze it.
 
         io:format(user, "SET always_last_partitions OFF ... let loose the dogs of war!\n", []),

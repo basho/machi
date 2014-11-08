@@ -564,6 +564,8 @@ react_to_env_A30(Retries, P_newprop, S) ->
     UPI_Repairing_FLUs = lists:sort(P_latest#projection.upi ++
                                     P_latest#projection.repairing),
     All_UPI_Repairing_were_unanimous = UPI_Repairing_FLUs == UnanimousFLUs,
+    %% TODO: investigate if the condition below is more correct?
+    %% All_UPI_Repairing_were_unanimous = (UPI_Repairing_FLUs -- UnanimousFLUs) == [],
     LatestUnanimousP =
         if UnanimousTag == unanimous
            andalso
@@ -760,10 +762,6 @@ react_to_env_C110(P_latest, #ch_mgr{myflu=MyFLU} = S) ->
                    {hooray, {v2, date(), time()}}|Extra_todo]),
     Epoch = P_latest2#projection.epoch_number,
     ok = machi_flu0:proj_write(MyFLU, Epoch, private, P_latest2),
-    react_to_env_C120(P_latest, S).
-
-react_to_env_C120(P_latest, S) ->
-    ?REACT(c120),
     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
         true ->
             {_,_,C} = os:timestamp(),
@@ -771,13 +769,14 @@ react_to_env_C120(P_latest, S) ->
             {HH,MM,SS} = time(),
             io:format(user, "~2..0w:~2..0w:~2..0w.~3..0w ~p uses: ~w\n",
                       [HH,MM,SS,MSec, S#ch_mgr.name,
-                       make_projection_summary(P_latest)]);
-            %% io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses: ~w\nPrev was:            ~w\n",
-            %%           [HH,MM,SS,MSec, S#ch_mgr.name,
-            %%            make_projection_summary(P_latest), make_projection_summary(S#ch_mgr.proj)]);
+                       make_projection_summary(P_latest2)]);
         _ ->
             ok
     end,
+    react_to_env_C120(P_latest, S).
+
+react_to_env_C120(P_latest, S) ->
+    ?REACT(c120),
     {{now_using, P_latest#projection.epoch_number},
      S#ch_mgr{proj=P_latest, proj_proposed=none}}.
 
@@ -1105,7 +1104,7 @@ perhaps_call(#ch_mgr{name=MyName, myflu=MyFLU}, Partitions, FLU, DoIt) ->
                 false ->
                     Res;
                 _ ->
-                    (catch put(react, [timeout2|get(react)])),
+                    (catch put(react, [{timeout2,me,MyFLU,to,FLU,RemoteFLU_p,Partitions}|get(react)])),
                     exit(timeout)
             end;
         _ ->
