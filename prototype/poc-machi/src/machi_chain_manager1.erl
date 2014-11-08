@@ -816,8 +816,10 @@ react_to_env_C310(P_newprop, S) ->
 projection_transitions_are_sane(Ps, RelativeToServer) ->
     projection_transitions_are_sane(Ps, RelativeToServer, false).
 
+-ifdef(TEST).
 projection_transitions_are_sane_retrospective(Ps, RelativeToServer) ->
     projection_transitions_are_sane(Ps, RelativeToServer, true).
+-endif. % TEST
 
 projection_transitions_are_sane([], _RelativeToServer, _RetrospectiveP) ->
     true;
@@ -836,8 +838,10 @@ projection_transitions_are_sane([P1, P2|T], RelativeToServer, RetrospectiveP) ->
 projection_transition_is_sane(P1, P2, RelativeToServer) ->
     projection_transition_is_sane(P1, P2, RelativeToServer, false).
 
+-ifdef(TEST).
 projection_transition_is_sane_retrospective(P1, P2, RelativeToServer) ->
     projection_transition_is_sane(P1, P2, RelativeToServer, true).
+-endif. % TEST
 
 projection_transition_is_sane(
   #projection{epoch_number=Epoch1,
