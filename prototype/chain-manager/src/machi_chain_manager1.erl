@@ -274,7 +274,7 @@ cl_write_public_proj_remote(FLUs, Partitions, Epoch, Proj, S) ->
 do_cl_read_latest_public_projection(ReadRepairP,
                                     #ch_mgr{proj=Proj1, myflu=_MyFLU} = S) ->
     _Epoch1 = Proj1#projection.epoch_number,
-    case cl_read_latest_public_projection(S) of
+    case cl_read_latest_projection(public, S) of
         {needs_repair, FLUsRs, Extra, S3} ->
             if not ReadRepairP ->
                     {not_unanimous, todoxyz, [{results, FLUsRs}|Extra], S3};
@@ -286,11 +286,11 @@ do_cl_read_latest_public_projection(ReadRepairP,
             {UnanimousTag, Proj2, Extra, S3}
     end.
 
-cl_read_latest_public_projection(#ch_mgr{proj=CurrentProj}=S) ->
+cl_read_latest_projection(ProjectionType, #ch_mgr{proj=CurrentProj}=S) ->
     #projection{all_members=All_list} = CurrentProj,
     {_UpNodes, Partitions, S2} = calc_up_nodes(S),
     DoIt = fun(X) ->
-                   case machi_flu0:proj_read_latest(X, public) of
+                   case machi_flu0:proj_read_latest(X, ProjectionType) of
                        {ok, P} -> P;
                        Else    -> Else
                    end
@@ -300,6 +300,8 @@ cl_read_latest_public_projection(#ch_mgr{proj=CurrentProj}=S) ->
     FLUsRs = lists:zip(All_list, Rs),
     UnwrittenRs = [x || error_unwritten <- Rs],
     Ps = [Proj || {_FLU, Proj} <- FLUsRs, is_record(Proj, projection)],
+    BadAnswerFLUs = [FLU || {FLU, Answer} <- FLUsRs,
+                            not is_record(Answer, projection)],
     if length(UnwrittenRs) == length(Rs) ->
             {error_unwritten, FLUsRs, [todo_fix_caller_perhaps], S2};
        UnwrittenRs /= [] ->
@@ -313,7 +315,10 @@ cl_read_latest_public_projection(#ch_mgr{proj=CurrentProj}=S) ->
             Extra = [{all_members_replied, length(Rs) == length(All_list)}],
             Best_FLUs = [FLU || {FLU, Projx} <- FLUsRs, Projx == BestProj],
             Extra2 = [{unanimous_flus,Best_FLUs},
-                      {not_unanimous_flus, NotBestPs}|Extra],
+                      {not_unanimous_flus, All_list --
+                                                 (Best_FLUs ++ BadAnswerFLUs)},
+                      {bad_answer_flus, BadAnswerFLUs},
+                      {not_unanimous_answers, NotBestPs}|Extra],
             {UnanimousTag, BestProj, Extra2, S2}
     end.
 
@@ -693,8 +698,8 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                  Rank_newprop, Rank_latest, #ch_mgr{name=MyName}=S0) ->
     ?REACT(b10),
 
-    S = calculate_flaps(P_newprop, S0),
     FlapLimit = 3,                              % todo tweak
+    S = calculate_flaps(P_newprop, FlapLimit, S0),
     if
         LatestUnanimousP ->
             ?REACT({b10, ?LINE}),
@@ -781,8 +786,10 @@ react_to_env_C110(P_latest, #ch_mgr{myflu=MyFLU} = S) ->
     Islands = proplists:get_value(network_islands, RunEnv),
     P_latest2 = update_projection_dbg2(
                   P_latest,
-                  [{network_islands, Islands},
-                   {hooray, {v2, date(), time()}}|Extra_todo]),
+                  [%% {network_islands, Islands},
+                   %% {hooray, {v2, date(), time()}}
+                   Islands--Islands
+                   |Extra_todo]),
     Epoch = P_latest2#projection.epoch_number,
     ok = machi_flu0:proj_write(MyFLU, Epoch, private, P_latest2),
     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
@@ -847,21 +854,39 @@ react_to_env_C310(P_newprop, S) ->
     
     react_to_env_A10(S2).
 
-calculate_flaps(P_newprop, #ch_mgr{name=_MyName,
-                                   proj_history=H, flaps=Flaps} = S) ->
+calculate_flaps(P_newprop, FlapLimit,
+                #ch_mgr{name=_MyName, proj_history=H, flaps=Flaps} = S) ->
     Ps = queue:to_list(H) ++ [P_newprop],
     UPI_Repairing_combos =
         lists:usort([{P#projection.upi, P#projection.repairing} || P <- Ps]),
     Down_combos = lists:usort([P#projection.down || P <- Ps]),
     case {queue:len(H), length(UPI_Repairing_combos), length(Down_combos)} of
         {N, _, _} when N < length(P_newprop#projection.all_members) ->
+            put(flap_hack, false),
             S#ch_mgr{flaps=0};
-        %% {_, URs=_URs, 1=_Ds} when URs < 3 ->
         {_, 1=_URs, 1=_Ds} ->
             %%%%%% io:format(user, "F{~w,~w,~w..~w}!", [_MyName, _URs, _Ds, Flaps]),
-            S#ch_mgr{flaps=Flaps + 1};
-            %% todo_flapping;
+            NewFlaps = Flaps + 1,
+            FlapHack = get(flap_hack),
+            if NewFlaps > FlapLimit andalso FlapHack == false ->
+                    put(flap_hack, true),
+                    {_WhateverUnanimous, BestP, Props, _S} =
+                        cl_read_latest_projection(private, S),
+                    NotBestPs = proplists:get_value(not_unanimous_answers, Props),
+                    DownUnion = lists:usort(
+                                  lists:flatten(
+                                    [P#projection.down ||
+                                        P <- [BestP|NotBestPs]])),
+                    Unanimous = proplists:get_value(unanimous_flus, Props),
+                    NotUnanimous = proplists:get_value(not_unanimous_flus, Props),
+                    BadFLUs = proplists:get_value(bad_answer_flus, Props),
+                    io:format(user, "flu ~p sees flaps: DownUnion ~p by u ~p not-u ~p bad-flus ~p\n", [S#ch_mgr.name, DownUnion, Unanimous, NotUnanimous, BadFLUs]);
+               true ->
+                    ok
+            end,
+            S#ch_mgr{flaps=NewFlaps};
         _ ->
+            put(flap_hack, false),
             S#ch_mgr{flaps=0}
     end.
 

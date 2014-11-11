@@ -1,0 +1,10 @@
+{application,tango,
+             [{description,"Really quick hack prototype of Tango on top of corfurl."},
+              {vsn,"0.0.0"},
+              {applications,[kernel,stdlib,lager]},
+              {mod,{tango_does_not_exist_app,[]}},
+              {registered,[]},
+              {env,[]},
+              {modules,[corfurl,corfurl_client,corfurl_flu,corfurl_sequencer,
+                        corfurl_util,tango,tango_dt,tango_dt_map,
+                        tango_dt_queue,tango_dt_register,tango_oid]}]}.

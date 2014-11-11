@@ -228,7 +228,7 @@ chain_to_projection(MyName, Epoch, UPI_list, Repairing_list, All_list) ->
 -ifndef(PULSE).
 
 convergence_demo_test_() ->
-    {timeout, 300, fun() -> convergence_demo_test(x) end}.
+    {timeout, 98*300, fun() -> convergence_demo_test(x) end}.
 
 convergence_demo_test(_) ->
     All_list = [a,b,c,d],
@@ -291,23 +291,33 @@ convergence_demo_test(_) ->
                         end || _ <- Pids]
                end,
 
-        DoIt(30, 0, 0),
-        io:format(user, "\nSET always_last_partitions ON ... we should see convergence to correct chains.\n", []),
-        %% machi_partition_simulator:always_these_partitions([{b,a}]),
-        machi_partition_simulator:always_these_partitions([{a,b}]),
-        %% machi_partition_simulator:always_these_partitions([{b,c}]),
-        %% machi_partition_simulator:always_these_partitions([{a,c},{c,b}]),
-        %% machi_partition_simulator:always_last_partitions(),
-        [DoIt(25, 40, 400) || _ <- [1]],
-        %% TODO: We should be stable now ... analyze it.
+        %% DoIt(30, 0, 0),
+        %% io:format(user, "\nSET always_last_partitions ON ... we should see convergence to correct chains.\n", []),
+        %% %% machi_partition_simulator:always_these_partitions([{b,a}]),
+        %% %% machi_partition_simulator:always_these_partitions([{a,b}]),
+        %% %% machi_partition_simulator:always_these_partitions([{b,c}]),
+        %% %% machi_partition_simulator:always_these_partitions([{a,c},{c,b}]),
+        %% %% machi_partition_simulator:always_last_partitions(),
+        %% [DoIt(25, 40, 400) || _ <- [1]],
+        %% %% TODO: We should be stable now ... analyze it.
 
-        io:format(user, "\nSET always_last_partitions OFF ... let loose the dogs of war!\n", []),
+XandYs1 = [[{X,Y}] || X <- All_list, Y <- All_list, X /= Y],
+XandYs2 = [[{X,Y}, {A,B}] || X <- All_list, Y <- All_list, X /= Y,
+                            A <- All_list, B <- All_list, A /= B,
+                            X /= A],
+NotReallyAllPartitionCombinations = XandYs1 ++ XandYs2,
+?D({?LINE, length(NotReallyAllPartitionCombinations)}),
+[begin
         machi_partition_simulator:reset_thresholds(10, 50),
+        io:format(user, "\nLet loose the dogs of war!\n", []),
+        timer:sleep(333),
         DoIt(30, 0, 0),
-        io:format(user, "\nSET always_last_partitions ON ... we should see convergence to correct chains2.\n", []),
+        io:format(user, "\nSET always_last_partitions ~w.\n", [Partition]),
         %% machi_partition_simulator:always_last_partitions(),
-        machi_partition_simulator:always_these_partitions([{a,c}]),
+        machi_partition_simulator:always_these_partitions(Partition),
         [DoIt(25, 40, 400) || _ <- [1]],
+ ok
+ end || Partition <- NotReallyAllPartitionCombinations],
 
         io:format(user, "\nSET always_last_partitions ON ... we should see convergence to correct chains3.\n", []),
         machi_partition_simulator:no_partitions(),

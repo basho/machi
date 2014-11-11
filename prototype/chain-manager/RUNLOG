@@ -1,0 +1,431 @@
+/Users/fritchie/b/src/rebar/rebar get-deps
+==> goldrush (get-deps)
+==> lager (get-deps)
+==> chain-manager (get-deps)
+/Users/fritchie/b/src/rebar/rebar compile
+==> goldrush (compile)
+Compiled src/gre.erl
+Compiled src/gr_param_sup.erl
+Compiled src/gr_sup.erl
+Compiled src/gr_manager_sup.erl
+Compiled src/gr_counter_sup.erl
+Compiled src/gr_manager.erl
+Compiled src/gr_context.erl
+Compiled src/gr_app.erl
+Compiled src/gr_param.erl
+Compiled src/glc_ops.erl
+Compiled src/gr_counter.erl
+Compiled src/glc.erl
+Compiled src/glc_lib.erl
+Compiled src/glc_code.erl
+==> lager (compile)
+Compiled src/lager_util.erl
+Compiled src/lager_transform.erl
+Compiled src/lager_sup.erl
+Compiled src/lager_msg.erl
+Compiled src/lager_handler_watcher_sup.erl
+Compiled src/lager_handler_watcher.erl
+Compiled src/lager_stdlib.erl
+Compiled src/lager_trunc_io.erl
+Compiled src/lager_default_formatter.erl
+Compiled src/lager_format.erl
+Compiled src/lager_crash_log.erl
+Compiled src/lager_console_backend.erl
+Compiled src/lager_file_backend.erl
+Compiled src/lager_config.erl
+Compiled src/lager_backend_throttle.erl
+Compiled src/lager_app.erl
+Compiled src/lager.erl
+Compiled src/error_logger_lager_h.erl
+==> chain-manager (compile)
+Compiled src/machi_util.erl
+Compiled src/machi_flu0.erl
+Compiled src/machi_chain_manager0.erl
+Compiled src/machi_chain_manager1.erl
+/Users/fritchie/b/src/rebar/rebar -v skip_deps=true eunit
+INFO:  Looking for lager-2.0.1 ; found lager-2.0.1 at /Users/fritchie/b/src/machi/prototype/chain-manager/deps/lager
+INFO:  Looking for lager-2.0.1 ; found lager-2.0.1 at /Users/fritchie/b/src/machi/prototype/chain-manager/deps/lager
+INFO:  Looking for goldrush-.* ; found goldrush-0.1.5 at /Users/fritchie/b/src/machi/prototype/chain-manager/deps/goldrush
+INFO:  Looking for goldrush-.* ; found goldrush-0.1.5 at /Users/fritchie/b/src/machi/prototype/chain-manager/deps/goldrush
+==> chain-manager (eunit)
+INFO:  sh info:
+	cwd: "/Users/fritchie/b/src/machi/prototype/chain-manager"
+	cmd: cp -R src/machi_util.erl src/machi_flu0.erl src/machi_chain_manager1.erl src/machi_chain_manager0.erl test/pulse_util/lamport_clock.erl test/pulse_util/handle_errors.erl test/pulse_util/event_logger.erl test/machi_util_test.erl test/machi_partition_simulator.erl test/machi_flu0_test.erl test/machi_chain_manager1_test.erl test/machi_chain_manager1_pulse.erl test/machi_chain_manager0_test.erl ".eunit"
+Compiled src/machi_flu0.erl
+Compiled src/machi_util.erl
+Compiled test/pulse_util/lamport_clock.erl
+Compiled test/pulse_util/handle_errors.erl
+Compiled src/machi_chain_manager0.erl
+Compiled test/pulse_util/event_logger.erl
+Compiled test/machi_partition_simulator.erl
+Compiled test/machi_util_test.erl
+Compiled test/machi_flu0_test.erl
+Compiled test/machi_chain_manager1_pulse.erl
+Compiled test/machi_chain_manager1_test.erl
+Compiled src/machi_chain_manager1.erl
+Compiled test/machi_chain_manager0_test.erl
+======================== EUnit ========================
+machi_util_test: repair_merge_test_ (module 'machi_util_test')...............................................................................................................................................................................................................................................................................................................
+OK, passed 300 tests
+[1.733 s] ok
+module 'machi_util'
+module 'machi_partition_simulator'
+module 'machi_flu0_test'
+  machi_flu0_test: repair_status_test...[0.002 s] ok
+  machi_flu0_test: concuerror1_test...ok
+  machi_flu0_test: concuerror2_test...ok
+  machi_flu0_test: concuerror3_test...ok
+  machi_flu0_test: concuerror4_test...ok
+  machi_flu0_test: proj_store_test...ok
+  machi_flu0_test: wedge_test...ok
+  machi_flu0_test: proj0_test...[0.001 s] ok
+  [done in 0.026 s]
+module 'machi_flu0'
+module 'machi_chain_manager1_test'
+  machi_chain_manager1_test: smoke0_test...[{epoch,1},{author,a},{upi,[a,b,c]},{repair,[]},{down,[]},{d,[{author_proc,call},{ps,[]},{nodes_up,[a,b,c]}]},{d2,[]}]
+[{epoch,1},{author,a},{upi,[a]},{repair,[]},{down,[b,c]},{d,[{author_proc,call},{ps,[{a,b},{c,a},{b,c},{c,b}]},{nodes_up,[a]}]},{d2,[]}]
+[{epoch,1},{author,a},{upi,[a,b]},{repair,[]},{down,[c]},{d,[{author_proc,call},{ps,[{c,a},{b,c}]},{nodes_up,[a,b]}]},{d2,[]}]
+[{epoch,1},{author,a},{upi,[a,b]},{repair,[]},{down,[c]},{d,[{author_proc,call},{ps,[{c,a},{b,c}]},{nodes_up,[a,b]}]},{d2,[]}]
+[{epoch,1},{author,a},{upi,[a]},{repair,[]},{down,[b,c]},{d,[{author_proc,call},{ps,[{a,b},{b,a},{a,c},{c,a},{b,c}]},{nodes_up,[a]}]},{d2,[]}]
+[0.003 s] ok
+  machi_chain_manager1_test: smoke1_test...[0.001 s] ok
+  machi_chain_manager1_test: nonunanimous_setup_and_fix_test...x x
+_XX {not_unanimous,{projection,1,<<110,253,187,8,20,172,231,72,56,72,97,162,22,0,234,37,105,166,11,10>>,[a,b],[a],{1425,368983,392344},b,[b],[],[{hackhack,103}],[]},[{unanimous_flus,[b]},{not_unanimous_flus,[{projection,1,<<125,66,48,143,209,3,150,235,225,93,216,21,70,165,243,106,106,243,105,176>>,[a,b],[b],{1425,368983,392326},a,[a],[],[{hackhack,100}],[]}]},{all_members_replied,true}]}
+[0.001 s] ok
+  machi_chain_manager1_test: convergence_demo_test_...16:49:43.396 a uses: [{epoch,1},{author,a},{upi,[a,b,c,d]},{repair,[]},{down,[]},{d,[{author_proc,call},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+XX1 1
+16:49:43.396 b uses: [{epoch,1},{author,a},{upi,[a,b,c,d]},{repair,[]},{down,[]},{d,[{author_proc,call},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.396 c uses: [{epoch,1},{author,a},{upi,[a,b,c,d]},{repair,[]},{down,[]},{d,[{author_proc,call},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+QQ unanimous
+? MGR : make_projection_summary ( QQP2 ) [{epoch,1},{author,a},{upi,[a,b,c,d]},{repair,[]},{down,[]},{d,[{author_proc,call},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[]}]
+QQE2 [{unanimous_flus,[a,b,c,d]},
+      {not_unanimous_flus,[]},
+      {all_members_replied,true}]
+16:49:43.397 d uses: [{epoch,1},{author,a},{upi,[a,b,c,d]},{repair,[]},{down,[]},{d,[{author_proc,call},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.398 c uses: [{epoch,4},{author,c},{upi,[c]},{repair,[]},{down,[a,b,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[c]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.399 d uses: [{epoch,10},{author,d},{upi,[d]},{repair,[]},{down,[a,b,c]},{d,[{author_proc,react},{ps,[{d,a},{b,c},{b,d},{d,b},{c,d}]},{nodes_up,[d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.401 d uses: [{epoch,19},{author,d},{upi,[d]},{repair,[a,b,c]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.403 d uses: [{epoch,26},{author,d},{upi,[d]},{repair,[a,b,c]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.404 d uses: [{epoch,28},{author,d},{upi,[d]},{repair,[a,b,c]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.405 d uses: [{epoch,34},{author,d},{upi,[d]},{repair,[]},{down,[a,b,c]},{d,[{author_proc,react},{ps,[{b,a},{a,c},{c,a},{a,d},{b,c},{c,b},{d,b},{c,d},{d,c}]},{nodes_up,[d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.406 d uses: [{epoch,38},{author,d},{upi,[d]},{repair,[a,b,c]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.408 d uses: [{epoch,45},{author,d},{upi,[d]},{repair,[]},{down,[a,b,c]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{a,d},{d,a},{b,c},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.411 d uses: [{epoch,63},{author,d},{upi,[d]},{repair,[]},{down,[a,b,c]},{d,[{author_proc,react},{ps,[{b,a},{a,c},{c,a},{a,d},{d,a},{b,c},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.412 d uses: [{epoch,65},{author,d},{upi,[d]},{repair,[]},{down,[a,b,c]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{a,d},{d,a},{b,c},{c,b},{b,d},{d,b},{d,c}]},{nodes_up,[d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.414 d uses: [{epoch,71},{author,d},{upi,[d]},{repair,[a,b,c]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.417 d uses: [{epoch,85},{author,d},{upi,[d]},{repair,[a,c]},{down,[b]},{d,[{author_proc,react},{ps,[{d,b}]},{nodes_up,[a,c,d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.418 d uses: [{epoch,87},{author,d},{upi,[d]},{repair,[a,c,b]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.421 d uses: [{epoch,98},{author,d},{upi,[d]},{repair,[]},{down,[a,b,c]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{a,d},{d,a},{b,c},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.423 d uses: [{epoch,104},{author,d},{upi,[d]},{repair,[]},{down,[a,b,c]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,d},{d,a},{b,c},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.424 d uses: [{epoch,107},{author,d},{upi,[d]},{repair,[a,b,c]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.425 d uses: [{epoch,110},{author,d},{upi,[d]},{repair,[a,b,c]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.426 d uses: [{epoch,113},{author,d},{upi,[d]},{repair,[]},{down,[a,b,c]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{a,d},{b,c},{c,b},{d,b},{c,d},{d,c}]},{nodes_up,[d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.426 d uses: [{epoch,116},{author,d},{upi,[d]},{repair,[]},{down,[a,b,c]},{d,[{author_proc,react},{ps,[{a,b},{a,c},{a,d},{c,b},{b,d},{d,b},{d,c}]},{nodes_up,[d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.427 d uses: [{epoch,118},{author,d},{upi,[d]},{repair,[]},{down,[a,b,c]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{c,a},{a,d},{d,a},{b,c},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.428 d uses: [{epoch,121},{author,d},{upi,[d]},{repair,[a,b,c]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.428 d uses: [{epoch,123},{author,d},{upi,[d]},{repair,[]},{down,[a,b,c]},{d,[{author_proc,react},{ps,[{b,a},{a,d},{b,d},{d,c}]},{nodes_up,[d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.430 d uses: [{epoch,129},{author,d},{upi,[d]},{repair,[a,b,c]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.433 d uses: [{epoch,139},{author,d},{upi,[d]},{repair,[a,b,c]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.436 d uses: [{epoch,149},{author,d},{upi,[d]},{repair,[a,b,c]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.503 c uses: [{epoch,149},{author,d},{upi,[d]},{repair,[a,b,c]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.506 b uses: [{epoch,153},{author,b},{upi,[a,b,c,d]},{repair,[]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.507 b uses: [{epoch,157},{author,b},{upi,[a,b,c,d]},{repair,[]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.508 b uses: [{epoch,161},{author,b},{upi,[b]},{repair,[]},{down,[a,c,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{a,d},{d,a},{b,c},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[b]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.509 b uses: [{epoch,166},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.510 b uses: [{epoch,170},{author,b},{upi,[b]},{repair,[]},{down,[a,c,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{c,a},{a,d},{d,a},{b,c},{c,b},{d,b},{c,d},{d,c}]},{nodes_up,[b]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.513 b uses: [{epoch,181},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.515 b uses: [{epoch,184},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.516 b uses: [{epoch,187},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.516 b uses: [{epoch,189},{author,b},{upi,[b]},{repair,[]},{down,[a,c,d]},{d,[{author_proc,react},{ps,[{b,a},{c,a},{a,d},{d,a},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[b]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.517 b uses: [{epoch,192},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.518 b uses: [{epoch,196},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.520 b uses: [{epoch,200},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.521 b uses: [{epoch,202},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.523 b uses: [{epoch,209},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.524 b uses: [{epoch,211},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.526 b uses: [{epoch,220},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.528 b uses: [{epoch,225},{author,b},{upi,[b]},{repair,[c]},{down,[a,d]},{d,[{author_proc,react},{ps,[{a,b},{a,c},{a,d},{d,a},{b,d},{d,b},{c,d}]},{nodes_up,[b,c]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.529 b uses: [{epoch,228},{author,b},{upi,[b]},{repair,[]},{down,[a,c,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{a,d},{b,c},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[b]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.530 b uses: [{epoch,232},{author,b},{upi,[b]},{repair,[]},{down,[a,c,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{c,a},{a,d},{d,a},{c,b},{b,d},{d,b}]},{nodes_up,[b]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.531 b uses: [{epoch,235},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.534 b uses: [{epoch,243},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{d,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.563 c uses: [{epoch,243},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{d,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.563 c uses: [{epoch,245},{author,c},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.567 c uses: [{epoch,261},{author,c},{upi,[c]},{repair,[]},{down,[a,b,d]},{d,[{author_proc,react},{ps,[{a,b},{a,c},{c,a},{a,d},{d,a},{b,c},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[c]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.567 c uses: [{epoch,263},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.568 c uses: [{epoch,266},{author,c},{upi,[c]},{repair,[]},{down,[a,b,d]},{d,[{author_proc,react},{ps,[{a,b},{a,c},{c,a},{a,d},{b,c},{d,b},{c,d},{d,c}]},{nodes_up,[c]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.570 c uses: [{epoch,273},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.571 c uses: [{epoch,279},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.573 c uses: [{epoch,284},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.573 c uses: [{epoch,286},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.575 c uses: [{epoch,294},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.576 c uses: [{epoch,296},{author,c},{upi,[c]},{repair,[]},{down,[a,b,d]},{d,[{author_proc,react},{ps,[{b,a},{a,c},{c,a},{d,a},{b,c},{c,b},{d,b},{c,d},{d,c}]},{nodes_up,[c]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.576 c uses: [{epoch,299},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.579 c uses: [{epoch,311},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.580 c uses: [{epoch,314},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.582 c uses: [{epoch,322},{author,c},{upi,[c]},{repair,[]},{down,[a,b,d]},{d,[{author_proc,react},{ps,[{b,a},{c,a},{a,d},{d,a},{b,c},{c,b},{d,b},{d,c}]},{nodes_up,[c]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.583 c uses: [{epoch,325},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.583 c uses: [{epoch,327},{author,c},{upi,[c]},{repair,[]},{down,[a,b,d]},{d,[{author_proc,react},{ps,[{a,b},{c,a},{c,b},{c,d}]},{nodes_up,[c]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.631 a uses: [{epoch,329},{author,a},{upi,[a,b,c,d]},{repair,[]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.633 a uses: [{epoch,338},{author,a},{upi,[a]},{repair,[]},{down,[b,c,d]},{d,[{author_proc,react},{ps,[{a,b},{a,c},{c,a},{a,d},{d,a},{c,b},{b,d},{c,d},{d,c}]},{nodes_up,[a]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.635 a uses: [{epoch,344},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.635 a uses: [{epoch,347},{author,a},{upi,[a]},{repair,[]},{down,[b,c,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{a,d},{d,a},{b,c},{c,b},{b,d},{c,d},{d,c}]},{nodes_up,[a]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.636 a uses: [{epoch,349},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.636 a uses: [{epoch,351},{author,a},{upi,[a]},{repair,[]},{down,[b,c,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{c,a},{a,d},{d,b},{c,d},{d,c}]},{nodes_up,[a]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.637 a uses: [{epoch,354},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{c,b}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.639 a uses: [{epoch,362},{author,a},{upi,[a]},{repair,[]},{down,[b,c,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{a,d},{d,a},{b,c},{c,b},{c,d},{d,c}]},{nodes_up,[a]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.640 a uses: [{epoch,365},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.641 a uses: [{epoch,368},{author,a},{upi,[a]},{repair,[]},{down,[b,c,d]},{d,[{author_proc,react},{ps,[{a,b},{a,c},{c,a},{a,d},{d,a},{b,d},{d,b},{d,c}]},{nodes_up,[a]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.642 a uses: [{epoch,372},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.642 a uses: [{epoch,374},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.643 a uses: [{epoch,376},{author,a},{upi,[a]},{repair,[]},{down,[b,c,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{a,d},{b,c},{c,b},{b,d},{d,b},{d,c}]},{nodes_up,[a]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.644 a uses: [{epoch,380},{author,a},{upi,[a]},{repair,[]},{down,[b,c,d]},{d,[{author_proc,react},{ps,[{b,a},{c,a},{d,a},{d,c}]},{nodes_up,[a]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.644 a uses: [{epoch,382},{author,a},{upi,[a]},{repair,[]},{down,[b,c,d]},{d,[{author_proc,react},{ps,[{a,b},{c,a},{a,d},{c,b}]},{nodes_up,[a]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.647 a uses: [{epoch,394},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.648 a uses: [{epoch,398},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.649 a uses: [{epoch,402},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.650 a uses: [{epoch,404},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.651 a uses: [{epoch,409},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.652 a uses: [{epoch,414},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{b,d},{d,b}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.654 a uses: [{epoch,420},{author,a},{upi,[a]},{repair,[]},{down,[b,c,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{a,d},{c,b},{d,b},{d,c}]},{nodes_up,[a]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.656 a uses: [{epoch,427},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.657 a uses: [{epoch,431},{author,a},{upi,[a]},{repair,[]},{down,[b,c,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{a,d},{d,a},{b,c},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[a]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.658 a uses: [{epoch,434},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{b,c},{c,b},{d,b},{c,d},{d,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+
+SET always_last_partitions ON ... we should see convergence to correct chains.
+16:49:43.701 d uses: [{epoch,434},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{b,c},{c,b},{d,b},{c,d},{d,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.799 c uses: [{epoch,434},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{b,c},{c,b},{d,b},{c,d},{d,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:43.999 a uses: [{epoch,436},{author,a},{upi,[a,c]},{repair,[d]},{down,[b]},{d,[{repair_airquote_done,{we_agree,434}},{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,43}}}]}]
+16:49:44.143 b uses: [{epoch,437},{author,b},{upi,[b]},{repair,[c,d]},{down,[a]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,44}}}]}]
+16:49:44.171 d uses: [{epoch,438},{author,d},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,44}}}]}]
+16:49:44.206 c uses: [{epoch,438},{author,d},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,44}}}]}]
+16:49:44.403 a uses: [{epoch,439},{author,a},{upi,[a,c]},{repair,[d]},{down,[b]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,44}}}]}]
+16:49:44.695 d uses: [{epoch,440},{author,d},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,44}}}]}]
+16:49:44.740 c uses: [{epoch,440},{author,d},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,44}}}]}]
+16:49:44.808 a uses: [{epoch,441},{author,a},{upi,[a,c]},{repair,[d]},{down,[b]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,44}}}]}]
+16:49:44.810 b uses: [{epoch,442},{author,b},{upi,[b]},{repair,[c,d]},{down,[a]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,44}}}]}]
+16:49:45.100 d uses: [{epoch,443},{author,d},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,45}}}]}]
+16:49:45.144 c uses: [{epoch,443},{author,d},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,45}}}]}]
+16:49:45.212 a uses: [{epoch,444},{author,a},{upi,[a,c]},{repair,[d]},{down,[b]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,45}}}]}]
+16:49:45.460 b uses: [{epoch,445},{author,b},{upi,[b]},{repair,[c,d]},{down,[a]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,45}}}]}]
+16:49:45.502 d uses: [{epoch,446},{author,d},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,45}}}]}]
+16:49:45.549 c uses: [{epoch,446},{author,d},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,45}}}]}]
+16:49:45.618 a uses: [{epoch,447},{author,a},{upi,[a,c]},{repair,[d]},{down,[b]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,45}}}]}]
+16:49:46.025 d uses: [{epoch,448},{author,d},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,46}}}]}]
+16:49:46.031 c uses: [{epoch,448},{author,d},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,46}}}]}]
+16:49:46.117 b uses: [{epoch,449},{author,b},{upi,[b]},{repair,[c,d]},{down,[a]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,46}}}]}]
+16:49:46.427 a uses: [{epoch,450},{author,a},{upi,[a,c]},{repair,[d]},{down,[b]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,46}}}]}]
+16:49:46.531 d uses: [{epoch,451},{author,d},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,46}}}]}]
+16:49:46.580 c uses: [{epoch,451},{author,d},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,46}}}]}]
+16:49:46.790 b uses: [{epoch,452},{author,b},{upi,[b]},{repair,[c,d]},{down,[a]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,46}}}]}]
+16:49:46.833 a uses: [{epoch,453},{author,a},{upi,[a,c]},{repair,[d]},{down,[b]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,46}}}]}]
+16:49:47.039 d uses: [{epoch,454},{author,d},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,47}}}]}]
+16:49:47.043 c uses: [{epoch,454},{author,d},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,47}}}]}]
+16:49:47.237 a uses: [{epoch,455},{author,a},{upi,[a,c]},{repair,[d]},{down,[b]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,47}}}]}]
+16:49:47.451 b uses: [{epoch,456},{author,b},{upi,[b]},{repair,[c,d]},{down,[a]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,47}}}]}]
+16:49:47.492 d uses: [{epoch,457},{author,d},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,47}}}]}]
+16:49:47.538 c uses: [{epoch,457},{author,d},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,47}}}]}]
+16:49:47.644 a uses: [{epoch,458},{author,a},{upi,[a,c]},{repair,[d]},{down,[b]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,47}}}]}]
+16:49:48.016 d uses: [{epoch,459},{author,d},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,48}}}]}]
+16:49:48.022 c uses: [{epoch,459},{author,d},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,48}}}]}]
+16:49:48.049 a uses: [{epoch,460},{author,a},{upi,[a,c]},{repair,[d]},{down,[b]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[a,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,48}}}]}]
+16:49:48.111 b uses: [{epoch,461},{author,b},{upi,[b]},{repair,[c,d]},{down,[a]},{d,[{author_proc,react},{ps,[{a,b}]},{nodes_up,[b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,48}}}]}]
+{FLAP: c flaps 5}!
+{FLAP: a flaps 5}!
+{FLAP: c flaps 6}!
+{FLAP: a flaps 6}!
+
+SET always_last_partitions OFF ... let loose the dogs of war!
+16:49:56.562 a uses: [{epoch,466},{author,a},{upi,[a,c]},{repair,[d,b]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.565 a uses: [{epoch,471},{author,a},{upi,[a,c]},{repair,[d,b]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.568 a uses: [{epoch,479},{author,a},{upi,[a,c]},{repair,[d,b]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.569 a uses: [{epoch,481},{author,a},{upi,[a]},{repair,[]},{down,[b,c,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{d,a},{b,c},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[a]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.571 a uses: [{epoch,487},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.572 a uses: [{epoch,490},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.573 a uses: [{epoch,493},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.575 a uses: [{epoch,496},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.580 a uses: [{epoch,509},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.582 a uses: [{epoch,513},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.583 a uses: [{epoch,516},{author,a},{upi,[a]},{repair,[]},{down,[b,c,d]},{d,[{author_proc,react},{ps,[{a,b},{a,c},{d,a},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[a]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.585 a uses: [{epoch,520},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{c,d}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.587 a uses: [{epoch,524},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.589 a uses: [{epoch,529},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.590 a uses: [{epoch,532},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.591 a uses: [{epoch,535},{author,a},{upi,[a]},{repair,[]},{down,[b,c,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{d,a},{b,c},{c,b},{d,c}]},{nodes_up,[a]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.592 a uses: [{epoch,537},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.594 a uses: [{epoch,540},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.595 a uses: [{epoch,542},{author,a},{upi,[a]},{repair,[]},{down,[b,c,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{a,d},{d,a},{b,c},{c,b},{b,d},{d,b},{c,d}]},{nodes_up,[a]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.598 a uses: [{epoch,547},{author,a},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.622 c uses: [{epoch,555},{author,c},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.625 c uses: [{epoch,561},{author,c},{upi,[c]},{repair,[]},{down,[a,b,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{a,d},{d,a},{b,c},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[c]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.626 c uses: [{epoch,565},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.627 c uses: [{epoch,569},{author,c},{upi,[c]},{repair,[]},{down,[a,b,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{c,a},{b,c},{c,b},{b,d},{d,b},{c,d}]},{nodes_up,[c]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.628 c uses: [{epoch,573},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.629 c uses: [{epoch,575},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.630 c uses: [{epoch,578},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.632 c uses: [{epoch,582},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.636 d uses: [{epoch,596},{author,d},{upi,[d]},{repair,[]},{down,[a,b,c]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{a,d},{d,a},{b,c},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.636 c uses: [{epoch,596},{author,c},{upi,[c]},{repair,[]},{down,[a,b,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{a,d},{d,a},{b,c},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[c]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.640 d uses: [{epoch,604},{author,d},{upi,[d]},{repair,[a]},{down,[b,c]},{d,[{author_proc,react},{ps,[{a,c},{d,b},{c,d},{d,c}]},{nodes_up,[a,d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.643 d uses: [{epoch,610},{author,d},{upi,[d]},{repair,[a,b,c]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.646 d uses: [{epoch,615},{author,d},{upi,[d]},{repair,[]},{down,[a,b,c]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,d},{d,a},{c,b},{d,b},{c,d}]},{nodes_up,[d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.647 d uses: [{epoch,617},{author,d},{upi,[d]},{repair,[c]},{down,[a,b]},{d,[{author_proc,react},{ps,[{a,b},{c,a},{a,d},{c,b},{b,d}]},{nodes_up,[c,d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.649 d uses: [{epoch,623},{author,d},{upi,[d]},{repair,[c,a,b]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.652 d uses: [{epoch,627},{author,d},{upi,[d]},{repair,[c,a,b]},{down,[]},{d,[{author_proc,react},{ps,[{c,a},{b,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.653 d uses: [{epoch,629},{author,d},{upi,[d]},{repair,[c,a,b]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.659 d uses: [{epoch,643},{author,d},{upi,[d]},{repair,[c,a,b]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.662 d uses: [{epoch,651},{author,d},{upi,[d]},{repair,[c,a,b]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.668 d uses: [{epoch,668},{author,d},{upi,[d]},{repair,[c,a,b]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.677 d uses: [{epoch,685},{author,d},{upi,[d]},{repair,[]},{down,[a,b,c]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{a,d},{d,a},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.679 d uses: [{epoch,688},{author,d},{upi,[d]},{repair,[a,b,c]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.680 d uses: [{epoch,691},{author,d},{upi,[d]},{repair,[a,b,c]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.685 d uses: [{epoch,699},{author,d},{upi,[d]},{repair,[a,b,c]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.688 d uses: [{epoch,701},{author,d},{upi,[d]},{repair,[a,c]},{down,[b]},{d,[{author_proc,react},{ps,[{d,b}]},{nodes_up,[a,c,d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.690 d uses: [{epoch,706},{author,d},{upi,[d]},{repair,[a,c,b]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.690 d uses: [{epoch,708},{author,d},{upi,[d]},{repair,[]},{down,[a,b,c]},{d,[{author_proc,react},{ps,[{a,c},{d,a},{b,c},{c,b},{b,d},{d,b},{d,c}]},{nodes_up,[d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.697 d uses: [{epoch,724},{author,d},{upi,[d]},{repair,[]},{down,[a,b,c]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{d,a},{b,c},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.753 b uses: [{epoch,729},{author,b},{upi,[b]},{repair,[]},{down,[a,c,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{a,d},{d,a},{b,c},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[b]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.754 b uses: [{epoch,731},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.759 b uses: [{epoch,738},{author,b},{upi,[b]},{repair,[]},{down,[a,c,d]},{d,[{author_proc,react},{ps,[{a,b},{a,c},{c,a},{a,d},{d,a},{b,c},{d,b},{d,c}]},{nodes_up,[b]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.767 b uses: [{epoch,753},{author,b},{upi,[b]},{repair,[]},{down,[a,c,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{a,d},{d,a},{b,c},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[b]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.768 b uses: [{epoch,755},{author,b},{upi,[b]},{repair,[]},{down,[a,c,d]},{d,[{author_proc,react},{ps,[{b,a},{a,c},{d,a},{b,c},{b,d},{c,d},{d,c}]},{nodes_up,[b]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.773 b uses: [{epoch,765},{author,b},{upi,[b]},{repair,[]},{down,[a,c,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{a,d},{d,a},{b,c},{c,b},{b,d},{d,b},{d,c}]},{nodes_up,[b]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.778 b uses: [{epoch,775},{author,b},{upi,[b]},{repair,[]},{down,[a,c,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{a,d},{d,a},{b,c},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[b]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.784 b uses: [{epoch,792},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.787 b uses: [{epoch,799},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.790 b uses: [{epoch,807},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.795 b uses: [{epoch,821},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.797 b uses: [{epoch,825},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.798 b uses: [{epoch,828},{author,b},{upi,[b]},{repair,[c,d]},{down,[a]},{d,[{author_proc,react},{ps,[{a,b},{d,a}]},{nodes_up,[b,c,d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.799 b uses: [{epoch,832},{author,b},{upi,[b]},{repair,[c,d,a]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.800 b uses: [{epoch,834},{author,b},{upi,[b]},{repair,[c,d,a]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.801 b uses: [{epoch,837},{author,b},{upi,[b]},{repair,[c,d,a]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.802 b uses: [{epoch,840},{author,b},{upi,[b]},{repair,[]},{down,[a,c,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{d,a},{b,c},{c,b},{b,d},{d,c}]},{nodes_up,[b]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.803 b uses: [{epoch,842},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.804 b uses: [{epoch,845},{author,b},{upi,[b]},{repair,[]},{down,[a,c,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{c,a},{d,a},{b,c},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[b]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.808 b uses: [{epoch,854},{author,b},{upi,[b]},{repair,[]},{down,[a,c,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{a,d},{d,a},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[b]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.808 b uses: [{epoch,856},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.815 b uses: [{epoch,870},{author,b},{upi,[b]},{repair,[]},{down,[a,c,d]},{d,[{author_proc,react},{ps,[{a,b},{a,c},{c,a},{a,d},{d,a},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[b]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.818 b uses: [{epoch,877},{author,b},{upi,[b]},{repair,[]},{down,[a,c,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{a,d},{d,a},{b,c},{c,b},{b,d},{d,b},{d,c}]},{nodes_up,[b]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.876 c uses: [{epoch,879},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.877 c uses: [{epoch,881},{author,c},{upi,[c]},{repair,[]},{down,[a,b,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{a,d},{d,a},{b,c},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[c]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.878 c uses: [{epoch,883},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.879 c uses: [{epoch,885},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.881 c uses: [{epoch,890},{author,c},{upi,[c]},{repair,[]},{down,[a,b,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{a,d},{d,a},{b,c},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[c]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.882 c uses: [{epoch,892},{author,c},{upi,[c]},{repair,[]},{down,[a,b,d]},{d,[{author_proc,react},{ps,[{b,a},{c,a},{a,d},{d,a},{b,c},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[c]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.884 c uses: [{epoch,899},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.886 c uses: [{epoch,904},{author,c},{upi,[c]},{repair,[]},{down,[a,b,d]},{d,[{author_proc,react},{ps,[{a,b},{a,c},{c,a},{a,d},{b,c},{c,b},{b,d},{c,d},{d,c}]},{nodes_up,[c]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.887 c uses: [{epoch,906},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.888 c uses: [{epoch,910},{author,c},{upi,[c]},{repair,[]},{down,[a,b,d]},{d,[{author_proc,react},{ps,[{a,b},{b,a},{a,c},{c,a},{a,d},{d,a},{b,c},{c,b},{b,d},{d,b},{c,d},{d,c}]},{nodes_up,[c]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.894 c uses: [{epoch,925},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.896 c uses: [{epoch,929},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.902 c uses: [{epoch,943},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[islands_not_supported]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:56.903 c uses: [{epoch,945},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+
+SET always_last_partitions ON ... we should see convergence to correct chains2.
+16:49:56.946 d uses: [{epoch,945},{author,c},{upi,[c]},{repair,[a,b,d]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,56}}}]}]
+16:49:57.049 c uses: [{epoch,947},{author,c},{upi,[c]},{repair,[b,d]},{down,[a]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,57}}}]}]
+16:49:57.147 b uses: [{epoch,948},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,57}}}]}]
+16:49:57.350 d uses: [{epoch,948},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,57}}}]}]
+16:49:57.579 a uses: [{epoch,949},{author,a},{upi,[a]},{repair,[b,d]},{down,[c]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,57}}}]}]
+16:49:57.625 c uses: [{epoch,950},{author,c},{upi,[c]},{repair,[b,d]},{down,[a]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,57}}}]}]
+16:49:57.760 d uses: [{epoch,951},{author,d},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,57}}}]}]
+16:49:57.959 b uses: [{epoch,951},{author,d},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,57}}}]}]
+16:49:58.200 c uses: [{epoch,952},{author,c},{upi,[c]},{repair,[b,d]},{down,[a]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,58}}}]}]
+16:49:58.321 a uses: [{epoch,953},{author,a},{upi,[a]},{repair,[b,d]},{down,[c]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,58}}}]}]
+16:49:58.366 b uses: [{epoch,954},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,58}}}]}]
+16:49:58.572 d uses: [{epoch,954},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,58}}}]}]
+16:49:58.802 c uses: [{epoch,955},{author,c},{upi,[c]},{repair,[b,d]},{down,[a]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,58}}}]}]
+16:49:58.976 d uses: [{epoch,956},{author,d},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,58}}}]}]
+16:49:59.047 a uses: [{epoch,957},{author,a},{upi,[a]},{repair,[b,d]},{down,[c]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,59}}}]}]
+16:49:59.173 b uses: [{epoch,958},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,59}}}]}]
+16:49:59.382 d uses: [{epoch,958},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,59}}}]}]
+16:49:59.383 c uses: [{epoch,959},{author,c},{upi,[c]},{repair,[b,d]},{down,[a]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,59}}}]}]
+16:49:59.576 b uses: [{epoch,960},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,59}}}]}]
+16:49:59.778 a uses: [{epoch,961},{author,a},{upi,[a]},{repair,[b,d]},{down,[c]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,59}}}]}]
+16:49:59.784 d uses: [{epoch,962},{author,d},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,59}}}]}]
+16:49:59.957 c uses: [{epoch,963},{author,c},{upi,[c]},{repair,[b,d]},{down,[a]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,59}}}]}]
+16:49:59.980 b uses: [{epoch,964},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,49,59}}}]}]
+16:50:00.187 d uses: [{epoch,964},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,50,0}}}]}]
+16:50:00.532 a uses: [{epoch,965},{author,a},{upi,[a]},{repair,[b,d]},{down,[c]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,50,0}}}]}]
+16:50:00.552 c uses: [{epoch,966},{author,c},{upi,[c]},{repair,[b,d]},{down,[a]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,50,0}}}]}]
+16:50:00.590 d uses: [{epoch,967},{author,d},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,50,0}}}]}]
+16:50:00.788 b uses: [{epoch,967},{author,d},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,50,0}}}]}]
+16:50:01.136 c uses: [{epoch,968},{author,c},{upi,[c]},{repair,[b,d]},{down,[a]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,50,1}}}]}]
+16:50:01.194 b uses: [{epoch,969},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,50,1}}}]}]
+16:50:01.263 a uses: [{epoch,970},{author,a},{upi,[a]},{repair,[b,d]},{down,[c]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,50,1}}}]}]
+16:50:01.398 d uses: [{epoch,971},{author,d},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,50,1}}}]}]
+16:50:01.600 b uses: [{epoch,971},{author,d},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,50,1}}}]}]
+16:50:01.716 c uses: [{epoch,972},{author,c},{upi,[c]},{repair,[b,d]},{down,[a]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,50,1}}}]}]
+16:50:01.803 d uses: [{epoch,973},{author,d},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,50,1}}}]}]
+16:50:02.002 a uses: [{epoch,974},{author,a},{upi,[a]},{repair,[b,d]},{down,[c]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,50,2}}}]}]
+16:50:02.003 b uses: [{epoch,975},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,50,2}}}]}]
+16:50:02.209 d uses: [{epoch,975},{author,b},{upi,[b]},{repair,[a,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,50,2}}}]}]
+16:50:02.291 c uses: [{epoch,976},{author,c},{upi,[c]},{repair,[b,d]},{down,[a]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,50,2}}}]}]
+{FLAP: b flaps 4}!
+{FLAP: b flaps 5}!
+{FLAP: d flaps 6}!
+{FLAP: b flaps 6}!
+16:50:02.761 a uses: [{epoch,977},{author,a},{upi,[a]},{repair,[b,d]},{down,[c]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{16,50,2}}}]}]
+
+SET always_last_partitions ON ... we should see convergence to correct chains3.
+16:50:12.096 c uses: [{epoch,978},{author,c},{upi,[c]},{repair,[b,d,a]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,50,12}}}]}]
+16:50:12.196 b uses: [{epoch,978},{author,c},{upi,[c]},{repair,[b,d,a]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,50,12}}}]}]
+16:50:12.294 a uses: [{epoch,978},{author,c},{upi,[c]},{repair,[b,d,a]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,50,12}}}]}]
+16:50:12.464 d uses: [{epoch,978},{author,c},{upi,[c]},{repair,[b,d,a]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,50,12}}}]}]
+16:50:12.503 c uses: [{epoch,980},{author,c},{upi,[c,b]},{repair,[d,a]},{down,[]},{d,[{repair_airquote_done,{we_agree,978}},{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,50,12}}}]}]
+16:50:12.601 b uses: [{epoch,980},{author,c},{upi,[c,b]},{repair,[d,a]},{down,[]},{d,[{repair_airquote_done,{we_agree,978}},{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,50,12}}}]}]
+16:50:12.700 a uses: [{epoch,980},{author,c},{upi,[c,b]},{repair,[d,a]},{down,[]},{d,[{repair_airquote_done,{we_agree,978}},{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,50,12}}}]}]
+16:50:12.871 d uses: [{epoch,980},{author,c},{upi,[c,b]},{repair,[d,a]},{down,[]},{d,[{repair_airquote_done,{we_agree,978}},{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,50,12}}}]}]
+16:50:12.910 c uses: [{epoch,982},{author,c},{upi,[c,b,d]},{repair,[a]},{down,[]},{d,[{repair_airquote_done,{we_agree,980}},{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,50,12}}}]}]
+16:50:13.008 b uses: [{epoch,982},{author,c},{upi,[c,b,d]},{repair,[a]},{down,[]},{d,[{repair_airquote_done,{we_agree,980}},{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,50,13}}}]}]
+16:50:13.106 a uses: [{epoch,982},{author,c},{upi,[c,b,d]},{repair,[a]},{down,[]},{d,[{repair_airquote_done,{we_agree,980}},{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,50,13}}}]}]
+16:50:13.278 d uses: [{epoch,982},{author,c},{upi,[c,b,d]},{repair,[a]},{down,[]},{d,[{repair_airquote_done,{we_agree,980}},{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,50,13}}}]}]
+16:50:13.316 c uses: [{epoch,984},{author,c},{upi,[c,b,d,a]},{repair,[]},{down,[]},{d,[{repair_airquote_done,{we_agree,982}},{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,50,13}}}]}]
+16:50:13.414 b uses: [{epoch,984},{author,c},{upi,[c,b,d,a]},{repair,[]},{down,[]},{d,[{repair_airquote_done,{we_agree,982}},{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,50,13}}}]}]
+16:50:13.513 a uses: [{epoch,984},{author,c},{upi,[c,b,d,a]},{repair,[]},{down,[]},{d,[{repair_airquote_done,{we_agree,982}},{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,50,13}}}]}]
+16:50:13.684 d uses: [{epoch,984},{author,c},{upi,[c,b,d,a]},{repair,[]},{down,[]},{d,[{repair_airquote_done,{we_agree,982}},{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,50,13}}}]}]
+16:50:14.088 d uses: [{epoch,986},{author,d},{upi,[c,b,d,a]},{repair,[]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,50,14}}}]}]
+16:50:14.128 c uses: [{epoch,986},{author,d},{upi,[c,b,d,a]},{repair,[]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,50,14}}}]}]
+16:50:14.224 b uses: [{epoch,986},{author,d},{upi,[c,b,d,a]},{repair,[]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,50,14}}}]}]
+16:50:14.326 a uses: [{epoch,986},{author,d},{upi,[c,b,d,a]},{repair,[]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{16,50,14}}}]}]
+Tue Mar  3 16:50:20 JST 2015
+
+[36.758 s] ok
+  [done in 36.773 s]
+module 'machi_chain_manager1_pulse'
+module 'machi_chain_manager1'
+module 'machi_chain_manager0_test'
+  machi_chain_manager0_test: smoke0_test...[0.001 s] ok
+  machi_chain_manager0_test: calc_projection_test_...
+{ time ( ) , Hack } {{16,50,20},0}
+.......................
+	NotCounted list was written to /tmp/manager-test.16.50.22
+	OKs length = 135
+	Transitions hit = 109
+	NotCounted length = 26
+	Least-counted transition = {{[a,c,b],[b]},1}
+	Most-counted transition  = {{[b],[b]},21051}
+[2.626 s] ok
+  machi_chain_manager0_test: pass1_smoke_test...ok
+  machi_chain_manager0_test: fail1_smoke_test...ok
+  machi_chain_manager0_test: fail2_smoke_test...ok
+  machi_chain_manager0_test: fail3_smoke_test...ok
+  machi_chain_manager0_test: fail4_smoke_test...ok
+  [done in 2.647 s]
+module 'machi_chain_manager0'
+module 'lamport_clock'
+module 'handle_errors'
+module 'event_logger'
+=======================================================
+  All 20 tests passed.
+
+=INFO REPORT==== 3-Mar-2015::16:50:22 ===
+    application: pulse
+    exited: stopped
+    type: temporary
+
+=INFO REPORT==== 3-Mar-2015::16:50:22 ===
+    application: inets
+    exited: killed
+    type: temporary
