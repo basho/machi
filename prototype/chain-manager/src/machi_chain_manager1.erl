@@ -113,6 +113,7 @@ init({MyName, All_list, MyFLUPid, MgrOpts}) ->
               {seed, now()},
               {network_partitions, []},
               {network_islands, []},
+              {flapping_i, []},
               {up_nodes, not_init_yet}],
     BestProj = make_initial_projection(MyName, All_list, All_list,
                                        [], [{author_proc, init_best}]),
@@ -694,12 +695,12 @@ react_to_env_A50(P_latest, S) ->
 
     {{no_change, P_latest#projection.epoch_number}, S}.
 
-react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
+react_to_env_B10(Retries, P_newprop0, P_latest, LatestUnanimousP,
                  Rank_newprop, Rank_latest, #ch_mgr{name=MyName}=S0) ->
     ?REACT(b10),
 
     FlapLimit = 3,                              % todo tweak
-    S = calculate_flaps(P_newprop, FlapLimit, S0),
+    {S, P_newprop} = calculate_flaps(P_newprop0, FlapLimit, S0),
     if
         LatestUnanimousP ->
             ?REACT({b10, ?LINE}),
@@ -855,7 +856,8 @@ react_to_env_C310(P_newprop, S) ->
     react_to_env_A10(S2).
 
 calculate_flaps(P_newprop, FlapLimit,
-                #ch_mgr{name=_MyName, proj_history=H, flaps=Flaps} = S) ->
+                #ch_mgr{name=_MyName, proj_history=H, flaps=Flaps, runenv=RunEnv0} = S) ->
+    RunEnv1 = replace(RunEnv0, [{flapping_i, []}]),
     Ps = queue:to_list(H) ++ [P_newprop],
     UPI_Repairing_combos =
         lists:usort([{P#projection.upi, P#projection.repairing} || P <- Ps]),
@@ -863,13 +865,11 @@ calculate_flaps(P_newprop, FlapLimit,
     case {queue:len(H), length(UPI_Repairing_combos), length(Down_combos)} of
         {N, _, _} when N < length(P_newprop#projection.all_members) ->
             put(flap_hack, false),
-            S#ch_mgr{flaps=0};
+            {S#ch_mgr{flaps=0, runenv=RunEnv1}, P_newprop};
         {_, 1=_URs, 1=_Ds} ->
             %%%%%% io:format(user, "F{~w,~w,~w..~w}!", [_MyName, _URs, _Ds, Flaps]),
             NewFlaps = Flaps + 1,
-            FlapHack = get(flap_hack),
-            if NewFlaps > FlapLimit andalso FlapHack == false ->
-                    put(flap_hack, true),
+            if NewFlaps > FlapLimit-3 ->
                     {_WhateverUnanimous, BestP, Props, _S} =
                         cl_read_latest_projection(private, S),
                     NotBestPs = proplists:get_value(not_unanimous_answers, Props),
@@ -877,17 +877,43 @@ calculate_flaps(P_newprop, FlapLimit,
                                   lists:flatten(
                                     [P#projection.down ||
                                         P <- [BestP|NotBestPs]])),
+                    DownTransUnion = lists:usort(
+                                       lists:flatten(
+                                         [X || P <- [BestP|NotBestPs],
+                                               FIs <- [proplists:get_value(flapping_i,
+                                                                           P#projection.dbg,
+                                                                           [])],
+                                               X <- proplists:get_value(down_union, FIs, [])])),
                     Unanimous = proplists:get_value(unanimous_flus, Props),
                     NotUnanimous = proplists:get_value(not_unanimous_flus, Props),
                     BadFLUs = proplists:get_value(bad_answer_flus, Props),
-                    io:format(user, "flu ~p sees flaps: DownUnion ~p by u ~p not-u ~p bad-flus ~p\n", [S#ch_mgr.name, DownUnion, Unanimous, NotUnanimous, BadFLUs]);
+                    FlappingI = {flapping_i, [{flap_count,NewFlaps},
+                                              {down_union, DownUnion},
+                                              {bad,BadFLUs}]},
+                    Dbg2 = [FlappingI|P_newprop#projection.dbg],
+                    RunEnv2 = replace(RunEnv1, [FlappingI]),
+                    %% FlapHack = get(flap_hack),
+                    %% if FlapHack == false ->
+                            %% put(flap_hack, true),
+                    FlapHack = now(),
+                    if is_tuple(FlapHack) ->
+                            io:format(user,
+                                      "flu ~p sees flaps: DownUnion ~p by u ~p not-u ~p "
+                                      "bad-flus ~p down-trans ~w\n",
+                                      [S#ch_mgr.name, DownUnion, Unanimous, NotUnanimous,
+                                       BadFLUs, DownTransUnion]);
+                       true ->
+                            ok
+                    end;
                true ->
+                    RunEnv2 = RunEnv1,
+                    Dbg2 = P_newprop#projection.dbg,
                     ok
             end,
-            S#ch_mgr{flaps=NewFlaps};
+            {S#ch_mgr{flaps=NewFlaps, runenv=RunEnv2}, P_newprop#projection{dbg=Dbg2}};
         _ ->
             put(flap_hack, false),
-            S#ch_mgr{flaps=0}
+            {S#ch_mgr{flaps=0, runenv=RunEnv1}, P_newprop}
     end.
 
 projection_transitions_are_sane(Ps, RelativeToServer) ->
