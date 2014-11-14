@@ -699,7 +699,7 @@ react_to_env_B10(Retries, P_newprop0, P_latest, LatestUnanimousP,
                  Rank_newprop, Rank_latest, #ch_mgr{name=MyName}=S0) ->
     ?REACT(b10),
 
-    FlapLimit = 5,                              % todo tweak
+    FlapLimit = 2 * length(P_latest#projection.all_members),
     {S, P_newprop} = calculate_flaps(P_newprop0, FlapLimit, S0),
     P_newprop_all_hosed =
         proplists:get_value(all_hosed,
@@ -715,12 +715,11 @@ react_to_env_B10(Retries, P_newprop0, P_latest, LatestUnanimousP,
             react_to_env_C100(P_newprop, P_latest, S);
 
         S#ch_mgr.flaps > FlapLimit ->
-            if S#ch_mgr.flaps - FlapLimit - 3 =< 0 -> io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, S#ch_mgr.flaps]); true -> ok end,
+            %% if S#ch_mgr.flaps - FlapLimit - 3 =< 0 -> io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, S#ch_mgr.flaps]); true -> ok end,
             if length(P_newprop_all_hosed) > length(P_latest_all_hosed) ->
                     %% If flaps is non-zero, we're in a hosed state already.
                     %% Rank doesn't matter much right now ... but we know
                     %% that new members in all_hosed info to disseminate.
-io:format(user, "\n\n********************* all-hosed party ~w > ~w *******************\n\n", [P_newprop_all_hosed, P_latest_all_hosed]),
                     react_to_env_C300(P_newprop, P_latest, S);
 
                Rank_latest =< Rank_newprop ->
@@ -814,7 +813,7 @@ react_to_env_C110(P_latest, #ch_mgr{myflu=MyFLU} = S) ->
             {_,_,C} = os:timestamp(),
             MSec = trunc(C / 1000),
             {HH,MM,SS} = time(),
-            io:format(user, "~2..0w:~2..0w:~2..0w.~3..0w ~p uses: ~w\n",
+            io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses: ~w\n",
                       [HH,MM,SS,MSec, S#ch_mgr.name,
                        make_projection_summary(P_latest2)]);
         _ ->

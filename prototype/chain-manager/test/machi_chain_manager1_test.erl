@@ -227,10 +227,98 @@ chain_to_projection(MyName, Epoch, UPI_list, Repairing_list, All_list) ->
 
 -ifndef(PULSE).
 
+short_doc() ->
+"
+A visualization of the convergence behavior of the chain self-management
+algorithm for Machi.
+  1. Set up 4 FLUs and chain manager pairs.
+  2. Create a number of different network partition scenarios, where
+     (simulated) partitions may be symmetric or asymmetric.  Then halt changing
+     the partitions and keep the simulated network stable and broken.
+  3. Run a number of iterations of the algorithm in parallel by poking each
+     of the manager processes on a random'ish basis.
+  4. Afterward, fetch the chain transition changes made by each FLU and
+     verify that no transition was unsafe.
+
+During the iteration periods, the following is a cheatsheet for the output.
+See the internal source for interpreting the rest of the output.
+
+    'Let loose the dogs of war!'  Network instability
+    'SET partitions = '           Network stability (but broken)
+    'x uses:' The FLU x has made an internal state transition.  The rest of
+              the line is a dump of internal state.
+    '{t}'     This is a tick event which triggers one of the manager processes
+              to evaluate its environment and perhaps make a state transition.
+
+A long chain of '{t}{t}{t}{t}' means that the chain state has settled
+to a stable configuration, which is the goal of the algorithm.
+Press control-c to interrupt....".
+
+long_doc() ->
+    "
+'Let loose the dogs of war!'
+
+    The simulated network is very unstable for a few seconds.
+
+'x uses'
+
+    After a single iteration, server x has determined that the chain
+    should be defined by the upi, repair, and down list in this record.
+    If all participants reach the same conclusion at the same epoch
+    number (and checksum, see next item below), then the chain is
+    stable, fully configured, and can provide full service.
+
+'epoch,E'
+
+    The epoch number for this decision is E.  The checksum of the full
+    record is not shown.  For purposes of the protocol, a server will
+    'wedge' itself and refuse service (until a new config is chosen)
+    whenever: a). it sees a bigger epoch number mentioned somewhere, or
+    b). it sees the same epoch number but a different checksum.  In case
+    of b), there was a network partition that has healed, and both sides
+    had chosen to operate with an identical epoch number but different
+    chain configs.
+
+'upi', 'repair', and 'down'
+
+    Members in the chain that are fully in sync and thus preserving the
+    Update Propagation Invariant, up but under repair (simulated), and
+    down, respectively.
+
+'ps,[some list]'
+
+    The list of asymmetric network partitions.  {a,b} means that a
+    cannot send to b, but b can send to a.
+
+    This partition list is recorded for debugging purposes but is *not*
+    used by the algorithm.  The algorithm only 'feels' its effects via
+    simulated timeout whenever there's a partition in one of the
+    messaging directions.
+
+'nodes_up,[list]'
+
+    The best guess right now of which ndoes are up, relative to the
+    author node, specified by '{author,X}'
+
+'SET partitions = [some list]'
+
+    All subsequent iterations should have a stable list of partitions,
+    i.e. the 'ps' list described should be stable.
+
+'{FLAP: x flaps n}!'
+
+    Server x has detected that it's flapping/oscillating after iteration
+    n of a naive/1st draft detection algorithm.
+".
+
 convergence_demo_test_() ->
     {timeout, 98*300, fun() -> convergence_demo_test(x) end}.
 
 convergence_demo_test(_) ->
+    timer:sleep(100),
+    io:format(user, short_doc(), []),
+    timer:sleep(3000),
+
     All_list = [a,b,c,d],
     machi_partition_simulator:start_link({111,222,33}, 0, 100),
     _ = machi_partition_simulator:get(All_list),
@@ -248,122 +336,107 @@ convergence_demo_test(_) ->
     {ok, Md} = ?MGR:start_link(d, All_list, d, MgrOpts),
     try
         {ok, P1} = ?MGR:test_calc_projection(Ma, false),
-        P1Epoch = P1#projection.epoch_number,
-        ok = machi_flu0:proj_write(FLUa, P1Epoch, public, P1),
-        ok = machi_flu0:proj_write(FLUb, P1Epoch, public, P1),
-        ok = machi_flu0:proj_write(FLUc, P1Epoch, public, P1),
-        ok = machi_flu0:proj_write(FLUd, P1Epoch, public, P1),
+      P1Epoch = P1#projection.epoch_number,
+      ok = machi_flu0:proj_write(FLUa, P1Epoch, public, P1),
+      ok = machi_flu0:proj_write(FLUb, P1Epoch, public, P1),
+      ok = machi_flu0:proj_write(FLUc, P1Epoch, public, P1),
+      ok = machi_flu0:proj_write(FLUd, P1Epoch, public, P1),
 
-        {now_using, XX1} = ?MGR:test_react_to_env(Ma),
-        ?D(XX1),
-        {now_using, _} = ?MGR:test_react_to_env(Mb),
-        {now_using, _} = ?MGR:test_react_to_env(Mc),
-        {QQ,QQP2,QQE2} = ?MGR:test_read_latest_public_projection(Ma, false),
-        ?D(QQ),
-        ?Dw(?MGR:make_projection_summary(QQP2)),
-        ?D(QQE2),
-        %% {unanimous,P2,E2} = test_read_latest_public_projection(Ma, false),
+      machi_partition_simulator:reset_thresholds(10, 50),
+      _ = machi_partition_simulator:get(All_list),
 
-        machi_partition_simulator:reset_thresholds(10, 50),
-        _ = machi_partition_simulator:get(All_list),
+      Parent = self(),
+      DoIt = fun(Iters, S_min, S_max) ->
+                     io:format(user, "\nDoIt: top\n\n", []),
+                     Pids = [spawn(fun() ->
+                                           random:seed(now()),
+                                           [begin
+                                                erlang:yield(),
+                                                S_max_rand = random:uniform(
+                                                               S_max + 1),
+                                                io:format(user, "{t}", []),
+                                                Elapsed =
+                                                    ?MGR:sleep_ranked_order(
+                                                       S_min, S_max_rand,
+                                                       M_name, All_list),
+                                                _ = ?MGR:test_react_to_env(MMM),
+                                                timer:sleep(S_max - Elapsed)
+                                            end || _ <- lists:seq(1, Iters)],
+                                           Parent ! done
+                                   end) || {M_name, MMM} <- [{a, Ma},
+                                                             {b, Mb},
+                                                             {c, Mc},
+                                                             {d, Md}] ],
+                     [receive
+                          done ->
+                              ok
+                      after 995000 ->
+                              exit(icky_timeout)
+                      end || _ <- Pids]
+             end,
 
-        Parent = self(),
-        DoIt = fun(Iters, S_min, S_max) ->
-                       io:format(user, "\nDoIt: top\n\n", []),
-                       Pids = [spawn(fun() ->
-                                             random:seed(now()),
-                                             [begin
-io:format(user, "*", []),
-%% io:format(user, "*~w*", [M_name]),
-                                                  erlang:yield(),
-                                                  Elapsed =
-                                                      ?MGR:sleep_ranked_order(S_min, random:uniform(S_max + 1), M_name, All_list),
-                                                  Res = ?MGR:test_react_to_env(MMM),
-                                                  timer:sleep(S_max - Elapsed),
-                                                  Res=Res %% ?D({self(), Res})
-                                              end || _ <- lists:seq(1, Iters)],
-                                             Parent ! done
-                                     end) || {M_name, MMM} <- [{a, Ma},
-                                                               {b, Mb},
-                                                               {c, Mc},
-                                                               {d, Md}] ],
-                       [receive
-                            done ->
-                                ok
-                        after 995000 ->
-                                exit(icky_timeout)
-                        end || _ <- Pids]
-               end,
+      XandYs1 = [[{X,Y}] || X <- All_list, Y <- All_list, X /= Y],
+      XandYs2 = [[{X,Y}, {A,B}] || X <- All_list, Y <- All_list, X /= Y,
+                                   A <- All_list, B <- All_list, A /= B,
+                                   X /= A],
+      AllPartitionCombinations = XandYs1 ++ XandYs2,
+      ?D({?LINE, length(AllPartitionCombinations)}),
+      [begin
+           machi_partition_simulator:reset_thresholds(10, 50),
+           io:format(user, "\nLet loose the dogs of war!\n", []),
+           DoIt(30, 0, 0),
+           machi_partition_simulator:always_these_partitions(Partition),
+           io:format(user, "\nSET partitions = ~w.\n", [Partition]),
+           DoIt(40, 10, 100),
+           true = private_projections_are_stable(Namez, DoIt),
+           io:format(user, "\nSweet, we converged to a stable state.\n", []),
+           timer:sleep(1000),
+           ok
+       end || Partition <- AllPartitionCombinations],
 
-        %% DoIt(30, 0, 0),
-        %% io:format(user, "\nSET always_last_partitions ON ... we should see convergence to correct chains.\n", []),
-        %% %% machi_partition_simulator:always_these_partitions([{b,a}]),
-        %% %% machi_partition_simulator:always_these_partitions([{a,b}]),
-        %% %% machi_partition_simulator:always_these_partitions([{b,c}]),
-        %% %% machi_partition_simulator:always_these_partitions([{a,c},{c,b}]),
-        %% %% machi_partition_simulator:always_last_partitions(),
-        %% [DoIt(25, 40, 400) || _ <- [1]],
-        %% %% TODO: We should be stable now ... analyze it.
+      io:format(user, "\nSET partitions = []\n", []),
+      io:format(user, "We should see convergence to 1 correct chain.\n", []),
+      machi_partition_simulator:no_partitions(),
+      [DoIt(20, 40, 400) || _ <- [1]],
+      true = private_projections_are_stable(Namez, DoIt),
+      io:format(user, "~s\n", [os:cmd("date")]),
 
-XandYs1 = [[{X,Y}] || X <- All_list, Y <- All_list, X /= Y],
-XandYs2 = [[{X,Y}, {A,B}] || X <- All_list, Y <- All_list, X /= Y,
-                            A <- All_list, B <- All_list, A /= B,
-                            X /= A],
-NotReallyAllPartitionCombinations = XandYs1 ++ XandYs2,
-?D({?LINE, length(NotReallyAllPartitionCombinations)}),
-[begin
-        machi_partition_simulator:reset_thresholds(10, 50),
-        io:format(user, "\nLet loose the dogs of war!\n", []),
-        timer:sleep(333),
-        DoIt(30, 0, 0),
-        io:format(user, "\nSET always_last_partitions ~w.\n", [Partition]),
-        %% machi_partition_simulator:always_last_partitions(),
-        machi_partition_simulator:always_these_partitions(Partition),
-        [DoIt(25, 40, 400) || _ <- [1]],
- ok
- %% end || Partition <- [ [{b,a}] ] ],
- end || Partition <- NotReallyAllPartitionCombinations],
-exit(end_experiment),
+      %% We are stable now ... analyze it.
 
-        io:format(user, "\nSET always_last_partitions ON ... we should see convergence to correct chains3.\n", []),
-        machi_partition_simulator:no_partitions(),
-        [DoIt(20, 40, 400) || _ <- [1]],
-        %% TODO: We should be stable now ... analyze it.
-        io:format(user, "~s\n", [os:cmd("date")]),
+      %% Create a report where at least one FLU has written a
+      %% private projection.
+      Report = unanimous_report(Namez),
+      %% ?D(Report),
 
-        %% Create a report where at least one FLU has written a
-        %% private projection.
-        Report = unanimous_report(Namez),
-        %% ?D(Report),
+      %% Report is ordered by Epoch.  For each private projection
+      %% written during any given epoch, confirm that all chain
+      %% members appear in only one unique chain, i.e., the sets of
+      %% unique chains are disjoint.
+      true = all_reports_are_disjoint(Report),
 
-        %% Report is ordered by Epoch.  For each private projection
-        %% written during any given epoch, confirm that all chain
-        %% members appear in only one unique chain, i.e., the sets of
-        %% unique chains are disjoint.
-        true = all_reports_are_disjoint(Report),
+      %% Given the report, we flip it around so that we observe the
+      %% sets of chain transitions relative to each FLU.
+      R_Chains = [extract_chains_relative_to_flu(FLU, Report) ||
+                     FLU <- All_list],
+      %% ?D(R_Chains),
+      R_Projs = [{FLU, [chain_to_projection(FLU, Epoch, UPI, Repairing,
+                                            All_list) ||
+                           {Epoch, UPI, Repairing} <- E_Chains]} ||
+                    {FLU, E_Chains} <- R_Chains],
 
-        %% Given the report, we flip it around so that we observe the
-        %% sets of chain transitions relative to each FLU.
-        R_Chains = [extract_chains_relative_to_flu(FLU, Report) ||
-                       FLU <- All_list],
-        %% ?D(R_Chains),
-        R_Projs = [{FLU, [chain_to_projection(FLU, Epoch, UPI, Repairing,
-                                              All_list) ||
-                             {Epoch, UPI, Repairing} <- E_Chains]} ||
-                      {FLU, E_Chains} <- R_Chains],
+      %% For each chain transition experienced by a particular FLU,
+      %% confirm that each state transition is OK.
+      try
+          [{FLU, true} = {FLU, ?MGR:projection_transitions_are_sane(Ps, FLU)} ||
+              {FLU, Ps} <- R_Projs],
+          io:format(user, "\nAll sanity checks pass, hooray!\n", [])
+      catch _Err:_What ->
+              io:format(user, "Report ~p\n", [Report]),
+              exit({line, ?LINE, _Err, _What})
+      end,
+      %% ?D(R_Projs),
 
-        %% For each chain transition experienced by a particular FLU,
-        %% confirm that each state transition is OK.
-        try
-            [{FLU, true} = {FLU, ?MGR:projection_transitions_are_sane(Ps, FLU)} ||
-                {FLU, Ps} <- R_Projs]
-        catch _Err:_What ->
-                io:format(user, "Report ~p\n", [Report]),
-                exit({line, ?LINE, _Err, _What})
-        end,
-        %% ?D(R_Projs),
-
-        ok
+      ok
     after
         ok = ?MGR:stop(Ma),
         ok = ?MGR:stop(Mb),
@@ -371,6 +444,14 @@ exit(end_experiment),
         ok = machi_flu0:stop(FLUb),
         ok = machi_partition_simulator:stop()
     end.
+
+private_projections_are_stable(Namez, PollFunc) ->
+    Private1 = [machi_flu0:proj_get_latest_num(FLU, private) ||
+                   {_Name, FLU} <- Namez],
+    PollFunc(5, 1, 10),
+    Private2 = [machi_flu0:proj_get_latest_num(FLU, private) ||
+                   {_Name, FLU} <- Namez],
+    true = (Private1 == Private2).
 
 -endif. % not PULSE
 -endif. % TEST
