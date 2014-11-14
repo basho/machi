@@ -269,11 +269,15 @@ convergence_demo_test(_) ->
 
         Parent = self(),
         DoIt = fun(Iters, S_min, S_max) ->
+                       io:format(user, "\nDoIt: top\n\n", []),
                        Pids = [spawn(fun() ->
+                                             random:seed(now()),
                                              [begin
+io:format(user, "*", []),
+%% io:format(user, "*~w*", [M_name]),
                                                   erlang:yield(),
                                                   Elapsed =
-                                                      ?MGR:sleep_ranked_order(S_min, S_max, M_name, All_list),
+                                                      ?MGR:sleep_ranked_order(S_min, random:uniform(S_max + 1), M_name, All_list),
                                                   Res = ?MGR:test_react_to_env(MMM),
                                                   timer:sleep(S_max - Elapsed),
                                                   Res=Res %% ?D({self(), Res})
@@ -317,7 +321,9 @@ NotReallyAllPartitionCombinations = XandYs1 ++ XandYs2,
         machi_partition_simulator:always_these_partitions(Partition),
         [DoIt(25, 40, 400) || _ <- [1]],
  ok
+ %% end || Partition <- [ [{b,a}] ] ],
  end || Partition <- NotReallyAllPartitionCombinations],
+exit(end_experiment),
 
         io:format(user, "\nSET always_last_partitions ON ... we should see convergence to correct chains3.\n", []),
         machi_partition_simulator:no_partitions(),

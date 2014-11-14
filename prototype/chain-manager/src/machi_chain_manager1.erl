@@ -701,24 +701,40 @@ react_to_env_B10(Retries, P_newprop0, P_latest, LatestUnanimousP,
 
     FlapLimit = 5,                              % todo tweak
     {S, P_newprop} = calculate_flaps(P_newprop0, FlapLimit, S0),
+    P_newprop_all_hosed =
+        proplists:get_value(all_hosed,
+                            proplists:get_value(flapping_i, P_newprop#projection.dbg, [])),
+    P_latest_all_hosed =
+        proplists:get_value(all_hosed,
+                            proplists:get_value(flapping_i, P_latest#projection.dbg, [])),
+
     if
         LatestUnanimousP ->
             ?REACT({b10, ?LINE}),
 
             react_to_env_C100(P_newprop, P_latest, S);
 
-        S#ch_mgr.flaps > FlapLimit
-        andalso
-        Rank_latest =< Rank_newprop ->
+        S#ch_mgr.flaps > FlapLimit ->
             if S#ch_mgr.flaps - FlapLimit - 3 =< 0 -> io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, S#ch_mgr.flaps]); true -> ok end,
-            {_, _, USec} = os:timestamp(),
-            %% If we always go to C200, then we can deadlock sometimes.
-            %% So we roll the dice.
-            %% TODO: make this PULSE-friendly!
-            if USec rem 3 == 0 ->
-                    react_to_env_A50(P_latest, S);
+            if length(P_newprop_all_hosed) > length(P_latest_all_hosed) ->
+                    %% If flaps is non-zero, we're in a hosed state already.
+                    %% Rank doesn't matter much right now ... but we know
+                    %% that new members in all_hosed info to disseminate.
+io:format(user, "\n\n********************* all-hosed party ~w > ~w *******************\n\n", [P_newprop_all_hosed, P_latest_all_hosed]),
+                    react_to_env_C300(P_newprop, P_latest, S);
+
+               Rank_latest =< Rank_newprop ->
+                    {_, _, USec} = os:timestamp(),
+                    %% If we always go to C200, then we can deadlock sometimes.
+                    %% So we roll the dice.
+                    %% TODO: make this PULSE-friendly!
+                    if USec rem 3 == 0 ->
+                            react_to_env_A50(P_latest, S);
+                       true ->
+                            react_to_env_C200(Retries, P_latest, S)
+                    end;
                true ->
-                    react_to_env_C200(Retries, P_latest, S)
+                    react_to_env_A50(P_latest, S)
             end;
 
         Retries > 2 ->
@@ -870,47 +886,51 @@ calculate_flaps(P_newprop, FlapLimit,
                   lists:flatten(
                     [P#projection.down ||
                         P <- [BestP|NotBestPs]])),
-    DownTransUnion = lists:usort(
-                       lists:flatten(
-                         [X || P <- [BestP|NotBestPs],
-                               FIs <- [proplists:get_value(flapping_i,
-                                                           P#projection.dbg,
-                                                           [])],
-                               X <- proplists:get_value(down_union, FIs, [])])),
-    Unanimous = proplists:get_value(unanimous_flus, Props),
-    NotUnanimous = proplists:get_value(not_unanimous_flus, Props),
+    HosedTransUnion = lists:usort(
+                        lists:flatten(
+                          [X || P <- [BestP|NotBestPs],
+                                FIs <- [proplists:get_value(flapping_i,
+                                                            P#projection.dbg,
+                                                            [])],
+                                X <- proplists:get_value(all_hosed, FIs, [])])),
+    _Unanimous = proplists:get_value(unanimous_flus, Props),
+    _NotUnanimous = proplists:get_value(not_unanimous_flus, Props),
     BadFLUs = proplists:get_value(bad_answer_flus, Props),
 
     case {queue:len(H), length(UPI_Repairing_combos), length(Down_combos)} of
         {N, _, _} when N < length(P_newprop#projection.all_members) ->
-            NewFlaps = 0;
+            NewFlaps = 0,
+            AllHosed = [];
         {_, 1=_URs, 1=_Ds} ->
             %%%%%% io:format(user, "F{~w,~w,~w..~w}!", [_MyName, _URs, _Ds, Flaps]),
             NewFlaps = Flaps + 1,
+            AllHosed = lists:usort(DownUnion ++ HosedTransUnion ++ BadFLUs),
             if NewFlaps > FlapLimit-4 ->
                     %% FlapHack = get(flap_hack),
                     %% if FlapHack == false ->
                             %% put(flap_hack, true),
                     %% FlapHack = now(),
-                    if DownTransUnion /= [a,b] -> %%%%%%%%%%%%%% is_tuple(FlapHack) ->
-                            io:format(user,
-                                      "flu ~p sees flaps: DownUnion ~p by u ~p not-u ~p "
-                                      "bad-flus ~p down-trans ~w\n",
-                                      [S#ch_mgr.name, DownUnion, Unanimous, NotUnanimous,
-                                       BadFLUs, DownTransUnion]),
-                            io:format(user, "\t~p\n", [ [{P#projection.epoch_number, {auth,P#projection.author_server}, P#projection.dbg} || P <- [BestP|NotBestPs]] ]),
-                            ok;
-                       true ->
-                            ok
-                    end;
+                    %% if HosedTransUnion /= [a,b] -> %%%%%%%%%%%%%% is_tuple(FlapHack) ->
+                    %%         io:format(user,
+                    %%                   "flu ~p sees flaps: DownUnion ~p by u ~p not-u ~p "
+                    %%                   "bad-flus ~p all-hosed ~w\n",
+                    %%                   [S#ch_mgr.name, DownUnion, Unanimous, NotUnanimous,
+                    %%                    BadFLUs, AllHosed]),
+                    %%         io:format(user, "\t~p\n", [ [{P#projection.epoch_number, {auth,P#projection.author_server}, P#projection.dbg} || P <- [BestP|NotBestPs]] ]),
+                    %%         ok;
+                    %%    true ->
+                    %%         ok
+                    %% end,
+                    ok;
                true ->
                     ok
             end;
         _ ->
-            NewFlaps = 0
+            NewFlaps = 0,
+            AllHosed = []
     end,
     FlappingI = {flapping_i, [{flap_count,NewFlaps},
-                              {down_union, DownUnion},
+                              {all_hosed, AllHosed},
                               {bad,BadFLUs}]},
     Dbg2 = [FlappingI|P_newprop#projection.dbg],
     RunEnv2 = replace(RunEnv1, [FlappingI]),
