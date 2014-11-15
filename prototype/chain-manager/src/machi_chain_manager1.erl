@@ -935,12 +935,12 @@ calculate_flaps(P_newprop, _FlapLimit,
 
     case {queue:len(H), length(UPI_Repairing_combos), length(Down_combos)} of
         {N, _, _} when N < length(P_newprop#projection.all_members) ->
-io:format(user, "me ~w saw TransFlapCounts0 ~w line ~w\n", [MyName, TransFlapCounts0, ?LINE]),
+            %% io:format(user, "me ~w saw TransFlapCounts0 ~w line ~w\n", [MyName, TransFlapCounts0, ?LINE]),
             NewFlaps = 0,
             AllFlapCounts = [],
             AllHosed = [];
         {_, 1=_URs, 1=_Ds} ->
-io:format(user, "me ~w saw TransFlapCounts0 ~w line ~w flapping\n", [MyName, TransFlapCounts0, ?LINE]),
+            %% io:format(user, "me ~w saw TransFlapCounts0 ~w line ~w flapping\n", [MyName, TransFlapCounts0, ?LINE]),
             %%%%%% io:format(user, "F{~w,~w,~w..~w}!", [MyName, _URs, _Ds, Flaps]),
             NewFlaps = Flaps + 1,
             FlapFLUs = lists:usort([FLU || {FLU, _FlapCount} <- TransFlapCounts0]),
@@ -952,13 +952,13 @@ io:format(user, "me ~w saw TransFlapCounts0 ~w line ~w flapping\n", [MyName, Tra
             AllFlapCounts = [{MyName, NewFlaps}|RemoteTransFlapCounts],
             AllHosed = lists:usort(DownUnion ++ HosedTransUnion ++ BadFLUs);
         {_N, _URs, _Ds} ->
-io:format(user, "me ~w saw TransFlapCounts0 ~w N ~w URs ~w Ds ~w\n", [MyName, TransFlapCounts0, _N, _URs, _Ds]),
-io:format(user, "me ~w URs ~w Ds ~w\n", [MyName, UPI_Repairing_combos, Down_combos]),
+            %% io:format(user, "me ~w saw TransFlapCounts0 ~w N ~w URs ~w Ds ~w\n", [MyName, TransFlapCounts0, _N, _URs, _Ds]),
+            %% io:format(user, "me ~w URs ~w Ds ~w\n", [MyName, UPI_Repairing_combos, Down_combos]),
             NewFlaps = 0,
             AllFlapCounts = [],
             AllHosed = []
     end,
-io:format(user, "AllFlapCounts ~w saw ~w\n", [MyName, AllFlapCounts]),
+    %% io:format(user, "AllFlapCounts ~w saw ~w\n", [MyName, AllFlapCounts]),
     FlappingI = {flapping_i, [{flap_count,NewFlaps},
                               {all_hosed, AllHosed},
                               {all_flap_counts, AllFlapCounts},
