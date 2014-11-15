@@ -134,6 +134,19 @@ change_partitions(OldThreshold, NoPartitionThreshold) ->
     machi_partition_simulator:reset_thresholds(OldThreshold,
                                                NoPartitionThreshold).
 
+always_last_partitions() ->
+    machi_partition_simulator:always_last_partitions().
+
+private_stable_check(FLUs) ->
+    {_FLU_pids, Mgr_pids} = get(manager_pids_hack),
+    Res = private_projections_are_stable_check(FLUs, Mgr_pids),
+    if not Res ->
+            io:format(user, "BUMMER: private stable check failed!\n", []);
+       true ->
+            ok
+    end,
+    Res.
+
 do_ticks(Num, PidsMaybe, OldThreshold, NoPartitionThreshold) ->
     io:format(user, "~p,~p,~p|", [Num, OldThreshold, NoPartitionThreshold]),
     {_FLU_pids, Mgr_pids} = case PidsMaybe of
@@ -229,34 +242,38 @@ prop_pulse() ->
         %% doesn't always allow unanimous private projection store values:
         %% FLU a might need one more tick to write its private projection, but
         %% it isn't given a chance at the end of the PULSE run.  So we cheat
+        Stabilize1 = [{set,{var,99999995},
+                      {call, ?MODULE, always_last_partitions, []}}],
+        Stabilize2 = [{set,{var,99999996},
+                       {call, ?MODULE, private_stable_check, [all_list()]}}],
         LastTriggerTicks = {set,{var,99999997},
                             {call, ?MODULE, do_ticks, [25, undefined, no, no]}},
         Cmds1 = lists:duplicate(2, LastTriggerTicks),
         %% Cmds1 = lists:duplicate(length(all_list())*2, LastTriggerTicks),
         Cmds = Cmds0 ++
-               Cmds1 ++ [{set,{var,99999999},
-                          {call, ?MODULE, dump_state, []}}],
+               Stabilize1 ++
+               Cmds1 ++
+               Stabilize2 ++
+            [{set,{var,99999999}, {call, ?MODULE, dump_state, []}}],
         {_H2, S2, Res} = pulse:run(
                            fun() ->
                                    {_H, _S, _R} = run_commands(?MODULE, Cmds)
                            end, [{seed, Seed},
                                  {strategy, unfair}]),
-        %% {FLU_pids, Mgr_pids} = S2#state.pids,
-        %% [ok = machi_flu0:stop(FLU) || FLU <- FLU_pids],
-        %% [ok = ?MGR:stop(Mgr) || Mgr <- Mgr_pids],
         ok = shutdown_hard(),
 
-%% ?QC_FMT("Cmds ~p\n", [Cmds]),
-%% ?QC_FMT("H2 ~p\n", [_H2]),
-%% ?QC_FMT("S2 ~p\n", [S2]),
         {Report, Diag} = S2#state.dump_state,
-%% ?QC_FMT("\nLast report = ~p\n", [lists:last(Report)]),
+
+        %% Report is ordered by Epoch.  For each private projection
+        %% written during any given epoch, confirm that all chain
+        %% members appear in only one unique chain, i.e., the sets of
+        %% unique chains are disjoint.
+        AllDisjointP = ?MGRTEST:all_reports_are_disjoint(Report),
 
         %% Given the report, we flip it around so that we observe the
         %% sets of chain transitions relative to each FLU.
         R_Chains = [?MGRTEST:extract_chains_relative_to_flu(FLU, Report) ||
                        FLU <- all_list()],
-        %% ?D(R_Chains),
         R_Projs = [{FLU, [?MGRTEST:chain_to_projection(
                              FLU, Epoch, UPI, Repairing, all_list()) ||
                              {Epoch, UPI, Repairing} <- E_Chains]} ||
@@ -268,16 +285,11 @@ prop_pulse() ->
           [{FLU,_SaneRes} = {FLU,?MGR:projection_transitions_are_sane_retrospective(
                                     Ps, FLU)} ||
               {FLU, Ps} <- R_Projs],
-%% ?QC_FMT("Sane ~p\n", [Sane]),
         SaneP = lists:all(fun({_FLU, SaneRes}) -> SaneRes == true end, Sane),
 
         %% The final report item should say that all are agreed_membership.
         {_LastEpoch, {ok_disjoint, LastRepXs}} = lists:last(Report),
-%% ?QC_FMT("LastEpoch=~p,", [_LastEpoch]),
-%% ?QC_FMT("Report ~P\n", [Report, 5000]),
-%% ?QC_FMT("Diag ~s\n", [Diag]),
         AgreedOrNot = lists:usort([element(1, X) || X <- LastRepXs]),
-%% ?QC_FMT("LastRepXs ~p", [LastRepXs]),
         
         %% TODO: Check that we've converged to a single chain with no repairs.
         SingleChainNoRepair = case LastRepXs of
@@ -296,7 +308,7 @@ prop_pulse() ->
             ?QC_FMT("SingleChainNoRepair failure =\n    ~p\n", [SingleChainNoRepair])
         end,
         conjunction([{res, Res == true orelse Res == ok},
-                     {all_disjoint, ?MGRTEST:all_reports_are_disjoint(Report)},
+                     {all_disjoint, AllDisjointP},
                      {sane, SaneP},
                      {all_agreed_at_end, AgreedOrNot == [agreed_membership]},
                      {single_chain_no_repair, SingleChainNoRepair}
@@ -329,7 +341,7 @@ shutdown_hard() ->
 
 exec_ticks(Num, Mgr_pids) ->
     Parent = self(),
-    Pids = [spawn(fun() ->
+    Pids = [spawn_link(fun() ->
                           [begin
                                erlang:yield(),
                                Max = 10,
@@ -348,5 +360,20 @@ exec_ticks(Num, Mgr_pids) ->
              exit(icky_timeout)
      end || _ <- Pids],    
     ok.
+
+private_projections_are_stable_check(All_list, Mgr_pids) ->
+    %% TODO: extend the check to look not only for latest num, but
+    %% also check for flapping, and if yes, to see if all_hosed are
+    %% all exactly equal.
+
+    _ = exec_ticks(40, Mgr_pids),
+    Private1 = [machi_flu0:proj_get_latest_num(FLU, private) ||
+                   FLU <- All_list],
+    _ = exec_ticks(5, Mgr_pids),
+    Private2 = [machi_flu0:proj_get_latest_num(FLU, private) ||
+                   FLU <- All_list],
+
+    (Private1 == Private2).
+
 
 -endif. % PULSE
