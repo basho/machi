@@ -704,10 +704,13 @@ react_to_env_B10(Retries, P_newprop0, P_latest, LatestUnanimousP,
     P_newprop_all_hosed =
         proplists:get_value(all_hosed,
                             proplists:get_value(flapping_i, P_newprop#projection.dbg, [])),
-    P_newprop_min_flap_count =
-        proplists:get_value(min_flap_count,
-                            proplists:get_value(flapping_i, P_newprop#projection.dbg, []),
-                           -1),
+    P_newprop_flap_count =
+        proplists:get_value(flap_count,
+                            proplists:get_value(flapping_i, P_newprop#projection.dbg, [])),
+    AllFlapCounts =
+        proplists:get_value(all_flap_counts,
+                            proplists:get_value(flapping_i, P_newprop#projection.dbg, [])),
+    P_newprop_trans_flap_count = my_find_minmost(AllFlapCounts),
     P_latest_all_hosed =
         proplists:get_value(all_hosed,
                             proplists:get_value(flapping_i, P_latest#projection.dbg, [])),
@@ -719,27 +722,41 @@ react_to_env_B10(Retries, P_newprop0, P_latest, LatestUnanimousP,
 
             react_to_env_C100(P_newprop, P_latest, S);
 
-        P_newprop_min_flap_count >= FlapLimit ->
+        P_newprop_flap_count >= FlapLimit ->
             B10Hack = get(b10_hack),
-            if B10Hack == false andalso P_newprop_min_flap_count - FlapLimit - 3 =< 0 -> io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_min_flap_count]), put(b10_hack, true); true -> ok end,
-            if length(P_newprop_all_hosed) > length(P_latest_all_hosed) ->
+            if B10Hack == false andalso P_newprop_flap_count - FlapLimit - 3 =< 0 -> io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_flap_count]), put(b10_hack, true); true -> ok end,
+
+            if
+                P_newprop_trans_flap_count >= FlapLimit ->
+                    %% Everyone that's flapping together now has flap_count
+                    %% that's larger than the limit.  So it's safe and good
+                    %% to stop here, so we can break the cycle of flapping.
+                    react_to_env_A50(P_latest, S);
+
+                %% length(P_newprop_all_hosed) > length(P_latest_all_hosed) ->
                     %% If flaps is non-zero, we're in a hosed state already.
                     %% Rank doesn't matter much right now ... but we know
                     %% that new members in all_hosed info to disseminate.
-                    react_to_env_C300(P_newprop, P_latest, S);
+                true ->
+                    %% It is our moral imperative to write so that the flap
+                    %% cycle continues enough times so that everyone notices
+                    %% and thus the earlier clause above fires.
+                    P_newprop_all_hosed=P_newprop_all_hosed,
+                    P_latest_all_hosed=P_latest_all_hosed,
+                    react_to_env_C300(P_newprop, P_latest, S)
 
-               Rank_latest =< Rank_newprop ->
-                    {_, _, USec} = os:timestamp(),
-                    %% If we always go to C200, then we can deadlock sometimes.
-                    %% So we roll the dice.
-                    %% TODO: make this PULSE-friendly!
-                    if USec rem 3 == 0 ->
-                            react_to_env_A50(P_latest, S);
-                       true ->
-                            react_to_env_C200(Retries, P_latest, S)
-                    end;
-               true ->
-                    react_to_env_A50(P_latest, S)
+               %% Rank_latest =< Rank_newprop ->
+               %%      {_, _, USec} = os:timestamp(),
+               %%      %% If we always go to C200, then we can deadlock sometimes.
+               %%      %% So we roll the dice.
+               %%      %% TODO: make this PULSE-friendly!
+               %%      if USec rem 3 == 0 ->
+               %%              react_to_env_A50(P_latest, S);
+               %%         true ->
+               %%              react_to_env_C200(Retries, P_latest, S)
+               %%      end;
+                %% true ->
+                %%     react_to_env_A50(P_latest, S)
             end;
 
         Retries > 2 ->
@@ -880,7 +897,7 @@ react_to_env_C310(P_newprop, S) ->
     react_to_env_A10(S2).
 
 calculate_flaps(P_newprop, _FlapLimit,
-                #ch_mgr{name=_MyName, proj_history=H, flaps=Flaps, runenv=RunEnv0} = S) ->
+                #ch_mgr{name=MyName, proj_history=H, flaps=Flaps, runenv=RunEnv0} = S) ->
     RunEnv1 = replace(RunEnv0, [{flapping_i, []}]),
     HistoryPs = queue:to_list(H),
     Ps = HistoryPs ++ [P_newprop],
@@ -902,34 +919,13 @@ calculate_flaps(P_newprop, _FlapLimit,
                                                             P#projection.dbg,
                                                             [])],
                                 X <- proplists:get_value(all_hosed, FIs, [])])),
-    FlapCounts = lists:sort(
-                        lists:flatten(
-                          [X || P <- [BestP|NotBestPs],
-                                FIs <- [proplists:get_value(flapping_i,
-                                                            P#projection.dbg,
-                                                            [{flap_count,
-                                                              undefined}])],
-                                %% almost good!?
-                                %% X <- [proplists:get_value(flap_count, FIs)]
-                                %% next try:
-                                X <- [case proplists:get_value(flap_count, FIs) of
-                                          undefined ->
-                                              proplists:get_value(min_flap_count, FIs);
-                                          FC ->
-                                              FC
-                                      end]
-                          ])),
-io:format(user, "FlapCounts ~w saw ~w\n", [_MyName, FlapCounts]),
-
-    %% If we're in a flapping situation, each FLU is the author of the
-    %% projection that ends up in its private projection store; thus,
-    %% the flap_count there really does reflect the FLU's flap_count.
-    %% And the flap_count value
-    UndefinedFlapCountsP = lists:any(
-                             fun(X) -> not is_integer(X) end, FlapCounts),
-    MinFlapCount = if UndefinedFlapCountsP -> 0;
-                      true                 -> lists:min(FlapCounts)
-                   end,
+    TransFlapCounts0 = lists:usort(
+                         lists:flatten(
+                           [X || P <- [BestP|NotBestPs],
+                                 FIs <- [proplists:get_value(flapping_i,
+                                                             P#projection.dbg,
+                                                             [])],
+                                 X <- proplists:get_value(all_flap_counts, FIs, [])])),
 
     _Unanimous = proplists:get_value(unanimous_flus, Props),
     _NotUnanimous = proplists:get_value(not_unanimous_flus, Props),
@@ -937,19 +933,33 @@ io:format(user, "FlapCounts ~w saw ~w\n", [_MyName, FlapCounts]),
 
     case {queue:len(H), length(UPI_Repairing_combos), length(Down_combos)} of
         {N, _, _} when N < length(P_newprop#projection.all_members) ->
+io:format(user, "me ~w saw TransFlapCounts0 ~w line ~w\n", [MyName, TransFlapCounts0, ?LINE]),
             NewFlaps = 0,
+            AllFlapCounts = [],
             AllHosed = [];
         {_, 1=_URs, 1=_Ds} ->
-            %%%%%% io:format(user, "F{~w,~w,~w..~w}!", [_MyName, _URs, _Ds, Flaps]),
+io:format(user, "me ~w saw TransFlapCounts0 ~w line ~w flapping\n", [MyName, TransFlapCounts0, ?LINE]),
+            %%%%%% io:format(user, "F{~w,~w,~w..~w}!", [MyName, _URs, _Ds, Flaps]),
             NewFlaps = Flaps + 1,
+            FlapFLUs = lists:usort([FLU || {FLU, _FlapCount} <- TransFlapCounts0]),
+            %% We're interested in the *largest* flap count from each
+            %% remote participant.
+            RemoteTransFlapCounts = [{FLU, my_find_max(FLU, TransFlapCounts0)} ||
+                                        FLU <- FlapFLUs,
+                                        FLU /= MyName],
+            AllFlapCounts = [{MyName, NewFlaps}|RemoteTransFlapCounts],
             AllHosed = lists:usort(DownUnion ++ HosedTransUnion ++ BadFLUs);
-        _ ->
+        {_N, _URs, _Ds} ->
+io:format(user, "me ~w saw TransFlapCounts0 ~w N ~w URs ~w Ds ~w\n", [MyName, TransFlapCounts0, _N, _URs, _Ds]),
+io:format(user, "me ~w URs ~w Ds ~w\n", [MyName, UPI_Repairing_combos, Down_combos]),
             NewFlaps = 0,
+            AllFlapCounts = [],
             AllHosed = []
     end,
+io:format(user, "AllFlapCounts ~w saw ~w\n", [MyName, AllFlapCounts]),
     FlappingI = {flapping_i, [{flap_count,NewFlaps},
                               {all_hosed, AllHosed},
-                              {min_flap_count, MinFlapCount},
+                              {all_flap_counts, AllFlapCounts},
                               {bad,BadFLUs}]},
     Dbg2 = [FlappingI|P_newprop#projection.dbg],
     RunEnv2 = replace(RunEnv1, [FlappingI]),
@@ -1223,6 +1233,25 @@ sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list) ->
     SleepTime = MinSleep + (SleepChunk * SleepIndex),
     timer:sleep(SleepTime),
     SleepTime.
+
+my_special_min([]) ->
+    0;
+my_special_min(L) ->
+    case lists:min(L) of
+        X when is_integer(X) -> X;
+        _                    -> 0
+    end.
+
+my_find_max(_FLU, []) ->
+    0;
+my_find_max(FLU, TransFlapCounts0) ->
+    lists:max([FlapCount || {F, FlapCount} <- TransFlapCounts0,
+                            F == FLU]).
+
+my_find_minmost([]) ->
+    0;
+my_find_minmost(TransFlapCounts0) ->
+    lists:min([FlapCount || {_F, FlapCount} <- TransFlapCounts0]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
