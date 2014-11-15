@@ -707,10 +707,11 @@ react_to_env_B10(Retries, P_newprop0, P_latest, LatestUnanimousP,
     P_newprop_flap_count =
         proplists:get_value(flap_count,
                             proplists:get_value(flapping_i, P_newprop#projection.dbg, [])),
-    AllFlapCounts =
+    LatestAllFlapCounts =
         proplists:get_value(all_flap_counts,
-                            proplists:get_value(flapping_i, P_newprop#projection.dbg, [])),
-    P_newprop_trans_flap_count = my_find_minmost(AllFlapCounts),
+                            proplists:get_value(flapping_i, P_latest#projection.dbg, []),
+                            []),
+    P_latest_trans_flap_count = my_find_minmost(LatestAllFlapCounts),
     P_latest_all_hosed =
         proplists:get_value(all_hosed,
                             proplists:get_value(flapping_i, P_latest#projection.dbg, [])),
@@ -723,11 +724,12 @@ react_to_env_B10(Retries, P_newprop0, P_latest, LatestUnanimousP,
             react_to_env_C100(P_newprop, P_latest, S);
 
         P_newprop_flap_count >= FlapLimit ->
+            %% I am flapping ... what else do I do?
             B10Hack = get(b10_hack),
             if B10Hack == false andalso P_newprop_flap_count - FlapLimit - 3 =< 0 -> io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_flap_count]), put(b10_hack, true); true -> ok end,
 
             if
-                P_newprop_trans_flap_count >= FlapLimit ->
+                P_latest_trans_flap_count >= FlapLimit ->
                     %% Everyone that's flapping together now has flap_count
                     %% that's larger than the limit.  So it's safe and good
                     %% to stop here, so we can break the cycle of flapping.
