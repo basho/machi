@@ -1236,14 +1236,6 @@ sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list) ->
     timer:sleep(SleepTime),
     SleepTime.
 
-my_special_min([]) ->
-    0;
-my_special_min(L) ->
-    case lists:min(L) of
-        X when is_integer(X) -> X;
-        _                    -> 0
-    end.
-
 my_find_max(_FLU, []) ->
     0;
 my_find_max(FLU, TransFlapCounts0) ->
