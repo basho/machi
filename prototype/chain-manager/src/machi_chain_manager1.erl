@@ -699,11 +699,15 @@ react_to_env_B10(Retries, P_newprop0, P_latest, LatestUnanimousP,
                  Rank_newprop, Rank_latest, #ch_mgr{name=MyName}=S0) ->
     ?REACT(b10),
 
-    FlapLimit = 2 * length(P_latest#projection.all_members),
+    FlapLimit = length(P_latest#projection.all_members) + 1,
     {S, P_newprop} = calculate_flaps(P_newprop0, FlapLimit, S0),
     P_newprop_all_hosed =
         proplists:get_value(all_hosed,
                             proplists:get_value(flapping_i, P_newprop#projection.dbg, [])),
+    P_newprop_min_flap_count =
+        proplists:get_value(min_flap_count,
+                            proplists:get_value(flapping_i, P_newprop#projection.dbg, []),
+                           -1),
     P_latest_all_hosed =
         proplists:get_value(all_hosed,
                             proplists:get_value(flapping_i, P_latest#projection.dbg, [])),
@@ -711,11 +715,13 @@ react_to_env_B10(Retries, P_newprop0, P_latest, LatestUnanimousP,
     if
         LatestUnanimousP ->
             ?REACT({b10, ?LINE}),
+            put(b10_hack, false),
 
             react_to_env_C100(P_newprop, P_latest, S);
 
-        S#ch_mgr.flaps > FlapLimit ->
-            %% if S#ch_mgr.flaps - FlapLimit - 3 =< 0 -> io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, S#ch_mgr.flaps]); true -> ok end,
+        P_newprop_min_flap_count >= FlapLimit ->
+            B10Hack = get(b10_hack),
+            if B10Hack == false andalso P_newprop_min_flap_count - FlapLimit - 3 =< 0 -> io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_min_flap_count]), put(b10_hack, true); true -> ok end,
             if length(P_newprop_all_hosed) > length(P_latest_all_hosed) ->
                     %% If flaps is non-zero, we're in a hosed state already.
                     %% Rank doesn't matter much right now ... but we know
@@ -738,6 +744,7 @@ react_to_env_B10(Retries, P_newprop0, P_latest, LatestUnanimousP,
 
         Retries > 2 ->
             ?REACT({b10, ?LINE}),
+            put(b10_hack, false),
 
             %% The author of P_latest is too slow or crashed.
             %% Let's try to write P_newprop and see what happens!
@@ -747,6 +754,7 @@ react_to_env_B10(Retries, P_newprop0, P_latest, LatestUnanimousP,
         andalso
         P_latest#projection.author_server /= MyName ->
             ?REACT({b10, ?LINE}),
+            put(b10_hack, false),
 
             %% Give the author of P_latest an opportunite to write a
             %% new projection in a new epoch to resolve this mixed
@@ -755,6 +763,7 @@ react_to_env_B10(Retries, P_newprop0, P_latest, LatestUnanimousP,
 
         true ->
             ?REACT({b10, ?LINE}),
+            put(b10_hack, false),
 
             %% P_newprop is best, so let's write it.
             react_to_env_C300(P_newprop, P_latest, S)
@@ -870,10 +879,11 @@ react_to_env_C310(P_newprop, S) ->
     
     react_to_env_A10(S2).
 
-calculate_flaps(P_newprop, FlapLimit,
+calculate_flaps(P_newprop, _FlapLimit,
                 #ch_mgr{name=_MyName, proj_history=H, flaps=Flaps, runenv=RunEnv0} = S) ->
     RunEnv1 = replace(RunEnv0, [{flapping_i, []}]),
-    Ps = queue:to_list(H) ++ [P_newprop],
+    HistoryPs = queue:to_list(H),
+    Ps = HistoryPs ++ [P_newprop],
     UPI_Repairing_combos =
         lists:usort([{P#projection.upi, P#projection.repairing} || P <- Ps]),
     Down_combos = lists:usort([P#projection.down || P <- Ps]),
@@ -892,6 +902,35 @@ calculate_flaps(P_newprop, FlapLimit,
                                                             P#projection.dbg,
                                                             [])],
                                 X <- proplists:get_value(all_hosed, FIs, [])])),
+    FlapCounts = lists:sort(
+                        lists:flatten(
+                          [X || P <- [BestP|NotBestPs],
+                                FIs <- [proplists:get_value(flapping_i,
+                                                            P#projection.dbg,
+                                                            [{flap_count,
+                                                              undefined}])],
+                                %% almost good!?
+                                %% X <- [proplists:get_value(flap_count, FIs)]
+                                %% next try:
+                                X <- [case proplists:get_value(flap_count, FIs) of
+                                          undefined ->
+                                              proplists:get_value(min_flap_count, FIs);
+                                          FC ->
+                                              FC
+                                      end]
+                          ])),
+io:format(user, "FlapCounts ~w saw ~w\n", [_MyName, FlapCounts]),
+
+    %% If we're in a flapping situation, each FLU is the author of the
+    %% projection that ends up in its private projection store; thus,
+    %% the flap_count there really does reflect the FLU's flap_count.
+    %% And the flap_count value
+    UndefinedFlapCountsP = lists:any(
+                             fun(X) -> not is_integer(X) end, FlapCounts),
+    MinFlapCount = if UndefinedFlapCountsP -> 0;
+                      true                 -> lists:min(FlapCounts)
+                   end,
+
     _Unanimous = proplists:get_value(unanimous_flus, Props),
     _NotUnanimous = proplists:get_value(not_unanimous_flus, Props),
     BadFLUs = proplists:get_value(bad_answer_flus, Props),
@@ -903,33 +942,14 @@ calculate_flaps(P_newprop, FlapLimit,
         {_, 1=_URs, 1=_Ds} ->
             %%%%%% io:format(user, "F{~w,~w,~w..~w}!", [_MyName, _URs, _Ds, Flaps]),
             NewFlaps = Flaps + 1,
-            AllHosed = lists:usort(DownUnion ++ HosedTransUnion ++ BadFLUs),
-            if NewFlaps > FlapLimit-4 ->
-                    %% FlapHack = get(flap_hack),
-                    %% if FlapHack == false ->
-                            %% put(flap_hack, true),
-                    %% FlapHack = now(),
-                    %% if HosedTransUnion /= [a,b] -> %%%%%%%%%%%%%% is_tuple(FlapHack) ->
-                    %%         io:format(user,
-                    %%                   "flu ~p sees flaps: DownUnion ~p by u ~p not-u ~p "
-                    %%                   "bad-flus ~p all-hosed ~w\n",
-                    %%                   [S#ch_mgr.name, DownUnion, Unanimous, NotUnanimous,
-                    %%                    BadFLUs, AllHosed]),
-                    %%         io:format(user, "\t~p\n", [ [{P#projection.epoch_number, {auth,P#projection.author_server}, P#projection.dbg} || P <- [BestP|NotBestPs]] ]),
-                    %%         ok;
-                    %%    true ->
-                    %%         ok
-                    %% end,
-                    ok;
-               true ->
-                    ok
-            end;
+            AllHosed = lists:usort(DownUnion ++ HosedTransUnion ++ BadFLUs);
         _ ->
             NewFlaps = 0,
             AllHosed = []
     end,
     FlappingI = {flapping_i, [{flap_count,NewFlaps},
                               {all_hosed, AllHosed},
+                              {min_flap_count, MinFlapCount},
                               {bad,BadFLUs}]},
     Dbg2 = [FlappingI|P_newprop#projection.dbg],
     RunEnv2 = replace(RunEnv1, [FlappingI]),
