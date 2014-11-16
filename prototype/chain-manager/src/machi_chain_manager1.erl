@@ -378,30 +378,24 @@ update_projection_checksum(P) ->
 update_projection_dbg2(P, Dbg2) when is_list(Dbg2) ->
     P#projection{dbg2=Dbg2}.
 
-calc_projection(#ch_mgr{proj=LastProj, runenv=RunEnv} = S, RelativeToServer,
-                Dbg) ->
-    OldThreshold = proplists:get_value(old_threshold, RunEnv),
-    NoPartitionThreshold = proplists:get_value(no_partition_threshold, RunEnv),
-    calc_projection(OldThreshold, NoPartitionThreshold, LastProj,
-                    RelativeToServer, Dbg, S).
+calc_projection(#ch_mgr{proj=LastProj} = S, RelativeToServer, Dbg) ->
+    calc_projection2(LastProj, RelativeToServer, [], Dbg, S).
 
-%% OldThreshold: Percent chance of using the old/previous network partition list
-%% NoPartitionThreshold: If the network partition changes, what percent chance
-%%                       that there are no partitions at all?
+calc_projection(#ch_mgr{proj=LastProj} = S, RelativeToServer, AlsoDown, Dbg) ->
+    calc_projection2(LastProj, RelativeToServer, AlsoDown, Dbg, S).
 
-calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
-                RelativeToServer, Dbg,
-                #ch_mgr{name=MyName, runenv=RunEnv1}=S) ->
-    #projection{epoch_number=OldEpochNum,
-                all_members=All_list,
-                upi=OldUPI_list,
-                repairing=OldRepairing_list
-               } = LastProj,
+calc_projection2(#projection{epoch_number=OldEpochNum,
+                             all_members=All_list,
+                             upi=OldUPI_list,
+                             repairing=OldRepairing_list
+                            } = _LastProj,
+                 RelativeToServer, AlsoDown, Dbg,
+                 #ch_mgr{name=MyName, runenv=RunEnv1}=S) ->
     LastUp = lists:usort(OldUPI_list ++ OldRepairing_list),
     AllMembers = (S#ch_mgr.proj)#projection.all_members,
-    {Up, Partitions, RunEnv2} = calc_up_nodes(MyName,
-                                              AllMembers, RunEnv1),
-
+    {Up0, Partitions, RunEnv2} = calc_up_nodes(MyName,
+                                               AllMembers, RunEnv1),
+    Up = Up0 -- AlsoDown,
     NewUp = Up -- LastUp,
     Down = AllMembers -- Up,
 
@@ -589,12 +583,32 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP,
                  #ch_mgr{name=MyName, flap_limit=FlapLimit} = S) ->
     ?REACT(a20),
     RelativeToServer = MyName,
-    {P_newprop1, S2} = calc_projection(S, RelativeToServer,
+    {P_newprop1, S1} = calc_projection(S, RelativeToServer,
                                        []),
 
-    {S3, P_newprop2} = calculate_flaps(P_newprop1, FlapLimit, S2),
-
-    react_to_env_A40(Retries, P_newprop2, P_latest, LatestUnanimousP, S3).
+    {S2, P_newprop2} = calculate_flaps(P_newprop1, FlapLimit, S1),
+    {P_newprop3, S3} = case get_all_flap_counts_settled(P_newprop2) of
+                           true ->
+                               %% put(a30_hack, true),
+                               AllHosed = get_all_hosed(P_newprop2),
+                               {P3x, S3x} = calc_projection(
+                                              S, MyName, AllHosed,
+                                              P_newprop2#projection.dbg),
+                               NFS =
+                                   {P_newprop1#projection.upi,
+                                    P_newprop1#projection.repairing,
+                                    P_newprop1#projection.down},
+                               P3y = P3x#projection{non_flap_state=NFS,
+                                                    dbg=[switched_a_roo|P3x#projection.dbg]},
+                               {update_projection_checksum(P3y), S3x};
+                           false ->
+                               %% put(a30_hack, false),
+                               {P_newprop2, S2}
+                       end,
+%% case get(a30_hack) of true ->
+%%         io:format(user, "~w: P_newprop2 = ~p\n~w: P_newprop3: ~p\n", [MyName, P_newprop2, MyName, P_newprop3]);
+%%     _ -> ok end,
+    react_to_env_A40(Retries, P_newprop3, P_latest, LatestUnanimousP, S3).
 
 react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                  #ch_mgr{name=MyName, proj=P_current}=S) ->
@@ -702,7 +716,8 @@ react_to_env_A50(P_latest, S) ->
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                  Rank_newprop, Rank_latest,
-                 #ch_mgr{name=MyName, flap_limit=FlapLimit}=S) ->
+                 #ch_mgr{name=MyName, flap_limit=FlapLimit,
+                         proj=P_current}=S) ->
     ?REACT(b10),
 
     P_newprop_all_hosed =
@@ -729,11 +744,15 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
 
         P_newprop_flap_count >= FlapLimit ->
             %% I am flapping ... what else do I do?
+            Settled_newprop = get_all_flap_counts_settled(P_newprop),
+            Settled_current = get_all_flap_counts_settled(P_current),
             B10Hack = get(b10_hack),
             if B10Hack == false andalso P_newprop_flap_count - FlapLimit - 3 =< 0 -> io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_flap_count]), put(b10_hack, true); true -> ok end,
 
             if
-                P_latest_trans_flap_count >= FlapLimit ->
+                P_latest_trans_flap_count >= FlapLimit
+                andalso
+                Settled_current andalso Settled_newprop ->
                     %% Everyone that's flapping together now has flap_count
                     %% that's larger than the limit.  So it's safe and good
                     %% to stop here, so we can break the cycle of flapping.
@@ -749,20 +768,16 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                     %% and thus the earlier clause above fires.
                     P_newprop_all_hosed=P_newprop_all_hosed,
                     P_latest_all_hosed=P_latest_all_hosed,
-                    react_to_env_C300(P_newprop, P_latest, S)
-
-               %% Rank_latest =< Rank_newprop ->
-               %%      {_, _, USec} = os:timestamp(),
-               %%      %% If we always go to C200, then we can deadlock sometimes.
-               %%      %% So we roll the dice.
-               %%      %% TODO: make this PULSE-friendly!
-               %%      if USec rem 3 == 0 ->
-               %%              react_to_env_A50(P_latest, S);
-               %%         true ->
-               %%              react_to_env_C200(Retries, P_latest, S)
-               %%      end;
-                %% true ->
-                %%     react_to_env_A50(P_latest, S)
+                    %% haha, infinite loop.
+                    %% react_to_env_C300(P_newprop, P_latest, S)
+                    %% So we roll the dice.
+                    %% TODO: make this PULSE-friendly!
+                    {_, _, USec} = os:timestamp(),
+                    if USec rem 3 == 0 ->
+                            react_to_env_A50(P_latest, S);
+                       true ->
+                            react_to_env_C300(P_newprop, P_latest, S)
+                    end
             end;
 
         Retries > 2 ->
@@ -908,8 +923,8 @@ calculate_flaps(P_newprop, FlapLimit,
     HistoryPs = queue:to_list(H),
     Ps = HistoryPs ++ [P_newprop],
     UPI_Repairing_combos =
-        lists:usort([{P#projection.upi, P#projection.repairing} || P <- Ps]),
-    Down_combos = lists:usort([P#projection.down || P <- Ps]),
+        lists:usort([get_non_flap_upi_rs(P) || P <- Ps]),
+    Down_combos = lists:usort([get_non_flap_downs(P) || P <- Ps]),
 
     {_WhateverUnanimous, BestP, Props, _S} =
         cl_read_latest_projection(private, S),
@@ -950,7 +965,9 @@ calculate_flaps(P_newprop, FlapLimit,
             RemoteTransFlapCounts = [{FLU, my_find_max(FLU, TransFlapCounts0)} ||
                                         FLU <- FlapFLUs,
                                         FLU /= MyName],
+io:format(user, "~w gah: TransFlapCounts0 ~w RemoteTransFlapCounts ~w\n", [MyName, TransFlapCounts0, RemoteTransFlapCounts]),
             AllFlapCounts = [{MyName, NewFlaps}|RemoteTransFlapCounts],
+io:format(user, "~w gah: AllFlapCounts ~w\n", [MyName, AllFlapCounts]),
             AllHosed = lists:usort(DownUnion ++ HosedTransUnion ++ BadFLUs);
         {_N, _URs, _Ds} ->
             NewFlaps = 0,
@@ -959,14 +976,15 @@ calculate_flaps(P_newprop, FlapLimit,
     end,
 
     AllFlapCountsSettled = my_find_minmost(AllFlapCounts) >= FlapLimit,
+io:format(user, "~w YOO: AllFlapCountsSettled ~w\n", [MyName, AllFlapCountsSettled]),
     FlappingI = {flapping_i, [{flap_count,NewFlaps},
                               {all_hosed, AllHosed},
                               {all_flap_counts, AllFlapCounts},
                               {all_flap_counts_settled, AllFlapCountsSettled},
                               {bad,BadFLUs}]},
-    Dbg2 = [FlappingI|P_newprop#projection.dbg],
+    NewDbg = [FlappingI|P_newprop#projection.dbg],
     RunEnv2 = replace(RunEnv1, [FlappingI]),
-    {S#ch_mgr{flaps=NewFlaps, runenv=RunEnv2}, update_projection_checksum(P_newprop#projection{dbg=Dbg2})}.
+    {S#ch_mgr{flaps=NewFlaps, runenv=RunEnv2}, update_projection_checksum(P_newprop#projection{dbg=NewDbg})}.
 
 projection_transitions_are_sane(Ps, RelativeToServer) ->
     projection_transitions_are_sane(Ps, RelativeToServer, false).
@@ -1247,6 +1265,33 @@ my_find_minmost([]) ->
     0;
 my_find_minmost(TransFlapCounts0) ->
     lists:min([FlapCount || {_F, FlapCount} <- TransFlapCounts0]).
+
+get_all_flap_counts_settled(#projection{dbg=Dbg}) ->
+    proplists:get_value(all_flap_counts_settled,
+                        proplists:get_value(flapping_i, Dbg, []),
+                        false).
+
+get_all_hosed(#projection{dbg=Dbg}) ->
+    proplists:get_value(all_hosed,
+                        proplists:get_value(flapping_i, Dbg, []),
+                        []).
+
+get_non_flap_upi_rs(#projection{upi=UPIs, repairing=Repairing,
+                                non_flap_state=NFS}) ->
+    case NFS of
+        undefined ->
+            {UPIs, Repairing};
+        {NFS_UPIs, NFS_Repairing, _NFS_down} ->
+            {NFS_UPIs, NFS_Repairing}
+    end.
+
+get_non_flap_downs(#projection{down=Down, non_flap_state=NFS}) ->
+    case NFS of
+        undefined ->
+            Down;
+        {_NFS_UPIs, _NFS_Repairing, NFS_down} ->
+            NFS_down
+    end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

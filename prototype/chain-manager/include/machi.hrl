@@ -41,6 +41,7 @@
             author_server   :: m_server(),
             upi             :: [m_server()],
             repairing       :: [m_server()],
+            non_flap_state  :: term(),
             dbg             :: list(), %proplist(), is checksummed
             dbg2            :: list()  %proplist(), is not checksummed
         }).

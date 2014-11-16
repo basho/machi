@@ -317,7 +317,7 @@ convergence_demo_test_() ->
 convergence_demo_test(_) ->
     timer:sleep(100),
     io:format(user, short_doc(), []),
-    timer:sleep(3000),
+    %% timer:sleep(3000),
 
     All_list = [a,b,c,d],
     machi_partition_simulator:start_link({111,222,33}, 0, 100),
@@ -394,15 +394,16 @@ convergence_demo_test(_) ->
            %% DoIt(30, 0, 0),
            machi_partition_simulator:always_these_partitions(Partition),
            io:format(user, "\nSET partitions = ~w.\n", [Partition]),
-           [DoIt(50, 10, 100) || _ <- [1,2,3] ],
+           [DoIt(50, 10, 100) || _ <- [1,2,3,4,5] ],
            true = private_projections_are_stable(Namez, DoIt),
            io:format(user, "\nSweet, we converged to a stable state.\n", []),
            timer:sleep(1000),
            ok
-       end || Partition <- AllPartitionCombinations],
+       %% end || Partition <- AllPartitionCombinations],
+       end || Partition <- [ [{a,b}] ] ],
        %% end || Partition <- [ [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {b,c}],
        %%                       [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {c,d}] ] ],
-       %% exit(end_experiment),
+       exit(end_experiment),
 
       io:format(user, "\nSET partitions = []\n", []),
       io:format(user, "We should see convergence to 1 correct chain.\n", []),
