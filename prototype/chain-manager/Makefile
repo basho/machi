@@ -23,7 +23,7 @@ eunit:
 
 pulse: compile
 	env USE_PULSE=1 $(REBAR_BIN) skip_deps=true clean compile
-	env USE_PULSE=1 $(REBAR_BIN) skip_deps=true -D PULSE eunit
+	env USE_PULSE=1 $(REBAR_BIN) -v skip_deps=true -D PULSE eunit
 
 CONC_ARGS = --pz ./.eunit --treat_as_normal shutdown --after_timeout 1000
 
