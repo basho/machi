@@ -552,14 +552,7 @@ react_to_env_A10(S) ->
     ?REACT(a10),
     react_to_env_A20(0, S).
 
-react_to_env_A20(Retries, #ch_mgr{name=MyName} = S) ->
-    ?REACT(a20),
-    RelativeToServer = MyName,
-    {P_newprop, S2} = calc_projection(S, RelativeToServer,
-                                      [{author_proc, react}]),
-    react_to_env_A30(Retries, P_newprop, S2).
-
-react_to_env_A30(Retries, P_newprop, S) ->
+react_to_env_A20(Retries, S) ->
     ?REACT(a30),
     {UnanimousTag, P_latest, ReadExtra, S2} =
         do_cl_read_latest_public_projection(true, S),
@@ -588,8 +581,16 @@ react_to_env_A30(Retries, P_newprop, S) ->
            true ->
                 exit({badbad, UnanimousTag})
         end,
-    react_to_env_A40(Retries, P_newprop, P_latest,
-                     LatestUnanimousP, S2).
+    react_to_env_A30b(Retries, P_latest,
+                      LatestUnanimousP, S2).
+
+react_to_env_A30b(Retries, P_latest, LatestUnanimousP,
+                  #ch_mgr{name=MyName} = S) ->
+    ?REACT(a20),
+    RelativeToServer = MyName,
+    {P_newprop, S2} = calc_projection(S, RelativeToServer,
+                                      [{author_proc, react}]),
+    react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP, S2).
 
 react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                  #ch_mgr{name=MyName, proj=P_current}=S) ->
