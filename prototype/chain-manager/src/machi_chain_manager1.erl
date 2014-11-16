@@ -124,6 +124,7 @@ init({MyName, All_list, MyFLUPid, MgrOpts}) ->
                 proj=NoneProj,
                 proj_history=queue:new(),
                 myflu=MyFLUPid, % pid or atom local name
+                flap_limit=length(All_list) + 1,
                 runenv=RunEnv,
                 opts=MgrOpts},
 
@@ -581,16 +582,19 @@ react_to_env_A20(Retries, S) ->
            true ->
                 exit({badbad, UnanimousTag})
         end,
-    react_to_env_A30b(Retries, P_latest,
-                      LatestUnanimousP, S2).
+    react_to_env_A30(Retries, P_latest,
+                     LatestUnanimousP, S2).
 
-react_to_env_A30b(Retries, P_latest, LatestUnanimousP,
-                  #ch_mgr{name=MyName} = S) ->
+react_to_env_A30(Retries, P_latest, LatestUnanimousP,
+                 #ch_mgr{name=MyName, flap_limit=FlapLimit} = S) ->
     ?REACT(a20),
     RelativeToServer = MyName,
-    {P_newprop, S2} = calc_projection(S, RelativeToServer,
-                                      [{author_proc, react}]),
-    react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP, S2).
+    {P_newprop0, S2} = calc_projection(S, RelativeToServer,
+                                       [{author_proc, react}]),
+
+    {S3, P_newprop} = calculate_flaps(P_newprop0, FlapLimit, S2),
+
+    react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP, S3).
 
 react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                  #ch_mgr{name=MyName, proj=P_current}=S) ->
@@ -696,12 +700,11 @@ react_to_env_A50(P_latest, S) ->
 
     {{no_change, P_latest#projection.epoch_number}, S}.
 
-react_to_env_B10(Retries, P_newprop0, P_latest, LatestUnanimousP,
-                 Rank_newprop, Rank_latest, #ch_mgr{name=MyName}=S0) ->
+react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
+                 Rank_newprop, Rank_latest,
+                 #ch_mgr{name=MyName, flap_limit=FlapLimit}=S) ->
     ?REACT(b10),
 
-    FlapLimit = length(P_latest#projection.all_members) + 1,
-    {S, P_newprop} = calculate_flaps(P_newprop0, FlapLimit, S0),
     P_newprop_all_hosed =
         proplists:get_value(all_hosed,
                             proplists:get_value(flapping_i, P_newprop#projection.dbg, [])),

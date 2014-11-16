@@ -51,6 +51,7 @@
           proj            :: #projection{},
           proj_history    :: queue(),
           myflu           :: pid() | atom(),
+          flap_limit      :: non_neg_integer(),
           %%
           runenv          :: list(), %proplist()
           opts            :: list(),  %proplist()

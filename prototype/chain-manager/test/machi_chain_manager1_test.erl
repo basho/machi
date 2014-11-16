@@ -407,7 +407,7 @@ convergence_demo_test(_) ->
       io:format(user, "\nSET partitions = []\n", []),
       io:format(user, "We should see convergence to 1 correct chain.\n", []),
       machi_partition_simulator:no_partitions(),
-      [DoIt(20, 40, 400) || _ <- [1]],
+      [DoIt(50, 10, 100) || _ <- [1]],
       true = private_projections_are_stable(Namez, DoIt),
       io:format(user, "~s\n", [os:cmd("date")]),
 
