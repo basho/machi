@@ -113,7 +113,6 @@ init({MyName, All_list, MyFLUPid, MgrOpts}) ->
               {seed, now()},
               {network_partitions, []},
               {network_islands, []},
-              {flapping_i, []},
               {up_nodes, not_init_yet}],
     BestProj = make_initial_projection(MyName, All_list, All_list,
                                        [], []),
@@ -918,15 +917,14 @@ react_to_env_C310(P_newprop, S) ->
     react_to_env_A10(S2).
 
 calculate_flaps(P_newprop, FlapLimit,
-                #ch_mgr{name=MyName, proj_history=H, flaps=Flaps, runenv=RunEnv0} = S) ->
-    RunEnv1 = replace(RunEnv0, [{flapping_i, []}]),
+                #ch_mgr{name=MyName, proj_history=H, flaps=Flaps} = S) ->
     HistoryPs = queue:to_list(H),
     Ps = HistoryPs ++ [P_newprop],
     UPI_Repairing_combos =
         lists:usort([get_non_flap_upi_rs(P) || P <- Ps]),
     Down_combos = lists:usort([get_non_flap_downs(P) || P <- Ps]),
 
-    {_WhateverUnanimous, BestP, Props, _S} =
+    {_WhateverUnanimous, BestP, Props, S2} =
         cl_read_latest_projection(private, S),
     NotBestPs = proplists:get_value(not_unanimous_answers, Props),
     DownUnion = lists:usort(
@@ -983,8 +981,7 @@ io:format(user, "~w YOO: AllFlapCountsSettled ~w\n", [MyName, AllFlapCountsSettl
                               {all_flap_counts_settled, AllFlapCountsSettled},
                               {bad,BadFLUs}]},
     NewDbg = [FlappingI|P_newprop#projection.dbg],
-    RunEnv2 = replace(RunEnv1, [FlappingI]),
-    {S#ch_mgr{flaps=NewFlaps, runenv=RunEnv2}, update_projection_checksum(P_newprop#projection{dbg=NewDbg})}.
+    {S2#ch_mgr{flaps=NewFlaps}, update_projection_checksum(P_newprop#projection{dbg=NewDbg})}.
 
 projection_transitions_are_sane(Ps, RelativeToServer) ->
     projection_transitions_are_sane(Ps, RelativeToServer, false).
