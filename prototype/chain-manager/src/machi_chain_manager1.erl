@@ -116,9 +116,9 @@ init({MyName, All_list, MyFLUPid, MgrOpts}) ->
               {flapping_i, []},
               {up_nodes, not_init_yet}],
     BestProj = make_initial_projection(MyName, All_list, All_list,
-                                       [], [{author_proc, init_best}]),
+                                       [], []),
     NoneProj = make_initial_projection(MyName, All_list, [],
-                                       [], [{author_proc, init_none}]),
+                                       [], []),
     S = #ch_mgr{init_finished=false,
                 name=MyName,
                 proj=NoneProj,
@@ -147,7 +147,7 @@ handle_call(_Call, _From, #ch_mgr{init_finished=false} = S) ->
 handle_call({calculate_projection_internal_old}, _From,
             #ch_mgr{name=MyName}=S) ->
     RelativeToServer = MyName,
-    {Reply, S2} = calc_projection(S, RelativeToServer, [{author_proc, call}]),
+    {Reply, S2} = calc_projection(S, RelativeToServer, []),
     {reply, Reply, S2};
 handle_call({test_write_proposed_projection}, _From, S) ->
     if S#ch_mgr.proj_proposed == none ->
@@ -163,7 +163,7 @@ handle_call({stop}, _From, S) ->
 handle_call({test_calc_projection, KeepRunenvP}, _From,
             #ch_mgr{name=MyName}=S) ->
     RelativeToServer = MyName,
-    {P, S2} = calc_projection(S, RelativeToServer, [{author_proc, call}]),
+    {P, S2} = calc_projection(S, RelativeToServer, []),
     {reply, {ok, P}, if KeepRunenvP -> S2;
                         true        -> S
                      end};
@@ -182,7 +182,7 @@ handle_cast(_Cast, #ch_mgr{init_finished=false} = S) ->
     {noreply, S};
 handle_cast({test_calc_proposed_projection}, #ch_mgr{name=MyName}=S) ->
     RelativeToServer = MyName,
-    {Proj, S2} = calc_projection(S, RelativeToServer, [{author_proc, cast}]),
+    {Proj, S2} = calc_projection(S, RelativeToServer, []),
     {noreply, S2#ch_mgr{proj_proposed=Proj}};
 handle_cast(_Cast, S) ->
     ?D({cast_whaaaaaaaaaaa, _Cast}),
@@ -589,12 +589,12 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP,
                  #ch_mgr{name=MyName, flap_limit=FlapLimit} = S) ->
     ?REACT(a20),
     RelativeToServer = MyName,
-    {P_newprop0, S2} = calc_projection(S, RelativeToServer,
-                                       [{author_proc, react}]),
+    {P_newprop1, S2} = calc_projection(S, RelativeToServer,
+                                       []),
 
-    {S3, P_newprop} = calculate_flaps(P_newprop0, FlapLimit, S2),
+    {S3, P_newprop2} = calculate_flaps(P_newprop1, FlapLimit, S2),
 
-    react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP, S3).
+    react_to_env_A40(Retries, P_newprop2, P_latest, LatestUnanimousP, S3).
 
 react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                  #ch_mgr{name=MyName, proj=P_current}=S) ->
@@ -902,7 +902,7 @@ react_to_env_C310(P_newprop, S) ->
     
     react_to_env_A10(S2).
 
-calculate_flaps(P_newprop, _FlapLimit,
+calculate_flaps(P_newprop, FlapLimit,
                 #ch_mgr{name=MyName, proj_history=H, flaps=Flaps, runenv=RunEnv0} = S) ->
     RunEnv1 = replace(RunEnv0, [{flapping_i, []}]),
     HistoryPs = queue:to_list(H),
@@ -939,13 +939,10 @@ calculate_flaps(P_newprop, _FlapLimit,
 
     case {queue:len(H), length(UPI_Repairing_combos), length(Down_combos)} of
         {N, _, _} when N < length(P_newprop#projection.all_members) ->
-            %% io:format(user, "me ~w saw TransFlapCounts0 ~w line ~w\n", [MyName, TransFlapCounts0, ?LINE]),
             NewFlaps = 0,
             AllFlapCounts = [],
             AllHosed = [];
         {_, 1=_URs, 1=_Ds} ->
-            %% io:format(user, "me ~w saw TransFlapCounts0 ~w line ~w flapping\n", [MyName, TransFlapCounts0, ?LINE]),
-            %%%%%% io:format(user, "F{~w,~w,~w..~w}!", [MyName, _URs, _Ds, Flaps]),
             NewFlaps = Flaps + 1,
             FlapFLUs = lists:usort([FLU || {FLU, _FlapCount} <- TransFlapCounts0]),
             %% We're interested in the *largest* flap count from each
@@ -956,16 +953,16 @@ calculate_flaps(P_newprop, _FlapLimit,
             AllFlapCounts = [{MyName, NewFlaps}|RemoteTransFlapCounts],
             AllHosed = lists:usort(DownUnion ++ HosedTransUnion ++ BadFLUs);
         {_N, _URs, _Ds} ->
-            %% io:format(user, "me ~w saw TransFlapCounts0 ~w N ~w URs ~w Ds ~w\n", [MyName, TransFlapCounts0, _N, _URs, _Ds]),
-            %% io:format(user, "me ~w URs ~w Ds ~w\n", [MyName, UPI_Repairing_combos, Down_combos]),
             NewFlaps = 0,
             AllFlapCounts = [],
             AllHosed = []
     end,
-    %% io:format(user, "AllFlapCounts ~w saw ~w\n", [MyName, AllFlapCounts]),
+
+    AllFlapCountsSettled = my_find_minmost(AllFlapCounts) >= FlapLimit,
     FlappingI = {flapping_i, [{flap_count,NewFlaps},
                               {all_hosed, AllHosed},
                               {all_flap_counts, AllFlapCounts},
+                              {all_flap_counts_settled, AllFlapCountsSettled},
                               {bad,BadFLUs}]},
     Dbg2 = [FlappingI|P_newprop#projection.dbg],
     RunEnv2 = replace(RunEnv1, [FlappingI]),

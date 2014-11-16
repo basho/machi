@@ -394,7 +394,7 @@ convergence_demo_test(_) ->
            %% DoIt(30, 0, 0),
            machi_partition_simulator:always_these_partitions(Partition),
            io:format(user, "\nSET partitions = ~w.\n", [Partition]),
-           [DoIt(50, 10, 100) || _ <- [1,2] ],
+           [DoIt(50, 10, 100) || _ <- [1,2,3] ],
            true = private_projections_are_stable(Namez, DoIt),
            io:format(user, "\nSweet, we converged to a stable state.\n", []),
            timer:sleep(1000),
