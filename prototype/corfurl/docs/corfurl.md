@@ -12,7 +12,7 @@ the shared log underneath it.  But the Hyder paper has lots of
 interesting bits about how you'd go about creating a distributed
 DB where the transaction log *is* the DB.
 
-### "CORFU: A Distributed Shared Log￼CORFU: A Distributed Shared Log"
+### "CORFU: A Distributed Shared Log"
 
 MAHESH BALAKRISHNAN, DAHLIA MALKHI, JOHN D. DAVIS, and VIJAYAN
 PRABHAKARAN, Microsoft Research Silicon Valley, MICHAEL WEI,
@@ -79,7 +79,7 @@ parallel and make commit/abort decisions in parallel, based on
 what conflicts (or not) that they see in the log.  Scott's first
 reading was "No way, wacky" ... and has since changed his mind.
 
-http://www.snookles.com/scottmp/corfu/CIDR2011Proceedings.pdf
+http://www.snookles.com/scottmp/corfu/CIDR11Proceedings.pdf
 pages 9-20
 
 
