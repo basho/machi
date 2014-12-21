@@ -73,12 +73,7 @@ append_server_loop(DataDir) ->
         {seq_append, From, Prefix, Chunk} ->
             spawn(fun() -> append_server_dispatch(From, Prefix, Chunk,
                                                   DataDir) end),
-            append_server_loop(DataDir);
-QQQ =
-        {write_absolute, From, Ref, Offset, FileBin, Chunk} ->
-io:format("got write_absolute: ~P\n", [QQQ, 20]),
-            spawn(fun() -> append_server_dispatch_w(From, Ref, Offset, FileBin,
-                                                    Chunk, DataDir) end)
+            append_server_loop(DataDir)
     end.
 
 listen_server_loop(LSock, DataDir) ->
@@ -90,7 +85,7 @@ net_server_loop(Sock, DataDir) ->
     ok = inet:setopts(Sock, [{packet, line}]),
     case gen_tcp:recv(Sock, 0, 60*1000) of
         {ok, Line} ->
-            %% io:format("Got: ~p\n", [Line]),
+            %% fmt("Got: ~p\n", [Line]),
             PrefixLenLF = byte_size(Line)   - 2 - 8 - 1 - 1,
             PrefixLenCRLF = byte_size(Line) - 2 - 8 - 1 - 2,
             FileLenLF = byte_size(Line)   - 2 - 16 - 1 - 8 - 1 - 1,
@@ -129,7 +124,7 @@ net_server_loop(Sock, DataDir) ->
                 <<"DEL-migration ", File:DelFileLenLF/binary, "\n">> ->
                     do_net_server_delete_migration_only(Sock, File, DataDir);
                 _ ->
-                    io:format("Else Got: ~p\n", [Line]),
+                    fmt("Else Got: ~p\n", [Line]),
                     gen_tcp:send(Sock, "ERROR\n"),
                     catch gen_tcp:close(Sock),
                     exit(normal)
@@ -142,10 +137,8 @@ net_server_loop(Sock, DataDir) ->
 
 do_net_server_append(Sock, HexLen, Prefix) ->
     <<Len:32/big>> = hexstr_to_bin(HexLen),
-    %% io:format("Len ~p Prefix ~p\n", [Len, Prefix]),
     ok = inet:setopts(Sock, [{packet, raw}]),
     {ok, Chunk} = gen_tcp:recv(Sock, Len, 60*1000),
-    %% io:format("Chunk ~p\n", [Chunk]),
     ?MODULE ! {seq_append, self(), Prefix, Chunk},
     receive
         {assignment, File, Offset} ->
@@ -162,7 +155,7 @@ do_net_server_read(Sock, HexOffset, HexLen, FileBin, DataDir) ->
                           {ok, Bytes} when byte_size(Bytes) == Len ->
                               gen_tcp:send(Sock, ["OK\n", Bytes]);
                           _Else2 ->
-                              io:format("Else2 ~p ~p ~p\n",
+                              fmt("Else2 ~p ~p ~p\n",
                                         [Offset, Len, _Else2]),
                               ok = gen_tcp:send(Sock, "ERROR\n")
                       end
@@ -189,7 +182,7 @@ do_net_server_readwrite_common(Sock, HexOffset, HexLen, FileBin, DataDir,
               Sock, HexOffset, HexLen, FileBin, DataDir,
               FileOpts, DoItFun);
         _Else ->
-            io:format("Else ~p ~p ~p ~p\n", [Offset, Len, Path, _Else]),
+            fmt("Else ~p ~p ~p ~p\n", [Offset, Len, Path, _Else]),
             ok = gen_tcp:send(Sock, "ERROR\n")
     end.
 
@@ -202,7 +195,7 @@ do_net_server_write(Sock, HexOffset, HexLen, FileBin, DataDir) ->
                           ok ->
                               gen_tcp:send(Sock, <<"OK\n">>);
                           _Else2 ->
-                              io:format("Else2 ~p ~p ~p\n",
+                              fmt("Else2 ~p ~p ~p\n",
                                         [Offset, Len, _Else2]),
                               ok = gen_tcp:send(Sock, "ERROR\n")
                       end
@@ -250,13 +243,6 @@ append_server_dispatch(From, Prefix, Chunk, DataDir) ->
     Pid ! {seq_append, From, Prefix, Chunk},
     exit(normal).
 
-append_server_dispatch_w(From, Ref, Offset, FileBin, Chunk, DataDir) ->
-    Prefix = re:replace(FileBin, "\.[0-9]+$", "", [{return, binary}]),
-    io:format("abs write: File ~p prefix = ~p\n", [FileBin, Prefix]),
-    Pid = write_server_get_pid(Prefix, DataDir),
-    Pid ! {write_absolute, From, Ref, Offset, FileBin, Chunk},
-    exit(normal).
-
 start_seq_append_server(Prefix, DataDir) ->
     spawn(fun() -> run_seq_append_server(Prefix, DataDir) end).
 
@@ -269,7 +255,7 @@ run_seq_append_server(Prefix, DataDir) ->
 run_seq_append_server2(Prefix, DataDir) ->
     FileNum = read_max_filenum(DataDir, Prefix) + 1,
     ok = increment_max_filenum(DataDir, Prefix),
-    error_logger:info_msg("start: ~p server at file ~w\n", [Prefix, FileNum]),
+    info_msg("start: ~p server at file ~w\n", [Prefix, FileNum]),
     seq_append_server_loop(DataDir, Prefix, FileNum).
 
 seq_append_server_loop(DataDir, Prefix, FileNum) ->
@@ -282,8 +268,8 @@ seq_append_server_loop(DataDir, Prefix, FileNum) ->
 seq_append_server_loop(DataDir, Prefix, _File, FH, FileNum, Offset)
   when Offset > ?MAX_FILE_SIZE ->
     ok = file:close(FH),
-    error_logger:info_msg("rollover: ~p server at file ~w offset ~w\n",
-                          [Prefix, FileNum, Offset]),
+    info_msg("rollover: ~p server at file ~w offset ~w\n",
+             [Prefix, FileNum, Offset]),
     run_seq_append_server2(Prefix, DataDir);    
 seq_append_server_loop(DataDir, Prefix, File, FH, FileNum, Offset) ->
     receive
@@ -294,8 +280,8 @@ seq_append_server_loop(DataDir, Prefix, File, FH, FileNum, Offset) ->
             seq_append_server_loop(DataDir, Prefix, File, FH,
                                    FileNum, Offset + Size)
     after 30*1000 ->
-            error_logger:info_msg("stop: ~p server at file ~w offset ~w\n",
-                                  [Prefix, FileNum, Offset]),
+            info_msg("stop: ~p server at file ~w offset ~w\n",
+                     [Prefix, FileNum, Offset]),
             exit(normal)
     end.
 
@@ -347,11 +333,11 @@ bin_to_hexstr(Bin) ->
 
 %%% escript stuff
 
-main2(["file-write-client", Host, PortStr, BlockSizeStr, PrefixStr|FileList]) ->
+main2(["file-write-client", Host, PortStr, BlockSizeStr, PrefixStr, LocalFile]) ->
     Sock = escript_connect(Host, PortStr),
     BlockSize = list_to_integer(BlockSizeStr),
     Prefix = list_to_binary(PrefixStr),
-    [escript_upload_file(Sock, BlockSize, Prefix, File) || File <- FileList];
+    escript_upload_file(Sock, BlockSize, Prefix, LocalFile);
 main2(["1file-write-redundant-client", BlockSizeStr, PrefixStr, LocalFile|HPs]) ->
     BlockSize = list_to_integer(BlockSizeStr),
     Prefix = list_to_binary(PrefixStr),
@@ -362,11 +348,14 @@ main2(["chunk-read-client", Host, PortStr, ChunkFileList]) ->
 main2(["list-client", Host, PortStr]) ->
     Sock = escript_connect(Host, PortStr),
     escript_list(Sock);
-main2(["server", PortStr, DataDir]) ->
+main2(["delete-client", Host, PortStr, File]) ->
+    Sock = escript_connect(Host, PortStr),
+    escript_delete(Sock, File);
+main2(["server", RegNameStr, PortStr, DataDir]) ->
     Port = list_to_integer(PortStr),
-    application:start(sasl),
+    %% application:start(sasl),
     _Pid1 = start_listen_server(Port, DataDir),
-    _Pid2 = start_append_server(?MODULE, DataDir),
+    _Pid2 = start_append_server(list_to_atom(RegNameStr), DataDir),
     receive forever -> ok end.
 
 escript_connect(Host, PortStr) ->
@@ -386,7 +375,7 @@ escript_upload_file(Sock, BlockSize, Prefix, File) ->
 
 escript_upload_file2({ok, Bin}, FH, BlockSize, Prefix, Sock, Acc) ->
     {OffsetHex, SizeHex, File} = upload_chunk_append(Sock, Prefix, Bin),
-    io:format("~s ~s ~s\n", [OffsetHex, SizeHex, File]),
+    fmt("~s ~s ~s\n", [OffsetHex, SizeHex, File]),
     <<Offset:64/big>> = hexstr_to_bin(OffsetHex),
     <<Size:32/big>> = hexstr_to_bin(SizeHex),
     OSF = {Offset, Size, File},
@@ -427,24 +416,24 @@ escript_upload_redundant([Host, PortStr|HPs], BlockSize, Prefix, LocalFile) ->
            after
                gen_tcp:close(Sock)
            end,
-    escript_upload_redundant2(HPs, OSFs, LocalFile).
+    escript_upload_redundant2(HPs, OSFs, LocalFile, OSFs).
 
-escript_upload_redundant2([], _OSFs, _LocalFile) ->
-    ok;
-escript_upload_redundant2([Host, PortStr|HPs], OSFs, LocalFile) ->
+escript_upload_redundant2([], _OSFs, _LocalFile, OSFs) ->
+    OSFs;
+escript_upload_redundant2([Host, PortStr|HPs], OSFs, LocalFile, OSFs) ->
     Sock = escript_connect(Host, PortStr),
     {ok, FH} = file:open(LocalFile, [read, binary, raw]),
     try
         [begin
              {ok, Chunk} = file:read(FH, Size),
              _OSF2 = upload_chunk_write(Sock, Offset, File, Chunk)
-             %% io:format("~p: ~p\n", [{Host, PortStr}, OSF2])
+             %% fmt("~p: ~p\n", [{Host, PortStr}, OSF2])
          end || {Offset, Size, File} <- OSFs]
     after
         gen_tcp:close(Sock),
         file:close(FH)
     end,
-    escript_upload_redundant2(HPs, OSFs, LocalFile).
+    escript_upload_redundant2(HPs, OSFs, LocalFile, OSFs).
 
 escript_download_chunks(Sock, ChunkFileList) ->
     {ok, FH} = file:open(ChunkFileList, [read, raw, binary]),
@@ -457,7 +446,7 @@ escript_dowload_chunk({ok, Line}, FH, Sock) ->
     {ok, <<"OK\n">>} = gen_tcp:recv(Sock, 3),
     Size = read_hex_size(Line),
     {ok, _Chunk} = gen_tcp:recv(Sock, Size),
-    io:format("ok\n"),
+    fmt("ok\n"),
     escript_dowload_chunk(file:read_line(FH), FH, Sock);
 escript_dowload_chunk(eof, _FH, _Sock) ->    
     ok.
@@ -471,13 +460,36 @@ escript_list(Sock) ->
     Res.
 
 escript_list({ok, <<".\n">>}, _Sock) ->
-    ok;
+    [];
 escript_list({ok, Line}, Sock) ->
-    io:format("~s", [Line]),
-    escript_list(gen_tcp:recv(Sock, 0), Sock);
+    fmt("~s", [Line]),
+    [Line|escript_list(gen_tcp:recv(Sock, 0), Sock)];
 escript_list(Else, _Sock) ->
-    io:format("ERROR: ~p\n", [Else]),
+    fmt("ERROR: ~p\n", [Else]),
     {error, Else}.
+
+escript_delete(Sock, File) ->
+    ok = gen_tcp:send(Sock, [<<"DEL-migration ">>, File, <<"\n">>]),
+    ok = inet:setopts(Sock, [{packet, line}]),
+    case gen_tcp:recv(Sock, 0) of
+        {ok, <<"OK\n">>} ->
+            ok;
+        {ok, <<"ERROR\n">>} ->
+            error
+    end.
+
+fmt(Fmt) ->
+    fmt(Fmt, []).
+
+fmt(Fmt, Args) ->
+    case application:get_env(kernel, verbose) of {ok, false} -> ok;
+                                                 _     -> io:format(Fmt, Args)
+    end.
+
+info_msg(Fmt, Args) ->
+    case application:get_env(kernel, verbose) of {ok, false} -> ok;
+                                                 _     -> error_logger:info_msg(Fmt, Args)
+    end.
 
 %%%%%%%%%%%%%%%%%
 
