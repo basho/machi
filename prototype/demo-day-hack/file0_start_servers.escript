@@ -22,12 +22,22 @@
 %%
 %% -------------------------------------------------------------------
 
--module(file0_1file_write_redundant_client).
+-module(file0_start_servers).
 -compile(export_all).
--mode(compile).
 
 -define(NO_MODULE, true).
 -include("./file0.erl").
 
-main(Args) ->
-    main2(["1file-write-redundant-client" | Args]).
+main([]) ->
+    io:format("Use:  Demonstrate the commands required to start all servers on a host.\n"),
+    io:format("Args: ServerMapPath Host\n"),
+    erlang:halt(1);
+main([ServerMapPath, HostStr]) ->
+    Host = list_to_binary(HostStr),
+    {ok, Map} = file:consult(ServerMapPath),
+    io:format("Run the following commands to start all servers:\n\n"),
+    [begin
+         DataDir = proplists:get_value(data_dir, Ps),
+         io:format("    file0_server.escript file0_server ~w ~s\n",
+                   [Port, DataDir])
+     end || {{HostX, Port}, Ps} <- Map, HostX == Host].

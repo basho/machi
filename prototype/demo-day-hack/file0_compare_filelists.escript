@@ -22,12 +22,20 @@
 %%
 %% -------------------------------------------------------------------
 
--module(file0_1file_write_redundant_client).
+-module(file0_compare_servers).
 -compile(export_all).
--mode(compile).
+-mode(compile). % for escript use
 
 -define(NO_MODULE, true).
 -include("./file0.erl").
 
-main(Args) ->
-    main2(["1file-write-redundant-client" | Args]).
+main([]) ->
+    io:format("Use:  Compare file lists on two servers and calculate missing files.\n"),
+    io:format("Args: Host1, Port1, Host2, Port2 [<no arg> | 'null' | OutputPath]\n"),
+    erlang:halt(1);
+main([Host1, PortStr1, Host2, PortStr2|Args]) ->
+    Sock1 = escript_connect(Host1, PortStr1),
+    Sock2 = escript_connect(Host2, PortStr2),
+    escript_compare_servers(Sock1, Sock2, {Host1, PortStr1}, {Host2, PortStr2},
+                            Args).
+

@@ -22,7 +22,7 @@
 %%
 %% -------------------------------------------------------------------
 
--module(file0_1file_write_redundant_client).
+-module(file0_read_client).
 -compile(export_all).
 -mode(compile).
 
@@ -30,4 +30,4 @@
 -include("./file0.erl").
 
 main(Args) ->
-    main2(["1file-write-redundant-client" | Args]).
+    main2(["cc-chunk-read-client" | Args]).

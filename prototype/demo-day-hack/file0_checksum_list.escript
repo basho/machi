@@ -22,12 +22,16 @@
 %%
 %% -------------------------------------------------------------------
 
--module(file0_1file_write_redundant_client).
+-module(file0_checksum_list).
 -compile(export_all).
--mode(compile).
 
 -define(NO_MODULE, true).
 -include("./file0.erl").
 
+main(["line-by-line"|Args]) ->
+    %% This is merely a demo to show the cost of line-by-line I/O.
+    %% For a checksum list of 90K lines, line-by-line takes about 3 seconds.
+    %% Bulk I/O (used by the following clause) takes about 0.2 seconds.
+    main2(["checksum-list-client-line-by-line" | Args]);
 main(Args) ->
-    main2(["1file-write-redundant-client" | Args]).
+    main2(["checksum-list-client" | Args]).

@@ -1,0 +1,9 @@
+%% Server names (key): please use {binary(), integer()}
+%% Proplist (value): data_dir is mandatory
+
+{ {<<"localhost">>, 7071}, [{data_dir, "/tmp/file0/server1"}] }.
+{ {<<"localhost">>, 7072}, [{data_dir, "/tmp/file0/server2"}] }.
+{ {<<"localhost">>, 7073}, [{data_dir, "/tmp/file0/server3"}] }.
+{ {<<"localhost">>, 7074}, [{data_dir, "/tmp/file0/server4"}] }.
+{ {<<"localhost">>, 7075}, [{data_dir, "/tmp/file0/server5"}] }.
+{ {<<"localhost">>, 7076}, [{data_dir, "/tmp/file0/server6"}] }.

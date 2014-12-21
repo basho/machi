@@ -1,0 +1,27 @@
+%% Chain names (key): please use binary
+%% Chain members (value): two-tuples of binary hostname and integer TCP port
+
+{<<"chain1">>, [{<<"localhost">>, 7071}]}.
+{<<"chain2">>, [{<<"localhost">>, 7072}]}.
+{<<"chain3">>, [{<<"localhost">>, 7073}]}.
+{<<"chain4">>, [{<<"localhost">>, 7074}]}.
+{<<"chain5">>, [{<<"localhost">>, 7075}]}.
+{<<"chain6">>, [{<<"localhost">>, 7076}]}.
+
+{<<"chain10">>, [{<<"localhost">>, 7071}, {<<"localhost">>, 7072}]}.
+{<<"chain11">>, [{<<"localhost">>, 7073}, {<<"localhost">>, 7074}]}.
+{<<"chain12">>, [{<<"localhost">>, 7075}, {<<"localhost">>, 7076}]}.
+
+%% HACK ALERT
+%% I'm being lazy here -- normally all members of a chain contain identical
+%% data.  In case of erasure coding, I'm using this hack to demonstrate
+%% placement policy.  The **caller** will interpret the chain membership
+%% differently: for EC chains, the call assumes that each server in the
+%% chain list will store one copy of one of the data/parity stripes.
+{<<"ec-1-rs-10-4">>, [{<<"localhost">>, 7072}, {<<"localhost">>, 7072},
+                      {<<"localhost">>, 7072}, {<<"localhost">>, 7072},
+                      {<<"localhost">>, 7072}, {<<"localhost">>, 7072},
+                      {<<"localhost">>, 7072}, {<<"localhost">>, 7072},
+                      {<<"localhost">>, 7072}, {<<"localhost">>, 7072},
+                      {<<"localhost">>, 7072}, {<<"localhost">>, 7072},
+                      {<<"localhost">>, 7072}, {<<"localhost">>, 7072}]}.

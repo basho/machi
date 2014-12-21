@@ -1,0 +1,6 @@
+%% Created by:
+%%    ./file0_cc_make_projection.escript new examples/weight_map_ec1.weight examples/ec1.proj
+
+{projection,1,0,
+            [{<<"ec-1-rs-10-4">>,1.0}],
+            undefined,undefined,undefined,undefined}.

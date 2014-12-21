@@ -1,0 +1,7 @@
+% Created by:
+%    ./file0_cc_make_projection.escript examples/1.proj examples/weight_map2.weight examples/2.proj
+
+{projection,2,1,
+            [{<<"chain1">>,0.5},{<<"chain2">>,0.5}],
+            [{<<"chain1">>,1.0}],
+            undefined,undefined,undefined}.

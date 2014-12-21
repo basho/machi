@@ -1,7 +1,3 @@
-#!/usr/bin/env escript
-%% -*- erlang -*-
-%%! +A 0 -smp disable -noinput -noshell
-
 %% -------------------------------------------------------------------
 %%
 %% Copyright (c) 2007-2014 Basho Technologies, Inc.  All Rights Reserved.
@@ -22,12 +18,16 @@
 %%
 %% -------------------------------------------------------------------
 
--module(file0_1file_write_redundant_client).
--compile(export_all).
--mode(compile).
+-record(projection, {
+          %% hard state
+          epoch :: non_neg_integer(),
+          last_epoch :: non_neg_integer(),
+          float_map,
+          last_float_map,
+          %% soft state
+          migrating :: boolean(),
+          tree,
+          last_tree
+         }).
 
--define(NO_MODULE, true).
--include("./file0.erl").
-
-main(Args) ->
-    main2(["1file-write-redundant-client" | Args]).
+-define(SHA_MAX, (1 bsl (20*8))).

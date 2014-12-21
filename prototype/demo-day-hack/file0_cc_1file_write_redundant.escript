@@ -22,12 +22,11 @@
 %%
 %% -------------------------------------------------------------------
 
--module(file0_1file_write_redundant_client).
+-module(file0_cc_1file_write_redundant_client).
 -compile(export_all).
--mode(compile).
 
 -define(NO_MODULE, true).
 -include("./file0.erl").
 
 main(Args) ->
-    main2(["1file-write-redundant-client" | Args]).
+    main2(["cc-1file-write-redundant-client" | Args]).

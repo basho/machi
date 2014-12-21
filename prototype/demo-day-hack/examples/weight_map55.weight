@@ -1,0 +1,5 @@
+%% Please use binaries for chain names
+
+[
+ {<<"chain10">>, 1000}
+].

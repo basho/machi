@@ -1,6 +1,6 @@
 #!/usr/bin/env escript
 %% -*- erlang -*-
-%%! +A 0 -smp disable -noinput -noshell
+%%! +A 253 -smp enable -noinput -noshell -detached
 
 %% -------------------------------------------------------------------
 %%
@@ -22,12 +22,12 @@
 %%
 %% -------------------------------------------------------------------
 
--module(file0_1file_write_redundant_client).
+-module(file0_server).
 -compile(export_all).
--mode(compile).
+-mode(compile). % for escript use
 
 -define(NO_MODULE, true).
 -include("./file0.erl").
 
 main(Args) ->
-    main2(["1file-write-redundant-client" | Args]).
+    main2(["server" | Args]).
