@@ -61,8 +61,8 @@
           register = 'unwritten' :: register(),
           fake_repairing = false :: boolean(),
           proj_epoch :: non_neg_integer(),
-          proj_store_pub :: dict(),
-          proj_store_priv :: dict()
+          proj_store_pub :: dict:dict(),
+          proj_store_priv :: dict:dict()
          }).
 
 start_link(Name) when is_atom(Name) ->

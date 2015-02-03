@@ -408,7 +408,7 @@ convergence_demo_test(_) ->
       io:format(user, "\nSET partitions = []\n", []),
       io:format(user, "We should see convergence to 1 correct chain.\n", []),
       machi_partition_simulator:no_partitions(),
-      [DoIt(50, 10, 100) || _ <- [1]],
+      [DoIt(50, 10, 100) || _ <- [1,2]],
       true = private_projections_are_stable(Namez, DoIt),
       io:format(user, "~s\n", [os:cmd("date")]),
 
@@ -459,7 +459,8 @@ convergence_demo_test(_) ->
 private_projections_are_stable(Namez, PollFunc) ->
     Private1 = [machi_flu0:proj_get_latest_num(FLU, private) ||
                    {_Name, FLU} <- Namez],
-    PollFunc(5, 1, 10),
+    %% PollFunc(30*10, 1, 10), %% twiddled on 2015-02-03
+    PollFunc(10*50, 10, 100), %% drat, not working on 2015-02-03
     Private2 = [machi_flu0:proj_get_latest_num(FLU, private) ||
                    {_Name, FLU} <- Namez],
     true = (Private1 == Private2).

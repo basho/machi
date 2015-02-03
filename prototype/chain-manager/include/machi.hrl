@@ -50,7 +50,7 @@
           init_finished   :: boolean(),
           name            :: m_server(),
           proj            :: #projection{},
-          proj_history    :: queue(),
+          proj_history    :: queue:queue(),
           myflu           :: pid() | atom(),
           flap_limit      :: non_neg_integer(),
           %%

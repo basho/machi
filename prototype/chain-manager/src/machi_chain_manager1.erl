@@ -370,9 +370,9 @@ make_projection(EpochNum,
     P2 = update_projection_checksum(P),
     P2#projection{dbg2=Dbg2}.
 
-update_projection_checksum(P) ->
-    CSum = crypto:hash(sha, term_to_binary(P)),
-    P#projection{epoch_csum=CSum}.
+update_projection_checksum(#projection{dbg2=Dbg2} = P) ->
+    CSum = crypto:hash(sha, term_to_binary(P#projection{dbg2=[]})),
+    P#projection{epoch_csum=CSum, dbg2=Dbg2}.
 
 update_projection_dbg2(P, Dbg2) when is_list(Dbg2) ->
     P#projection{dbg2=Dbg2}.
@@ -721,18 +721,18 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
 
     P_newprop_all_hosed =
         proplists:get_value(all_hosed,
-                            proplists:get_value(flapping_i, P_newprop#projection.dbg, [])),
+                            proplists:get_value(flapping_i, P_newprop#projection.dbg2, [])),
     P_newprop_flap_count =
         proplists:get_value(flap_count,
-                            proplists:get_value(flapping_i, P_newprop#projection.dbg, [])),
+                            proplists:get_value(flapping_i, P_newprop#projection.dbg2, [])),
     LatestAllFlapCounts =
         proplists:get_value(all_flap_counts,
-                            proplists:get_value(flapping_i, P_latest#projection.dbg, []),
+                            proplists:get_value(flapping_i, P_latest#projection.dbg2, []),
                             []),
     P_latest_trans_flap_count = my_find_minmost(LatestAllFlapCounts),
     P_latest_all_hosed =
         proplists:get_value(all_hosed,
-                            proplists:get_value(flapping_i, P_latest#projection.dbg, [])),
+                            proplists:get_value(flapping_i, P_latest#projection.dbg2, [])),
 
     if
         LatestUnanimousP ->
@@ -827,10 +827,10 @@ react_to_env_C100(P_newprop, P_latest,
             %% that nobody is being Byzantine, so we'll believe that I
             %% am/should be repairing.  We ignore our proposal and try
             %% to go with the latest.
-            react_to_env_C110(P_latest, S);
+            react_to_env_C110(P_newprop, P_latest, S);
         {_, true} ->
             ?REACT({c100, sane}),
-            react_to_env_C110(P_latest, S);
+            react_to_env_C110(P_newprop, P_latest, S);
         {_, _AnyOtherReturnValue} ->
             ?REACT({c100, not_sane}),
             %% P_latest is not sane.
@@ -839,19 +839,24 @@ react_to_env_C100(P_newprop, P_latest,
             react_to_env_C300(P_newprop, P_latest, S)
     end.
 
-react_to_env_C110(P_latest, #ch_mgr{myflu=MyFLU} = S) ->
+react_to_env_C110(P_newprop, P_latest, #ch_mgr{name=MyName, myflu=MyFLU} = S) ->
     ?REACT(c110),
     %% TOOD: Should we carry along any extra info that that would be useful
     %%       in the dbg2 list?
-    Extra_todo = [],
-    RunEnv = S#ch_mgr.runenv,
-    Islands = proplists:get_value(network_islands, RunEnv),
+    Dbg2 = P_newprop#projection.dbg2 ++ P_latest#projection.dbg2,
+    FlappingI = case proplists:get_value(flapping_i, Dbg2, []) of
+                    [] ->
+                        [];
+                    FI ->
+                        MyFlapCount = proplists:get_value(flap_count, FI, 0),
+                        AllFlapCounts = proplists:get_value(
+                                          all_flap_counts, FI, []),
+                        [zoof|lists:keyreplace(MyName, 1, AllFlapCounts,
+                                               {MyName, MyFlapCount})]
+                end,
     P_latest2 = update_projection_dbg2(
                   P_latest,
-                  [%% {network_islands, Islands},
-                   %% {hooray, {v2, date(), time()}}
-                   Islands--Islands
-                   |Extra_todo]),
+                  lists:keyreplace(flapping_i, 1, Dbg2, {flapping_i,FlappingI})),
     Epoch = P_latest2#projection.epoch_number,
     ok = machi_flu0:proj_write(MyFLU, Epoch, private, P_latest2),
     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
@@ -935,14 +940,14 @@ calculate_flaps(P_newprop, FlapLimit,
                         lists:flatten(
                           [X || P <- [BestP|NotBestPs],
                                 FIs <- [proplists:get_value(flapping_i,
-                                                            P#projection.dbg,
+                                                            P#projection.dbg2,
                                                             [])],
                                 X <- proplists:get_value(all_hosed, FIs, [])])),
     TransFlapCounts0 = lists:usort(
                          lists:flatten(
                            [X || P <- [BestP|NotBestPs],
                                  FIs <- [proplists:get_value(flapping_i,
-                                                             P#projection.dbg,
+                                                             P#projection.dbg2,
                                                              [])],
                                  X <- proplists:get_value(all_flap_counts, FIs, [])])),
 
@@ -963,9 +968,9 @@ calculate_flaps(P_newprop, FlapLimit,
             RemoteTransFlapCounts = [{FLU, my_find_max(FLU, TransFlapCounts0)} ||
                                         FLU <- FlapFLUs,
                                         FLU /= MyName],
-io:format(user, "~w gah: TransFlapCounts0 ~w RemoteTransFlapCounts ~w\n", [MyName, TransFlapCounts0, RemoteTransFlapCounts]),
+%% io:format(user, "~w gah: TransFlapCounts0 ~w RemoteTransFlapCounts ~w\n", [MyName, TransFlapCounts0, RemoteTransFlapCounts]),
             AllFlapCounts = [{MyName, NewFlaps}|RemoteTransFlapCounts],
-io:format(user, "~w gah: AllFlapCounts ~w\n", [MyName, AllFlapCounts]),
+%% io:format(user, "~w gah: AllFlapCounts ~w\n", [MyName, AllFlapCounts]),
             AllHosed = lists:usort(DownUnion ++ HosedTransUnion ++ BadFLUs);
         {_N, _URs, _Ds} ->
             NewFlaps = 0,
@@ -974,14 +979,15 @@ io:format(user, "~w gah: AllFlapCounts ~w\n", [MyName, AllFlapCounts]),
     end,
 
     AllFlapCountsSettled = my_find_minmost(AllFlapCounts) >= FlapLimit,
-io:format(user, "~w YOO: AllFlapCountsSettled ~w\n", [MyName, AllFlapCountsSettled]),
+%% io:format(user, "~w YOO: AllFlapCountsSettled ~w\n", [MyName, AllFlapCountsSettled]),
     FlappingI = {flapping_i, [{flap_count,NewFlaps},
+                              {da_auth,MyName},
                               {all_hosed, AllHosed},
                               {all_flap_counts, AllFlapCounts},
                               {all_flap_counts_settled, AllFlapCountsSettled},
                               {bad,BadFLUs}]},
-    NewDbg = [FlappingI|P_newprop#projection.dbg],
-    {S2#ch_mgr{flaps=NewFlaps}, update_projection_checksum(P_newprop#projection{dbg=NewDbg})}.
+    NewDbg2 = [FlappingI|P_newprop#projection.dbg2],
+    {S2#ch_mgr{flaps=NewFlaps}, update_projection_dbg2(P_newprop, NewDbg2)}.
 
 projection_transitions_are_sane(Ps, RelativeToServer) ->
     projection_transitions_are_sane(Ps, RelativeToServer, false).
@@ -1263,14 +1269,14 @@ my_find_minmost([]) ->
 my_find_minmost(TransFlapCounts0) ->
     lists:min([FlapCount || {_F, FlapCount} <- TransFlapCounts0]).
 
-get_all_flap_counts_settled(#projection{dbg=Dbg}) ->
+get_all_flap_counts_settled(#projection{dbg2=Dbg2}) ->
     proplists:get_value(all_flap_counts_settled,
-                        proplists:get_value(flapping_i, Dbg, []),
+                        proplists:get_value(flapping_i, Dbg2, []),
                         false).
 
-get_all_hosed(#projection{dbg=Dbg}) ->
+get_all_hosed(#projection{dbg2=Dbg2}) ->
     proplists:get_value(all_hosed,
-                        proplists:get_value(flapping_i, Dbg, []),
+                        proplists:get_value(flapping_i, Dbg2, []),
                         []).
 
 get_non_flap_upi_rs(#projection{upi=UPIs, repairing=Repairing,
