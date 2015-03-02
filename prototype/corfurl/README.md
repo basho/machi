@@ -1,7 +1,3 @@
-This is a repo that has other stuff that Greg Burd was noodling
-around with wrt distributed indexing.  I haven't bothered weeding
-any of it out, sorry!
-
 The corfurl code is in the 'src' and 'include' directories.  In
 addition, there are docs here:
 
