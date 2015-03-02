@@ -1,0 +1,5 @@
+%% Please use binaries for chain names
+
+[
+ {<<"ec-1-rs-10-4">>, 1000}
+].

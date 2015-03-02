@@ -1,0 +1,5 @@
+{projection,2,1,
+            [{<<"chain10">>,0.9090909090909091},
+             {<<"chain11">>,0.09090909090909094}],
+            [{<<"chain10">>,1.0}],
+            undefined,undefined,undefined}.
