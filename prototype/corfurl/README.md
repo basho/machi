@@ -27,7 +27,8 @@ flawed or broken.
 that the logic still works without any active sequencer.
 * Includes logic to allow the sequencer to give
 **faulty sequencer assignments**, including duplicate page numbers and
-gaps of unused pages.
+gaps of unused pages.  Even if the sequencer **lies to us**, all other
+CORFU operation should remain 100% correct.
 
 If you have a Quviq QuickCheck license, then you can also use the
 `make pulse` target.

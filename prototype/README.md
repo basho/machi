@@ -12,6 +12,15 @@ purposes.  The code is preserved here for use as:
 * Some code might actually be reusable, as-is or after some
   refactoring.
 
+The prototype code here is not meant for long-term use or
+maintenance.  We are unlikely to accept changes/pull requests for adding
+large new features or to build full Erlang/OTP applications using this
+code only.
+
+However, pull requests for small changes, such as support for
+newer Erlang versions (e.g., Erlang 17), will be gladly accepted.
+We will also accept fixes for bugs in the test code.
+
 ## The chain-manager prototype
 
 TODO

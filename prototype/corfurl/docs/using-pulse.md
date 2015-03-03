@@ -128,8 +128,7 @@ REPL interactive work can be done via:
 ## Seeing an PULSE scheduler interleaving failure in action
 
 1. Edit `corfurl_pulse:check_trace()` to uncomment the
-   use of `conjunction()` that mentions `bogus_order_check_do_not_use_me`
-   and comment out the real `conjunction()` call below it.
+   use of `conjunction()` that mentions the `{bogus_no_gaps, ...}` tuple.
 2. Recompile & reload.
 3. Check.
 

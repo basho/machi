@@ -1,3 +1,17 @@
+## Notes on developing & debugging this CORFU prototype
+
+I've recorded some notes while developing & debugging this CORFU
+prototype.  See the `corfurl/notes` subdirectory.
+
+Most of the cases mentioned involve race conditions that were notable
+during the development cycle.  There is one case that IIRC is not
+mentioned in any of the CORFU papers and is probably a case that
+cannot be fixed/solved by CORFU itself.
+
+Each of the scenario notes includes an MSC diagram specification file
+to help illustrate the race.  The diagrams are annotated by hand, both
+with text and color, to point out critical points of timing.
+
 ## CORFU papers
 
 I recommend the "5 pages" paper below first, to give a flavor of

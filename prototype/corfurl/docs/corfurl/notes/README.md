@@ -1,3 +1,16 @@
+## NOTE
+
+The Git commit numbers used below refer to a private Git
+repository and not to the https://github.com/basho/machi repo.  My
+apologies for any confusion.
+
+## Generating diagrams of the race/bug scenarios
+
+Each of the scenario notes includes an MSC diagram
+(Message Sequence Chart) specification file
+to help illustrate the race, each with an `.mscgen` suffix.  Use the
+`mscgen` utility to render the diagrams into PNG, Encapsulated Postscript,
+or other graphic file formats.
 
 ## read-repair-race.1.
 
