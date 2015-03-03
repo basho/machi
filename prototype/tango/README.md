@@ -25,6 +25,8 @@ It ought to "just work" on other versions of Erlang and on other OS
 platforms, but sorry, I haven't tested it.
 
 Use `make` and `make test` to compile and run unit tests.
+Note that the Makefile assumes that the rebar utility is available
+somewhere in your path.
 
 ## Data types implemented
 
@@ -91,11 +93,12 @@ new OID has problems with updates written to the old OID before and before the
 new checkpoint has finished.
 
 I believe that a checkpoint where:
-    * all Tango writes, checkpoint and non-checkpoint alike, are noted with
-      a checkpoint number.
-    * that checkpoint number is strictly increasing
-    * a new checkpoint has a new checkpoint number
-    * scans ignore blocks with checkpoint numbers larger than the current
-      active checkpoint #, until the checkpoint is complete.
+
+* all Tango writes, checkpoint and non-checkpoint alike, are noted with
+  a checkpoint number.
+* that checkpoint number is strictly increasing
+* a new checkpoint has a new checkpoint number
+* scans ignore blocks with checkpoint numbers larger than the current
+  active checkpoint #, until the checkpoint is complete.
 
 ... ought to work correctly.  

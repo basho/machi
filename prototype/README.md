@@ -41,5 +41,7 @@ TODO
 
 ## The tango prototype
 
-TODO
-
+A quick & dirty prototype of Tango on top of the `prototype/corfurl`
+CORFU implementation.  The implementation is powerful enough (barely)
+to run concurrently on multiple Erlang nodes.  See its `README.md`
+file for limitations, TODO items, etc.
