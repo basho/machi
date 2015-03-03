@@ -78,19 +78,54 @@ happens at ISO Layer 2 (for example, due to a bad Ethernet cable that
 has a faulty receive wire), the entire TCP connection will hang rather
 than deliver disterl messages in only one direction.
 
+### Testing simulated data "repair"
+
+In the Machi documentation, "repair" is a re-syncronization of data
+between the UPI members of the chain (see below) and members which
+have been down/partitioned/gone-to-Hawaii-for-vacation for some period
+of time and may have state which is out-of-sync with the rest of the
+active-and-running-and-fully-in-sync chain members.
+
+A rough-and-inaccurate-but-useful summary of state transitions are:
+
+    down -> repair eligible -> repairing started -> repairing finished -> upi
+    
+        * Any state can transition back to 'down'
+        * Repair interruptions might trigger a transition to
+          'repair eligible instead of 'down'.
+        * UPI = Update Propagation Invariant (per the original
+                Chain Replication paper) preserving members.
+                
+                I.e., The state stored by any UPI member is fully
+                in sync with all other UPI chain members, except
+                for new updates which are being processed by Chain
+                Replication at a particular instant in time.
+
+In both the PULSE and `convergence_demo*()` tests, there is a
+simulated time when a FLU's repair state goes from "repair started" to
+"repair finished", which means that the FLU-under-repair is now
+eligible to join the UPI portion of the chain as a fully-sync'ed
+member of the chain.  The simulation is based on a simple "coin
+flip"-style random choice.
+
+The simulator framework is simulating repair failures when a network
+partition is detected with the repair destination FLU.  In the "real
+world", other kinds of failure could also interrupt the repair
+process.
+
 ### The PULSE test in machi_chain_manager1_test.erl
 
 As mentioned above, this test is quite slow: it can take many dozens
-of seconds to execute a single test case.  However, it really is using
+of seconds to execute a single test case.  However, the test really is using
 PULSE to play strange games with Erlang process scheduling.
 
 Unfortnately, the PULSE framework is very slow for this test.  We'd
 like something better, so I wrote the
 `machi_chain_manager1_test:convergence_demo_test()` test to use most
 of the network partition simulator to try to run many more partition
-scenarios in the same amount of time
+scenarios in the same amount of time.
 
-### machi_chain_manager1_test:convergence_demo()
+### machi_chain_manager1_test:convergence_demo1()
 
 This function is intended both as a demo and as a possible
 fully-automated sanity checking function (it will throw an exception
@@ -99,3 +134,33 @@ the PULSE test describe above.  It meets this purpose handily.
 However, it doesn't give quite as much confidence as PULSE does that
 Erlang process scheduling cannot somehow break algorithm running
 inside the simulator.
+
+To execute:
+
+    make test
+    erl -pz ./.eunit deps/*/ebin
+    ok = machi_chain_manager1_test:convergence_demo1().
+
+In summary:
+
+* Set up four FLUs, `[a,b,c,d]`, to be used for the test
+* Set up a set of random asymmetric network partitions, based on a
+  'seed' for a pseudo-random number generator.  Each call to the
+  partition simulator may yield a different partition scenario ... so
+  the simulated environment is very unstable.
+* Run the algorithm for a while so that it has witnessed the partition
+  instability for a long time.
+* Set the partitions definition to a fixed `[{a,b}]`, meaning that FLU `a`
+  cannot send messages to FLU `b`, but all other communication
+  (including messages from `b -> a`) works correctly.
+* Run the algorithm, wait for everyone to settle on rough consensus.
+* Set the partition definition to wildly random again.
+* Run the algorithm for a while so that it has witnessed the partition
+  instability for a long time.
+* Set the partitions definition to a fixed `[{a,c}]`.
+* Run the algorithm, wait for everyone to settle on rough consensus.
+* Set the partitions definition to a fixed `[]`, i.e., there are no
+  network partitions at all.
+* Run the algorithm, wait for everyone to settle on a **unanimous value**
+  of some ordering of all four FLUs.
+

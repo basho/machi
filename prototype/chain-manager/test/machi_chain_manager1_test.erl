@@ -146,11 +146,14 @@ nonunanimous_setup_and_fix_test() ->
 %% cruft to the console.  Comment out the EUnit fixture and run manually.
 
 %% convergence_demo_test_() ->
-%%     {timeout, 300, fun() -> convergence_demo() end}.
+%%     {timeout, 300, fun() -> convergence_demo1() end}.
 
-convergence_demo() ->
+convergence_demo1() ->
     All_list = [a,b,c,d],
-    machi_partition_simulator:start_link({111,222,33}, 0, 100),
+    %% machi_partition_simulator:start_link({111,222,33}, 0, 100),
+    Seed = erlang:now(),
+    machi_partition_simulator:start_link(Seed, 0, 100),
+    io:format(user, "convergence_demo seed = ~p\n", [Seed]),
     _ = machi_partition_simulator:get(All_list),
 
     {ok, FLUa} = machi_flu0:start_link(a),
