@@ -22,6 +22,10 @@ The `corfurl` code is a mostly-complete complete implementation of the
 CORFU server & client specification.  More details on the papers about
 CORFU are mentioned in the `corfurl/docs/corfurl.md` file.
 
+This code contains a QuickCheck + PULSE test.  If you wish to use it,
+please note the usage instructions and restrictions mentioned in the
+`README.md` file.
+
 ## The demo-day-hack prototype
 
 TODO
