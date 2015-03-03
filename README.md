@@ -12,9 +12,9 @@ permits.
 
 ## Initial re-porting on 'prototype' directory
 
-* `chain-manager`: not started
+* `chain-manager`: working on it now......
 * `corfurl`: finished
 * `demo-day-hack`: not started
-* `tango`: working now....
+* `tango`: finished
 
 -Scott and the Machi team
