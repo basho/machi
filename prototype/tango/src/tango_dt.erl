@@ -31,7 +31,8 @@
 
 -define(LONG_TIME, 30*1000).
 
--define(D(X), io:format(user, "Dbg: ~s =\n  ~p\n", [??X, X])).
+-define(D(X), ok).
+%% -define(D(X), io:format(user, "Dbg: ~s =\n  ~p\n", [??X, X])).
 
 -type lpn() :: non_neg_integer().
 
