@@ -27,15 +27,13 @@
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 -compile(export_all).
--ifdef(PULSE).
--compile({parse_transform, pulse_instrument}).
--endif.
 -endif.
 
 -define(SEQ, corfurl_sequencer).
 -define(T, tango).
 
--define(D(X), io:format(user, "Dbg: ~s =\n  ~p\n", [??X, X])).
+-define(D(X), ok).
+%% -define(D(X), io:format(user, "Dbg: ~s =\n  ~p\n", [??X, X])).
 
 -ifdef(TEST).
 -ifndef(PULSE).

@@ -14,7 +14,7 @@ deps:
 	$(REBAR_BIN) get-deps
 
 clean:
-	$(REBAR_BIN) clean
+	$(REBAR_BIN) -r clean
 
 test: deps compile eunit
 
@@ -25,9 +25,8 @@ pulse: compile
 	env USE_PULSE=1 $(REBAR_BIN) skip_deps=true clean compile
 	env USE_PULSE=1 $(REBAR_BIN) skip_deps=true -D PULSE eunit
 
-APPS = kernel stdlib sasl erts ssl tools os_mon runtime_tools crypto inets \
-        xmerl webtool snmp public_key mnesia eunit syntax_tools compiler
-PLT = $(HOME)/.dbms_dialyzer_plt
+APPS = kernel stdlib sasl erts ssl compiler eunit
+PLT = $(HOME)/.tango_dialyzer_plt
 
 build_plt: deps compile
 	dialyzer --build_plt --output_plt $(PLT) --apps $(APPS) deps/*/ebin

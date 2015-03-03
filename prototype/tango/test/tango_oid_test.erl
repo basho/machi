@@ -23,9 +23,6 @@
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 -compile(export_all).
--ifdef(PULSE).
--compile({parse_transform, pulse_instrument}).
--endif.
 -endif.
 
 -define(D(X), io:format(user, "Dbg: ~s = ~p\n", [??X, X])).

@@ -14,8 +14,7 @@ deps:
 	$(REBAR_BIN) get-deps
 
 clean:
-	$(REBAR_BIN) clean
-	-for dir in deps/*; do (cd $$dir ; $(REBAR_BIN) clean); done
+	$(REBAR_BIN) -r clean
 
 test: deps compile eunit
 
