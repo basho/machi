@@ -56,7 +56,8 @@ Tested using Erlang/OTP R16B and Erlang/OTP 17, both on OS X.
 If you wish to run the PULSE test in
 `test/machi_chain_manager1_pulse.erl` module, you must use Erlang
 R16B and Quviq QuickCheck 1.30.2 -- there is a known problem with
-QuickCheck 1.33.2, sorry!
+QuickCheck 1.33.2, sorry!  Also, please note that a single iteration
+of a PULSE test case in this model can run for 10s of seconds!
 
 Otherwise, it ought to "just work" on other versions of Erlang and on other OS
 platforms, but sorry, I haven't tested it.

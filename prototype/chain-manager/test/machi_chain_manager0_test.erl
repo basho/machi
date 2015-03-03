@@ -29,6 +29,7 @@
 -export([]).
 
 -ifdef(TEST).
+-ifndef(PULSE).
 
 -ifdef(EQC).
 -include_lib("eqc/include/eqc.hrl").
@@ -458,4 +459,5 @@ combinations(L) ->
 perms([]) -> [[]];
 perms(L)  -> [[H|T] || H <- L, T <- perms(L--[H])].
 
+-endif. % ! PULSE
 -endif.
