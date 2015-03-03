@@ -15,6 +15,6 @@ permits.
 * `chain-manager`: not started
 * `corfurl`: finished
 * `demo-day-hack`: not started
-* `tango`: not started
+* `tango`: working now....
 
 -Scott and the Machi team
