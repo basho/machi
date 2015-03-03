@@ -1,0 +1,9 @@
+{application, foo, [
+    {description, "Prototype of Machi chain manager."},
+    {vsn, "0.0.0"},
+    {applications, [kernel, stdlib, lager]},
+    {mod,{foo_unfinished_app,[]}},
+    {registered, []},
+    {env, [
+    ]}
+]}.

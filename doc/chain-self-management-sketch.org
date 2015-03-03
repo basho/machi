@@ -48,6 +48,8 @@ the simulator.
 
 See [[https://tools.ietf.org/html/rfc7282][On Consensus and Humming in the IETF]], RFC 7282.
 
+See also: [[http://www.snookles.com/slf-blog/2015/03/01/on-humming-consensus-an-allegory/][On “Humming Consensus”, an allegory]].
+
 ** Tunesmith?
 
 A mix of orchestral conducting, music composition, humming?
@@ -365,7 +367,8 @@ document presents a detailed example.)
 
 * Sketch of the self-management algorithm
 ** Introduction
-See also, the diagram (((Diagram1.eps))), a flowchart of the
+Refer to the diagram `chain-self-management-sketch.Diagram1.pdf`, a
+flowchart of the 
 algorithm.  The code is structured as a state machine where function
 executing for the flowchart's state is named by the approximate
 location of the state within the flowchart.  The flowchart has three

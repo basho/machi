@@ -12,7 +12,7 @@ permits.
 
 ## Initial re-porting on 'prototype' directory
 
-* `chain-manager`: working on it now......
+* `chain-manager`: finished
 * `corfurl`: finished
 * `demo-day-hack`: not started
 * `tango`: finished

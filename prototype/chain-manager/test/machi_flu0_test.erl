@@ -29,6 +29,7 @@
 -endif.
 
 -ifdef(TEST).
+-ifndef(PULSE).
 
 repair_status_test() ->
     {ok, F} = machi_flu0:start_link(one),
@@ -41,7 +42,6 @@ repair_status_test() ->
         ok = machi_flu0:stop(F)
     end.
 
--ifndef(PULSE).
 
 concuerror1_test() ->
     ok.
@@ -375,5 +375,5 @@ event_get_all() ->
     Tab = ?MODULE,
     ets:tab2list(Tab).
 
--endif.
+-endif. % ! PULSE
 -endif.

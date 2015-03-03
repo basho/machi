@@ -26,6 +26,7 @@
 -export([]).
 
 -ifdef(TEST).
+-ifndef(PULSE).
 
 -ifdef(EQC).
 -include_lib("eqc/include/eqc.hrl").
@@ -146,5 +147,6 @@ make_canonical_form2([{File, Start, End, Members}|T]) ->
                                  Member <- Members] ++
         make_canonical_form2(T).
 
+-endif. % ! PULSE
 -endif. % TEST
 

@@ -23,7 +23,7 @@ eunit:
 
 pulse: compile
 	env USE_PULSE=1 $(REBAR_BIN) skip_deps=true clean compile
-	env USE_PULSE=1 $(REBAR_BIN) skip_deps=true -D PULSE eunit
+	env USE_PULSE=1 $(REBAR_BIN) skip_deps=true -D PULSE -v eunit
 
 CONC_ARGS = --pz ./.eunit --treat_as_normal shutdown --after_timeout 1000
 
@@ -41,3 +41,15 @@ concuerror: deps compile
 	concuerror -m machi_flu0_test -t proj_store_test $(CONC_ARGS)
 	concuerror -m machi_flu0_test -t wedge_test $(CONC_ARGS)
 	concuerror -m machi_flu0_test -t proj0_test $(CONC_ARGS)
+
+APPS = kernel stdlib sasl erts ssl compiler eunit
+PLT = $(HOME)/.chmgr_dialyzer_plt
+
+build_plt: deps compile
+	dialyzer --build_plt --output_plt $(PLT) --apps $(APPS) deps/*/ebin
+
+dialyzer: deps compile
+	dialyzer -Wno_return --plt $(PLT) ebin
+
+clean_plt:
+	rm $(PLT)

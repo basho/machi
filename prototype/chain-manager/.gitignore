@@ -6,3 +6,4 @@ deps
 ebin/*.beam
 ebin/*.app
 erl_crash.dump
+RUNLOG*
