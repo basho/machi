@@ -41,3 +41,15 @@ concuerror: deps compile
 	concuerror -m machi_flu0_test -t proj_store_test $(CONC_ARGS)
 	concuerror -m machi_flu0_test -t wedge_test $(CONC_ARGS)
 	concuerror -m machi_flu0_test -t proj0_test $(CONC_ARGS)
+
+APPS = kernel stdlib sasl erts ssl compiler eunit
+PLT = $(HOME)/.chmgr_dialyzer_plt
+
+build_plt: deps compile
+	dialyzer --build_plt --output_plt $(PLT) --apps $(APPS) deps/*/ebin
+
+dialyzer: deps compile
+	dialyzer -Wno_return --plt $(PLT) ebin
+
+clean_plt:
+	rm $(PLT)

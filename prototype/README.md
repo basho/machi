@@ -23,7 +23,9 @@ We will also accept fixes for bugs in the test code.
 
 ## The chain-manager prototype
 
-TODO
+This is a very early experiment to try to create a distributed "rough
+consensus" algorithm that is sufficient & safe for managing the order
+of a Chain Replication chain, its members, and its chain order.
 
 ## The corfurl prototype
 
