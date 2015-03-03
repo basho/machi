@@ -21,12 +21,6 @@ However, pull requests for small changes, such as support for
 newer Erlang versions (e.g., Erlang 17), will be gladly accepted.
 We will also accept fixes for bugs in the test code.
 
-## The chain-manager prototype
-
-This is a very early experiment to try to create a distributed "rough
-consensus" algorithm that is sufficient & safe for managing the order
-of a Chain Replication chain, its members, and its chain order.
-
 ## The corfurl prototype
 
 The `corfurl` code is a mostly-complete complete implementation of the
@@ -47,3 +41,18 @@ A quick & dirty prototype of Tango on top of the `prototype/corfurl`
 CORFU implementation.  The implementation is powerful enough (barely)
 to run concurrently on multiple Erlang nodes.  See its `README.md`
 file for limitations, TODO items, etc.
+
+## The chain-manager prototype
+
+This is a very early experiment to try to create a distributed "rough
+consensus" algorithm that is sufficient & safe for managing the order
+of a Chain Replication chain, its members, and its chain order.
+
+* Code status: **active**!
+
+Unlike the other code projects in this repository's `prototype`
+directory, the chain management code is still under active
+development.  It is quite likely (as of early March 2015) that this
+code will be robust enough to move to the "real" Machi code base soon.
+
+
