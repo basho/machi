@@ -10,4 +10,11 @@ as I continue work in early March 2015.
 Meanwhile, see the wiki for this repo for helpful hints, as time
 permits.
 
+## Initial re-porting on 'prototype' directory
+
+* `chain-manager`: not started
+* `corfurl`: in progress
+* `demo-day-hack`: not started
+* `tango`: not started
+
 -Scott and the Machi team
