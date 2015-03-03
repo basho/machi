@@ -1,6 +1,6 @@
 REBAR_BIN := $(shell which rebar)
 ifeq ($(REBAR_BIN),)
-REBAR_BIN = ./rebar
+REBAR_BIN = /local/path/to/rebar
 endif
 
 .PHONY: rel deps package pkgclean
@@ -15,6 +15,7 @@ deps:
 
 clean:
 	$(REBAR_BIN) clean
+	-for dir in deps/*; do (cd $$dir ; $(REBAR_BIN) clean); done
 
 test: deps compile eunit
 

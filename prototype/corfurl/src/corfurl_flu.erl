@@ -213,7 +213,7 @@ handle_call({{fill, ClientEpoch, _LogicalPN}, LC1}, _From,
     {reply, {error_badepoch, LC2}, State};
 handle_call({{fill, _ClientEpoch, LogicalPN}, LC1}, _From, State) ->
     LC2 = lclock_update(LC1),
-    io:format(user, "~s.erl line ~w: TODO: this 'fill or trim' logic is probably stupid, due to mis-remembering the CORFU paper, sorry!  Commenting out this warning line is OK, if you wish to proceed with testing Corfurl.  This code can change a fill into a trim.  Those things are supposed to be separate, silly me, a fill should never automagically change to a trim.\n", [?MODULE, ?LINE]),
+    perhaps_spew_TODO_warning(),
     {Reply, NewState} = do_trim_or_fill(fill, LogicalPN, State),
     ?EVENT_LOG({flu, fill, self(), LogicalPN, Reply}),
     {reply, {Reply, LC2}, NewState};
@@ -422,11 +422,20 @@ trim_page(Op, LogicalPN, #state{max_mem=MaxMem, mem_fh=FH} = S) ->
 %% We do *not* want to remove any special PULSE return code.
 undo_special_pulse_test_result(Res) ->
     Res.
+
+perhaps_spew_TODO_warning() ->
+    ok.
 -else.  % PULSE
 undo_special_pulse_test_result({special_trimmed, LPN}) ->
     {ok, LPN};
 undo_special_pulse_test_result(Res) ->
     Res.
+
+perhaps_spew_TODO_warning() ->
+    case get(todo_warning_flu) of
+        undefined -> io:format(user, "~s.erl line ~w: TODO: this 'fill or trim' logic is probably stupid, due to mis-remembering the CORFU paper, sorry!  Commenting out this warning line is OK, if you wish to proceed with testing Corfurl.  This code can change a fill into a trim.  Those things are supposed to be separate, silly me, a fill should never automagically change to a trim.\n", [?MODULE, ?LINE]), put(todo_warning_flu, true);
+        _ -> ok
+    end.
 -endif. % PULSE
 
 

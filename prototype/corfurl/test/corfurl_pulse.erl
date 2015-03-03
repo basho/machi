@@ -477,7 +477,9 @@ check_trace(Trace0, _Cmds, _Seed) ->
                fun(x)-> [] end,
                Events),
     {_, _, Perhaps} = lists:last(eqc_temporal:all_future(PerhapsR)),
-    %%?QC_FMT("*Perhaps: ~p\n", [Perhaps]),
+    %% ?QC_FMT("*Perhaps: ~p\n", [Perhaps]),
+    _PerhapsLPNs = lists:sort([LPN || {perhaps, LPN, _} <- Perhaps]),
+    %% ?QC_FMT("*_PerhapsLPNs: ~p\n", [_PerhapsLPNs]),
     Reads = eqc_temporal:stateful(
                fun({call, Pid, {read, LPN, _, _}}) ->
                        {read, Pid, LPN, []}
@@ -555,13 +557,12 @@ check_trace(Trace0, _Cmds, _Seed) ->
         InvalidTransitions == []},
        {no_bad_reads,
         eqc_temporal:is_false(eqc_temporal:all_future(BadReads))},
-       %% If you want to see PULSE causing crazy scheduling, then
-       %% change one of the "true orelse" -> "false orelse" below.
        %% {bogus_no_gaps,
-       %%  true orelse
-       %%          (AppendLPNs == [] orelse length(range_ify(AppendLPNs)) == 1)},
+       %%  (_PerhapsLPNs == [] orelse length(range_ify(_PerhapsLPNs)) == 1)},
        %% {bogus_exactly_1_to_N,
-       %%  true orelse (AppendLPNs == lists:seq(1, length(AppendLPNs)))},
+       %%  (_PerhapsLPNs == lists:seq(1, length(_PerhapsLPNs)))},
+       %% Do not remove the {true, true}, please.  It should always be the
+       %% last conjunction test.
        {true, true}
       ])).
 
