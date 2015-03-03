@@ -67,6 +67,9 @@ research papers.
 
 ## TODO list
 
+__ The src/corfu* files in this sub-repo differ from the original
+   prototype source files in the ../corfu sub-repo, sorry!
+
 __ The current checkpoint implementation is fundamentally broken and
    needs a rewrite, or else.
    This issue is not mentioned at all in the Tango paper.
