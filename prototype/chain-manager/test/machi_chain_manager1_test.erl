@@ -54,10 +54,12 @@ smoke0_test() ->
         %% If/when calculate_projection_internal_old() disappears, then
         %% get rid of the comprehension below ... start/ping/stop is
         %% good enough for smoke0.
+        io:format(user, "\n\nBegin 5 lines of verbose stuff, check manually for differences\n", []),
         [begin
              Proj = ?MGR:calculate_projection_internal_old(M0),
              io:format(user, "~w\n", [?MGR:make_projection_summary(Proj)])
-         end || _ <- lists:seq(1,5)]
+         end || _ <- lists:seq(1,5)],
+        io:format(user, "\n", [])
     after
         ok = ?MGR:stop(M0),
         ok = machi_flu0:stop(FLUa),
@@ -107,9 +109,9 @@ nonunanimous_setup_and_fix_test() ->
         ok = machi_flu0:proj_write(FLUa, P1Epoch, public, P1a),
         ok = machi_flu0:proj_write(FLUb, P1Epoch, public, P1b),
 
-        ?D(x),
+        %% ?D(x),
         {not_unanimous,_,_}=_XX = ?MGR:test_read_latest_public_projection(Ma, false),
-        ?Dw(_XX),
+        %% ?Dw(_XX),
         {not_unanimous,_,_}=_YY = ?MGR:test_read_latest_public_projection(Ma, true),
         %% The read repair here doesn't automatically trigger the creation of
         %% a new projection (to try to create a unanimous projection).  So
@@ -140,10 +142,13 @@ nonunanimous_setup_and_fix_test() ->
         ok = machi_partition_simulator:stop()
     end.
 
-convergence_demo_test_() ->
-    {timeout, 300, fun() -> convergence_demo_test(x) end}.
+%% This test takes a long time and spits out a huge amount of logging
+%% cruft to the console.  Comment out the EUnit fixture and run manually.
 
-convergence_demo_test(_) ->
+%% convergence_demo_test_() ->
+%%     {timeout, 300, fun() -> convergence_demo() end}.
+
+convergence_demo() ->
     All_list = [a,b,c,d],
     machi_partition_simulator:start_link({111,222,33}, 0, 100),
     _ = machi_partition_simulator:get(All_list),

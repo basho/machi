@@ -64,13 +64,6 @@ platforms, but sorry, I haven't tested it.
 
 ### Testing with simulated network partitions
 
-One of the unit tests spits out **a tremendous amount** of verbose
-logging information to the console.  This test, the
-`machi_chain_manager1_test:convergence_demo_test()`, isn't the typical
-small unit test.  Rather, it (ab)uses the EUnit framework to
-automatically run this quite large test together with all of the other
-tiny unit tests.
-
 See the `doc/chain-self-management-sketch.org` file for details of how
 the simulator works.
 
@@ -84,3 +77,25 @@ distributed Erlang, because disterl uses TCP.  If a network partition
 happens at ISO Layer 2 (for example, due to a bad Ethernet cable that
 has a faulty receive wire), the entire TCP connection will hang rather
 than deliver disterl messages in only one direction.
+
+### The PULSE test in machi_chain_manager1_test.erl
+
+As mentioned above, this test is quite slow: it can take many dozens
+of seconds to execute a single test case.  However, it really is using
+PULSE to play strange games with Erlang process scheduling.
+
+Unfortnately, the PULSE framework is very slow for this test.  We'd
+like something better, so I wrote the
+`machi_chain_manager1_test:convergence_demo_test()` test to use most
+of the network partition simulator to try to run many more partition
+scenarios in the same amount of time
+
+### machi_chain_manager1_test:convergence_demo()
+
+This function is intended both as a demo and as a possible
+fully-automated sanity checking function (it will throw an exception
+when a model failure happens).  It's purpose is to "go faster" than
+the PULSE test describe above.  It meets this purpose handily.
+However, it doesn't give quite as much confidence as PULSE does that
+Erlang process scheduling cannot somehow break algorithm running
+inside the simulator.
