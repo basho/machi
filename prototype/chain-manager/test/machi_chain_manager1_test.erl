@@ -394,13 +394,23 @@ convergence_demo_test(_) ->
            %% DoIt(30, 0, 0),
            machi_partition_simulator:always_these_partitions(Partition),
            io:format(user, "\nSET partitions = ~w.\n", [Partition]),
-           [DoIt(50, 10, 100) || _ <- [1,2,3] ],
+           [DoIt(50, 10, 100) || _ <- [1,2,3,4] ],
            true = private_projections_are_stable(Namez, DoIt),
            io:format(user, "\nSweet, we converged to a stable state.\n", []),
+           PPP =
+               [begin
+                    PPPallPubs = machi_flu0:proj_list_all(FLU, public),
+                    [begin
+                         {ok, Pr} = machi_flu0:proj_read(FLU, PPPepoch, public),
+                         {Pr#projection.epoch_number, FLUName, Pr}
+                     end || PPPepoch <- PPPallPubs]
+                end || {FLUName, FLU} <- Namez],
+           io:format(user, "PPP ~p\n", [lists:sort(lists:append(PPP))]),
            timer:sleep(1000),
            ok
        %% end || Partition <- AllPartitionCombinations],
        end || Partition <- [ [{c,a}] ] ],
+       %% end || Partition <- [ [{c,a}], [{c,b}, {a, b}] ] ],
        %% end || Partition <- [ [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {b,c}],
        %%                       [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {c,d}] ] ],
        %% exit(end_experiment),

@@ -304,6 +304,9 @@ cl_read_latest_projection(ProjectionType, #ch_mgr{proj=CurrentProj}=S) ->
     FLUsRs = lists:zip(All_list, Rs),
     UnwrittenRs = [x || error_unwritten <- Rs],
     Ps = [Proj || {_FLU, Proj} <- FLUsRs, is_record(Proj, projection)],
+    %% debug only:
+    %% BadAnswerFLUs = [{FLU,bad_answer,Answer} || {FLU, Answer} <- FLUsRs,
+    %%                         not is_record(Answer, projection)],
     BadAnswerFLUs = [FLU || {FLU, Answer} <- FLUsRs,
                             not is_record(Answer, projection)],
     if length(UnwrittenRs) == length(Rs) ->
@@ -564,6 +567,7 @@ react_to_env_A20(Retries, S) ->
     ?REACT(a20),
     {UnanimousTag, P_latest, ReadExtra, S2} =
         do_cl_read_latest_public_projection(true, S),
+    io:format(user, "<~p rd latest auth ~p f_c's ~p>\n", [S#ch_mgr.name, P_latest#projection.author_server, get_all_flap_counts(P_latest)]),
 
     %% The UnanimousTag isn't quite sufficient for our needs.  We need
     %% to determine if *all* of the UPI+Repairing FLUs are members of
@@ -730,7 +734,6 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
     P_newprop_flap_count = get_flap_count(P_newprop),
     LatestAllFlapCounts = get_all_flap_counts(P_latest),
     P_latest_trans_flap_count = my_find_minmost(LatestAllFlapCounts),
-    P_latest_all_hosed = get_all_hosed(P_latest),
 
     if
         LatestUnanimousP ->
@@ -742,9 +745,16 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         P_newprop_flap_count >= FlapLimit ->
             %% I am flapping ... what else do I do?
             B10Hack = get(b10_hack),
-            if B10Hack == false andalso P_newprop_flap_count - FlapLimit - 3 =< 0 -> io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_flap_count]), put(b10_hack, true); true -> ok end,
+            io:format(user, "{FLAP: ~w auth ~w #flaps ~w} myenv ~w\n", [S#ch_mgr.name, P_newprop#projection.author_server, P_newprop_flap_count, S#ch_mgr.runenv]),
+            %% if B10Hack == false andalso P_newprop_flap_count - FlapLimit - 3 =< 0 -> io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_flap_count]), put(b10_hack, true); true -> ok end,
 
             if
+                %% So, if we noticed a flap count by some FLU X with a
+                %% count below FlapLimit, then X crashes so that X's
+                %% flap count remains below FlapLimit, then we could get
+                %% stuck forever?  Hrm, except that 'crashes' ought to be
+                %% detected by our own failure detector and get us out of
+                %% this current flapping situation, right? TODO
                 P_latest_trans_flap_count >= FlapLimit ->
                     %% Everyone that's flapping together now has flap_count
                     %% that's larger than the limit.  So it's safe and good
@@ -755,7 +765,6 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                     %% It is our moral imperative to write so that the flap
                     %% cycle continues enough times so that everyone notices
                     %% and thus the earlier clause above fires.
-                    P_latest_all_hosed=P_latest_all_hosed,
                     react_to_env_C300(P_newprop, P_latest, S)
 
                %% Rank_latest =< Rank_newprop ->
@@ -852,6 +861,10 @@ react_to_env_C110(P_latest, #ch_mgr{myflu=MyFLU} = S) ->
             {_,_,C} = os:timestamp(),
             MSec = trunc(C / 1000),
             {HH,MM,SS} = time(),
+            %% {sigh} Runenv never has any non-[] flapping info at this point.
+            %% io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses: ~w myenv ~w\n",
+            %%           [HH,MM,SS,MSec, S#ch_mgr.name,
+            %%            make_projection_summary(P_latest2), S#ch_mgr.runenv]);
             io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses: ~w\n",
                       [HH,MM,SS,MSec, S#ch_mgr.name,
                        make_projection_summary(P_latest2)]);
@@ -930,6 +943,9 @@ calculate_flaps(P_newprop, FlapLimit,
 
     _Unanimous = proplists:get_value(unanimous_flus, Props),
     _NotUnanimous = proplists:get_value(not_unanimous_flus, Props),
+    %% NOTE: bad_answer_flus are probably due to timeout or some other network
+    %%       glitch, i.e., anything other than {ok, P::projection()}
+    %%       response from machi_flu0:proj_read_latest().
     BadFLUs = proplists:get_value(bad_answer_flus, Props),
 
     case {queue:len(H), length(UPI_Repairing_combos), length(Down_combos)} of
@@ -946,6 +962,30 @@ calculate_flaps(P_newprop, FlapLimit,
                                         FLU <- FlapFLUs,
                                         FLU /= MyName],
             AllFlapCounts = [{MyName, NewFlaps}|RemoteTransFlapCounts],
+
+            %% Wow, this behavior is almost spooky.
+            %%
+            %% For an example partition map [{c,a}], on the very first
+            %% time this 'if' clause is hit by FLU b, AllHosed=[a,c].
+            %% How the heck does B know that??
+            %%
+            %% If I use:
+            %% DownUnionQQQ = [{P#projection.epoch_number, P#projection.author_server, P#projection.down} || P <- [BestP|NotBestPs]],
+            %% AllHosed = [x_1] ++ DownUnion ++ [x_2] ++ HosedTransUnion ++ [x_3] ++ BadFLUs ++ [{downunionqqq, DownUnionQQQ}];
+            %%
+            %% ... then b sees this when proposing epoch 451:
+            %%
+            %% {all_hosed,
+            %%  [x_1,a,c,x_2,x_3,
+            %%   {downunionqqq,
+            %%    [{450,a,[c]},{449,b,[]},{448,c,[a]},{441,d,[]}]}]},
+            %%
+            %% So b's working on epoch 451 at the same time that d's latest
+            %% public projection is only epoch 441.  But there's enough
+            %% lag so that b can "see" that a's bad=[c] (due to t_timeout!)
+            %% and c's bad=[a].  So voila, b magically knows about both
+            %% problem FLUs.  Weird/cool.
+
             AllHosed = lists:usort(DownUnion ++ HosedTransUnion ++ BadFLUs);
         {_N, _URs, _Ds} ->
             NewFlaps = 0,
@@ -958,7 +998,11 @@ calculate_flaps(P_newprop, FlapLimit,
                               {all_hosed, AllHosed},
                               {all_flap_counts, AllFlapCounts},
                               {all_flap_counts_settled, AllFlapCountsSettled},
-                              {bad,BadFLUs}]},
+                              {bad,BadFLUs},
+                              {da_downu, DownUnion}, % debugging aid
+                              {da_hosedtu, HosedTransUnion}, % debugging aid
+                              {da_downreports, [{P#projection.epoch_number, P#projection.author_server, P#projection.down} || P <- [BestP|NotBestPs]]} % debugging aid
+                             ]},
     Dbg2 = [FlappingI|P_newprop#projection.dbg],
     %% SLF TODO: 2015-03-04: I'm growing increasingly suspicious of
     %% the 'runenv' variable that's threaded through all this code.
@@ -966,6 +1010,12 @@ calculate_flaps(P_newprop, FlapLimit,
     %% the flapping information that we've just constructed here is
     %% going to get lost, and that's a shame.  Fix it.
     RunEnv2 = replace(RunEnv1, [FlappingI]),
+    %% NOTE: If we'd increment of flaps here, that doesn't mean that
+    %%       someone's public proj store has been updated.  For example,
+    %%       if we loop through states C2xx a few times, we would incr
+    %%       flaps each time ... but the C2xx path doesn't write a new
+    %%       proposal to everyone's public proj stores, and there's no
+    %%       guarantee that anyone else as written a new public proj either.
     {S#ch_mgr{flaps=NewFlaps, runenv=RunEnv2}, update_projection_checksum(P_newprop#projection{dbg=Dbg2})}.
 
 projection_transitions_are_sane(Ps, RelativeToServer) ->
