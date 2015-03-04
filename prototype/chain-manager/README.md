@@ -164,3 +164,39 @@ In summary:
 * Run the algorithm, wait for everyone to settle on a **unanimous value**
   of some ordering of all four FLUs.
 
+To try to understand the simulator's output, let's look at some examples:
+
+    20:12:59.120 c uses: [{epoch,1023},{author,d},{upi,[c,b,d,a]},{repair,[]},{down,[]},{d,[{author_proc,react},{ps,[]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[[a,b,c,d]]},{hooray,{v2,{2015,3,3},{20,12,59}}}]}]
+
+So, server C has decided the following, as far as it can tell:
+
+* Epoch 1023 is the latest epoch
+* There's already a projection written to the "public" projection stores by author server D.
+* C has decided that D's proposal is the best out of all that C can see in the "public" projection stores plus its own calculation
+* The UPI/active chain order is: C (head), B, D, A (tail).
+* No servers are under repair
+* No servers are down.
+* Then there's some other debugging/status info in the 'd' and 'd2' data attributes
+    * The 'react' to outside stimulus triggered the author's action
+    * The 'ps' says that there are no network partitions *inside the simulator* (yes, that's cheating, but sooo useful for debugging)
+    * All 4 nodes are believed up
+    * (aside) The 'ps' partition list describes nodes that cannot talk to each other.
+    * For easier debugging/visualization, the 'network_islands' converts 'ps' into lists of "islands" where nodes can talk to each other.
+    * So 'network_islands' says that A&B&C&D can all message each other, as far as author D understands at the moment.
+    * Hooray, the decision was made at 20:12:59 on 2015-03-03.
+
+So, let's see a tiny bit of what happens when there's an asymmetric
+network partition.  Note that no consensus has yet been reached:
+participants are still churning/uncertain.
+
+    20:12:48.420 a uses: [{epoch,1011},{author,a},{upi,[a,b]},{repair,[d]},{down,[c]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{20,12,48}}}]}]
+    20:12:48.811 d uses: [{epoch,1012},{author,d},{upi,[a]},{repair,[b,c,d]},{down,[]},{d,[{author_proc,react},{ps,[{a,c}]},{nodes_up,[a,b,c,d]}]},{d2,[{network_islands,[na_reset_by_always]},{hooray,{v2,{2015,3,3},{20,12,48}}}]}]
+    {FLAP: a flaps 5}!
+
+* The simulator says that the one-way partition definition is `{ps,[{a,c}]}`. This is authoritative info from the simulator.  The algorithm *does not* use this source of info, however!
+* Server A believes that `{nodes_up,[a,b,d]}`.  A is a victim of the simulator's partitioning, so this belief is correct relative to A.
+* Server D believes that `{nodes_up,[a,b,c,d]}`.  D doesn't have any simulator partition, so this belief is also correct relative to D.
+* A participant has now noticed that server A has "flapped": it has
+  proposed the same proposal at least 5 times in a row.  This kind of
+  pattern is indicative of an asymmetric partition ... which is indeed
+  what is happening at this moment.
