@@ -399,7 +399,8 @@ convergence_demo_test(_) ->
            io:format(user, "\nSweet, we converged to a stable state.\n", []),
            timer:sleep(1000),
            ok
-       end || Partition <- AllPartitionCombinations],
+       %% end || Partition <- AllPartitionCombinations],
+       end || Partition <- [ [{c,a}] ] ],
        %% end || Partition <- [ [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {b,c}],
        %%                       [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {c,d}] ] ],
        %% exit(end_experiment),

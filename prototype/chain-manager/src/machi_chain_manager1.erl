@@ -318,11 +318,16 @@ cl_read_latest_projection(ProjectionType, #ch_mgr{proj=CurrentProj}=S) ->
                            end,
             Extra = [{all_members_replied, length(Rs) == length(All_list)}],
             Best_FLUs = [FLU || {FLU, Projx} <- FLUsRs, Projx == BestProj],
+            AllHosed = lists:usort(
+                         lists:flatten([get_all_hosed(P) || P <- Ps])),
+            AllFlapCounts = merge_flap_counts([get_all_flap_counts(P)|| P <- Ps]),
             Extra2 = [{unanimous_flus,Best_FLUs},
                       {not_unanimous_flus, All_list --
                                                  (Best_FLUs ++ BadAnswerFLUs)},
                       {bad_answer_flus, BadAnswerFLUs},
-                      {not_unanimous_answers, NotBestPs}|Extra],
+                      {not_unanimous_answers, NotBestPs},
+                      {trans_all_hosed, AllHosed},
+                      {trans_all_flap_counts, AllFlapCounts}|Extra],
             {UnanimousTag, BestProj, Extra2, S2}
     end.
 
@@ -597,7 +602,6 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP,
     {S3, P_newprop2} = calculate_flaps(P_newprop1, FlapLimit, S2),
 
     P_newprop2_all_hosed = get_all_hosed(P_newprop2),
-    NewDown = lists:usort(P_newprop2#projection.down ++ P_newprop2_all_hosed),
 
     %% 2015-03-04: This will definitely stop a self-identified hosed machine
     %%             from participating.  However, it doesn't prevent problems
@@ -921,20 +925,8 @@ calculate_flaps(P_newprop, FlapLimit,
                   lists:flatten(
                     [P#projection.down ||
                         P <- [BestP|NotBestPs]])),
-    HosedTransUnion = lists:usort(
-                        lists:flatten(
-                          [X || P <- [BestP|NotBestPs],
-                                FIs <- [proplists:get_value(flapping_i,
-                                                            P#projection.dbg,
-                                                            [])],
-                                X <- proplists:get_value(all_hosed, FIs, [])])),
-    TransFlapCounts0 = lists:usort(
-                         lists:flatten(
-                           [X || P <- [BestP|NotBestPs],
-                                 FIs <- [proplists:get_value(flapping_i,
-                                                             P#projection.dbg,
-                                                             [])],
-                                 X <- proplists:get_value(all_flap_counts, FIs, [])])),
+    HosedTransUnion = proplists:get_value(trans_all_hosed, Props),
+    TransFlapCounts0 = proplists:get_value(trans_all_flap_counts, Props),
 
     _Unanimous = proplists:get_value(unanimous_flus, Props),
     _NotUnanimous = proplists:get_value(not_unanimous_flus, Props),
@@ -968,6 +960,11 @@ calculate_flaps(P_newprop, FlapLimit,
                               {all_flap_counts_settled, AllFlapCountsSettled},
                               {bad,BadFLUs}]},
     Dbg2 = [FlappingI|P_newprop#projection.dbg],
+    %% SLF TODO: 2015-03-04: I'm growing increasingly suspicious of
+    %% the 'runenv' variable that's threaded through all this code.
+    %% It isn't doing what I'd originally intended.  And I think that
+    %% the flapping information that we've just constructed here is
+    %% going to get lost, and that's a shame.  Fix it.
     RunEnv2 = replace(RunEnv1, [FlappingI]),
     {S#ch_mgr{flaps=NewFlaps, runenv=RunEnv2}, update_projection_checksum(P_newprop#projection{dbg=Dbg2})}.
 
@@ -1261,15 +1258,25 @@ get_all_flap_counts(#projection{dbg=Dbg}) ->
                         proplists:get_value(flapping_i, Dbg, []),
                         []).
 
-get_all_flap_counts_settled(#projection{dbg=Dbg}) ->
-    proplists:get_value(all_flap_counts_settled,
-                        proplists:get_value(flapping_i, Dbg, []),
-                        false).
-
 get_all_hosed(#projection{dbg=Dbg}) ->
     proplists:get_value(all_hosed,
                         proplists:get_value(flapping_i, Dbg, []),
                         []).
+
+merge_flap_counts(FlapCounts) ->
+    merge_flap_counts(FlapCounts, orddict:new()).
+
+merge_flap_counts([], D) ->
+    orddict:to_list(D);
+merge_flap_counts([FlapCount|Rest], D1) ->
+    %% We know that FlapCount is list({Actor, NumFlaps}).
+    D2 = orddict:from_list(FlapCount),
+    D3 = orddict:merge(fun(_Key, V1, V2) when V1 > V2 ->
+                               V1;
+                          (_Key, V1, V2) ->
+                               V2
+                       end, D1, D2),
+    merge_flap_counts(Rest, D3).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
