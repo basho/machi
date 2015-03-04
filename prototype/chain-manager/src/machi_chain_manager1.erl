@@ -124,9 +124,9 @@ init({MyName, All_list, MyFLUPid, MgrOpts}) ->
                 proj=NoneProj,
                 proj_history=queue:new(),
                 myflu=MyFLUPid, % pid or atom local name
-                flap_limit=length(All_list) + 1,
+                %% flap_limit=length(All_list) + 1,
                 %% TODO 2015-03-04: revisit, should this constant be bigger?
-                %% flap_limit=length(All_list) + 5,
+                flap_limit=length(All_list) + 12,
                 runenv=RunEnv,
                 opts=MgrOpts},
 
@@ -605,22 +605,26 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP,
 
     {S3, P_newprop2} = calculate_flaps(P_newprop1, FlapLimit, S2),
 
-    P_newprop2_all_hosed = get_all_hosed(P_newprop2),
-
-    %% 2015-03-04: This will definitely stop a self-identified hosed machine
-    %%             from participating.  However, it doesn't prevent problems
-    %%             like UPI=[x],all_hosed=[x], either.
+    %% HRRRRRMMMMMMMMM, I think this shortcut is doing more harm than good???
     %%
-    case lists:member(MyName, P_newprop2_all_hosed) of
-        true ->
-            io:format(user, "{~w hosed}", [MyName]),
-            ?REACT({a30, i_am_hosed}),
-            react_to_env_A50(P_latest, S);
-        false ->
-            ?REACT({a30, i_am_normal}),
-            react_to_env_A40(Retries, P_newprop2, P_latest,
-                             LatestUnanimousP, S3)
-    end.
+    %% %% 2015-03-04: This will definitely stop a self-identified hosed machine
+    %% %%             from participating.  However, it doesn't prevent problems
+    %% %%             like UPI=[x],all_hosed=[x], either.
+    %% %%
+    %% P_newprop2_all_hosed = get_all_hosed(P_newprop2),
+    %% case lists:member(MyName, P_newprop2_all_hosed) of
+    %%     true ->
+    %%         io:format(user, "{~w hosed}", [MyName]),
+    %%         ?REACT({a30, i_am_hosed}),
+    %%         react_to_env_A50(P_latest, S);
+    %%     false ->
+    %%         ?REACT({a30, i_am_normal}),
+    %%         react_to_env_A40(Retries, P_newprop2, P_latest,
+    %%                          LatestUnanimousP, S3)
+    %% end.
+
+    react_to_env_A40(Retries, P_newprop2, P_latest,
+                     LatestUnanimousP, S3).
 
 react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                  #ch_mgr{name=MyName, proj=P_current}=S) ->
@@ -756,6 +760,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                 %% detected by our own failure detector and get us out of
                 %% this current flapping situation, right? TODO
                 P_latest_trans_flap_count >= FlapLimit ->
+                    io:format(user, "{FLAP: ~w auth ~w #flaps ~w} go to A50\n", [S#ch_mgr.name, P_newprop#projection.author_server, P_newprop_flap_count]),
                     %% Everyone that's flapping together now has flap_count
                     %% that's larger than the limit.  So it's safe and good
                     %% to stop here, so we can break the cycle of flapping.
@@ -877,6 +882,10 @@ react_to_env_C120(P_latest, #ch_mgr{proj_history=H} = S) ->
     ?REACT(c120),
     H2 = queue:in(P_latest, H),
     H3 = case queue:len(H2) of
+             %% TODO: revisit this constant?  Is this too long as a base?
+             %% My hunch is that it's fine and that the flap_limit needs to
+             %% be raised much higher (because it can increase several ticks
+             %% without a newer public epoch proposed anywhere).
              X when X > length(P_latest#projection.all_members) * 2 ->
                  {_V, Hxx} = queue:out(H2),
                  Hxx;
