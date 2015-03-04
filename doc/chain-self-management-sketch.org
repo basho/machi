@@ -560,7 +560,7 @@ look like this:
 | E+2 | UPI=[A,B]    | UPI=[A,B]    | UPI=[C]      |
 |     | Repairing=[] | Repairing=[] | Repairing=[] |
 |     | Down=[C]     | Down=[C]     | Down=[A,B]   |
-|     | Author=A     | Author=A     |              |
+|     | Author=A     | Author=A     | Author=C     |
 |-----+--------------+--------------+--------------|
 
 Now we're in a pickle where a client C could read the latest
