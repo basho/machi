@@ -596,7 +596,25 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP,
 
     {S3, P_newprop2} = calculate_flaps(P_newprop1, FlapLimit, S2),
 
-    react_to_env_A40(Retries, P_newprop2, P_latest, LatestUnanimousP, S3).
+    P_newprop2_all_hosed =
+        proplists:get_value(all_hosed,
+                            proplists:get_value(flapping_i, P_newprop2#projection.dbg, [])),
+    NewDown = lists:usort(P_newprop2#projection.down ++ P_newprop2_all_hosed),
+
+    %% 2015-03-04: This will definitely stop a self-identified hosed machine
+    %%             from participating.  However, it doesn't prevent problems
+    %%             like UPI=[x],all_hosed=[x], either.
+    %%
+    case lists:member(MyName, P_newprop2_all_hosed) of
+        true ->
+            io:format(user, "{~w hosed}", [MyName]),
+            ?REACT({a30, i_am_hosed}),
+            react_to_env_A50(P_latest, S);
+        false ->
+            ?REACT({a30, i_am_normal}),
+            react_to_env_A40(Retries, P_newprop2, P_latest,
+                             LatestUnanimousP, S3)
+    end.
 
 react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                  #ch_mgr{name=MyName, proj=P_current}=S) ->
