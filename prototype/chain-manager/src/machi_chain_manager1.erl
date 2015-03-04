@@ -596,9 +596,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP,
 
     {S3, P_newprop2} = calculate_flaps(P_newprop1, FlapLimit, S2),
 
-    P_newprop2_all_hosed =
-        proplists:get_value(all_hosed,
-                            proplists:get_value(flapping_i, P_newprop2#projection.dbg, [])),
+    P_newprop2_all_hosed = get_all_hosed(P_newprop2),
     NewDown = lists:usort(P_newprop2#projection.down ++ P_newprop2_all_hosed),
 
     %% 2015-03-04: This will definitely stop a self-identified hosed machine
@@ -725,17 +723,10 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                  #ch_mgr{name=MyName, flap_limit=FlapLimit}=S) ->
     ?REACT(b10),
 
-    P_newprop_flap_count =
-        proplists:get_value(flap_count,
-                            proplists:get_value(flapping_i, P_newprop#projection.dbg, [])),
-    LatestAllFlapCounts =
-        proplists:get_value(all_flap_counts,
-                            proplists:get_value(flapping_i, P_latest#projection.dbg, []),
-                            []),
+    P_newprop_flap_count = get_flap_count(P_newprop),
+    LatestAllFlapCounts = get_all_flap_counts(P_latest),
     P_latest_trans_flap_count = my_find_minmost(LatestAllFlapCounts),
-    P_latest_all_hosed =
-        proplists:get_value(all_hosed,
-                            proplists:get_value(flapping_i, P_latest#projection.dbg, [])),
+    P_latest_all_hosed = get_all_hosed(P_latest),
 
     if
         LatestUnanimousP ->
@@ -1259,6 +1250,26 @@ my_find_minmost([]) ->
     0;
 my_find_minmost(TransFlapCounts0) ->
     lists:min([FlapCount || {_F, FlapCount} <- TransFlapCounts0]).
+
+get_flap_count(#projection{dbg=Dbg}) ->
+    proplists:get_value(flap_count,
+                        proplists:get_value(flapping_i, Dbg, []),
+                        0).
+
+get_all_flap_counts(#projection{dbg=Dbg}) ->
+    proplists:get_value(all_flap_counts,
+                        proplists:get_value(flapping_i, Dbg, []),
+                        []).
+
+get_all_flap_counts_settled(#projection{dbg=Dbg}) ->
+    proplists:get_value(all_flap_counts_settled,
+                        proplists:get_value(flapping_i, Dbg, []),
+                        false).
+
+get_all_hosed(#projection{dbg=Dbg}) ->
+    proplists:get_value(all_hosed,
+                        proplists:get_value(flapping_i, Dbg, []),
+                        []).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
