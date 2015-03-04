@@ -125,6 +125,8 @@ init({MyName, All_list, MyFLUPid, MgrOpts}) ->
                 proj_history=queue:new(),
                 myflu=MyFLUPid, % pid or atom local name
                 flap_limit=length(All_list) + 1,
+                %% TODO 2015-03-04: revisit, should this constant be bigger?
+                %% flap_limit=length(All_list) + 5,
                 runenv=RunEnv,
                 opts=MgrOpts},
 
