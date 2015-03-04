@@ -707,9 +707,6 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                  #ch_mgr{name=MyName, flap_limit=FlapLimit}=S) ->
     ?REACT(b10),
 
-    P_newprop_all_hosed =
-        proplists:get_value(all_hosed,
-                            proplists:get_value(flapping_i, P_newprop#projection.dbg, [])),
     P_newprop_flap_count =
         proplists:get_value(flap_count,
                             proplists:get_value(flapping_i, P_newprop#projection.dbg, [])),
@@ -741,15 +738,10 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                     %% to stop here, so we can break the cycle of flapping.
                     react_to_env_A50(P_latest, S);
 
-                %% length(P_newprop_all_hosed) > length(P_latest_all_hosed) ->
-                    %% If flaps is non-zero, we're in a hosed state already.
-                    %% Rank doesn't matter much right now ... but we know
-                    %% that new members in all_hosed info to disseminate.
                 true ->
                     %% It is our moral imperative to write so that the flap
                     %% cycle continues enough times so that everyone notices
                     %% and thus the earlier clause above fires.
-                    P_newprop_all_hosed=P_newprop_all_hosed,
                     P_latest_all_hosed=P_latest_all_hosed,
                     react_to_env_C300(P_newprop, P_latest, S)
 
