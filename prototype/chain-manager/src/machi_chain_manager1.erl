@@ -373,9 +373,9 @@ make_projection(EpochNum,
     P2 = update_projection_checksum(P),
     P2#projection{dbg2=Dbg2}.
 
-update_projection_checksum(P) ->
-    CSum = crypto:hash(sha, term_to_binary(P)),
-    P#projection{epoch_csum=CSum}.
+update_projection_checksum(#projection{dbg2=Dbg2} = P) ->
+    CSum = crypto:hash(sha, term_to_binary(P#projection{dbg2=[]})),
+    P#projection{epoch_csum=CSum, dbg2=Dbg2}.
 
 update_projection_dbg2(P, Dbg2) when is_list(Dbg2) ->
     P#projection{dbg2=Dbg2}.
