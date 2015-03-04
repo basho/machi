@@ -556,7 +556,7 @@ react_to_env_A10(S) ->
     react_to_env_A20(0, S).
 
 react_to_env_A20(Retries, S) ->
-    ?REACT(a30),
+    ?REACT(a20),
     {UnanimousTag, P_latest, ReadExtra, S2} =
         do_cl_read_latest_public_projection(true, S),
 
@@ -573,13 +573,13 @@ react_to_env_A20(Retries, S) ->
         if UnanimousTag == unanimous
            andalso
            All_UPI_Repairing_were_unanimous ->
-                ?REACT({a30,?LINE}),
+                ?REACT({a20,?LINE}),
                 true;
            UnanimousTag == unanimous ->
-                ?REACT({a30,?LINE,UPI_Repairing_FLUs,UnanimousFLUs}),
+                ?REACT({a20,?LINE,UPI_Repairing_FLUs,UnanimousFLUs}),
                 false;
            UnanimousTag == not_unanimous ->
-                ?REACT({a30,?LINE}),
+                ?REACT({a20,?LINE}),
                 false;
            true ->
                 exit({badbad, UnanimousTag})
@@ -589,7 +589,7 @@ react_to_env_A20(Retries, S) ->
 
 react_to_env_A30(Retries, P_latest, LatestUnanimousP,
                  #ch_mgr{name=MyName, flap_limit=FlapLimit} = S) ->
-    ?REACT(a20),
+    ?REACT(a30),
     RelativeToServer = MyName,
     {P_newprop1, S2} = calc_projection(S, RelativeToServer,
                                        []),
