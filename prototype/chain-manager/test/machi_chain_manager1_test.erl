@@ -408,14 +408,15 @@ convergence_demo_test(_) ->
            io:format(user, "PPP ~p\n", [lists:sort(lists:append(PPP))]),
            timer:sleep(1000),
            ok
-       %% end || Partition <- AllPartitionCombinations],
-       end || Partition <- [ [{c,a}] ] ],
+       end || Partition <- AllPartitionCombinations],
+       %% end || Partition <- [ [{c,a}] ] ],
        %% end || Partition <- [ [{c,a}], [{c,b}, {a, b}] ] ],
        %% end || Partition <- [ [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {b,c}],
        %%                       [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {c,d}] ] ],
        %% exit(end_experiment),
 
       io:format(user, "\nSET partitions = []\n", []),
+      io:format(user, "Sweet, finishing early\n", []), exit(yoyoyo_testing_hack),
       io:format(user, "We should see convergence to 1 correct chain.\n", []),
       machi_partition_simulator:no_partitions(),
       [DoIt(50, 10, 100) || _ <- [1]],

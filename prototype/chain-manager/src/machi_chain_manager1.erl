@@ -126,7 +126,10 @@ init({MyName, All_list, MyFLUPid, MgrOpts}) ->
                 myflu=MyFLUPid, % pid or atom local name
                 %% flap_limit=length(All_list) + 1,
                 %% TODO 2015-03-04: revisit, should this constant be bigger?
-                flap_limit=length(All_list) + 12,
+                %% Yes, this should be bigger, but it's a hack.  There is
+                %% no guarantee that all parties will advance to a minimum
+                %% flap awareness in the amount of time that this mgr will.
+                flap_limit=length(All_list) + 50,
                 runenv=RunEnv,
                 opts=MgrOpts},
 
