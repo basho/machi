@@ -2,7 +2,7 @@
 %%
 %% Machi: a small village of replicated files
 %%
-%% Copyright (c) 2014 Basho Technologies, Inc.  All Rights Reserved.
+%% Copyright (c) 2014-2015 Basho Technologies, Inc.  All Rights Reserved.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -50,7 +50,8 @@
          test_calc_proposed_projection/1,
          test_write_proposed_projection/1,
          test_read_latest_public_projection/2,
-         test_react_to_env/1]).
+         test_react_to_env/1,
+         get_all_hosed/1]).
 
 -ifdef(EQC).
 -include_lib("eqc/include/eqc.hrl").
@@ -928,9 +929,9 @@ calculate_flaps(P_newprop, FlapLimit,
     RunEnv1 = replace(RunEnv0, [{flapping_i, []}]),
     HistoryPs = queue:to_list(H),
     Ps = HistoryPs ++ [P_newprop],
-    UPI_Repairing_combos =
-        lists:usort([{P#projection.upi, P#projection.repairing} || P <- Ps]),
-    Down_combos = lists:usort([P#projection.down || P <- Ps]),
+    UniqueProposalSummaries = lists:usort([{P#projection.upi,
+                                            P#projection.repairing,
+                                            P#projection.down} || P <- Ps]),
 
     {_WhateverUnanimous, BestP, Props, _S} =
         cl_read_latest_projection(private, S),
@@ -980,8 +981,8 @@ calculate_flaps(P_newprop, FlapLimit,
     %% 3. If one of the remote managers that we saw earlier has
     %%    stopped flapping.
 
-    case {queue:len(H), length(UPI_Repairing_combos), length(Down_combos)} of
-        {N, 1=_URs, 1=_Ds} when N >= length(P_newprop#projection.all_members) ->
+    case {queue:len(H), UniqueProposalSummaries} of
+        {N, [_]} when N >= length(P_newprop#projection.all_members) ->
             NewFlaps = TempNewFlaps,
 
             %% Wow, this behavior is almost spooky.
@@ -1009,7 +1010,7 @@ calculate_flaps(P_newprop, FlapLimit,
 
             AllFlapCounts = TempAllFlapCounts,
             AllHosed = lists:usort(DownUnion ++ HosedTransUnion ++ BadFLUs);
-        {_N, _URs, _Ds} ->
+        {_N, _} ->
             NewFlaps = 0,
             AllFlapCounts = [],
             AllHosed = []
