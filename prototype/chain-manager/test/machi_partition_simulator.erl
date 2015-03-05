@@ -38,6 +38,8 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
+-export([islands2partitions/1, partitions2num_islands/2]).
+
 -define(TAB, ?MODULE).
 
 -record(state, {
@@ -178,6 +180,16 @@ islands2partitions([Island|Rest]) ->
     ++
     islands2partitions(Rest).
 
-
+partitions2num_islands(Members, Partition) ->
+    Connections0 = [{X,Y} || X <- Members, Y <- Members, X /= Y],
+    Connections1 = Connections0 -- Partition,
+    Cs = [lists:member({X,Y}, Connections1)
+          orelse
+          lists:member({Y,X}, Connections1) || X <- Members, Y <- Members,
+                                               X /= Y],
+    case lists:usort(Cs) of
+        [true]        -> 1;
+        [false, true] -> many                   % TODO too lazy to finish
+    end.
 
 -endif. % TEST
