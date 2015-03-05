@@ -151,7 +151,7 @@ handle_call(_Call, _From, #ch_mgr{init_finished=false} = S) ->
 handle_call({calculate_projection_internal_old}, _From,
             #ch_mgr{name=MyName}=S) ->
     RelativeToServer = MyName,
-    {Reply, S2} = calc_projection(S, RelativeToServer, []),
+    {Reply, S2} = calc_projection(S, RelativeToServer),
     {reply, Reply, S2};
 handle_call({test_write_proposed_projection}, _From, S) ->
     if S#ch_mgr.proj_proposed == none ->
@@ -167,7 +167,7 @@ handle_call({stop}, _From, S) ->
 handle_call({test_calc_projection, KeepRunenvP}, _From,
             #ch_mgr{name=MyName}=S) ->
     RelativeToServer = MyName,
-    {P, S2} = calc_projection(S, RelativeToServer, []),
+    {P, S2} = calc_projection(S, RelativeToServer),
     {reply, {ok, P}, if KeepRunenvP -> S2;
                         true        -> S
                      end};
@@ -186,7 +186,7 @@ handle_cast(_Cast, #ch_mgr{init_finished=false} = S) ->
     {noreply, S};
 handle_cast({test_calc_proposed_projection}, #ch_mgr{name=MyName}=S) ->
     RelativeToServer = MyName,
-    {Proj, S2} = calc_projection(S, RelativeToServer, []),
+    {Proj, S2} = calc_projection(S, RelativeToServer),
     {noreply, S2#ch_mgr{proj_proposed=Proj}};
 handle_cast(_Cast, S) ->
     ?D({cast_whaaaaaaaaaaa, _Cast}),
@@ -391,8 +391,13 @@ update_projection_checksum(#projection{dbg2=Dbg2} = P) ->
 update_projection_dbg2(P, Dbg2) when is_list(Dbg2) ->
     P#projection{dbg2=Dbg2}.
 
+calc_projection(S, RelativeToServer) ->
+    AllHosed = [],
+    calc_projection(S, RelativeToServer, AllHosed).
+
 calc_projection(#ch_mgr{proj=LastProj, runenv=RunEnv} = S, RelativeToServer,
-                Dbg) ->
+                _AllHosed) ->
+    Dbg = [],
     OldThreshold = proplists:get_value(old_threshold, RunEnv),
     NoPartitionThreshold = proplists:get_value(no_partition_threshold, RunEnv),
     calc_projection(OldThreshold, NoPartitionThreshold, LastProj,
@@ -602,8 +607,8 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP,
                  #ch_mgr{name=MyName, flap_limit=FlapLimit} = S) ->
     ?REACT(a30),
     RelativeToServer = MyName,
-    {P_newprop1, S2} = calc_projection(S, RelativeToServer,
-                                       []),
+    AllHosed = get_all_hosed(S),
+    {P_newprop1, S2} = calc_projection(S, RelativeToServer, AllHosed),
 
     {P_newprop2, S3} = calculate_flaps(P_newprop1, FlapLimit, S2),
 
@@ -748,7 +753,21 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                 %% early.  (Where AllSettled comes from the runenv's
                 %% flapping_i prop.)  So, I believe that we need to
                 %% rely on the failure detector to rescue us.
-                P_latest_trans_flap_count >= FlapLimit ->
+                %%
+                %% TODO About the above ^^ I think that was based on buggy
+                %%      calculation of AllSettled.  Recheck!
+                %%
+                %% TODO Yay, another magic constant below, added to
+                %%      FlapLimit, that needs thorough examination and
+                %%      hopefully elimination.  I'm adding it to try to
+                %%      make it more likely that someone's private proj
+                %%      will include all_flap_counts_settled,true 100%
+                %%      of the time.  But I'm not sure how important that
+                %%      really is.
+                %%      That settled flag can lag behind after a change in
+                %%      network conditions, so I'm not sure how big its
+                %%      value is, if any.
+                P_latest_trans_flap_count >= FlapLimit + 20 ->
                     %% Everyone that's flapping together now has flap_count
                     %% that's larger than the limit.  So it's safe and good
                     %% to stop here, so we can break the cycle of flapping.
@@ -1320,8 +1339,12 @@ get_all_flap_counts_counts(P) ->
             [Count || {_FLU, {_Time, Count}} <- Cs]
     end.
 
-get_all_hosed(P) ->
-    proplists:get_value(all_hosed, get_raw_flapping_i(P), []).
+get_all_hosed(P) when is_record(P, projection)->
+    proplists:get_value(all_hosed, get_raw_flapping_i(P), []);
+get_all_hosed(S) when is_record(S, ch_mgr) ->
+    proplists:get_value(all_hosed,
+                        proplists:get_value(flapping_i, S#ch_mgr.runenv, []),
+                        []).
 
 merge_flap_counts(FlapCounts) ->
     merge_flap_counts(FlapCounts, orddict:new()).
