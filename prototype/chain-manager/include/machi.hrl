@@ -45,6 +45,8 @@
             dbg2            :: list()  %proplist(), is not checksummed
         }).
 
+-define(NOT_FLAPPING, {0,0,0}).
+
 -record(ch_mgr, {
           init_finished   :: boolean(),
           name            :: m_server(),
@@ -62,7 +64,10 @@
           %% other nodes tell when some other manager is having a
           %% flapping episode at time T+x that is different from the
           %% flapping episode at an earlier time T.
-          flap_start      :: erlang:now(),
+          flap_start = ?NOT_FLAPPING
+                          :: erlang:now(),
+          all_flap_starts = []
+                          :: [{term(), erlang:now()}],
 
           %% Deprecated ... TODO: remove when old test unit test code is removed
           proj_proposed   :: 'none' | #projection{}

@@ -739,7 +739,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                  #ch_mgr{name=MyName, flap_limit=FlapLimit}=S) ->
     ?REACT(b10),
 
-    {P_newprop_flap_time, P_newprop_flap_count} = get_flap_count(P_newprop),
+    {_P_newprop_flap_time, P_newprop_flap_count} = get_flap_count(P_newprop),
     LatestAllFlapCounts = get_all_flap_counts_counts(P_latest),
     P_latest_trans_flap_count = my_find_minmost(LatestAllFlapCounts),
 
@@ -938,6 +938,7 @@ react_to_env_C310(P_newprop, S) ->
 calculate_flaps(P_newprop, FlapLimit,
                 #ch_mgr{name=MyName, proj_history=H,
                         flaps=Flaps, flap_start=FlapStart,
+                        all_flap_starts=AllFlapStarts,
                         runenv=RunEnv0} = S) ->
     RunEnv1 = replace(RunEnv0, [{flapping_i, []}]),
     HistoryPs = queue:to_list(H),
@@ -963,27 +964,59 @@ calculate_flaps(P_newprop, FlapLimit,
     %%       response from machi_flu0:proj_read_latest().
     BadFLUs = proplists:get_value(bad_answer_flus, Props),
 
-    case {queue:len(H), length(UPI_Repairing_combos), length(Down_combos)} of
-        {N, _, _} when N < length(P_newprop#projection.all_members) ->
-            NewFlapStart = undefined,
-            NewFlaps = 0,
-            AllFlapCounts = [],
-            AllHosed = [];
-        {_, 1=_URs, 1=_Ds} ->
-            if Flaps == 0 ->
+    FlapFLUs = lists:usort([FLU ||
+                               {FLU, {FlTime, _FlapCount}} <- TransFlapCounts0,
+                               FlTime /= ?NOT_FLAPPING]),
+    RemoteTransFlapCounts1 = lists:keydelete(MyName, 1, TransFlapCounts0),
+    RemoteTransFlapCounts =
+        [X || {_FLU, {FlTime, _FlapCount}}=X <- RemoteTransFlapCounts1,
+              FlTime /= ?NOT_FLAPPING],
+    TempNewFlaps = Flaps + 1,
+    TempAllFlapCounts = lists:sort([{MyName, {FlapStart, TempNewFlaps}}|
+                                    RemoteTransFlapCounts]),
+    %% Sanity check.
+    true = lists:all(fun({_,{_,_}}) -> true;
+                        (_)         -> false end, TempAllFlapCounts),
+    NewAllFlapStarts0 = [{FLU, Time} ||
+                            {FLU, {Time, _Count}} <- TempAllFlapCounts],
+    FlapStatusSameP = calc_flap_status_quo(MyName,
+                                           AllFlapStarts, NewAllFlapStarts0),
+    if not FlapStatusSameP ->
+            io:format(user, "yo ~p AllFlapStarts, NewAllFlapStarts0\n~w\n~w\n",
+                      [MyName, AllFlapStarts, NewAllFlapStarts0]);
+       true -> ok end,
+
+    %% H is the bounded history of all of this manager's private
+    %% projection store writes.  If we've proposed the *same*
+    %% {UPI+Repairing, Down} combination for the entire length of our
+    %% bounded size of H, then we're flapping.
+    %%
+    %% If we're flapping, then we use our own flap counter and that of
+    %% all of our peer managers to see if we've all got flap counters
+    %% that exceed the flap_limit.  If that global condition appears
+    %% true, then we "blow the circuit breaker" by stopping our
+    %% participation in the flapping store (via the shortcut to A50).
+    %%
+    %% We reset our flap counter on any of several conditions:
+    %%
+    %% 1. If our bounded history H contains more than one proposal,
+    %%    then by definition we are not flapping.
+    %% 2. If a remote manager is flapping and has re-started a new
+    %%    flapping episode.
+    %% 3. If one of the remote managers that we saw earlier has
+    %%    stopped flapping.
+
+    case {queue:len(H), FlapStatusSameP,
+          length(UPI_Repairing_combos), length(Down_combos)} of
+        {N, true,
+         1=_URs, 1=_Ds} when N >= length(P_newprop#projection.all_members) ->
+            if FlapStart == ?NOT_FLAPPING ->
                     NewFlapStart = now();
                true ->
                     NewFlapStart = FlapStart
             end,
-            NewFlaps = Flaps + 1,
-            FlapFLUs = lists:usort([FLU || {FLU, _FlapCount} <- TransFlapCounts0]),
-            %% We're interested in the *largest* flap count from each
-            %% remote participant.
-            RemoteTransFlapCounts = [{FLU, my_find_max_flap_count(FLU, TransFlapCounts0)} ||
-                                        FLU <- FlapFLUs,
-                                        FLU /= MyName],
-            AllFlapCounts = [{MyName, {NewFlapStart, NewFlaps}}|
-                             RemoteTransFlapCounts],
+            NewAllFlapStarts = NewAllFlapStarts0,
+            NewFlaps = TempNewFlaps,
 
             %% Wow, this behavior is almost spooky.
             %%
@@ -1008,9 +1041,11 @@ calculate_flaps(P_newprop, FlapLimit,
             %% and c's bad=[a].  So voila, b magically knows about both
             %% problem FLUs.  Weird/cool.
 
+            AllFlapCounts = TempAllFlapCounts,
             AllHosed = lists:usort(DownUnion ++ HosedTransUnion ++ BadFLUs);
-        {_N, _URs, _Ds} ->
-            NewFlapStart = undefined,
+        {_N, _Bool, _URs, _Ds} ->
+            NewFlapStart = ?NOT_FLAPPING,
+            NewAllFlapStarts = [],
             NewFlaps = 0,
             AllFlapCounts = [],
             AllHosed = []
@@ -1039,7 +1074,8 @@ calculate_flaps(P_newprop, FlapLimit,
     %%       flaps each time ... but the C2xx path doesn't write a new
     %%       proposal to everyone's public proj stores, and there's no
     %%       guarantee that anyone else as written a new public proj either.
-    {S#ch_mgr{flaps=NewFlaps, flap_start=NewFlapStart, runenv=RunEnv2},
+    {S#ch_mgr{flaps=NewFlaps, flap_start=NewFlapStart,
+              all_flap_starts=NewAllFlapStarts, runenv=RunEnv2},
      update_projection_checksum(P_newprop#projection{dbg=Dbg2})}.
 
 projection_transitions_are_sane(Ps, RelativeToServer) ->
@@ -1314,7 +1350,7 @@ sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list) ->
 my_find_max_flap_count(_FLU, []) ->
     0;
 my_find_max_flap_count(FLU, [{_,{_,_}}|_] = TransFlapCounts0) ->
-    lists:max([FlapCount || {F, FlapCount} <- TransFlapCounts0,
+    lists:max([FlapCount || {F, {_T, FlapCount}} <- TransFlapCounts0,
                             F == FLU]).
 
 my_find_minmost([]) ->
@@ -1363,13 +1399,51 @@ merge_flap_counts([FlapCount|Rest], D1) ->
                           (_Key, {T1,_NF1}= V1, {T2,_NF2}=_V2)
                              when T1 > T2 ->
                                V1;
-                          (_Key, {T1,_NF1}=_V1, {T2,_NF2}= V2) ->
+                          (_Key, {_T1,_NF1}=_V1, {_T2,_NF2}= V2) ->
                                V2;
                           (_Key, V1, V2) ->
-                               exit({bad_merge_values,mod,?MODULE,line,?LINE,
+                               exit({bad_merge_2tuples,mod,?MODULE,line,?LINE,
                                      _Key, V1, V2})
                        end, D1, D2),
     merge_flap_counts(Rest, D3).
+
+calc_flap_status_quo(_MyName, _OldTempFlapStarts, _NewFlapStarts) ->
+    %% This seemed a good idea at the time (see also, the comments on
+    %% git commit 8ff177f0c54f6338ef5c1dca5be736f3c56ebc86.
+    %% Unfortunately, it doesn't work: the system can read old/laggy data
+    %% that forces the original intent of this function to return false,
+    %% and that destabilizes the system enough to be unworkable.
+    true.
+    %% AllOldAreSameTimeP =
+    %%     lists:all(fun({FLU, ?NOT_FLAPPING}) ->
+    %%                       %% The start time for the local manager in
+    %%                       %% the OldTempFlapStarts list may be on the
+    %%                       %% edge of flapping, so #projection.flap_start
+    %%                       %% can still be ?NOT_FLAPPING.  If there's an
+    %%                       %% entry in the new list, it's really a new
+    %%                       %% entry and not different/changed one.
+    %%                       FLU == MyName;
+    %%                  ({FLU, OldStart}) ->
+    %%                       case proplists:get_value(FLU, NewFlapStarts) of
+    %%                           NewStart when OldStart == NewStart ->
+    %%                               true;
+    %%                           _Else ->
+    %%                               false
+    %%                       end
+    %%               end, OldTempFlapStarts),
+    %% AllInNewArtSameTimeOrNewP =
+    %%     lists:all(fun({FLU, NewStart}) ->
+    %%                       case proplists:get_value(FLU, OldTempFlapStarts,
+    %%                                                ?NOT_FLAPPING) of
+    %%                           ?NOT_FLAPPING ->
+    %%                               true;
+    %%                           OldStart when OldStart == NewStart ->
+    %%                               true;
+    %%                           _Else ->
+    %%                               false
+    %%                       end
+    %%               end, NewFlapStarts),
+    %% AllOldAreSameTimeP andalso AllInNewArtSameTimeOrNewP.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
