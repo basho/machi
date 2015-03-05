@@ -382,7 +382,12 @@ convergence_demo_test(_) ->
       XandYs2 = [[{X,Y}, {A,B}] || X <- All_list, Y <- All_list, X /= Y,
                                    A <- All_list, B <- All_list, A /= B,
                                    X /= A],
+      %% XandYs3 = [[{X,Y}, {A,B}, {C,D}] || X <- All_list, Y <- All_list, X /= Y,
+      %%                                     A <- All_list, B <- All_list, A /= B,
+      %%                                     C <- All_list, D <- All_list, C /= D,
+      %%                                     X /= A, X /= C, A /= C],
       AllPartitionCombinations = XandYs1 ++ XandYs2,
+      %% AllPartitionCombinations = XandYs3,
       ?D({?LINE, length(AllPartitionCombinations)}),
 
       machi_partition_simulator:reset_thresholds(10, 50),
@@ -396,7 +401,8 @@ convergence_demo_test(_) ->
            io:format(user, "\nSET partitions = ~w.\n", [Partition]),
            [DoIt(50, 10, 100) || _ <- [1,2,3,4] ],
            true = private_projections_are_stable(Namez, DoIt),
-           io:format(user, "\nSweet, we converged to a stable state.\n", []),
+           true = all_hosed_lists_are_identical(Namez, Partition),
+           io:format(user, "\nSweet, we converged & all_hosed are unanimous-or-islands-inconclusive.\n", []),
            %% PPP =
            %%     [begin
            %%          PPPallPubs = machi_flu0:proj_list_all(FLU, public),
@@ -408,11 +414,13 @@ convergence_demo_test(_) ->
            %% io:format(user, "PPP ~p\n", [lists:sort(lists:append(PPP))]),
            timer:sleep(1000),
            ok
-       end || Partition <- AllPartitionCombinations],
-       %% end || Partition <- [ [{c,a}] ] ],
-       %% end || Partition <- [ [{c,a}], [{c,b}, {a, b}] ] ],
-       %% end || Partition <- [ [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {b,c}],
-       %%                       [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {c,d}] ] ],
+       end || Partition <- AllPartitionCombinations
+       %% end || Partition <- [ [{c,a}] ]
+       %% end || Partition <- [ [{c,a}], [{c,b}, {a, b}] ]
+       %% end || Partition <- [ [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}],
+       %%                       [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {b,c}],
+       %%                       [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {c,d}] ]
+      ],
        %% exit(end_experiment),
 
       io:format(user, "\nSET partitions = []\n", []),
@@ -474,6 +482,29 @@ private_projections_are_stable(Namez, PollFunc) ->
     Private2 = [machi_flu0:proj_get_latest_num(FLU, private) ||
                    {_Name, FLU} <- Namez],
     true = (Private1 == Private2).
+
+all_hosed_lists_are_identical(Namez, Partition) ->
+    Ps = [machi_flu0:proj_read_latest(FLU, private) || {_Name, FLU} <- Namez],
+    Uniques = lists:usort([machi_chain_manager1:get_all_hosed(P) ||
+                              {ok, P} <- Ps]),
+    Members = [M || {M, _Pid} <- Namez],
+    Islands = machi_partition_simulator:partitions2num_islands(
+                Members, Partition),
+    %% io:format(user, "all_hosed_lists_are_identical:\n", []),
+    %% io:format(user, "  Uniques = ~p Islands ~p\n  Partition ~p\n",
+    %%           [Uniques, Islands, Partition]),
+    case length(Uniques) of
+        1 ->
+            true;
+        _ when Islands == 'many' ->
+            %% There are at least two partitions, so yes, it's quite
+            %% possible that the all_hosed lists may differ.
+            %% TODO Fix this up to be smarter about fully-isolated
+            %% islands of partition.
+            true;
+        _ ->
+            false
+    end.
 
 -endif. % not PULSE
 -endif. % TEST
