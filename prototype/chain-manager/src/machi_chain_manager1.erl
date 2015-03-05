@@ -609,24 +609,6 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP,
 
     {S3, P_newprop2} = calculate_flaps(P_newprop1, FlapLimit, S2),
 
-    %% HRRRRRMMMMMMMMM, I think this shortcut is doing more harm than good???
-    %%
-    %% %% 2015-03-04: This will definitely stop a self-identified hosed machine
-    %% %%             from participating.  However, it doesn't prevent problems
-    %% %%             like UPI=[x],all_hosed=[x], either.
-    %% %%
-    %% P_newprop2_all_hosed = get_all_hosed(P_newprop2),
-    %% case lists:member(MyName, P_newprop2_all_hosed) of
-    %%     true ->
-    %%         io:format(user, "{~w hosed}", [MyName]),
-    %%         ?REACT({a30, i_am_hosed}),
-    %%         react_to_env_A50(P_latest, S);
-    %%     false ->
-    %%         ?REACT({a30, i_am_normal}),
-    %%         react_to_env_A40(Retries, P_newprop2, P_latest,
-    %%                          LatestUnanimousP, S3)
-    %% end.
-
     react_to_env_A40(Retries, P_newprop2, P_latest,
                      LatestUnanimousP, S3).
 
@@ -775,19 +757,6 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                     %% cycle continues enough times so that everyone notices
                     %% and thus the earlier clause above fires.
                     react_to_env_C300(P_newprop, P_latest, S)
-
-               %% Rank_latest =< Rank_newprop ->
-               %%      {_, _, USec} = os:timestamp(),
-               %%      %% If we always go to C200, then we can deadlock sometimes.
-               %%      %% So we roll the dice.
-               %%      %% TODO: make this PULSE-friendly!
-               %%      if USec rem 3 == 0 ->
-               %%              react_to_env_A50(P_latest, S);
-               %%         true ->
-               %%              react_to_env_C200(Retries, P_latest, S)
-               %%      end;
-                %% true ->
-                %%     react_to_env_A50(P_latest, S)
             end;
 
         Retries > 2 ->
@@ -870,10 +839,6 @@ react_to_env_C110(P_latest, #ch_mgr{myflu=MyFLU} = S) ->
             {_,_,C} = os:timestamp(),
             MSec = trunc(C / 1000),
             {HH,MM,SS} = time(),
-            %% {sigh} Runenv never has any non-[] flapping info at this point.
-            %% io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses: ~w myenv ~w\n",
-            %%           [HH,MM,SS,MSec, S#ch_mgr.name,
-            %%            make_projection_summary(P_latest2), S#ch_mgr.runenv]);
             io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses: ~w\n",
                       [HH,MM,SS,MSec, S#ch_mgr.name,
                        make_projection_summary(P_latest2)]);
@@ -1414,36 +1379,6 @@ calc_flap_status_quo(_MyName, _OldTempFlapStarts, _NewFlapStarts) ->
     %% that forces the original intent of this function to return false,
     %% and that destabilizes the system enough to be unworkable.
     true.
-    %% AllOldAreSameTimeP =
-    %%     lists:all(fun({FLU, ?NOT_FLAPPING}) ->
-    %%                       %% The start time for the local manager in
-    %%                       %% the OldTempFlapStarts list may be on the
-    %%                       %% edge of flapping, so #projection.flap_start
-    %%                       %% can still be ?NOT_FLAPPING.  If there's an
-    %%                       %% entry in the new list, it's really a new
-    %%                       %% entry and not different/changed one.
-    %%                       FLU == MyName;
-    %%                  ({FLU, OldStart}) ->
-    %%                       case proplists:get_value(FLU, NewFlapStarts) of
-    %%                           NewStart when OldStart == NewStart ->
-    %%                               true;
-    %%                           _Else ->
-    %%                               false
-    %%                       end
-    %%               end, OldTempFlapStarts),
-    %% AllInNewArtSameTimeOrNewP =
-    %%     lists:all(fun({FLU, NewStart}) ->
-    %%                       case proplists:get_value(FLU, OldTempFlapStarts,
-    %%                                                ?NOT_FLAPPING) of
-    %%                           ?NOT_FLAPPING ->
-    %%                               true;
-    %%                           OldStart when OldStart == NewStart ->
-    %%                               true;
-    %%                           _Else ->
-    %%                               false
-    %%                       end
-    %%               end, NewFlapStarts),
-    %% AllOldAreSameTimeP andalso AllInNewArtSameTimeOrNewP.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
