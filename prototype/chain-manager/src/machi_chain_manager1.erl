@@ -570,7 +570,6 @@ react_to_env_A20(Retries, S) ->
     ?REACT(a20),
     {UnanimousTag, P_latest, ReadExtra, S2} =
         do_cl_read_latest_public_projection(true, S),
-    %% io:format(user, "<~p rd latest auth ~p f_c's ~p>\n", [S#ch_mgr.name, P_latest#projection.author_server, get_all_flap_counts(P_latest)]),
 
     %% The UnanimousTag isn't quite sufficient for our needs.  We need
     %% to determine if *all* of the UPI+Repairing FLUs are members of
@@ -606,7 +605,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP,
     {P_newprop1, S2} = calc_projection(S, RelativeToServer,
                                        []),
 
-    {S3, P_newprop2} = calculate_flaps(P_newprop1, FlapLimit, S2),
+    {P_newprop2, S3} = calculate_flaps(P_newprop1, FlapLimit, S2),
 
     react_to_env_A40(Retries, P_newprop2, P_latest,
                      LatestUnanimousP, S3).
@@ -734,7 +733,6 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         P_newprop_flap_count >= FlapLimit ->
             %% I am flapping ... what else do I do?
             B10Hack = get(b10_hack),
-            %% io:format(user, "{FLAP: ~w auth ~w #flaps ~w} myenv ~w\n", [S#ch_mgr.name, P_newprop#projection.author_server, P_newprop_flap_count, S#ch_mgr.runenv]),
             if B10Hack == false andalso P_newprop_flap_count - FlapLimit - 3 =< 0 -> io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_flap_count]), put(b10_hack, true); true -> ok end,
 
             if
@@ -751,7 +749,6 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                 %% flapping_i prop.)  So, I believe that we need to
                 %% rely on the failure detector to rescue us.
                 P_latest_trans_flap_count >= FlapLimit ->
-                    io:format(user, "{FLAP: ~w auth ~w #flaps ~w} go to A50\n", [S#ch_mgr.name, P_newprop#projection.author_server, P_newprop_flap_count]),
                     %% Everyone that's flapping together now has flap_count
                     %% that's larger than the limit.  So it's safe and good
                     %% to stop here, so we can break the cycle of flapping.
@@ -999,7 +996,12 @@ calculate_flaps(P_newprop, FlapLimit,
             AllHosed = []
     end,
 
-    AllFlapCountsSettled = my_find_minmost(AllFlapCounts) >= FlapLimit,
+    %% If there's at least one count in AllFlapCounts that isn't my
+    %% flap count, and if it's over the flap limit, then consider them
+    %% settled.
+    AllFlapCountsSettled = lists:keydelete(MyName, 1, AllFlapCounts) /= []
+                           andalso
+                           my_find_minmost(AllFlapCounts) >= FlapLimit,
     FlappingI = {flapping_i, [{flap_count, {Now, NewFlaps}},
                               {all_hosed, AllHosed},
                               {all_flap_counts, lists:sort(AllFlapCounts)},
@@ -1022,8 +1024,8 @@ calculate_flaps(P_newprop, FlapLimit,
     %%       flaps each time ... but the C2xx path doesn't write a new
     %%       proposal to everyone's public proj stores, and there's no
     %%       guarantee that anyone else as written a new public proj either.
-    {S#ch_mgr{flaps=NewFlaps, runenv=RunEnv2},
-     update_projection_checksum(P_newprop#projection{dbg=Dbg2})}.
+    {update_projection_checksum(P_newprop#projection{dbg=Dbg2}),
+     S#ch_mgr{flaps=NewFlaps, runenv=RunEnv2}}.
 
 projection_transitions_are_sane(Ps, RelativeToServer) ->
     projection_transitions_are_sane(Ps, RelativeToServer, false).
@@ -1297,7 +1299,7 @@ sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list) ->
 my_find_minmost([]) ->
     0;
 my_find_minmost([{_,_}|_] = TransFlapCounts0) ->
-    lists:min([FlapCount || {_T, FlapCount} <- TransFlapCounts0]);
+    lists:min([FlapCount || {_T, {_FlTime, FlapCount}} <- TransFlapCounts0]);
 my_find_minmost(TransFlapCounts0) ->
     lists:min(TransFlapCounts0).
 
