@@ -570,7 +570,7 @@ react_to_env_A20(Retries, S) ->
     ?REACT(a20),
     {UnanimousTag, P_latest, ReadExtra, S2} =
         do_cl_read_latest_public_projection(true, S),
-    io:format(user, "<~p rd latest auth ~p f_c's ~p>\n", [S#ch_mgr.name, P_latest#projection.author_server, get_all_flap_counts(P_latest)]),
+    %% io:format(user, "<~p rd latest auth ~p f_c's ~p>\n", [S#ch_mgr.name, P_latest#projection.author_server, get_all_flap_counts(P_latest)]),
 
     %% The UnanimousTag isn't quite sufficient for our needs.  We need
     %% to determine if *all* of the UPI+Repairing FLUs are members of
@@ -952,6 +952,8 @@ calculate_flaps(P_newprop, FlapLimit,
                         P <- [BestP|NotBestPs]])),
     HosedTransUnion = proplists:get_value(trans_all_hosed, Props),
     TransFlapCounts0 = proplists:get_value(trans_all_flap_counts, Props),
+    LatestAllFlapTimes = get_all_flap_counts_times(P_newprop),
+    %% io:format(user, "l_all @ ~p = ~p\n", [MyName, LatestAllFlapTimes]),
 
     _Unanimous = proplists:get_value(unanimous_flus, Props),
     _NotUnanimous = proplists:get_value(not_unanimous_flus, Props),
