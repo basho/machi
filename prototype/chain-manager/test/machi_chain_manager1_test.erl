@@ -397,15 +397,15 @@ convergence_demo_test(_) ->
            [DoIt(50, 10, 100) || _ <- [1,2,3,4] ],
            true = private_projections_are_stable(Namez, DoIt),
            io:format(user, "\nSweet, we converged to a stable state.\n", []),
-           PPP =
-               [begin
-                    PPPallPubs = machi_flu0:proj_list_all(FLU, public),
-                    [begin
-                         {ok, Pr} = machi_flu0:proj_read(FLU, PPPepoch, public),
-                         {Pr#projection.epoch_number, FLUName, Pr}
-                     end || PPPepoch <- PPPallPubs]
-                end || {FLUName, FLU} <- Namez],
-           io:format(user, "PPP ~p\n", [lists:sort(lists:append(PPP))]),
+           %% PPP =
+           %%     [begin
+           %%          PPPallPubs = machi_flu0:proj_list_all(FLU, public),
+           %%          [begin
+           %%               {ok, Pr} = machi_flu0:proj_read(FLU, PPPepoch, public),
+           %%               {Pr#projection.epoch_number, FLUName, Pr}
+           %%           end || PPPepoch <- PPPallPubs]
+           %%      end || {FLUName, FLU} <- Namez],
+           %% io:format(user, "PPP ~p\n", [lists:sort(lists:append(PPP))]),
            timer:sleep(1000),
            ok
        end || Partition <- AllPartitionCombinations],
