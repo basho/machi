@@ -326,7 +326,8 @@ cl_read_latest_projection(ProjectionType, #ch_mgr{proj=CurrentProj}=S) ->
             Best_FLUs = [FLU || {FLU, Projx} <- FLUsRs, Projx == BestProj],
             AllHosed = lists:usort(
                          lists:flatten([get_all_hosed(P) || P <- Ps])),
-            AllFlapCounts = merge_flap_counts([get_all_flap_counts(P)|| P <- Ps]),
+            AllFlapCounts = merge_flap_counts([get_all_flap_counts(P) ||
+                                                  P <- Ps]),
             Extra2 = [{unanimous_flus,Best_FLUs},
                       {not_unanimous_flus, All_list --
                                                  (Best_FLUs ++ BadAnswerFLUs)},
@@ -738,8 +739,8 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                  #ch_mgr{name=MyName, flap_limit=FlapLimit}=S) ->
     ?REACT(b10),
 
-    P_newprop_flap_count = get_flap_count(P_newprop),
-    LatestAllFlapCounts = get_all_flap_counts(P_latest),
+    {P_newprop_flap_time, P_newprop_flap_count} = get_flap_count(P_newprop),
+    LatestAllFlapCounts = get_all_flap_counts_counts(P_latest),
     P_latest_trans_flap_count = my_find_minmost(LatestAllFlapCounts),
 
     if
@@ -935,7 +936,9 @@ react_to_env_C310(P_newprop, S) ->
     react_to_env_A10(S2).
 
 calculate_flaps(P_newprop, FlapLimit,
-                #ch_mgr{name=MyName, proj_history=H, flaps=Flaps, runenv=RunEnv0} = S) ->
+                #ch_mgr{name=MyName, proj_history=H,
+                        flaps=Flaps, flap_start=FlapStart,
+                        runenv=RunEnv0} = S) ->
     RunEnv1 = replace(RunEnv0, [{flapping_i, []}]),
     HistoryPs = queue:to_list(H),
     Ps = HistoryPs ++ [P_newprop],
@@ -952,8 +955,6 @@ calculate_flaps(P_newprop, FlapLimit,
                         P <- [BestP|NotBestPs]])),
     HosedTransUnion = proplists:get_value(trans_all_hosed, Props),
     TransFlapCounts0 = proplists:get_value(trans_all_flap_counts, Props),
-    LatestAllFlapTimes = get_all_flap_counts_times(P_newprop),
-    %% io:format(user, "l_all @ ~p = ~p\n", [MyName, LatestAllFlapTimes]),
 
     _Unanimous = proplists:get_value(unanimous_flus, Props),
     _NotUnanimous = proplists:get_value(not_unanimous_flus, Props),
@@ -964,18 +965,25 @@ calculate_flaps(P_newprop, FlapLimit,
 
     case {queue:len(H), length(UPI_Repairing_combos), length(Down_combos)} of
         {N, _, _} when N < length(P_newprop#projection.all_members) ->
+            NewFlapStart = undefined,
             NewFlaps = 0,
             AllFlapCounts = [],
             AllHosed = [];
         {_, 1=_URs, 1=_Ds} ->
+            if Flaps == 0 ->
+                    NewFlapStart = now();
+               true ->
+                    NewFlapStart = FlapStart
+            end,
             NewFlaps = Flaps + 1,
             FlapFLUs = lists:usort([FLU || {FLU, _FlapCount} <- TransFlapCounts0]),
             %% We're interested in the *largest* flap count from each
             %% remote participant.
-            RemoteTransFlapCounts = [{FLU, my_find_max(FLU, TransFlapCounts0)} ||
+            RemoteTransFlapCounts = [{FLU, my_find_max_flap_count(FLU, TransFlapCounts0)} ||
                                         FLU <- FlapFLUs,
                                         FLU /= MyName],
-            AllFlapCounts = [{MyName, NewFlaps}|RemoteTransFlapCounts],
+            AllFlapCounts = [{MyName, {NewFlapStart, NewFlaps}}|
+                             RemoteTransFlapCounts],
 
             %% Wow, this behavior is almost spooky.
             %%
@@ -1002,13 +1010,14 @@ calculate_flaps(P_newprop, FlapLimit,
 
             AllHosed = lists:usort(DownUnion ++ HosedTransUnion ++ BadFLUs);
         {_N, _URs, _Ds} ->
+            NewFlapStart = undefined,
             NewFlaps = 0,
             AllFlapCounts = [],
             AllHosed = []
     end,
 
     AllFlapCountsSettled = my_find_minmost(AllFlapCounts) >= FlapLimit,
-    FlappingI = {flapping_i, [{flap_count,NewFlaps},
+    FlappingI = {flapping_i, [{flap_count, {NewFlapStart, NewFlaps}},
                               {all_hosed, AllHosed},
                               {all_flap_counts, AllFlapCounts},
                               {all_flap_counts_settled, AllFlapCountsSettled},
@@ -1030,7 +1039,8 @@ calculate_flaps(P_newprop, FlapLimit,
     %%       flaps each time ... but the C2xx path doesn't write a new
     %%       proposal to everyone's public proj stores, and there's no
     %%       guarantee that anyone else as written a new public proj either.
-    {S#ch_mgr{flaps=NewFlaps, runenv=RunEnv2}, update_projection_checksum(P_newprop#projection{dbg=Dbg2})}.
+    {S#ch_mgr{flaps=NewFlaps, flap_start=NewFlapStart, runenv=RunEnv2},
+     update_projection_checksum(P_newprop#projection{dbg=Dbg2})}.
 
 projection_transitions_are_sane(Ps, RelativeToServer) ->
     projection_transitions_are_sane(Ps, RelativeToServer, false).
@@ -1301,31 +1311,38 @@ sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list) ->
     timer:sleep(SleepTime),
     SleepTime.
 
-my_find_max(_FLU, []) ->
+my_find_max_flap_count(_FLU, []) ->
     0;
-my_find_max(FLU, TransFlapCounts0) ->
+my_find_max_flap_count(FLU, [{_,{_,_}}|_] = TransFlapCounts0) ->
     lists:max([FlapCount || {F, FlapCount} <- TransFlapCounts0,
                             F == FLU]).
 
 my_find_minmost([]) ->
     0;
+my_find_minmost([{_,_}|_] = TransFlapCounts0) ->
+    lists:min([FlapCount || {_T, FlapCount} <- TransFlapCounts0]);
 my_find_minmost(TransFlapCounts0) ->
-    lists:min([FlapCount || {_F, FlapCount} <- TransFlapCounts0]).
+    lists:min(TransFlapCounts0).
 
-get_flap_count(#projection{dbg=Dbg}) ->
-    proplists:get_value(flap_count,
-                        proplists:get_value(flapping_i, Dbg, []),
-                        0).
+get_raw_flapping_i(#projection{dbg=Dbg}) ->
+    proplists:get_value(flapping_i, Dbg, []).
 
-get_all_flap_counts(#projection{dbg=Dbg}) ->
-    proplists:get_value(all_flap_counts,
-                        proplists:get_value(flapping_i, Dbg, []),
-                        []).
+get_flap_count(P) ->
+    proplists:get_value(flap_count, get_raw_flapping_i(P), 0).
 
-get_all_hosed(#projection{dbg=Dbg}) ->
-    proplists:get_value(all_hosed,
-                        proplists:get_value(flapping_i, Dbg, []),
-                        []).
+get_all_flap_counts(P) ->
+    proplists:get_value(all_flap_counts, get_raw_flapping_i(P), []).
+
+get_all_flap_counts_counts(P) ->
+    case get_all_flap_counts(P) of
+        [] ->
+            [];
+        [{_,{_,_}}|_] = Cs ->
+            [Count || {_FLU, {_Time, Count}} <- Cs]
+    end.
+
+get_all_hosed(P) ->
+    proplists:get_value(all_hosed, get_raw_flapping_i(P), []).
 
 merge_flap_counts(FlapCounts) ->
     merge_flap_counts(FlapCounts, orddict:new()).
@@ -1333,12 +1350,24 @@ merge_flap_counts(FlapCounts) ->
 merge_flap_counts([], D) ->
     orddict:to_list(D);
 merge_flap_counts([FlapCount|Rest], D1) ->
-    %% We know that FlapCount is list({Actor, NumFlaps}).
+    %% We know that FlapCount is list({Actor, {FlapStartTime,NumFlaps}}).
     D2 = orddict:from_list(FlapCount),
-    D3 = orddict:merge(fun(_Key, V1, V2) when V1 > V2 ->
+    %% If the FlapStartTimes are identical, then pick the bigger flap count.
+    %% If the FlapStartTimes differ, then pick the larger start time tuple.
+    D3 = orddict:merge(fun(_Key, {T1, NF1}= V1, {T2, NF2}=_V2)
+                             when T1 == T2, NF1 > NF2 ->
                                V1;
+                          (_Key, {T1,_NF1}=_V1, {T2,_NF2}= V2)
+                             when T1 == T2 ->
+                               V2;
+                          (_Key, {T1,_NF1}= V1, {T2,_NF2}=_V2)
+                             when T1 > T2 ->
+                               V1;
+                          (_Key, {T1,_NF1}=_V1, {T2,_NF2}= V2) ->
+                               V2;
                           (_Key, V1, V2) ->
-                               V2
+                               exit({bad_merge_values,mod,?MODULE,line,?LINE,
+                                     _Key, V1, V2})
                        end, D1, D2),
     merge_flap_counts(Rest, D3).
 
