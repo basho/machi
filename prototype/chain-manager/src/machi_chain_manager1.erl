@@ -124,7 +124,6 @@ init({MyName, All_list, MyFLUPid, MgrOpts}) ->
                 proj=NoneProj,
                 proj_history=queue:new(),
                 myflu=MyFLUPid, % pid or atom local name
-                %% flap_limit=length(All_list) + 1,
                 %% TODO 2015-03-04: revisit, should this constant be bigger?
                 %% Yes, this should be bigger, but it's a hack.  There is
                 %% no guarantee that all parties will advance to a minimum
@@ -735,8 +734,8 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         P_newprop_flap_count >= FlapLimit ->
             %% I am flapping ... what else do I do?
             B10Hack = get(b10_hack),
-            io:format(user, "{FLAP: ~w auth ~w #flaps ~w} myenv ~w\n", [S#ch_mgr.name, P_newprop#projection.author_server, P_newprop_flap_count, S#ch_mgr.runenv]),
-            %% if B10Hack == false andalso P_newprop_flap_count - FlapLimit - 3 =< 0 -> io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_flap_count]), put(b10_hack, true); true -> ok end,
+            %% io:format(user, "{FLAP: ~w auth ~w #flaps ~w} myenv ~w\n", [S#ch_mgr.name, P_newprop#projection.author_server, P_newprop_flap_count, S#ch_mgr.runenv]),
+            if B10Hack == false andalso P_newprop_flap_count - FlapLimit - 3 =< 0 -> io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_flap_count]), put(b10_hack, true); true -> ok end,
 
             if
                 %% So, if we noticed a flap count by some FLU X with a
@@ -745,6 +744,12 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                 %% stuck forever?  Hrm, except that 'crashes' ought to be
                 %% detected by our own failure detector and get us out of
                 %% this current flapping situation, right? TODO
+                %%
+                %% 2015-04-05: If we add 'orelse AllSettled' to this 'if'
+                %% clause, then we can end up short-circuiting too
+                %% early.  (Where AllSettled comes from the runenv's
+                %% flapping_i prop.)  So, I believe that we need to
+                %% rely on the failure detector to rescue us.
                 P_latest_trans_flap_count >= FlapLimit ->
                     io:format(user, "{FLAP: ~w auth ~w #flaps ~w} go to A50\n", [S#ch_mgr.name, P_newprop#projection.author_server, P_newprop_flap_count]),
                     %% Everyone that's flapping together now has flap_count
@@ -902,9 +907,8 @@ react_to_env_C310(P_newprop, S) ->
 
 calculate_flaps(P_newprop, FlapLimit,
                 #ch_mgr{name=MyName, proj_history=H,
-                        flaps=Flaps, flap_start=FlapStart,
-                        all_flap_starts=AllFlapStarts,
-                        runenv=RunEnv0} = S) ->
+                        flaps=Flaps, runenv=RunEnv0} = S) ->
+    Now = os:timestamp(),
     RunEnv1 = replace(RunEnv0, [{flapping_i, []}]),
     HistoryPs = queue:to_list(H),
     Ps = HistoryPs ++ [P_newprop],
@@ -929,27 +933,16 @@ calculate_flaps(P_newprop, FlapLimit,
     %%       response from machi_flu0:proj_read_latest().
     BadFLUs = proplists:get_value(bad_answer_flus, Props),
 
-    FlapFLUs = lists:usort([FLU ||
-                               {FLU, {FlTime, _FlapCount}} <- TransFlapCounts0,
-                               FlTime /= ?NOT_FLAPPING]),
     RemoteTransFlapCounts1 = lists:keydelete(MyName, 1, TransFlapCounts0),
     RemoteTransFlapCounts =
         [X || {_FLU, {FlTime, _FlapCount}}=X <- RemoteTransFlapCounts1,
               FlTime /= ?NOT_FLAPPING],
     TempNewFlaps = Flaps + 1,
-    TempAllFlapCounts = lists:sort([{MyName, {FlapStart, TempNewFlaps}}|
+    TempAllFlapCounts = lists:sort([{MyName, {Now, TempNewFlaps}}|
                                     RemoteTransFlapCounts]),
     %% Sanity check.
     true = lists:all(fun({_,{_,_}}) -> true;
                         (_)         -> false end, TempAllFlapCounts),
-    NewAllFlapStarts0 = [{FLU, Time} ||
-                            {FLU, {Time, _Count}} <- TempAllFlapCounts],
-    FlapStatusSameP = calc_flap_status_quo(MyName,
-                                           AllFlapStarts, NewAllFlapStarts0),
-    if not FlapStatusSameP ->
-            io:format(user, "yo ~p AllFlapStarts, NewAllFlapStarts0\n~w\n~w\n",
-                      [MyName, AllFlapStarts, NewAllFlapStarts0]);
-       true -> ok end,
 
     %% H is the bounded history of all of this manager's private
     %% projection store writes.  If we've proposed the *same*
@@ -971,16 +964,8 @@ calculate_flaps(P_newprop, FlapLimit,
     %% 3. If one of the remote managers that we saw earlier has
     %%    stopped flapping.
 
-    case {queue:len(H), FlapStatusSameP,
-          length(UPI_Repairing_combos), length(Down_combos)} of
-        {N, true,
-         1=_URs, 1=_Ds} when N >= length(P_newprop#projection.all_members) ->
-            if FlapStart == ?NOT_FLAPPING ->
-                    NewFlapStart = now();
-               true ->
-                    NewFlapStart = FlapStart
-            end,
-            NewAllFlapStarts = NewAllFlapStarts0,
+    case {queue:len(H), length(UPI_Repairing_combos), length(Down_combos)} of
+        {N, 1=_URs, 1=_Ds} when N >= length(P_newprop#projection.all_members) ->
             NewFlaps = TempNewFlaps,
 
             %% Wow, this behavior is almost spooky.
@@ -1008,18 +993,16 @@ calculate_flaps(P_newprop, FlapLimit,
 
             AllFlapCounts = TempAllFlapCounts,
             AllHosed = lists:usort(DownUnion ++ HosedTransUnion ++ BadFLUs);
-        {_N, _Bool, _URs, _Ds} ->
-            NewFlapStart = ?NOT_FLAPPING,
-            NewAllFlapStarts = [],
+        {_N, _URs, _Ds} ->
             NewFlaps = 0,
             AllFlapCounts = [],
             AllHosed = []
     end,
 
     AllFlapCountsSettled = my_find_minmost(AllFlapCounts) >= FlapLimit,
-    FlappingI = {flapping_i, [{flap_count, {NewFlapStart, NewFlaps}},
+    FlappingI = {flapping_i, [{flap_count, {Now, NewFlaps}},
                               {all_hosed, AllHosed},
-                              {all_flap_counts, AllFlapCounts},
+                              {all_flap_counts, lists:sort(AllFlapCounts)},
                               {all_flap_counts_settled, AllFlapCountsSettled},
                               {bad,BadFLUs},
                               {da_downu, DownUnion}, % debugging aid
@@ -1039,8 +1022,7 @@ calculate_flaps(P_newprop, FlapLimit,
     %%       flaps each time ... but the C2xx path doesn't write a new
     %%       proposal to everyone's public proj stores, and there's no
     %%       guarantee that anyone else as written a new public proj either.
-    {S#ch_mgr{flaps=NewFlaps, flap_start=NewFlapStart,
-              all_flap_starts=NewAllFlapStarts, runenv=RunEnv2},
+    {S#ch_mgr{flaps=NewFlaps, runenv=RunEnv2},
      update_projection_checksum(P_newprop#projection{dbg=Dbg2})}.
 
 projection_transitions_are_sane(Ps, RelativeToServer) ->
@@ -1312,12 +1294,6 @@ sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list) ->
     timer:sleep(SleepTime),
     SleepTime.
 
-my_find_max_flap_count(_FLU, []) ->
-    0;
-my_find_max_flap_count(FLU, [{_,{_,_}}|_] = TransFlapCounts0) ->
-    lists:max([FlapCount || {F, {_T, FlapCount}} <- TransFlapCounts0,
-                            F == FLU]).
-
 my_find_minmost([]) ->
     0;
 my_find_minmost([{_,_}|_] = TransFlapCounts0) ->
@@ -1353,15 +1329,8 @@ merge_flap_counts([], D) ->
 merge_flap_counts([FlapCount|Rest], D1) ->
     %% We know that FlapCount is list({Actor, {FlapStartTime,NumFlaps}}).
     D2 = orddict:from_list(FlapCount),
-    %% If the FlapStartTimes are identical, then pick the bigger flap count.
     %% If the FlapStartTimes differ, then pick the larger start time tuple.
-    D3 = orddict:merge(fun(_Key, {T1, NF1}= V1, {T2, NF2}=_V2)
-                             when T1 == T2, NF1 > NF2 ->
-                               V1;
-                          (_Key, {T1,_NF1}=_V1, {T2,_NF2}= V2)
-                             when T1 == T2 ->
-                               V2;
-                          (_Key, {T1,_NF1}= V1, {T2,_NF2}=_V2)
+    D3 = orddict:merge(fun(_Key, {T1,_NF1}= V1, {T2,_NF2}=_V2)
                              when T1 > T2 ->
                                V1;
                           (_Key, {_T1,_NF1}=_V1, {_T2,_NF2}= V2) ->
@@ -1371,14 +1340,6 @@ merge_flap_counts([FlapCount|Rest], D1) ->
                                      _Key, V1, V2})
                        end, D1, D2),
     merge_flap_counts(Rest, D3).
-
-calc_flap_status_quo(_MyName, _OldTempFlapStarts, _NewFlapStarts) ->
-    %% This seemed a good idea at the time (see also, the comments on
-    %% git commit 8ff177f0c54f6338ef5c1dca5be736f3c56ebc86.
-    %% Unfortunately, it doesn't work: the system can read old/laggy data
-    %% that forces the original intent of this function to return false,
-    %% and that destabilizes the system enough to be unworkable.
-    true.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

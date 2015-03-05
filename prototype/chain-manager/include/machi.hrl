@@ -58,16 +58,6 @@
           runenv          :: list(), %proplist()
           opts            :: list(),  %proplist()
           flaps=0         :: integer(),
-          %% Each manager keeps track of the starting time that it
-          %% first observed itself flapping.  This time is stored in
-          %% the 'flapping_i' proplist in #projection.dbg to help
-          %% other nodes tell when some other manager is having a
-          %% flapping episode at time T+x that is different from the
-          %% flapping episode at an earlier time T.
-          flap_start = ?NOT_FLAPPING
-                          :: erlang:now(),
-          all_flap_starts = []
-                          :: [{term(), erlang:now()}],
 
           %% Deprecated ... TODO: remove when old test unit test code is removed
           proj_proposed   :: 'none' | #projection{}
