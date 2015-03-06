@@ -263,9 +263,13 @@ cl_write_public_proj_local(Epoch, Proj, SkipLocalWriteErrorP,
                end,
     case Res0 of
         ok ->
-            Continue();
+            {XX, SS} = Continue(),
+            {{qqq_local_write, ok, XX}, SS};
+            %% Continue();
         _Else when SkipLocalWriteErrorP ->
-            Continue();
+            {XX, SS} = Continue(),
+            {{qqq_local_write, _Else, XX}, SS};
+            %% Continue();
         Else when Else == error_written; Else == timeout; Else == t_timeout ->
             {Else, S2}
     end.
@@ -397,19 +401,19 @@ calc_projection(S, RelativeToServer) ->
     calc_projection(S, RelativeToServer, AllHosed).
 
 calc_projection(#ch_mgr{proj=LastProj, runenv=RunEnv} = S, RelativeToServer,
-                _AllHosed) ->
+                AllHosed) ->
     Dbg = [],
     OldThreshold = proplists:get_value(old_threshold, RunEnv),
     NoPartitionThreshold = proplists:get_value(no_partition_threshold, RunEnv),
     calc_projection(OldThreshold, NoPartitionThreshold, LastProj,
-                    RelativeToServer, Dbg, S).
+                    RelativeToServer, AllHosed, Dbg, S).
 
 %% OldThreshold: Percent chance of using the old/previous network partition list
 %% NoPartitionThreshold: If the network partition changes, what percent chance
 %%                       that there are no partitions at all?
 
 calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
-                RelativeToServer, Dbg,
+                RelativeToServer, _____TODO_delme_I_think__AllHosed, Dbg,
                 #ch_mgr{name=MyName, runenv=RunEnv1}=S) ->
     #projection{epoch_number=OldEpochNum,
                 all_members=All_list,
@@ -429,7 +433,7 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
     {NewUPI_list3, Repairing_list3, RunEnv3} =
         case {NewUp, Repairing_list2} of
             {[], []} ->
-D_foo=[],
+                D_foo=[],
                 {NewUPI_list, [], RunEnv2};
             {[], [H|T]} when RelativeToServer == hd(NewUPI_list) ->
                 %% The author is head of the UPI list.  Let's see if
@@ -443,16 +447,19 @@ D_foo=[],
                                 tl(NewUPI_list) ++ Repairing_list2,
                                 S#ch_mgr.proj, Partitions, S),
                 if not SameEpoch_p ->
-D_foo=[],
+                        D_foo=[],
                         {NewUPI_list, OldRepairing_list, RunEnv2};
                    true ->
-D_foo=[{repair_airquote_done, {we_agree, (S#ch_mgr.proj)#projection.epoch_number}}],
+                        D_foo=[{repair_airquote_done,
+                                {we_agree,
+                                 (S#ch_mgr.proj)#projection.epoch_number}}],
                         {NewUPI_list ++ [H], T, RunEnv2}
                 end;
             {_, _} ->
-D_foo=[],
+                D_foo=[],
                 {NewUPI_list, OldRepairing_list, RunEnv2}
         end,
+
     Repairing_list4 = case NewUp of
                           []    -> Repairing_list3;
                           NewUp -> Repairing_list3 ++ NewUp
@@ -472,7 +479,7 @@ D_foo=[],
 
     P = make_projection(OldEpochNum + 1,
                         MyName, All_list, Down, NewUPI, NewRepairing,
-                        D_foo ++
+                        [da_hd] ++ D_foo ++
                         Dbg ++ [{ps, Partitions},{nodes_up, Up}]),
     {P, S#ch_mgr{runenv=RunEnv3}}.
 
@@ -555,6 +562,8 @@ rank_projections(Projs, CurrentProj) ->
     N = length(All_list),
     [{rank_projection(Proj, MemberRank, N), Proj} || Proj <- Projs].
 
+rank_projection(#projection{upi=[]}, _MemberRank, _N) ->
+    -100;
 rank_projection(#projection{author_server=Author,
                             upi=UPI_list,
                             repairing=Repairing_list}, MemberRank, N) ->
@@ -581,11 +590,28 @@ react_to_env_A20(Retries, S) ->
     %% to determine if *all* of the UPI+Repairing FLUs are members of
     %% the unanimous server replies.
     UnanimousFLUs = lists:sort(proplists:get_value(unanimous_flus, ReadExtra)),
-    UPI_Repairing_FLUs = lists:sort(P_latest#projection.upi ++
-                                    P_latest#projection.repairing),
+    ?REACT({a20,?LINE,latest_epoch,P_latest#projection.epoch_number}),
+    ?REACT({a20,?LINE,latest_upi,P_latest#projection.upi}),
+    ?REACT({a20,?LINE,latest_repairing,P_latest#projection.repairing}),
+    ?REACT({a20,?LINE,flapping_i,get_raw_flapping_i(P_latest)}),
+
+    %% Reach into hosed compensation, if necessary, to find effective
+    %% UPI and Repairing lists.
+    {E_UPI, E_Repairing} = case get_flapping_hosed_compensation(P_latest) of
+                               undefined ->
+                                   {P_latest#projection.upi,
+                                    P_latest#projection.repairing};
+                               Answer ->
+                                   Answer
+                           end,
+    UPI_Repairing_FLUs = lists:sort(E_UPI ++ E_Repairing),
     All_UPI_Repairing_were_unanimous = UPI_Repairing_FLUs == UnanimousFLUs,
     %% TODO: investigate if the condition below is more correct?
     %% All_UPI_Repairing_were_unanimous = (UPI_Repairing_FLUs -- UnanimousFLUs) == [],
+    %% TODO: or:
+    %% All_UPI_Repairing_were_unanimous =
+    %%     ordsets:is_subset(ordsets:from_list(UPI_Repairing_FLUs),
+    %%                       ordsets:from_list(UnanimousFLUs)),
     LatestUnanimousP =
         if UnanimousTag == unanimous
            andalso
@@ -778,7 +804,19 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                     %% It is our moral imperative to write so that the flap
                     %% cycle continues enough times so that everyone notices
                     %% and thus the earlier clause above fires.
-                    react_to_env_C300(P_newprop, P_latest, S)
+                    P_newprop2 = trim_proj_with_all_hosed(P_newprop, S),
+                    io:format(user, "GEE ~w\n", [self()]),
+                    io:format(user, "GEE1 ~w ~w\n", [self(), make_projection_summary(P_newprop)]),
+                    if P_newprop2#projection.upi == [] ->
+                            io:format(user, "GEE1-50  ~w ~w\n", [self(), make_projection_summary(P_newprop)]),
+                            ?REACT({b10, ?LINE}),
+                            react_to_env_A50(P_latest, S);
+                       true ->
+                            io:format(user, "GEE1-300 newprop ~w ~w\n", [self(), make_projection_summary(P_newprop)]),
+                            io:format(user, "GEE1-300 latest  ~w ~w\n", [self(), make_projection_summary(P_latest)]),
+                            ?REACT({b10, ?LINE}),
+                            react_to_env_C300(P_newprop2, P_latest, S)
+                    end
             end;
 
         Retries > 2 ->
@@ -917,10 +955,59 @@ react_to_env_C310(P_newprop, S) ->
     ?REACT(c310),
     Epoch = P_newprop#projection.epoch_number,
     {_Res, S2} = cl_write_public_proj_skip_local_error(Epoch, P_newprop, S),
+    io:format(user, "GEE3 ~w ~w epoch ~w ~w\n", [self(), S#ch_mgr.name, P_newprop#projection.epoch_number, _Res]),
+    io:format(user, "GEE3 ~w ~w\n", [self(), make_projection_summary(P_newprop)]),
+    HH = lists:sublist(get(react), 90),
+    io:format(user, "GEE3 ~w ~p\n", [self(), lists:reverse(HH)]),
     ?REACT({c310,make_projection_summary(P_newprop)}),
     ?REACT({c310,_Res}),
     
     react_to_env_A10(S2).
+
+proposals_are_flapping(Ps) ->
+    %% This works:
+    %% UniqueProposalSummaries = lists:usort([{P#projection.upi,
+    %%                                         P#projection.repairing,
+    %%                                         P#projection.down} || P <- Ps]),
+    %% length(UniqueProposalSummaries).
+    %% ... but refactor to use a fold, for later refactoring ease.
+    [First|Rest] = Ps,
+    case lists:foldl(
+           fun(#projection{upi=UPI,repairing=Repairing,down=Down}=NewP,
+               #projection{upi=UPI,repairing=Repairing,down=Down}) ->
+                   NewP;
+              (#projection{}=NewP,
+               #projection{upi=UPIo,repairing=Repairingo}=_OldP) ->
+                   case get_flapping_hosed_compensation(NewP) of
+                       {NewUnadjUPI, NewUnadjRepairing} ->
+                           OK = case get_flapping_hosed_compensation(NewP) of
+                                    {OldUnadjUPI, OldUnadjRepairing} ->
+                                        OldUnadjUPI == NewUnadjUPI
+                                        andalso
+                                        OldUnadjRepairing == NewUnadjRepairing;
+                                    _Else9 ->
+                                        UPIo == NewUnadjUPI
+                                        andalso
+                                        Repairingo == NewUnadjRepairing
+                                end,
+                           if not OK ->
+                                   bummer4;
+                              true ->
+                                   NewP
+                           end;
+                       undefined ->
+                           bummer2;
+                       _Else ->
+                           bummer3
+                   end;
+              (_, _Else) ->
+                   bummer
+           end, First, Rest) of
+        LastProj when is_record(LastProj, projection) ->
+            1;
+        _Else ->
+            -1 % arbitrary, anything but 1
+    end.
 
 calculate_flaps(P_newprop, FlapLimit,
                 #ch_mgr{name=MyName, proj_history=H,
@@ -929,9 +1016,7 @@ calculate_flaps(P_newprop, FlapLimit,
     RunEnv1 = replace(RunEnv0, [{flapping_i, []}]),
     HistoryPs = queue:to_list(H),
     Ps = HistoryPs ++ [P_newprop],
-    UniqueProposalSummaries = lists:usort([{P#projection.upi,
-                                            P#projection.repairing,
-                                            P#projection.down} || P <- Ps]),
+    UniqueProposalSummaries = proposals_are_flapping(Ps),
 
     {_WhateverUnanimous, BestP, Props, _S} =
         cl_read_latest_projection(private, S),
@@ -982,7 +1067,7 @@ calculate_flaps(P_newprop, FlapLimit,
     %%    stopped flapping.
 
     case {queue:len(H), UniqueProposalSummaries} of
-        {N, [_]} when N >= length(P_newprop#projection.all_members) ->
+        {N, 1} when N >= length(P_newprop#projection.all_members) ->
             NewFlaps = TempNewFlaps,
 
             %% Wow, this behavior is almost spooky.
@@ -1347,6 +1432,10 @@ get_all_hosed(S) when is_record(S, ch_mgr) ->
                         proplists:get_value(flapping_i, S#ch_mgr.runenv, []),
                         []).
 
+get_flapping_hosed_compensation(P) ->
+    proplists:get_value(hosed_compensation, get_raw_flapping_i(P),
+                        undefined).
+
 merge_flap_counts(FlapCounts) ->
     merge_flap_counts(FlapCounts, orddict:new()).
 
@@ -1366,6 +1455,27 @@ merge_flap_counts([FlapCount|Rest], D1) ->
                                      _Key, V1, V2})
                        end, D1, D2),
     merge_flap_counts(Rest, D3).
+
+trim_proj_with_all_hosed(#projection{upi=UPI, repairing=Repairing,
+                                     dbg=Dbg}=P, S) ->
+    AllHosed = get_all_hosed(S),
+    HosedComp = get_flapping_hosed_compensation(P),
+    if AllHosed == [] orelse HosedComp /= undefined ->
+            P;
+       true ->
+            UPI2 = UPI -- AllHosed,
+            Repairing2 = Repairing -- AllHosed,
+            X = if AllHosed /= [] ->
+                        Compensation = {hosed_compensation, {UPI, Repairing}},
+                        [Compensation, {now_all_hosed, AllHosed}];
+                   true ->
+                        [no_comp]
+                end,
+            FI = get_raw_flapping_i(P),
+            Replace = [{flapping_i, X ++ FI}],
+            DbgB = replace(Dbg, Replace),
+            P#projection{upi=UPI2, repairing=Repairing2, dbg=DbgB}
+    end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
