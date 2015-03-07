@@ -742,7 +742,8 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
 react_to_env_A50(P_latest, S) ->
     ?REACT(a50),
 
-    HH = lists:sublist(get(react), 50),
+    HH = get(react),
+    io:format(user, "HEE50s ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse([X || X <- HH, is_atom(X)])]),
     io:format(user, "HEE50 ~w ~w ~p\n", [S#ch_mgr.name, self(), lists:reverse(HH)]),
 
     ?REACT({a50, ?LINE, [{latest_epoch, P_latest#projection.epoch_number}]}),
@@ -921,7 +922,8 @@ react_to_env_C120(P_latest, #ch_mgr{proj_history=H} = S) ->
                  H2
          end,
 
-    HH = lists:sublist(get(react), 50),
+    HH = get(react),
+    io:format(user, "HEE120s ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse([X || X <- HH, is_atom(X)])]),
     io:format(user, "HEE120 ~w ~w ~p\n", [S#ch_mgr.name, self(), lists:reverse(HH)]),
 
     ?REACT({c120, [{latest, make_projection_summary(P_latest)}]}),
