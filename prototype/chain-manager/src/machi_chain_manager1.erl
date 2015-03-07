@@ -597,7 +597,8 @@ react_to_env_A20(Retries, S) ->
                 ?REACT({a20,?LINE}),
                 true;
            UnanimousTag == unanimous ->
-                ?REACT({a20,?LINE,UPI_Repairing_FLUs,UnanimousFLUs}),
+                ?REACT({a20,?LINE,[{upi_repairing,UPI_Repairing_FLUs},
+                                   {unanimous,UnanimousFLUs}]}),
                 false;
            UnanimousTag == not_unanimous ->
                 ?REACT({a20,?LINE}),
@@ -614,8 +615,11 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP,
     RelativeToServer = MyName,
     AllHosed = get_all_hosed(S),
     {P_newprop1, S2} = calc_projection(S, RelativeToServer, AllHosed),
+    ?REACT({a30, ?LINE, [{newprop1, make_projection_summary(P_newprop1)}]}),
 
+    %% Are we flapping yet?
     {P_newprop2, S3} = calculate_flaps(P_newprop1, FlapLimit, S2),
+    ?REACT({a30, ?LINE, [{newprop2, make_projection_summary(P_newprop2)}]}),
 
     react_to_env_A40(Retries, P_newprop2, P_latest,
                      LatestUnanimousP, S3).
@@ -632,7 +636,10 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
         P_latest#projection.epoch_number > P_current#projection.epoch_number
         orelse
         not LatestUnanimousP ->
-            ?REACT({a40, ?LINE,P_latest#projection.epoch_number > P_current#projection.epoch_number, not LatestUnanimousP}),
+            ?REACT({a40, ?LINE,
+                    [{latest_epoch, P_latest#projection.epoch_number},
+                     {current_epoch, P_current#projection.epoch_number},
+                     {latest_unanimous_p, LatestUnanimousP}]}),
 
             %% 1st clause: someone else has written a newer projection
             %% 2nd clause: a network partition has healed, revealing a
@@ -643,7 +650,10 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
         P_latest#projection.epoch_number < P_current#projection.epoch_number
         orelse
         P_latest /= P_current ->
-            ?REACT({a40, ?LINE}),
+            ?REACT({a40, ?LINE,
+                    [{latest_epoch, P_latest#projection.epoch_number},
+                     {current_epoch, P_current#projection.epoch_number},
+                     {neq, P_latest /= P_current}]}),
 
             %% Both of these cases are rare.  Elsewhere, the code
             %% assumes that the local FLU's projection store is always
@@ -668,7 +678,10 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
 
         %% A40a (see flowchart)
         Rank_newprop > Rank_latest ->
-            ?REACT({a40, ?LINE}),
+            ?REACT({b10, ?LINE,
+                    [{rank_latest, Rank_latest},
+                     {rank_newprop, Rank_newprop},
+                     {latest_author, P_latest#projection.author_server}]}),
 
             %% TODO: There may be an "improvement" here.  If we're the
             %% highest-ranking FLU in the all_members list, then if we make a
@@ -686,13 +699,20 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
         (P_newprop#projection.upi /= P_latest#projection.upi
          orelse
          P_newprop#projection.repairing /= P_latest#projection.repairing) ->
-            ?REACT({a40, ?LINE}),
+            ?REACT({a40, ?LINE,
+                   [{latest_author, P_latest#projection.author_server},
+                   {newprop_upi, P_newprop#projection.upi},
+                   {latest_upi, P_latest#projection.upi},
+                   {newprop_repairing, P_newprop#projection.repairing},
+                   {latest_repairing, P_latest#projection.repairing}]}),
 
             react_to_env_C300(P_newprop, P_latest, S);
 
         %% A40c (see flowchart)
         LatestAuthorDownP ->
-            ?REACT({a40, ?LINE}),
+            ?REACT({a40, ?LINE,
+                   [{latest_author, P_latest#projection.author_server},
+                    {author_is_down_p, LatestAuthorDownP}]}),
 
             %% TODO: I believe that membership in the
             %% P_newprop#projection.down is not sufficient for long
@@ -714,17 +734,18 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
             react_to_env_C300(P_newprop, P_latest, S);
 
         true ->
-            ?REACT({a40, ?LINE}),
+            ?REACT({a40, ?LINE, [true]}),
 
             react_to_env_A50(P_latest, S)
     end.
 
 react_to_env_A50(P_latest, S) ->
-    ?REACT({a50, ?LINE, latest_epoch, P_latest#projection.epoch_number}),
+    ?REACT(a50),
 
     HH = lists:sublist(get(react), 50),
     io:format(user, "HEE50 ~w ~w ~p\n", [S#ch_mgr.name, self(), lists:reverse(HH)]),
 
+    ?REACT({a50, ?LINE, [{latest_epoch, P_latest#projection.epoch_number}]}),
     {{no_change, P_latest#projection.epoch_number}, S}.
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
@@ -738,13 +759,16 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
 
     if
         LatestUnanimousP ->
-            ?REACT({b10, ?LINE}),
+            ?REACT({b10, ?LINE, [{latest_unanimous_p, LatestUnanimousP}]}),
             put(b10_hack, false),
 
             react_to_env_C100(P_newprop, P_latest, S);
 
         P_newprop_flap_count >= FlapLimit ->
             %% I am flapping ... what else do I do?
+            ?REACT({b10, ?LINE, [i_am_flapping,
+                                 {newprop_flap_count, P_newprop_flap_count},
+                                 {flap_limit, FlapLimit}]}),
             B10Hack = get(b10_hack),
             %% if B10Hack == false andalso P_newprop_flap_count - FlapLimit - 3 =< 0 -> io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_flap_count]), put(b10_hack, true); true -> ok end,
             io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_flap_count]),
@@ -780,19 +804,19 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                     %% Everyone that's flapping together now has flap_count
                     %% that's larger than the limit.  So it's safe and good
                     %% to stop here, so we can break the cycle of flapping.
-                    ?REACT({b10, ?LINE, P_latest_trans_flap_count, FlapLimit}),
+                    ?REACT({b10, ?LINE, [flap_stop]}),
                     react_to_env_A50(P_latest, S);
 
                 true ->
                     %% It is our moral imperative to write so that the flap
                     %% cycle continues enough times so that everyone notices
                     %% and thus the earlier clause above fires.
-                    ?REACT({b10, ?LINE, P_latest_trans_flap_count, FlapLimit}),
+                    ?REACT({b10, ?LINE, [flap_continue]}),
                     react_to_env_C300(P_newprop, P_latest, S)
             end;
 
         Retries > 2 ->
-            ?REACT({b10, ?LINE, Retries}),
+            ?REACT({b10, ?LINE, [{retries, Retries}]}),
             put(b10_hack, false),
 
             %% The author of P_latest is too slow or crashed.
@@ -802,8 +826,10 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         Rank_latest >= Rank_newprop
         andalso
         P_latest#projection.author_server /= MyName ->
-            ?REACT({b10, ?LINE, Rank_latest, Rank_newprop,
-                    P_latest#projection.author_server}),
+            ?REACT({b10, ?LINE,
+                    [{rank_latest, Rank_latest},
+                     {rank_newprop, Rank_newprop},
+                     {latest_author, P_latest#projection.author_server}]}),
             put(b10_hack, false),
 
             %% Give the author of P_latest an opportunite to write a
@@ -835,20 +861,20 @@ react_to_env_C100(P_newprop, P_latest,
     case {ShortCircuit_p, projection_transition_is_sane(P_current, P_latest,
                                                         MyName)} of
         {true, _} ->
-            ?REACT({c100, repairing_short_circuit}),
             %% Someone else believes that I am repairing.  We assume
             %% that nobody is being Byzantine, so we'll believe that I
             %% am/should be repairing.  We ignore our proposal and try
             %% to go with the latest.
+            ?REACT({c100, ?LINE, [repairing_short_circuit]}),
             react_to_env_C110(P_latest, S);
         {_, true} ->
-            ?REACT({c100, sane}),
+            ?REACT({c100, ?LINE, [sane]}),
             react_to_env_C110(P_latest, S);
         {_, _AnyOtherReturnValue} ->
-            ?REACT({c100, not_sane}),
             %% P_latest is not sane.
             %% By process of elimination, P_newprop is best,
             %% so let's write it.
+            ?REACT({c100, ?LINE, [not_sane]}),
             react_to_env_C300(P_newprop, P_latest, S)
     end.
 
@@ -881,7 +907,7 @@ react_to_env_C110(P_latest, #ch_mgr{myflu=MyFLU} = S) ->
     react_to_env_C120(P_latest, S).
 
 react_to_env_C120(P_latest, #ch_mgr{proj_history=H} = S) ->
-    ?REACT({c120, make_projection_summary(P_latest)}),
+    ?REACT(c120),
     H2 = queue:in(P_latest, H),
     H3 = case queue:len(H2) of
              %% TODO: revisit this constant?  Is this too long as a base?
@@ -898,12 +924,16 @@ react_to_env_C120(P_latest, #ch_mgr{proj_history=H} = S) ->
     HH = lists:sublist(get(react), 50),
     io:format(user, "HEE120 ~w ~w ~p\n", [S#ch_mgr.name, self(), lists:reverse(HH)]),
 
+    ?REACT({c120, [{latest, make_projection_summary(P_latest)}]}),
     {{now_using, P_latest#projection.epoch_number},
      S#ch_mgr{proj=P_latest, proj_history=H3, proj_proposed=none}}.
 
 react_to_env_C200(Retries, P_latest, S) ->
     ?REACT(c200),
     try
+        %% TODO: This code works "well enough" without actually
+        %% telling anybody anything.  Do we want to rip this out?
+        %% Actually implement it?  None of the above?
         yo:tell_author_yo(P_latest#projection.author_server)
     catch _Type:_Err ->
             %% io:format(user, "TODO: tell_author_yo is broken: ~p ~p\n",
@@ -932,9 +962,9 @@ react_to_env_C310(P_newprop, S) ->
     ?REACT(c310),
     Epoch = P_newprop#projection.epoch_number,
     {WriteRes, S2} = cl_write_public_proj_skip_local_error(Epoch, P_newprop, S),
-    ?REACT({c310,make_projection_summary(P_newprop)}),
-    ?REACT({c310,WriteRes}),
-    
+    ?REACT({c310, ?LINE,
+            [{newprop, make_projection_summary(P_newprop)},
+            {write_result, WriteRes}]}),
     react_to_env_A10(S2).
 
 calculate_flaps(P_newprop, FlapLimit,
