@@ -739,7 +739,8 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         P_newprop_flap_count >= FlapLimit ->
             %% I am flapping ... what else do I do?
             B10Hack = get(b10_hack),
-            if B10Hack == false andalso P_newprop_flap_count - FlapLimit - 3 =< 0 -> io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_flap_count]), put(b10_hack, true); true -> ok end,
+            %% if B10Hack == false andalso P_newprop_flap_count - FlapLimit - 3 =< 0 -> io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_flap_count]), put(b10_hack, true); true -> ok end,
+            io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_flap_count]),
 
             if
                 %% So, if we noticed a flap count by some FLU X with a
@@ -923,9 +924,8 @@ react_to_env_C310(P_newprop, S) ->
     react_to_env_A10(S2).
 
 calculate_flaps(P_newprop, FlapLimit,
-                #ch_mgr{name=MyName, proj_history=H,
+                #ch_mgr{name=MyName, proj_history=H, flap_start=FlapStart,
                         flaps=Flaps, runenv=RunEnv0} = S) ->
-    Now = os:timestamp(),
     RunEnv1 = replace(RunEnv0, [{flapping_i, []}]),
     HistoryPs = queue:to_list(H),
     Ps = HistoryPs ++ [P_newprop],
@@ -955,7 +955,7 @@ calculate_flaps(P_newprop, FlapLimit,
         [X || {_FLU, {FlTime, _FlapCount}}=X <- RemoteTransFlapCounts1,
               FlTime /= ?NOT_FLAPPING],
     TempNewFlaps = Flaps + 1,
-    TempAllFlapCounts = lists:sort([{MyName, {Now, TempNewFlaps}}|
+    TempAllFlapCounts = lists:sort([{MyName, {FlapStart, TempNewFlaps}}|
                                     RemoteTransFlapCounts]),
     %% Sanity check.
     true = lists:all(fun({_,{_,_}}) -> true;
@@ -981,9 +981,15 @@ calculate_flaps(P_newprop, FlapLimit,
     %% 3. If one of the remote managers that we saw earlier has
     %%    stopped flapping.
 
+    ?REACT({calculate_flaps, queue:len(H), UniqueProposalSummaries}),
     case {queue:len(H), UniqueProposalSummaries} of
         {N, [_]} when N >= length(P_newprop#projection.all_members) ->
             NewFlaps = TempNewFlaps,
+            if FlapStart == ?NOT_FLAPPING ->
+                    NewFlapStart = now();
+               true ->
+                    NewFlapStart = FlapStart
+            end,
 
             %% Wow, this behavior is almost spooky.
             %%
@@ -1012,6 +1018,7 @@ calculate_flaps(P_newprop, FlapLimit,
             AllHosed = lists:usort(DownUnion ++ HosedTransUnion ++ BadFLUs);
         {_N, _} ->
             NewFlaps = 0,
+            NewFlapStart = ?NOT_FLAPPING,
             AllFlapCounts = [],
             AllHosed = []
     end,
@@ -1022,7 +1029,7 @@ calculate_flaps(P_newprop, FlapLimit,
     AllFlapCountsSettled = lists:keydelete(MyName, 1, AllFlapCounts) /= []
                            andalso
                            my_find_minmost(AllFlapCounts) >= FlapLimit,
-    FlappingI = {flapping_i, [{flap_count, {Now, NewFlaps}},
+    FlappingI = {flapping_i, [{flap_count, {NewFlapStart, NewFlaps}},
                               {all_hosed, AllHosed},
                               {all_flap_counts, lists:sort(AllFlapCounts)},
                               {all_flap_counts_settled, AllFlapCountsSettled},
@@ -1045,7 +1052,7 @@ calculate_flaps(P_newprop, FlapLimit,
     %%       proposal to everyone's public proj stores, and there's no
     %%       guarantee that anyone else as written a new public proj either.
     {update_projection_checksum(P_newprop#projection{dbg=Dbg2}),
-     S#ch_mgr{flaps=NewFlaps, runenv=RunEnv2}}.
+     S#ch_mgr{flaps=NewFlaps, flap_start=NewFlapStart, runenv=RunEnv2}}.
 
 projection_transitions_are_sane(Ps, RelativeToServer) ->
     projection_transitions_are_sane(Ps, RelativeToServer, false).
@@ -1355,12 +1362,22 @@ merge_flap_counts([], D) ->
 merge_flap_counts([FlapCount|Rest], D1) ->
     %% We know that FlapCount is list({Actor, {FlapStartTime,NumFlaps}}).
     D2 = orddict:from_list(FlapCount),
+     D2 = orddict:from_list(FlapCount),
+    %% If the FlapStartTimes are identical, then pick the bigger flap count.
     %% If the FlapStartTimes differ, then pick the larger start time tuple.
-    D3 = orddict:merge(fun(_Key, {T1,_NF1}= V1, {T2,_NF2}=_V2)
-                             when T1 > T2 ->
-                               V1;
-                          (_Key, {_T1,_NF1}=_V1, {_T2,_NF2}= V2) ->
-                               V2;
+    D3 = orddict:merge(fun(_Key, {T1, NF1}= V1, {T2, NF2}=V2)
+                             when T1 == T2 ->
+                               if NF1 > NF2 ->
+                                       V1;
+                                  true ->
+                                       V2
+                               end;
+                          (_Key, {T1,_NF1}= V1, {T2,_NF2}=V2) ->
+                               if T1 > T2 ->
+                                       V1;
+                                  true ->
+                                       V2
+                               end;
                           (_Key, V1, V2) ->
                                exit({bad_merge_2tuples,mod,?MODULE,line,?LINE,
                                      _Key, V1, V2})

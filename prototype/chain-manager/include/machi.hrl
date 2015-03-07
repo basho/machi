@@ -58,6 +58,8 @@
           runenv          :: list(), %proplist()
           opts            :: list(),  %proplist()
           flaps=0         :: integer(),
+          flap_start = ?NOT_FLAPPING
+                          :: erlang:now(),
 
           %% Deprecated ... TODO: remove when old test unit test code is removed
           proj_proposed   :: 'none' | #projection{}
