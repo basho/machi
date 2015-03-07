@@ -263,9 +263,11 @@ cl_write_public_proj_local(Epoch, Proj, SkipLocalWriteErrorP,
                end,
     case Res0 of
         ok ->
-            Continue();
-        _Else when SkipLocalWriteErrorP ->
-            Continue();
+            {XX, SS} = Continue(),
+            {{local_write_result, ok, XX}, SS};
+        Else when SkipLocalWriteErrorP ->
+            {XX, SS} = Continue(),
+            {{local_write_result, Else, XX}, SS};
         Else when Else == error_written; Else == timeout; Else == t_timeout ->
             {Else, S2}
     end.
@@ -555,6 +557,8 @@ rank_projections(Projs, CurrentProj) ->
     N = length(All_list),
     [{rank_projection(Proj, MemberRank, N), Proj} || Proj <- Projs].
 
+rank_projection(#projection{upi=[]}, _MemberRank, _N) ->
+    -100;
 rank_projection(#projection{author_server=Author,
                             upi=UPI_list,
                             repairing=Repairing_list}, MemberRank, N) ->
@@ -716,7 +720,10 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
     end.
 
 react_to_env_A50(P_latest, S) ->
-    ?REACT({a50, ?LINE}),
+    ?REACT({a50, ?LINE, latest_epoch, P_latest#projection.epoch_number}),
+
+    HH = lists:sublist(get(react), 50),
+    io:format(user, "HEE50 ~w ~w ~p\n", [S#ch_mgr.name, self(), lists:reverse(HH)]),
 
     {{no_change, P_latest#projection.epoch_number}, S}.
 
@@ -773,17 +780,19 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                     %% Everyone that's flapping together now has flap_count
                     %% that's larger than the limit.  So it's safe and good
                     %% to stop here, so we can break the cycle of flapping.
+                    ?REACT({b10, ?LINE, P_latest_trans_flap_count, FlapLimit}),
                     react_to_env_A50(P_latest, S);
 
                 true ->
                     %% It is our moral imperative to write so that the flap
                     %% cycle continues enough times so that everyone notices
                     %% and thus the earlier clause above fires.
+                    ?REACT({b10, ?LINE, P_latest_trans_flap_count, FlapLimit}),
                     react_to_env_C300(P_newprop, P_latest, S)
             end;
 
         Retries > 2 ->
-            ?REACT({b10, ?LINE}),
+            ?REACT({b10, ?LINE, Retries}),
             put(b10_hack, false),
 
             %% The author of P_latest is too slow or crashed.
@@ -793,7 +802,8 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         Rank_latest >= Rank_newprop
         andalso
         P_latest#projection.author_server /= MyName ->
-            ?REACT({b10, ?LINE}),
+            ?REACT({b10, ?LINE, Rank_latest, Rank_newprop,
+                    P_latest#projection.author_server}),
             put(b10_hack, false),
 
             %% Give the author of P_latest an opportunite to write a
@@ -871,7 +881,7 @@ react_to_env_C110(P_latest, #ch_mgr{myflu=MyFLU} = S) ->
     react_to_env_C120(P_latest, S).
 
 react_to_env_C120(P_latest, #ch_mgr{proj_history=H} = S) ->
-    ?REACT(c120),
+    ?REACT({c120, make_projection_summary(P_latest)}),
     H2 = queue:in(P_latest, H),
     H3 = case queue:len(H2) of
              %% TODO: revisit this constant?  Is this too long as a base?
@@ -884,6 +894,10 @@ react_to_env_C120(P_latest, #ch_mgr{proj_history=H} = S) ->
              _ ->
                  H2
          end,
+
+    HH = lists:sublist(get(react), 50),
+    io:format(user, "HEE120 ~w ~w ~p\n", [S#ch_mgr.name, self(), lists:reverse(HH)]),
+
     {{now_using, P_latest#projection.epoch_number},
      S#ch_mgr{proj=P_latest, proj_history=H3, proj_proposed=none}}.
 
@@ -917,9 +931,9 @@ react_to_env_C300(#projection{epoch_number=Epoch_newprop}=P_newprop,
 react_to_env_C310(P_newprop, S) ->
     ?REACT(c310),
     Epoch = P_newprop#projection.epoch_number,
-    {_Res, S2} = cl_write_public_proj_skip_local_error(Epoch, P_newprop, S),
+    {WriteRes, S2} = cl_write_public_proj_skip_local_error(Epoch, P_newprop, S),
     ?REACT({c310,make_projection_summary(P_newprop)}),
-    ?REACT({c310,_Res}),
+    ?REACT({c310,WriteRes}),
     
     react_to_env_A10(S2).
 
