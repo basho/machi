@@ -162,8 +162,9 @@ smoke1_test() ->
         {ok, _P1} = ?MGR:test_calc_projection(M0, false),
 
         _ = ?MGR:test_calc_proposed_projection(M0),
-        {remote_write_results,
-         [{b,ok},{c,ok}]} = ?MGR:test_write_proposed_projection(M0),
+        {local_write_result, ok,
+         {remote_write_results, [{b,ok},{c,ok}]}} =
+            ?MGR:test_write_proposed_projection(M0),
         {unanimous, P1, Extra1} = ?MGR:test_read_latest_public_projection(M0, false),
 
         ok
