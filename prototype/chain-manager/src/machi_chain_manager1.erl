@@ -414,23 +414,22 @@ update_projection_dbg2(P, Dbg2) when is_list(Dbg2) ->
     P#projection{dbg2=Dbg2}.
 
 calc_projection(S, RelativeToServer) ->
-    AllHosed = [],
-    calc_projection(S, RelativeToServer, AllHosed).
+    calc_projection(S, RelativeToServer, []).
 
-calc_projection(#ch_mgr{proj=LastProj, runenv=RunEnv} = S, RelativeToServer,
-                _AllHosed) ->
+calc_projection(#ch_mgr{proj=LastProj, runenv=RunEnv} = S,
+                RelativeToServer, AllHosed) ->
     Dbg = [],
     OldThreshold = proplists:get_value(old_threshold, RunEnv),
     NoPartitionThreshold = proplists:get_value(no_partition_threshold, RunEnv),
     calc_projection(OldThreshold, NoPartitionThreshold, LastProj,
-                    RelativeToServer, Dbg, S).
+                    RelativeToServer, AllHosed, Dbg, S).
 
 %% OldThreshold: Percent chance of using the old/previous network partition list
 %% NoPartitionThreshold: If the network partition changes, what percent chance
 %%                       that there are no partitions at all?
 
 calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
-                RelativeToServer, Dbg,
+                RelativeToServer, AllHosed, Dbg,
                 #ch_mgr{name=MyName, runenv=RunEnv1}=S) ->
     #projection{epoch_number=OldEpochNum,
                 all_members=All_list,
@@ -439,8 +438,9 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                } = LastProj,
     LastUp = lists:usort(OldUPI_list ++ OldRepairing_list),
     AllMembers = (S#ch_mgr.proj)#projection.all_members,
-    {Up, Partitions, RunEnv2} = calc_up_nodes(MyName,
-                                              AllMembers, RunEnv1),
+    {Up0, Partitions, RunEnv2} = calc_up_nodes(MyName,
+                                               AllMembers, RunEnv1),
+    Up = Up0 -- AllHosed,
 
     NewUp = Up -- LastUp,
     Down = AllMembers -- Up,
@@ -629,55 +629,39 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra,
                  #ch_mgr{name=MyName, flap_limit=FlapLimit} = S) ->
     ?REACT(a30),
     RelativeToServer = MyName,
-    AllHosed = get_all_hosed(S),
-    {P_newprop1, S2} = calc_projection(S, RelativeToServer, AllHosed),
+    {P_newprop1, S2} = calc_projection(S, RelativeToServer),
     ?REACT({a30, ?LINE, [{newprop1, make_projection_summary(P_newprop1)}]}),
 
     %% Are we flapping yet?
     {P_newprop2, S3} = calculate_flaps(P_newprop1, FlapLimit, S2),
     ?REACT({a30, ?LINE, [{newprop2, make_projection_summary(P_newprop2)}]}),
 
-    P_newprop3 =
-    case get_flap_count(P_newprop2) of
-        %% TODO: refactor to eliminate cut-and-paste code
-        {_, P_newprop2_flap_count} when P_newprop2_flap_count >= FlapLimit ->
-            All_queried_list_no_hosed =
-                proplists:get_value(all_queried_list, ReadExtra) -- AllHosed,
-            Orig_FLUsRs = proplists:get_value(flus_rs, ReadExtra),
-            FLUsRs = [X ||
-                         {FLU, _R}=X <- proplists:get_value(flus_rs, ReadExtra),
-                         lists:member(FLU, All_queried_list_no_hosed)],
-            {UnanimousInner, BestProjInner, ExtraInfoInner, _S} = _QQQ =
-                rank_and_sort_projections_with_extra(
-                  All_queried_list_no_hosed, FLUsRs, S3),
-            #projection{upi=_BI_UPI, repairing=BI_repairing, down=BI_down,
-                        dbg=BI_dbg} = BestProjInner,
+    {P_newprop10, S10} =
+        case get_flap_count(P_newprop2) of
+            %% TODO: refactor to eliminate cut-and-paste code in 'when'
+            {_, P_newprop2_flap_count} when P_newprop2_flap_count >= FlapLimit ->
+                AllHosed = get_all_hosed(S3),
+                {P_i, S_i} = calc_projection(S3, MyName, AllHosed),
+                P_inner = case lists:member(MyName, AllHosed) of
+                              false ->
+                                  P_i;
+                              true ->
+                                  P_i#projection{upi=[MyName],
+                                                 repairing=[],
+                                                 down=P_i#projection.all_members
+                                                      -- [MyName]}
+                          end,
+                InnerInfo = [{inner_qqq, make_projection_summary(P_inner)},
+                             {inner_best, P_inner}],
+                DbgX = replace(P_newprop2#projection.dbg, InnerInfo),
+                ?REACT({a30, ?LINE, [qqqwww|DbgX]}),
+                {P_newprop2#projection{dbg=DbgX}, S_i};
+            _ ->
+                {P_newprop2, S3}
+        end,
 
-            %% Sanity check
-            case UnanimousInner of unanimous     -> ok;
-                                   not_unanimous -> ok
-            end,
-            %% Delete stuff from BestProjInner to avoid nested term explosion!
-            InnerDbg = lists:keydelete(inner_unanimous, 1,
-                         lists:keydelete(inner_best, 1,
-                           lists:keydelete(inner_qqq, 1,
-                                           BI_dbg))),
-            BestProj = BestProjInner#projection{
-                         repairing=BI_repairing --AllHosed,
-                         down=lists:usort(BI_down ++ AllHosed),
-                         dbg=InnerDbg},
-            InnerInfo = [{inner_unanimous, UnanimousInner},
-                         {inner_qqq, {All_queried_list_no_hosed,make_projection_summary(BestProj)}},
-                         {inner_best, BestProj}],
-            DbgX = replace(P_newprop2#projection.dbg, InnerInfo),
-            ?REACT({a30, ?LINE, [qqqwww|DbgX]}),
-            P_newprop2#projection{dbg=DbgX};
-        _ ->
-            P_newprop2
-    end,
-
-    react_to_env_A40(Retries, P_newprop3, P_latest,
-                     LatestUnanimousP, S3).
+    react_to_env_A40(Retries, P_newprop10, P_latest,
+                     LatestUnanimousP, S10).
 
 react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                  #ch_mgr{name=MyName, proj=P_current}=S) ->
@@ -935,7 +919,7 @@ react_to_env_C100(P_newprop, P_latest,
             react_to_env_C300(P_newprop, P_latest, S)
     end.
 
-react_to_env_C110(P_latest, #ch_mgr{myflu=MyFLU} = S) ->
+react_to_env_C110(P_latest, #ch_mgr{name=MyName, myflu=MyFLU} = S) ->
     ?REACT(c110),
     %% TOOD: Should we carry along any extra info that that would be useful
     %%       in the dbg2 list?
