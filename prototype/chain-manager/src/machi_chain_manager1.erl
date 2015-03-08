@@ -295,8 +295,11 @@ do_cl_read_latest_public_projection(ReadRepairP,
             {UnanimousTag, Proj2, Extra, S3}
     end.
 
-cl_read_latest_projection(ProjectionType, #ch_mgr{proj=CurrentProj}=S) ->
+read_latest_projection_call_only(ProjectionType, AllHosed,
+                                      #ch_mgr{proj=CurrentProj}=S) ->
     #projection{all_members=All_list} = CurrentProj,
+    All_queried_list = All_list -- AllHosed,
+
     {_UpNodes, Partitions, S2} = calc_up_nodes(S),
     DoIt = fun(X) ->
                    case machi_flu0:proj_read_latest(X, ProjectionType) of
@@ -305,39 +308,55 @@ cl_read_latest_projection(ProjectionType, #ch_mgr{proj=CurrentProj}=S) ->
                    end
            end,
     Rs = [perhaps_call_t(S, Partitions, FLU, fun() -> DoIt(FLU) end) ||
-             FLU <- All_list],
-    FLUsRs = lists:zip(All_list, Rs),
-    UnwrittenRs = [x || error_unwritten <- Rs],
+             FLU <- All_queried_list],
+    FLUsRs = lists:zip(All_queried_list, Rs),
+    {All_queried_list, FLUsRs, S2}.
+
+cl_read_latest_projection(ProjectionType, S) ->
+    AllHosed = [],
+    cl_read_latest_projection(ProjectionType, AllHosed, S).
+
+cl_read_latest_projection(ProjectionType, AllHosed, S) ->
+    {All_queried_list, FLUsRs, S2} =
+        read_latest_projection_call_only(ProjectionType, AllHosed, S),
+
+    rank_and_sort_projections_with_extra(All_queried_list, FLUsRs, S2).
+
+rank_and_sort_projections_with_extra(All_queried_list, FLUsRs,
+                                     #ch_mgr{proj=CurrentProj}=S) ->
+    UnwrittenRs = [x || {_, error_unwritten} <- FLUsRs],
     Ps = [Proj || {_FLU, Proj} <- FLUsRs, is_record(Proj, projection)],
-    %% debug only:
-    %% BadAnswerFLUs = [{FLU,bad_answer,Answer} || {FLU, Answer} <- FLUsRs,
-    %%                         not is_record(Answer, projection)],
     BadAnswerFLUs = [FLU || {FLU, Answer} <- FLUsRs,
                             not is_record(Answer, projection)],
-    if length(UnwrittenRs) == length(Rs) ->
-            {error_unwritten, FLUsRs, [todo_fix_caller_perhaps], S2};
+
+    if All_queried_list == []
+       orelse
+       length(UnwrittenRs) == length(FLUsRs) ->
+            {error_unwritten, FLUsRs, [todo_fix_caller_perhaps], S};
        UnwrittenRs /= [] ->
-            {needs_repair, FLUsRs, [flarfus], S2};
+            {needs_repair, FLUsRs, [flarfus], S};
        true ->
             [{_Rank, BestProj}|_] = rank_and_sort_projections(Ps, CurrentProj),
             NotBestPs = [Proj || Proj <- Ps, Proj /= BestProj],
             UnanimousTag = if NotBestPs == [] -> unanimous;
                               true            -> not_unanimous
                            end,
-            Extra = [{all_members_replied, length(Rs) == length(All_list)}],
+            Extra = [{all_members_replied, length(FLUsRs) == length(All_queried_list)}],
             Best_FLUs = [FLU || {FLU, Projx} <- FLUsRs, Projx == BestProj],
-            AllHosed = lists:usort(
-                         lists:flatten([get_all_hosed(P) || P <- Ps])),
+            TransAllHosed = lists:usort(
+                              lists:flatten([get_all_hosed(P) || P <- Ps])),
             AllFlapCounts = merge_flap_counts([get_all_flap_counts(P) ||
                                                   P <- Ps]),
-            Extra2 = [{unanimous_flus,Best_FLUs},
-                      {not_unanimous_flus, All_list --
+            Extra2 = [{all_queried_list, All_queried_list},
+                      {flus_rs, FLUsRs},
+                      {unanimous_flus,Best_FLUs},
+                      {not_unanimous_flus, All_queried_list --
                                                  (Best_FLUs ++ BadAnswerFLUs)},
                       {bad_answer_flus, BadAnswerFLUs},
                       {not_unanimous_answers, NotBestPs},
-                      {trans_all_hosed, AllHosed},
+                      {trans_all_hosed, TransAllHosed},
                       {trans_all_flap_counts, AllFlapCounts}|Extra],
-            {UnanimousTag, BestProj, Extra2, S2}
+            {UnanimousTag, BestProj, Extra2, S}
     end.
 
 do_read_repair(FLUsRs, _Extra, #ch_mgr{proj=CurrentProj} = S) ->
@@ -606,10 +625,9 @@ react_to_env_A20(Retries, S) ->
            true ->
                 exit({badbad, UnanimousTag})
         end,
-    react_to_env_A30(Retries, P_latest,
-                     LatestUnanimousP, S2).
+    react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra, S2).
 
-react_to_env_A30(Retries, P_latest, LatestUnanimousP,
+react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra,
                  #ch_mgr{name=MyName, flap_limit=FlapLimit} = S) ->
     ?REACT(a30),
     RelativeToServer = MyName,
@@ -620,6 +638,24 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP,
     %% Are we flapping yet?
     {P_newprop2, S3} = calculate_flaps(P_newprop1, FlapLimit, S2),
     ?REACT({a30, ?LINE, [{newprop2, make_projection_summary(P_newprop2)}]}),
+
+    case get_flap_count(P_newprop2) of
+        %% TODO: refactor to eliminate cut-and-paste code
+        {_, P_newprop2_flap_count} when P_newprop2_flap_count >= FlapLimit ->
+            All_queried_list_no_hosed =
+                proplists:get_value(all_queried_list, ReadExtra) -- AllHosed,
+            ?D(All_queried_list_no_hosed),
+            Orig_FLUsRs = proplists:get_value(flus_rs, ReadExtra),
+            FLUsRs = [X ||
+                         {FLU, _R}=X <- proplists:get_value(flus_rs, ReadExtra),
+                         lists:member(FLU, All_queried_list_no_hosed)],
+            ?D(FLUsRs),
+            QQ = rank_and_sort_projections_with_extra(
+                   All_queried_list_no_hosed, FLUsRs, S3),
+            ?REACT({a30, ?LINE, [{qqq_todo, QQ}]});
+        _ ->
+            ok
+    end,
 
     react_to_env_A40(Retries, P_newprop2, P_latest,
                      LatestUnanimousP, S3).
@@ -769,6 +805,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
             %% I am flapping ... what else do I do?
             ?REACT({b10, ?LINE, [i_am_flapping,
                                  {newprop_flap_count, P_newprop_flap_count},
+                                 {latest_trans_flap_count, P_latest_trans_flap_count},
                                  {flap_limit, FlapLimit}]}),
             B10Hack = get(b10_hack),
             %% if B10Hack == false andalso P_newprop_flap_count - FlapLimit - 3 =< 0 -> io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_flap_count]), put(b10_hack, true); true -> ok end,
