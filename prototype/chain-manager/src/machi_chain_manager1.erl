@@ -542,9 +542,7 @@ calc_up_nodes(MyName, AllMembers, RunEnv1) ->
     {UpNodes, Partitions2, RunEnv2}.
 
 replace(PropList, Items) ->
-    lists:foldl(fun({Key, Val}, Ps) ->
-                        lists:keyreplace(Key, 1, Ps, {Key,Val})
-                end, PropList, Items).
+    proplists:compact(Items ++ PropList).
 
 make_projection_summary(#projection{epoch_number=EpochNum,
                                     all_members=_All_list,
@@ -639,25 +637,46 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra,
     {P_newprop2, S3} = calculate_flaps(P_newprop1, FlapLimit, S2),
     ?REACT({a30, ?LINE, [{newprop2, make_projection_summary(P_newprop2)}]}),
 
+    P_newprop3 =
     case get_flap_count(P_newprop2) of
         %% TODO: refactor to eliminate cut-and-paste code
         {_, P_newprop2_flap_count} when P_newprop2_flap_count >= FlapLimit ->
             All_queried_list_no_hosed =
                 proplists:get_value(all_queried_list, ReadExtra) -- AllHosed,
-            ?D(All_queried_list_no_hosed),
             Orig_FLUsRs = proplists:get_value(flus_rs, ReadExtra),
             FLUsRs = [X ||
                          {FLU, _R}=X <- proplists:get_value(flus_rs, ReadExtra),
                          lists:member(FLU, All_queried_list_no_hosed)],
-            ?D(FLUsRs),
-            QQ = rank_and_sort_projections_with_extra(
-                   All_queried_list_no_hosed, FLUsRs, S3),
-            ?REACT({a30, ?LINE, [{qqq_todo, QQ}]});
+            {UnanimousInner, BestProjInner, ExtraInfoInner, _S} = _QQQ =
+                rank_and_sort_projections_with_extra(
+                  All_queried_list_no_hosed, FLUsRs, S3),
+            #projection{upi=_BI_UPI, repairing=BI_repairing, down=BI_down,
+                        dbg=BI_dbg} = BestProjInner,
+
+            %% Sanity check
+            case UnanimousInner of unanimous     -> ok;
+                                   not_unanimous -> ok
+            end,
+            %% Delete stuff from BestProjInner to avoid nested term explosion!
+            InnerDbg = lists:keydelete(inner_unanimous, 1,
+                         lists:keydelete(inner_best, 1,
+                           lists:keydelete(inner_qqq, 1,
+                                           BI_dbg))),
+            BestProj = BestProjInner#projection{
+                         repairing=BI_repairing --AllHosed,
+                         down=lists:usort(BI_down ++ AllHosed),
+                         dbg=InnerDbg},
+            InnerInfo = [{inner_unanimous, UnanimousInner},
+                         {inner_qqq, {All_queried_list_no_hosed,make_projection_summary(BestProj)}},
+                         {inner_best, BestProj}],
+            DbgX = replace(P_newprop2#projection.dbg, InnerInfo),
+            ?REACT({a30, ?LINE, [qqqwww|DbgX]}),
+            P_newprop2#projection{dbg=DbgX};
         _ ->
-            ok
+            P_newprop2
     end,
 
-    react_to_env_A40(Retries, P_newprop2, P_latest,
+    react_to_env_A40(Retries, P_newprop3, P_latest,
                      LatestUnanimousP, S3).
 
 react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
