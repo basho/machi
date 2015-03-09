@@ -633,7 +633,7 @@ react_to_env_A20(Retries, S) ->
         end,
     react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra, S2).
 
-react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra,
+react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                  #ch_mgr{name=MyName, proj=P_current,
                          flap_limit=FlapLimit} = S) ->
     ?REACT(a30),
@@ -857,8 +857,8 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                                  {newprop_flap_count, P_newprop_flap_count},
                                  {latest_trans_flap_count, P_latest_trans_flap_count},
                                  {flap_limit, FlapLimit}]}),
-            B10Hack = get(b10_hack),
-            %% if B10Hack == false andalso P_newprop_flap_count - FlapLimit - 3 =< 0 -> io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_flap_count]), put(b10_hack, true); true -> ok end,
+            _B10Hack = get(b10_hack),
+            %% if _B10Hack == false andalso P_newprop_flap_count - FlapLimit - 3 =< 0 -> io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_flap_count]), put(b10_hack, true); true -> ok end,
             io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_flap_count]),
 
             if
@@ -967,7 +967,7 @@ react_to_env_C100(P_newprop, P_latest,
             react_to_env_C300(P_newprop, P_latest, S)
     end.
 
-react_to_env_C110(P_latest, #ch_mgr{name=MyName, myflu=MyFLU} = S) ->
+react_to_env_C110(P_latest, #ch_mgr{myflu=MyFLU} = S) ->
     ?REACT(c110),
     %% TOOD: Should we carry along any extra info that that would be useful
     %%       in the dbg2 list?
@@ -1062,7 +1062,7 @@ react_to_env_C310(P_newprop, S) ->
             {write_result, WriteRes}]}),
     react_to_env_A10(S2).
 
-calculate_flaps(P_newprop, P_current, FlapLimit,
+calculate_flaps(P_newprop, _P_current, FlapLimit,
                 #ch_mgr{name=MyName, proj_history=H, flap_start=FlapStart,
                         flaps=Flaps, runenv=RunEnv0} = S) ->
     RunEnv1 = replace(RunEnv0, [{flapping_i, []}]),
@@ -1091,7 +1091,7 @@ calculate_flaps(P_newprop, P_current, FlapLimit,
 
     RemoteTransFlapCounts1 = lists:keydelete(MyName, 1, TransFlapCounts0),
     RemoteTransFlapCounts =
-        [X || {_FLU, {{FlEpk,FlTime}, _FlapCount}}=X <- RemoteTransFlapCounts1,
+        [X || {_FLU, {{_FlEpk,FlTime}, _FlapCount}}=X <- RemoteTransFlapCounts1,
               FlTime /= ?NOT_FLAPPING],
     TempNewFlaps = Flaps + 1,
     TempAllFlapCounts = lists:sort([{MyName, {FlapStart, TempNewFlaps}}|
