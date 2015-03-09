@@ -634,12 +634,18 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra,
 
     %% Are we flapping yet?
     {P_newprop2, S3} = calculate_flaps(P_newprop1, FlapLimit, S2),
-    ?REACT({a30, ?LINE, [{newprop2, make_projection_summary(P_newprop2)}]}),
+
+    %% Move the epoch number up ... originally done in C300.
+    #projection{epoch_number=Epoch_newprop2}=P_newprop2,
+    #projection{epoch_number=Epoch_latest}=P_latest,
+    NewEpoch = erlang:max(Epoch_newprop2, Epoch_latest) + 1,
+    P_newprop3 = P_newprop2#projection{epoch_number=NewEpoch},
+    ?REACT({a30, ?LINE, [{newprop3, make_projection_summary(P_newprop3)}]}),
 
     {P_newprop10, S10} =
-        case get_flap_count(P_newprop2) of
+        case get_flap_count(P_newprop3) of
             %% TODO: refactor to eliminate cut-and-paste code in 'when'
-            {_, P_newprop2_flap_count} when P_newprop2_flap_count >= FlapLimit ->
+            {_, P_newprop3_flap_count} when P_newprop3_flap_count >= FlapLimit ->
                 AllHosed = get_all_hosed(S3),
                 {P_i, S_i} = calc_projection(S3, MyName, AllHosed),
                 P_inner = case lists:member(MyName, AllHosed) of
@@ -651,13 +657,17 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra,
                                                  down=P_i#projection.all_members
                                                       -- [MyName]}
                           end,
-                InnerInfo = [{inner_qqq, make_projection_summary(P_inner)},
-                             {inner_best, P_inner}],
-                DbgX = replace(P_newprop2#projection.dbg, InnerInfo),
+                %% TODO FIXME A naive assignment here will cause epoch #
+                %% instability of the inner projection.  We need a stable
+                %% epoch number somehow.  ^_^
+                P_inner2 = P_inner#projection{epoch_number=P_newprop3#projection.epoch_number},
+                InnerInfo = [{inner_qqq, make_projection_summary(P_inner2)},
+                             {inner_best, P_inner2}],
+                DbgX = replace(P_newprop3#projection.dbg, InnerInfo),
                 ?REACT({a30, ?LINE, [qqqwww|DbgX]}),
-                {P_newprop2#projection{dbg=DbgX}, S_i};
+                {P_newprop3#projection{dbg=DbgX}, S_i};
             _ ->
-                {P_newprop2, S3}
+                {P_newprop3, S3}
         end,
 
     react_to_env_A40(Retries, P_newprop10, P_latest,
@@ -993,12 +1003,16 @@ react_to_env_C220(Retries, S) ->
     ?REACT(c220),
     react_to_env_A20(Retries + 1, S).
 
-react_to_env_C300(#projection{epoch_number=Epoch_newprop}=P_newprop,
-                  #projection{epoch_number=Epoch_latest}=_P_latest, S) ->
+react_to_env_C300(#projection{epoch_number=_Epoch_newprop}=P_newprop,
+                  #projection{epoch_number=_Epoch_latest}=_P_latest, S) ->
     ?REACT(c300),
-    NewEpoch = erlang:max(Epoch_newprop, Epoch_latest) + 1,
-    P_newprop2 = P_newprop#projection{epoch_number=NewEpoch},
-    react_to_env_C310(update_projection_checksum(P_newprop2), S).
+
+    %% This logic moved to A30.
+    %% NewEpoch = erlang:max(Epoch_newprop, Epoch_latest) + 1,
+    %% P_newprop2 = P_newprop#projection{epoch_number=NewEpoch},
+    %% react_to_env_C310(update_projection_checksum(P_newprop2), S).
+
+    react_to_env_C310(update_projection_checksum(P_newprop), S).
 
 react_to_env_C310(P_newprop, S) ->
     ?REACT(c310),
