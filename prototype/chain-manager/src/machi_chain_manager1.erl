@@ -506,6 +506,14 @@ check_latest_private_projections(FLUs, MyProj, Partitions, S) ->
                           end,
                       case perhaps_call_t(S, Partitions, FLU, F) of
                           {ok, RemotePrivateProj} ->
+                              %% TODO: For use inside the simulator, this
+                              %% function needs to check if RemotePrivateProj
+                              %% contains a nested inner projection and, if
+                              %% so, compare epoch# and upi & repairing lists.
+                              %% If the nested inner proj is not checked here,
+                              %% then a FLU in asymmetric partition flapping
+                              %% case will appear in the simulator to be stuck
+                              %% in repairing state.
                               if MyProj#projection.epoch_number ==
                                  RemotePrivateProj#projection.epoch_number
                                  andalso
@@ -626,14 +634,15 @@ react_to_env_A20(Retries, S) ->
     react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra, S2).
 
 react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra,
-                 #ch_mgr{name=MyName, flap_limit=FlapLimit} = S) ->
+                 #ch_mgr{name=MyName, proj=P_current,
+                         flap_limit=FlapLimit} = S) ->
     ?REACT(a30),
     RelativeToServer = MyName,
     {P_newprop1, S2} = calc_projection(S, RelativeToServer),
     ?REACT({a30, ?LINE, [{newprop1, make_projection_summary(P_newprop1)}]}),
 
     %% Are we flapping yet?
-    {P_newprop2, S3} = calculate_flaps(P_newprop1, FlapLimit, S2),
+    {P_newprop2, S3} = calculate_flaps(P_newprop1, P_current, FlapLimit, S2),
 
     %% Move the epoch number up ... originally done in C300.
     #projection{epoch_number=Epoch_newprop2}=P_newprop2,
@@ -657,12 +666,40 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra,
                                                  down=P_i#projection.all_members
                                                       -- [MyName]}
                           end,
+
                 %% TODO FIXME A naive assignment here will cause epoch #
                 %% instability of the inner projection.  We need a stable
                 %% epoch number somehow.  ^_^
-                P_inner2 = P_inner#projection{epoch_number=P_newprop3#projection.epoch_number},
-                InnerInfo = [{inner_qqq, make_projection_summary(P_inner2)},
-                             {inner_best, P_inner2}],
+                %% P_inner2 = P_inner#projection{epoch_number=P_newprop3#projection.epoch_number},
+
+                FinalInnerEpoch =
+                    case proplists:get_value(inner_projection,
+                                             P_current#projection.dbg) of
+                        undefined ->
+                            AllFlapCounts_epk =
+                                [Epk || {{Epk,_FlTime}, _FlCount} <-
+                                            get_all_flap_counts(P_newprop3)],
+                            case AllFlapCounts_epk of
+                                [] ->
+                                    P_newprop3#projection.epoch_number;
+                                [_|_] ->
+                                    lists:max(AllFlapCounts_epk)
+                            end;
+                        P_oldinner ->
+                            if P_oldinner#projection.upi == P_inner#projection.upi
+                               andalso
+                               P_oldinner#projection.repairing == P_inner#projection.repairing
+                               andalso
+                               P_oldinner#projection.down == P_inner#projection.down ->
+                                    P_oldinner#projection.epoch_number;
+                               true ->
+                                    P_oldinner#projection.epoch_number + 1
+                            end
+                    end,
+
+                P_inner2 = P_inner#projection{epoch_number=FinalInnerEpoch},
+                InnerInfo = [{inner_summary, make_projection_summary(P_inner2)},
+                             {inner_projection, P_inner2}],
                 DbgX = replace(P_newprop3#projection.dbg, InnerInfo),
                 ?REACT({a30, ?LINE, [qqqwww|DbgX]}),
                 {P_newprop3#projection{dbg=DbgX}, S_i};
@@ -793,7 +830,7 @@ react_to_env_A50(P_latest, S) ->
 
     HH = get(react),
     io:format(user, "HEE50s ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse([X || X <- HH, is_atom(X)])]),
-    io:format(user, "HEE50 ~w ~w ~p\n", [S#ch_mgr.name, self(), lists:reverse(HH)]),
+    %% io:format(user, "HEE50 ~w ~w ~p\n", [S#ch_mgr.name, self(), lists:reverse(HH)]),
 
     ?REACT({a50, ?LINE, [{latest_epoch, P_latest#projection.epoch_number}]}),
     {{no_change, P_latest#projection.epoch_number}, S}.
@@ -851,12 +888,13 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                 %%      That settled flag can lag behind after a change in
                 %%      network conditions, so I'm not sure how big its
                 %%      value is, if any.
-                P_latest_trans_flap_count >= FlapLimit + 20 ->
-                    %% Everyone that's flapping together now has flap_count
-                    %% that's larger than the limit.  So it's safe and good
-                    %% to stop here, so we can break the cycle of flapping.
-                    ?REACT({b10, ?LINE, [flap_stop]}),
-                    react_to_env_A50(P_latest, S);
+% QQQ TODO
+%                P_latest_trans_flap_count >= FlapLimit + 20 ->
+%                    %% Everyone that's flapping together now has flap_count
+%                    %% that's larger than the limit.  So it's safe and good
+%                    %% to stop here, so we can break the cycle of flapping.
+%                    ?REACT({b10, ?LINE, [flap_stop]}),
+%                    react_to_env_A50(P_latest, S);
 
                 true ->
                     %% It is our moral imperative to write so that the flap
@@ -942,6 +980,7 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName, myflu=MyFLU} = S) ->
                    %% {hooray, {v2, date(), time()}}
                    Islands--Islands
                    |Extra_todo]),
+
     Epoch = P_latest2#projection.epoch_number,
     ok = machi_flu0:proj_write(MyFLU, Epoch, private, P_latest2),
     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
@@ -974,7 +1013,7 @@ react_to_env_C120(P_latest, #ch_mgr{proj_history=H} = S) ->
 
     HH = get(react),
     io:format(user, "HEE120s ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse([X || X <- HH, is_atom(X)])]),
-    io:format(user, "HEE120 ~w ~w ~p\n", [S#ch_mgr.name, self(), lists:reverse(HH)]),
+    %% io:format(user, "HEE120 ~w ~w ~p\n", [S#ch_mgr.name, self(), lists:reverse(HH)]),
 
     ?REACT({c120, [{latest, make_projection_summary(P_latest)}]}),
     {{now_using, P_latest#projection.epoch_number},
@@ -1023,7 +1062,7 @@ react_to_env_C310(P_newprop, S) ->
             {write_result, WriteRes}]}),
     react_to_env_A10(S2).
 
-calculate_flaps(P_newprop, FlapLimit,
+calculate_flaps(P_newprop, P_current, FlapLimit,
                 #ch_mgr{name=MyName, proj_history=H, flap_start=FlapStart,
                         flaps=Flaps, runenv=RunEnv0} = S) ->
     RunEnv1 = replace(RunEnv0, [{flapping_i, []}]),
@@ -1052,7 +1091,7 @@ calculate_flaps(P_newprop, FlapLimit,
 
     RemoteTransFlapCounts1 = lists:keydelete(MyName, 1, TransFlapCounts0),
     RemoteTransFlapCounts =
-        [X || {_FLU, {FlTime, _FlapCount}}=X <- RemoteTransFlapCounts1,
+        [X || {_FLU, {{FlEpk,FlTime}, _FlapCount}}=X <- RemoteTransFlapCounts1,
               FlTime /= ?NOT_FLAPPING],
     TempNewFlaps = Flaps + 1,
     TempAllFlapCounts = lists:sort([{MyName, {FlapStart, TempNewFlaps}}|
@@ -1085,8 +1124,8 @@ calculate_flaps(P_newprop, FlapLimit,
     case {queue:len(H), UniqueProposalSummaries} of
         {N, [_]} when N >= length(P_newprop#projection.all_members) ->
             NewFlaps = TempNewFlaps,
-            if FlapStart == ?NOT_FLAPPING ->
-                    NewFlapStart = now();
+            if element(2,FlapStart) == ?NOT_FLAPPING ->
+                    NewFlapStart = {{epk,P_newprop#projection.epoch_number},now()};
                true ->
                     NewFlapStart = FlapStart
             end,
@@ -1118,7 +1157,7 @@ calculate_flaps(P_newprop, FlapLimit,
             AllHosed = lists:usort(DownUnion ++ HosedTransUnion ++ BadFLUs);
         {_N, _} ->
             NewFlaps = 0,
-            NewFlapStart = ?NOT_FLAPPING,
+            NewFlapStart = {{epk,-1},?NOT_FLAPPING},
             AllFlapCounts = [],
             AllHosed = []
     end,
@@ -1460,19 +1499,19 @@ merge_flap_counts(FlapCounts) ->
 merge_flap_counts([], D) ->
     orddict:to_list(D);
 merge_flap_counts([FlapCount|Rest], D1) ->
-    %% We know that FlapCount is list({Actor, {FlapStartTime,NumFlaps}}).
+    %% We know that FlapCount is list({Actor, {{_epk,FlapStartTime},NumFlaps}}).
     D2 = orddict:from_list(FlapCount),
      D2 = orddict:from_list(FlapCount),
     %% If the FlapStartTimes are identical, then pick the bigger flap count.
     %% If the FlapStartTimes differ, then pick the larger start time tuple.
-    D3 = orddict:merge(fun(_Key, {T1, NF1}= V1, {T2, NF2}=V2)
+    D3 = orddict:merge(fun(_Key, {{_,T1}, NF1}= V1, {{_,T2}, NF2}=V2)
                              when T1 == T2 ->
                                if NF1 > NF2 ->
                                        V1;
                                   true ->
                                        V2
                                end;
-                          (_Key, {T1,_NF1}= V1, {T2,_NF2}=V2) ->
+                          (_Key, {{_,T1},_NF1}= V1, {{_,T2},_NF2}=V2) ->
                                if T1 > T2 ->
                                        V1;
                                   true ->
