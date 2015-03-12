@@ -38,7 +38,11 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--export([islands2partitions/1, partitions2num_islands/2]).
+-export([islands2partitions/1,
+         partition2connection/2,
+         connection2partition/2,
+         partitions2num_islands/2,
+         partition_list_is_symmetric_p/2]).
 
 -define(TAB, ?MODULE).
 
@@ -180,16 +184,56 @@ islands2partitions([Island|Rest]) ->
     ++
     islands2partitions(Rest).
 
-partitions2num_islands(Members, Partition) ->
-    Connections0 = [{X,Y} || X <- Members, Y <- Members, X /= Y],
-    Connections1 = Connections0 -- Partition,
-    Cs = [lists:member({X,Y}, Connections1)
+partition2connection(Members0, Partition0) ->
+    p2c_invert(lists:usort(Members0), lists:usort(Partition0)).
+
+connection2partition(Members0, Partition0) ->
+    p2c_invert(lists:usort(Members0), lists:usort(Partition0)).
+
+p2c_invert(Members, Partition_list_Or_Connection_list) ->
+    All = [{X,Y} || X <- Members, Y <- Members, X /= Y],
+    All -- Partition_list_Or_Connection_list.
+
+partitions2num_islands(Members0, Partition0) ->
+    %% Ignore duplicates in either arg, if any.
+    Members = lists:usort(Members0),
+    Partition = lists:usort(Partition0),
+
+    Connections = partition2connection(Members, Partition),
+    Cs = [lists:member({X,Y}, Connections)
           orelse
-          lists:member({Y,X}, Connections1) || X <- Members, Y <- Members,
-                                               X /= Y],
+          lists:member({Y,X}, Connections) || X <- Members, Y <- Members,
+                                              X /= Y],
     case lists:usort(Cs) of
         [true]        -> 1;
         [false, true] -> many                   % TODO too lazy to finish
+    end.
+
+partition_list_is_symmetric_p(Members0, Partition0) ->
+    %% %% Ignore duplicates in either arg, if any.
+    Members = lists:usort(Members0),
+    NumMembers = length(Members),
+    Partition = lists:usort(Partition0),
+
+    NewDict = lists:foldl(
+                fun({A,B}, Dict) ->
+                        Key = if A > B -> {A,B};
+                                 true  -> {B,A}
+                              end,
+                        orddict:update_counter(Key, 1, Dict)
+                end, orddict:new(), Partition),
+    AllOddP = orddict:fold(
+                fun(_Key, Count, true) when Count rem 2 == 0 ->
+                        true;
+                   (_, _, _) ->
+                        false
+                end, true, NewDict),
+    if not AllOddP ->
+            false;
+       true ->
+            TwosCount = [Key || {Key, Count} <- orddict:to_list(NewDict),
+                                Count == 2],
+            length(TwosCount) >= (NumMembers - 1)
     end.
 
 -endif. % TEST
