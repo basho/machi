@@ -4,7 +4,7 @@
 #+STARTUP: lognotedone hidestars indent showall inlineimages
 #+SEQ_TODO: TODO WORKING WAITING DONE
 
-* Abstract
+* 1. Abstract
 Yo, this is the first draft of a document that attempts to describe a
 proposed self-management algorithm for Machi's chain replication.
 Welcome!  Sit back and enjoy the disjointed prose.
@@ -26,7 +26,9 @@ partition cases are working well (in a damn mystifying kind of way).
 It'd be really, *really* great to get more review of the algorithm and
 the simulator.
 
-* Copyright
+* 2. Copyright
+
+#+BEGIN_SRC
 %% Copyright (c) 2015 Basho Technologies, Inc.  All Rights Reserved.
 %%
 %% This file is provided to you under the Apache License,
@@ -42,17 +44,14 @@ the simulator.
 %% KIND, either express or implied.  See the License for the
 %% specific language governing permissions and limitations
 %% under the License.
+#+END_SRC
 
-* TODO Naming: possible ideas
+* 3. Naming: possible ideas (TODO)
 ** Humming consensus?
 
 See [[https://tools.ietf.org/html/rfc7282][On Consensus and Humming in the IETF]], RFC 7282.
 
 See also: [[http://www.snookles.com/slf-blog/2015/03/01/on-humming-consensus-an-allegory/][On “Humming Consensus”, an allegory]].
-
-** Tunesmith?
-
-A mix of orchestral conducting, music composition, humming?
 
 ** Foggy consensus?
 
@@ -71,7 +70,7 @@ I agree with Chris: there may already be a definition that's close
 enough to "rough consensus" to continue using that existing tag than
 to invent a new one.  TODO: more research required
 
-* What does "self-management" mean in this context?
+* 4. What does "self-management" mean in this context?
 
 For the purposes of this document, chain replication self-management
 is the ability for the N nodes in an N-length chain replication chain
@@ -96,7 +95,7 @@ to participate.  Chain state includes:
    synchronization/"repair" required to bring the node's data into
    full synchronization with the other nodes.
 
-* Goals
+* 5. Goals
 ** Better than state-of-the-art: Chain Replication self-management
 
 We hope/believe that this new self-management algorithem can improve
@@ -173,7 +172,7 @@ case this algorithm to churn will cause other management techniques
 (such as an external "oracle") similar problems.  [Proof by handwaving
 assertion.]  See also: "time model" assumptions (below).
 
-* Assumptions
+* 6. Assumptions
 ** Introduction to assumptions, why they differ from other consensus algorithms
 
 Given a long history of consensus algorithms (viewstamped replication,
@@ -294,7 +293,7 @@ be either of:
 - The special 'unwritten' value
 - An application-specific binary blob that is immutable thereafter
   
-* The projection store, built with write-once registers
+* 7. The projection store, built with write-once registers
 
 - NOTE to the reader: The notion of "public" vs. "private" projection
   stores does not appear in the Machi RFC.
@@ -333,7 +332,7 @@ The private projection store serves multiple purposes, including:
 - communicate to remote nodes the past states and current operational
   state of the local node
 
-* Modification of CORFU-style epoch numbering and "wedge state" triggers
+* 8. Modification of CORFU-style epoch numbering and "wedge state" triggers
 
 According to the CORFU research papers, if a server node N or client
 node C believes that epoch E is the latest epoch, then any information
@@ -365,7 +364,7 @@ document presents a detailed example.)
 {epoch #, hash of the entire projection (minus hash field itself)}
 #+END_SRC
 
-* Sketch of the self-management algorithm
+* 9. Sketch of the self-management algorithm
 ** Introduction
 Refer to the diagram `chain-self-management-sketch.Diagram1.pdf`, a
 flowchart of the 
@@ -579,7 +578,7 @@ use of quorum majority for UPI members is out of scope of this
 document.  Also out of scope is the use of "witness servers" to
 augment the quorum majority UPI scheme.)
 
-* The Simulator
+* 10. The Network Partition Simulator
 ** Overview
 The function machi_chain_manager1_test:convergence_demo_test()
 executes the following in a simulated network environment within a
@@ -636,13 +635,25 @@ partition, the algorithm oscillates in a very predictable way: each
 node X makes the same P_newprop projection at epoch E that X made
 during a previous recent epoch E-delta (where delta is small, usually
 much less than 10).  However, at least one node makes a proposal that
-makes unanimous results impossible.  When any epoch E is not
-unanimous, the result is one or more new rounds of proposals.
-However, because any node N's proposal doesn't change, the system
-spirals into an infinite loop of never-fully-unanimous proposals.
+makes rough consensus impossible.  When any epoch E is not
+acceptable (because some node disagrees about something, e.g.,
+which nodes are down),
+the result is more new rounds of proposals.
+
+Because any node X's proposal isn't any different than X's last
+proposal, the system spirals into an infinite loop of
+never-fully-agreed-upon proposals.  This is ... really cool, I think.
 
 From the sole perspective of any single participant node, the pattern
-of this infinite loop is easy to detect.  When detected, the local
+of this infinite loop is easy to detect.
+
+#+BEGIN_QUOTE
+Were my last 2*L proposals were exactly the same?
+(where L is the maximum possible chain length (i.e. if all chain
+ members are fully operational))
+#+END_QUOTE
+
+When detected, the local
 node moves to a slightly different mode of operation: it starts
 suspecting that a "proposal flapping" series of events is happening.
 (The name "flap" is taken from IP network routing, where a "flapping
@@ -652,8 +663,9 @@ manner.)
 
 If flapping is suspected, then the count of number of flap cycles is
 counted.  If the local node sees all participants (including itself)
-flappign with the same relative proposed projection for 5 times in a
-row, then the local node has firm evidence that there is an asymmetric
+flapping with the same relative proposed projection for 2L times in a
+row (where L is the maximum length of the chain),
+then the local node has firm evidence that there is an asymmetric
 network partition somewhere in the system.  The pattern of proposals
 is analyzed, and the local node makes a decision:
 
@@ -673,3 +685,30 @@ iteration of the self-management algorithm stops without
 externally-visible effects.  (I.e., it stops at the bottom of the
 flowchart's Column A.)
 
+*** Prototype notes
+
+Mid-March 2015
+
+I've come to realize that the property that causes the nice property
+of "Were my last 2L proposals identical?" also requires that the
+proposals be *stable*.  If a participant notices, "Hey, there's
+flapping happening, so I'll propose a different projection
+P_different", then the very act of proposing P_different disrupts the
+"last 2L proposals identical" cycle the enables us to detect
+flapping.  We kill the goose that's laying our golden egg.
+
+I've been working on the idea of "nested" projections, namely an
+"outer" and "inner" projection.  Only the "outer projection" is used
+for cycle detection.  The "inner projection" is the same as the outer
+projection when flapping is not detected.  When flapping is detected,
+then the inner projection is one that excludes all nodes that the
+outer projection has identified as victims of asymmetric partition.
+
+This inner projection technique may or may not work well enough to
+use?  It would require constant flapping of the outer proposal, which
+is going to consume CPU and also chew up projection store keys with
+the flapping churn.  That churn would continue as long as an
+asymmetric partition exists.  The simplest way to cope with this would
+be to reduce proposal rates significantly, say 10x or 50x slower, to
+slow churn down to proposals from several-per-second to perhaps
+several-per-minute?
