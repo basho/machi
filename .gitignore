@@ -1,9 +1,11 @@
+prototype/chain-manager/patch.*
 .eunit
 deps
-*.o
-ebin/*.beam
 *.plt
 erl_crash.dump
-rel/example_project
 .concrete/DEV_MODE
 .rebar
+doc/edoc-info
+doc/erlang.png
+doc/*.html
+doc/stylesheet.css

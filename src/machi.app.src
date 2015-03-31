@@ -1,0 +1,13 @@
+{application, machi, [
+    {description, "A village of write-once files."},
+    {vsn, "0.0.0"},
+    {applications, [kernel, stdlib, sasl, crypto]},
+    {mod,{machi_app,[]}},
+    {registered, []},
+    {env, [
+           {flu_list,
+            [
+             {flu_a, 32900, "./data.flu_a"}
+            ]}
+    ]}
+]}.
