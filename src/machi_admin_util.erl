@@ -27,13 +27,38 @@
 
 -include("machi.hrl").
 
-verify_file_checksums_remote(Sock, File) ->
-    verify_file_checksums_remote2(Sock, Sock, File).
+-define(FLU_C, machi_flu1_client).
 
-verify_file_checksums_remote(_Host, _TcpPort, File) ->
-    verify_file_checksums_remote2(todo, todo, File).
+verify_file_checksums_remote(Sock1, File) when is_port(Sock1) ->
+    verify_file_checksums_remote2(Sock1, File).
+
+verify_file_checksums_remote(Host, TcpPort, File) ->
+    Sock1 = machi_util:connect(Host, TcpPort),
+    verify_file_checksums_remote2(Sock1, File).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-verify_file_checksums_remote2(Sock, Sock, File) ->
-    todo.
+verify_file_checksums_remote2(Sock1, File) ->
+    try
+        {ok, Info} = ?FLU_C:checksum_list(Sock1, File),
+        Res = lists:foldl(verify_chunk_checksum(Sock1, File), [], Info),
+        {ok, Res}
+    catch
+        What:Why ->
+            {error, {What, Why, erlang:get_stacktrace()}}
+    end.
+
+verify_chunk_checksum(Sock1, File) ->
+    fun({Offset, Size, CSum}, Acc) ->
+            case ?FLU_C:read_chunk(Sock1, File, Offset, Size) of
+                {ok, Chunk} ->
+                    CSum2 = machi_util:checksum(Chunk),
+                    if CSum == CSum2 ->
+                            Acc;
+                       true ->
+                            [{Offset, Size, File, CSum, now, CSum2}|Acc]
+                    end;
+                _Else ->
+                    [{Offset, Size, File, CSum, now, read_failure}|Acc]
+            end
+    end.
