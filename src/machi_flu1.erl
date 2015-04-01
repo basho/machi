@@ -311,6 +311,8 @@ do_net_server_checksum_listing(Sock, File, DataDir) ->
     end.
 
 do_net_server_checksum_listing2(Sock, File, DataDir) ->
+    ok = sync_checksum_file(File),
+
     CSumPath = machi_util:make_checksum_filename(DataDir, File),
     case file:open(CSumPath, [read, raw, binary]) of
         {ok, FH} ->
@@ -328,6 +330,29 @@ do_net_server_checksum_listing2(Sock, File, DataDir) ->
             ok = gen_tcp:send(Sock, "ERROR NO-SUCH-FILE\n");
         _ ->
             ok = gen_tcp:send(Sock, "ERROR\n")
+    end.
+
+sync_checksum_file(File) ->
+    Prefix = re:replace(File, "\\..*", "", [{return, binary}]),
+    case write_server_find_pid(Prefix) of
+        undefined ->
+            ok;
+        Pid ->
+            Ref = make_ref(),
+            Pid ! {sync_stuff, self(), Ref},
+            receive
+                {sync_finished, Ref} ->
+                    ok
+            after 5000 ->
+                    case write_server_find_pid(Prefix) of
+                        undefined ->
+                            ok;
+                        Pid2 when Pid2 /= Pid ->
+                            ok;
+                        _Pid2 ->
+                            error
+                    end
+            end
     end.
 
 do_net_copy_bytes(FH, Sock) ->
@@ -384,8 +409,7 @@ do_net_server_truncate_hackityhack2(Sock, File, DataDir) ->
     end.
 
 write_server_get_pid(Prefix, DataDir) ->
-    RegName = machi_util:make_regname(Prefix),
-    case whereis(RegName) of
+    case write_server_find_pid(Prefix) of
         undefined ->
             start_seq_append_server(Prefix, DataDir),
             timer:sleep(1),
@@ -393,6 +417,10 @@ write_server_get_pid(Prefix, DataDir) ->
         Pid ->
             Pid
     end.
+
+write_server_find_pid(Prefix) ->
+    RegName = machi_util:make_regname(Prefix),
+    whereis(RegName).
 
 start_seq_append_server(Prefix, DataDir) ->
     spawn_link(fun() -> run_seq_append_server(Prefix, DataDir) end).
@@ -453,7 +481,12 @@ seq_append_server_loop(DataDir, Prefix, File, {FHd,FHc}=FH_, FileNum, Offset) ->
             CSum_info = [OffsetHex, 32, LenHex, 32, CSumHex, 10],
             ok = file:write(FHc, CSum_info),
             seq_append_server_loop(DataDir, Prefix, File, FH_,
-                                   FileNum, Offset + Len)
+                                   FileNum, Offset + Len);
+        {sync_stuff, FromPid, Ref} ->
+            file:sync(FHc),
+            FromPid ! {sync_finished, Ref},
+            seq_append_server_loop(DataDir, Prefix, File, FH_,
+                                   FileNum, Offset)
     after 30*1000 ->
             ok = file:close(FHd),
             ok = file:close(FHc),

@@ -285,7 +285,10 @@ list2(Sock) ->
 list2({ok, <<".\n">>}, _Sock) ->
     [];
 list2({ok, Line}, Sock) ->
-    [Line|list2(gen_tcp:recv(Sock, 0), Sock)];
+    FileLen = byte_size(Line) - 16 - 1 - 1,
+    <<SizeHex:16/binary, " ", File:FileLen/binary, _/binary>> = Line,
+    Size = machi_util:hexstr_to_int(SizeHex),
+    [{Size, File}|list2(gen_tcp:recv(Sock, 0), Sock)];
 list2(Else, _Sock) ->
     throw({server_protocol_error, Else}).
 
@@ -300,7 +303,7 @@ checksum_list2(Sock, File) ->
                 <<LenHex:RestLen/binary, _:1/binary>> = Rest,
                 <<Len:64/big>> = machi_util:hexstr_to_bin(LenHex),
                 ok = inet:setopts(Sock, [{packet, raw}]),
-                checksum_list_fast(Sock, Len);
+                {ok, checksum_list_finish(checksum_list_fast(Sock, Len))};
             {ok, <<"ERROR NO-SUCH-FILE", _/binary>>} ->
                 {error, no_such_file};
             {ok, <<"ERROR BAD-ARG", _/binary>>} ->
@@ -323,6 +326,22 @@ checksum_list_fast(Sock, Remaining) ->
     {ok, Bytes} = gen_tcp:recv(Sock, Num),
     [Bytes|checksum_list_fast(Sock, Remaining - byte_size(Bytes))].
 
+checksum_list_finish(Chunks) ->
+    Bin = case Chunks of
+              [X] ->
+                  X;
+              _ ->
+                  iolist_to_binary(Chunks)
+          end,
+    [begin
+         CSumLen = byte_size(Line) - 16 - 1 - 8 - 1,
+         <<OffsetHex:16/binary, " ", SizeHex:8/binary, " ",
+           CSum:CSumLen/binary>> = Line,
+         {machi_util:hexstr_to_int(OffsetHex),
+          machi_util:hexstr_to_int(SizeHex),
+          machi_util:hexstr_to_bin(CSum)}
+     end || Line <- re:split(Bin, "\n", [{return, binary}]),
+            Line /= <<>>].
 
 write_chunk2(Sock, File0, Offset, Chunk0) ->
     try
