@@ -18,23 +18,34 @@
 %%
 %% -------------------------------------------------------------------
 
--type m_csum()      :: {none | sha1 | sha1_excl_final_20, binary()}.
-%% -type m_epoch()     :: {m_epoch_n(), m_csum()}.
--type m_epoch_n()   :: non_neg_integer().
--type m_server()    :: atom().
--type timestamp()   :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
+-type pv1_csum()      :: binary().
+-type pv1_epoch()     :: {pv1_epoch_n(), pv1_csum()}.
+-type pv1_epoch_n()   :: non_neg_integer().
+-type pv1_server()    :: atom() | binary().
+-type pv1_timestamp() :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
 
--record(projection, {
-            epoch_number    :: m_epoch_n(),
-            epoch_csum      :: m_csum(),
-            all_members     :: [m_server()],
-            down            :: [m_server()],
-            creation_time   :: timestamp(),
-            author_server   :: m_server(),
-            upi             :: [m_server()],
-            repairing       :: [m_server()],
-            dbg             :: list(), %proplist(), is checksummed
-            dbg2            :: list()  %proplist(), is not checksummed
-        }).
+-record(projection_v1, {
+          epoch_number    :: pv1_epoch_n(),
+          epoch_csum      :: pv1_csum(),
+          all_members     :: [pv1_server()],
+          member_dict     :: orddict:orddict(),
+          down            :: [pv1_server()],
+          creation_time   :: pv1_timestamp(),
+          author_server   :: pv1_server(),
+          upi             :: [pv1_server()],
+          repairing       :: [pv1_server()],
+          dbg             :: list(), %proplist(), is checksummed
+          dbg2            :: list()  %proplist(), is not checksummed
+         }).
+
+-define(MACHI_DEFAULT_TCP_PORT, 50000).
+
+-record(p_srvr, {
+          name            :: pv1_server(),
+          proto = 'ipv4'  :: 'ipv4' | 'disterl', % disterl? Hrm.
+          address         :: term(), % Protocol-specific
+          port            :: term(), % Protocol-specific
+          props = []      :: list()  % proplist for other related info
+         }).
 
 -define(SHA_MAX, (1 bsl (20*8))).

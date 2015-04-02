@@ -1,10 +1,10 @@
 * To Do list
 
 ** Done: remove the escript* stuff from machi_util.erl
-
-** TODO Add functions to manipulate 1-chain projections
+** Done: Add functions to manipulate 1-chain projections
 
 - Add epoch ID = epoch number + checksum of projection!
+  Done via compare() func.
 
 ** TODO Change all protocol ops to add epoch ID
 ** TODO Add projection store to each FLU.
@@ -15,3 +15,4 @@
 ** TODO Move prototype/chain-manager code to "top" of source tree
 *** TODO Preserve current test code (leave as-is? tiny changes?)
 *** TODO Make chain manager code flexible enough to run "real world" or "sim"
+** TODO Replace registered name use from FLU write/append dispatcher
