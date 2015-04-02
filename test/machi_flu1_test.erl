@@ -80,8 +80,9 @@ flu_smoke_test() ->
         Len2 = byte_size(Chunk2),
         Off2 = ?MINIMUM_OFFSET + 77,
         File2 = "smoke-prefix",
-        ok = ?FLU_C:write_chunk(Host, TcpPort, File2, Off2, Chunk2),
-        {error, bad_arg} = ?FLU_C:write_chunk(Host, TcpPort,
+        ok = ?FLU_C:write_chunk(Host, TcpPort, ?DUMMY_PV1_EPOCH,
+                                File2, Off2, Chunk2),
+        {error, bad_arg} = ?FLU_C:write_chunk(Host, TcpPort, ?DUMMY_PV1_EPOCH,
                                               BadFile, Off2, Chunk2),
         {ok, Chunk2} = ?FLU_C:read_chunk(Host, TcpPort, ?DUMMY_PV1_EPOCH,
                                          File2, Off2, Len2),
@@ -94,15 +95,18 @@ flu_smoke_test() ->
 
         %% We know that File1 still exists.  Pretend that we've done a
         %% migration and exercise the delete_migration() API.
-        ok = ?FLU_C:delete_migration(Host, TcpPort, File1),
-        {error, no_such_file} = ?FLU_C:delete_migration(Host, TcpPort, File1),
-        {error, bad_arg} = ?FLU_C:delete_migration(Host, TcpPort, BadFile),
+        ok = ?FLU_C:delete_migration(Host, TcpPort, ?DUMMY_PV1_EPOCH, File1),
+        {error, no_such_file} = ?FLU_C:delete_migration(Host, TcpPort,
+                                                        ?DUMMY_PV1_EPOCH, File1),
+        {error, bad_arg} = ?FLU_C:delete_migration(Host, TcpPort,
+                                                   ?DUMMY_PV1_EPOCH, BadFile),
 
         %% We know that File2 still exists.  Pretend that we've done a
         %% migration and exercise the trunc_hack() API.
-        ok = ?FLU_C:trunc_hack(Host, TcpPort, File2),
-        ok = ?FLU_C:trunc_hack(Host, TcpPort, File2),
-        {error, bad_arg} = ?FLU_C:trunc_hack(Host, TcpPort, BadFile),
+        ok = ?FLU_C:trunc_hack(Host, TcpPort, ?DUMMY_PV1_EPOCH, File2),
+        ok = ?FLU_C:trunc_hack(Host, TcpPort, ?DUMMY_PV1_EPOCH, File2),
+        {error, bad_arg} = ?FLU_C:trunc_hack(Host, TcpPort,
+                                             ?DUMMY_PV1_EPOCH, BadFile),
 
         ok = ?FLU_C:quit(machi_util:connect(Host, TcpPort))
     after

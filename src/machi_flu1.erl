@@ -110,8 +110,8 @@ net_server_loop(Sock, #state{reg_name=RegName, data_dir=DataDir}=S) ->
             PrefixLenLF = byte_size(Line) - 2 - ?EpochIDSpace - 8 - 1,
             FileLenLF = byte_size(Line)   - 2 - ?EpochIDSpace - 16 - 8 - 1,
             CSumFileLenLF = byte_size(Line) - 2 - ?EpochIDSpace - 1,
-            WriteFileLenLF = byte_size(Line) - 7 - 16 - 1 - 8 - 1 - 1,
-            DelFileLenLF = byte_size(Line) - 14 - 1,
+            WriteFileLenLF = byte_size(Line) - 7 - ?EpochIDSpace - 16 - 8 - 1,
+            DelFileLenLF = byte_size(Line) - 14 - ?EpochIDSpace - 1,
             case Line of
                 %% For normal use
                 <<"A ",
@@ -137,14 +137,20 @@ net_server_loop(Sock, #state{reg_name=RegName, data_dir=DataDir}=S) ->
                     catch gen_tcp:close(Sock),
                     exit(normal);
                 %% For "internal" replication only.
-                <<"W-repl ", OffsetHex:16/binary, " ", LenHex:8/binary, " ",
+                <<"W-repl ",
+                  _EpochIDRaw:(?EpochIDSpace)/binary,
+                  OffsetHex:16/binary, LenHex:8/binary,
                   File:WriteFileLenLF/binary, "\n">> ->
                     do_net_server_write(Sock, OffsetHex, LenHex, File, DataDir);
                 %% For data migration only.
-                <<"DEL-migration ", File:DelFileLenLF/binary, "\n">> ->
+                <<"DEL-migration ",
+                  _EpochIDRaw:(?EpochIDSpace)/binary,
+                  File:DelFileLenLF/binary, "\n">> ->
                     do_net_server_delete_migration_only(Sock, File, DataDir);
                 %% For erasure coding hackityhack
-                <<"TRUNC-hack--- ", File:DelFileLenLF/binary, "\n">> ->
+                <<"TRUNC-hack--- ",
+                  _EpochIDRaw:(?EpochIDSpace)/binary,
+                  File:DelFileLenLF/binary, "\n">> ->
                     do_net_server_truncate_hackityhack(Sock, File, DataDir);
                 _ ->
                     machi_util:verb("Else Got: ~p\n", [Line]),
