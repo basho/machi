@@ -24,6 +24,7 @@
 -ifdef(TEST).
 
 -include("machi.hrl").
+-include("machi_projection.hrl").
 
 -define(FLU, machi_flu1).
 -define(FLU_C, machi_flu1_client).
@@ -36,7 +37,8 @@ verify_file_checksums_test() ->
     Sock1 = machi_util:connect(Host, TcpPort),
     try
         Prefix = <<"verify_prefix">>,
-        [{ok, _} = ?FLU_C:append_chunk(Sock1, Prefix, <<X:(X*8)/big>>) ||
+        [{ok, _} = ?FLU_C:append_chunk(Sock1, ?DUMMY_PV1_EPOCH,
+                                       Prefix, <<X:(X*8)/big>>) ||
             X <- lists:seq(1,10)],
         {ok, [{_FileSize,File}]} = ?FLU_C:list_files(Sock1),
         {ok, []} = machi_admin_util:verify_file_checksums_remote(

@@ -23,6 +23,7 @@
 
 -ifdef(TEST).
 -include("machi.hrl").
+-include("machi_projection.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 -define(FLU, machi_flu1).
@@ -55,10 +56,12 @@ flu_smoke_test() ->
 
         Chunk1 = <<"yo!">>,
         {ok, {Off1,Len1,File1}} = ?FLU_C:append_chunk(Host, TcpPort,
+                                                      ?DUMMY_PV1_EPOCH,
                                                       Prefix, Chunk1),
         {ok, Chunk1} = ?FLU_C:read_chunk(Host, TcpPort, File1, Off1, Len1),
         {ok, [{_,_,_}]} = ?FLU_C:checksum_list(Host, TcpPort, File1),
         {error, bad_arg} = ?FLU_C:append_chunk(Host, TcpPort,
+                                               ?DUMMY_PV1_EPOCH,
                                                BadPrefix, Chunk1),
         {ok, [{_,File1}]} = ?FLU_C:list_files(Host, TcpPort),
         Len1 = size(Chunk1),

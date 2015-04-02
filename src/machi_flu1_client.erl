@@ -23,7 +23,7 @@
 -include("machi.hrl").
 
 -export([
-         append_chunk/3, append_chunk/4,
+         append_chunk/4, append_chunk/5,
          read_chunk/4, read_chunk/5,
          checksum_list/2, checksum_list/3,
          list_files/1, list_files/2,
@@ -41,6 +41,9 @@
 -type chunk_s()     :: binary().               % server always uses binary()
 -type chunk_pos()   :: {file_offset(), chunk_size(), file_name_s()}.
 -type chunk_size()  :: non_neg_integer().
+-type epoch_csum()  :: binary().
+-type epoch_num()   :: non_neg_integer().
+-type epoch_id()    :: {epoch_num(), epoch_csum()}.
 -type inet_host()   :: inet:ip_address() | inet:hostname().
 -type inet_port()   :: inet:port_number().
 -type file_info()   :: {file_size(), file_name_s()}.
@@ -53,20 +56,21 @@
 %% @doc Append a chunk (binary- or iolist-style) of data to a file
 %% with `Prefix'.
 
--spec append_chunk(port(), file_prefix(), chunk()) ->
+-spec append_chunk(port(), epoch_id(), file_prefix(), chunk()) ->
       {ok, chunk_pos()} | {error, term()}.
-append_chunk(Sock, Prefix, Chunk) ->
-    append_chunk2(Sock, Prefix, Chunk).
+append_chunk(Sock, EpochID, Prefix, Chunk) ->
+    append_chunk2(Sock, EpochID, Prefix, Chunk).
 
 %% @doc Append a chunk (binary- or iolist-style) of data to a file
 %% with `Prefix'.
 
--spec append_chunk(inet_host(), inet_port(), file_prefix(), chunk()) ->
+-spec append_chunk(inet_host(), inet_port(),
+                   epoch_id(), file_prefix(), chunk()) ->
       {ok, chunk_pos()} | {error, term()}.
-append_chunk(Host, TcpPort, Prefix, Chunk) ->
+append_chunk(Host, TcpPort, EpochID, Prefix, Chunk) ->
     Sock = machi_util:connect(Host, TcpPort),
     try
-        append_chunk2(Sock, Prefix, Chunk)
+        append_chunk2(Sock, EpochID, Prefix, Chunk)
     after
         catch gen_tcp:close(Sock)
     end.
@@ -208,7 +212,7 @@ trunc_hack(Host, TcpPort, File) when is_integer(TcpPort) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-append_chunk2(Sock, Prefix0, Chunk0) ->
+append_chunk2(Sock, EpochID, Prefix0, Chunk0) ->
     try
         %% TODO: add client-side checksum to the server's protocol
         %% _ = crypto:hash(md5, Chunk),
@@ -216,8 +220,10 @@ append_chunk2(Sock, Prefix0, Chunk0) ->
         Chunk = machi_util:make_binary(Chunk0),
         Len = iolist_size(Chunk0),
         true = (Len =< ?MAX_CHUNK_SIZE),
+        {EpochNum, EpochCSum} = EpochID,
+        EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
         LenHex = machi_util:int_to_hexbin(Len, 32),
-        Cmd = <<"A ", LenHex/binary, " ", Prefix/binary, "\n">>,
+        Cmd = [<<"A ">>, EpochIDRaw, LenHex, Prefix, 10],
         ok = gen_tcp:send(Sock, [Cmd, Chunk]),
         {ok, Line} = gen_tcp:recv(Sock, 0),
         PathLen = byte_size(Line) - 3 - 16 - 1 - 1,

@@ -24,6 +24,8 @@
 -type pv1_server()    :: atom() | binary().
 -type pv1_timestamp() :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
 
+-define(DUMMY_PV1_EPOCH, {0,<<0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0>>}).
+
 -record(projection_v1, {
           epoch_number    :: pv1_epoch_n(),
           epoch_csum      :: pv1_csum(),
