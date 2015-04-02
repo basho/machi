@@ -2,19 +2,22 @@
 
 ## Nota Bene
 
-This source repo is in a state of chaotic consolidation of several
-independent repos.  At the moment, none of the prototype code is
-expected to work.  Perhaps it does, perhaps it doesn't.  I'll know
-as we continue work in early March 2015.
+This source repo is in a state of consolidation of several
+independent repos.  At the moment, most of the prototype code is
+expected to work -- please see the list below.
 
-Meanwhile, see the wiki for this repo for helpful hints, as time
-permits.
+Meanwhile, see the `README`* files throughout this repo
+for helpful hints.
 
 ## Initial re-porting on 'prototype' directory
 
 * `chain-manager`: finished
 * `corfurl`: finished
-* `demo-day-hack`: not started
+* `demo-day-hack`: work started on the `slf/otp-refactoring-step1` branch
+  to copy code from an internal Basho "Demo Day" from the `prototype/demo-day-hack`
+  directory to the "official" top of this repo.  The end goal of this branch
+  (and perhaps other branches with the `slf/otp-refactoring` prefix!) is
+  to create a code base of minimal, functional Machi server & client code.
 * `tango`: finished
 
--Scott and the Machi team
+-The Machi team at Basho

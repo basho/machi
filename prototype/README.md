@@ -33,7 +33,12 @@ please note the usage instructions and restrictions mentioned in the
 
 ## The demo-day-hack prototype
 
-TODO
+This code in the `demo-day-hack` is expected to remain static,
+as an archive of past "Demo Day" work.
+
+See the top-level README.md file for details on work to move
+much of this code out of the `prototype` directory and into real
+use elsewhere in the repo.
 
 ## The tango prototype
 
