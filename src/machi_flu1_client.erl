@@ -36,15 +36,18 @@
          trunc_hack/2, trunc_hack/3
         ]).
 
--type chunk()       :: iolist().
--type chunk_s()     :: binary().
+-type chunk()       :: binary() | iolist().    % client can use either
+-type chunk_csum()  :: {file_offset(), chunk_size(), binary()}.
+-type chunk_s()     :: binary().               % server always uses binary()
 -type chunk_pos()   :: {file_offset(), chunk_size(), file_name_s()}.
 -type chunk_size()  :: non_neg_integer().
 -type inet_host()   :: inet:ip_address() | inet:hostname().
 -type inet_port()   :: inet:port_number().
+-type file_info()   :: {file_size(), file_name_s()}.
 -type file_name()   :: binary() | list().
 -type file_name_s() :: binary().                % server reply
 -type file_offset() :: non_neg_integer().
+-type file_size()   :: non_neg_integer().
 -type file_prefix() :: binary() | list().
 
 %% @doc Append a chunk (binary- or iolist-style) of data to a file
@@ -72,14 +75,16 @@ append_chunk(Host, TcpPort, Prefix, Chunk) ->
 
 -spec read_chunk(port(), file_name(), file_offset(), chunk_size()) ->
       {ok, chunk_s()} | {error, term()}.
-read_chunk(Sock, File, Offset, Size) ->
+read_chunk(Sock, File, Offset, Size)
+  when Offset >= ?MINIMUM_OFFSET, Size >= 0 ->
     read_chunk2(Sock, File, Offset, Size).
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
 -spec read_chunk(inet_host(), inet_port(), file_name(), file_offset(), chunk_size()) ->
       {ok, chunk_s()} | {error, term()}.
-read_chunk(Host, TcpPort, File, Offset, Size) ->
+read_chunk(Host, TcpPort, File, Offset, Size)
+  when Offset >= ?MINIMUM_OFFSET, Size >= 0 ->
     Sock = machi_util:connect(Host, TcpPort),
     try
         read_chunk2(Sock, File, Offset, Size)
@@ -90,14 +95,14 @@ read_chunk(Host, TcpPort, File, Offset, Size) ->
 %% @doc Fetch the list of chunk checksums for `File'.
 
 -spec checksum_list(port(), file_name()) ->
-      {ok, [file_name()]} | {error, term()}.
+      {ok, [chunk_csum()]} | {error, term()}.
 checksum_list(Sock, File) when is_port(Sock) ->
     checksum_list2(Sock, File).
 
 %% @doc Fetch the list of chunk checksums for `File'.
 
 -spec checksum_list(inet_host(), inet_port(), file_name()) ->
-      {ok, [file_name()]} | {error, term()}.
+      {ok, [chunk_csum()]} | {error, term()}.
 checksum_list(Host, TcpPort, File) when is_integer(TcpPort) ->
     Sock = machi_util:connect(Host, TcpPort),
     try
@@ -109,14 +114,14 @@ checksum_list(Host, TcpPort, File) when is_integer(TcpPort) ->
 %% @doc Fetch the list of all files on the remote FLU.
 
 -spec list_files(port()) ->
-      {ok, [file_name()]} | {error, term()}.
+      {ok, [file_info()]} | {error, term()}.
 list_files(Sock) when is_port(Sock) ->
     list2(Sock).
 
 %% @doc Fetch the list of all files on the remote FLU.
 
 -spec list_files(inet_host(), inet_port()) ->
-      {ok, [file_name()]} | {error, term()}.
+      {ok, [file_info()]} | {error, term()}.
 list_files(Host, TcpPort) when is_integer(TcpPort) ->
     Sock = machi_util:connect(Host, TcpPort),
     try
@@ -140,16 +145,18 @@ quit(Sock) when is_port(Sock) ->
 %% `File' at `Offset'.
 
 -spec write_chunk(port(), file_name(), file_offset(), chunk()) ->
-      {ok, chunk_s()} | {error, term()}.
-write_chunk(Sock, File, Offset, Chunk) ->
+      ok | {error, term()}.
+write_chunk(Sock, File, Offset, Chunk)
+  when Offset >= ?MINIMUM_OFFSET ->
     write_chunk2(Sock, File, Offset, Chunk).
 
 %% @doc Restricted API: Write a chunk of already-sequenced data to
 %% `File' at `Offset'.
 
 -spec write_chunk(inet_host(), inet_port(), file_name(), file_offset(), chunk()) ->
-      {ok, chunk_s()} | {error, term()}.
-write_chunk(Host, TcpPort, File, Offset, Chunk) ->
+      ok | {error, term()}.
+write_chunk(Host, TcpPort, File, Offset, Chunk)
+  when Offset >= ?MINIMUM_OFFSET ->
     Sock = machi_util:connect(Host, TcpPort),
     try
         write_chunk2(Sock, File, Offset, Chunk)
@@ -161,7 +168,7 @@ write_chunk(Host, TcpPort, File, Offset, Chunk) ->
 %% migrated.
 
 -spec delete_migration(port(), file_name()) ->
-      {ok, [file_name()]} | {error, term()}.
+      ok | {error, term()}.
 delete_migration(Sock, File) when is_port(Sock) ->
     delete_migration2(Sock, File).
 
@@ -169,7 +176,7 @@ delete_migration(Sock, File) when is_port(Sock) ->
 %% migrated.
 
 -spec delete_migration(inet_host(), inet_port(), file_name()) ->
-      {ok, [file_name()]} | {error, term()}.
+      ok | {error, term()}.
 delete_migration(Host, TcpPort, File) when is_integer(TcpPort) ->
     Sock = machi_util:connect(Host, TcpPort),
     try
@@ -182,7 +189,7 @@ delete_migration(Host, TcpPort, File) when is_integer(TcpPort) ->
 %% erasure coded.
 
 -spec trunc_hack(port(), file_name()) ->
-      {ok, [file_name()]} | {error, term()}.
+      ok | {error, term()}.
 trunc_hack(Sock, File) when is_port(Sock) ->
     trunc_hack2(Sock, File).
 
@@ -190,7 +197,7 @@ trunc_hack(Sock, File) when is_port(Sock) ->
 %% erasure coded.
 
 -spec trunc_hack(inet_host(), inet_port(), file_name()) ->
-      {ok, [file_name()]} | {error, term()}.
+      ok | {error, term()}.
 trunc_hack(Host, TcpPort, File) when is_integer(TcpPort) ->
     Sock = machi_util:connect(Host, TcpPort),
     try

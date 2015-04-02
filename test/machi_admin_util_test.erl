@@ -28,7 +28,7 @@
 -define(FLU, machi_flu1).
 -define(FLU_C, machi_flu1_client).
 
-verify_file_checksums_remote_test() ->
+verify_file_checksums_test() ->
     Host = "localhost",
     TcpPort = 32958,
     DataDir = "./data",
@@ -49,10 +49,20 @@ verify_file_checksums_remote_test() ->
         ok = file:write(FH, "yo"),
         ok = file:write(FH, "yo!"),
         ok = file:close(FH),
-        {ok, [_,_,_]} = machi_admin_util:verify_file_checksums_remote(
-                          Host, TcpPort, File)
+
+        %% Check the local flavor of the API
+        {ok, Res1} = machi_admin_util:verify_file_checksums_local(
+                       Host, TcpPort, Path),
+        3 = length(Res1),
+
+        %% Check the remote flavor of the API
+        {ok, Res2} = machi_admin_util:verify_file_checksums_remote(
+                       Host, TcpPort, File),
+        3 = length(Res2),
+
+        ok
     after
-        catch ?FLU_C:quick(Sock1),
+        catch ?FLU_C:quit(Sock1),
         ok = ?FLU:stop(FLU1)
     end.
 

@@ -34,5 +34,8 @@ build_plt: deps compile
 dialyzer: deps compile
 	dialyzer -Wno_return --plt $(PLT) ebin
 
+dialyzer-test: deps compile
+	dialyzer -Wno_return --plt $(PLT) .eunit
+
 clean_plt:
 	rm $(PLT)

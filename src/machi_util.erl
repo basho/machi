@@ -24,7 +24,7 @@
          checksum/1,
          hexstr_to_bin/1, bin_to_hexstr/1,
          hexstr_to_int/1, int_to_hexstr/2, int_to_hexbin/2,
-         make_binary/1,
+         make_binary/1, make_string/1,
          make_regname/1,
          make_checksum_filename/2, make_data_filename/2,
          read_max_filenum/2, increment_max_filenum/2,
@@ -117,6 +117,11 @@ make_binary(X) when is_binary(X) ->
     X;
 make_binary(X) when is_list(X) ->
     iolist_to_binary(X).
+
+make_string(X) when is_list(X) ->
+    lists:flatten(X);
+make_string(X) when is_binary(X) ->
+    binary_to_list(X).
 
 hexstr_to_int(X) ->
     B = hexstr_to_bin(X),
