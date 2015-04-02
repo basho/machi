@@ -32,6 +32,7 @@
 -compile(export_all).
 
 -include("machi.hrl").
+-include("machi_projection.hrl").
 
 -define(FLU_C, machi_flu1_client).
 
@@ -73,7 +74,8 @@ verify_file_checksums_local2(Sock1, Path0) ->
 
 verify_file_checksums_remote2(Sock1, File) ->
     ReadChunk = fun(File_name, Offset, Size) ->
-                        ?FLU_C:read_chunk(Sock1, File_name, Offset, Size)
+                        ?FLU_C:read_chunk(Sock1, ?DUMMY_PV1_EPOCH,
+                                          File_name, Offset, Size)
                 end,
     verify_file_checksums_common(Sock1, File, ReadChunk).
 

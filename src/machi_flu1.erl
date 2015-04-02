@@ -107,35 +107,23 @@ net_server_loop(Sock, #state{reg_name=RegName, data_dir=DataDir}=S) ->
     case gen_tcp:recv(Sock, 0, 60*1000) of
         {ok, Line} ->
             %% machi_util:verb("Got: ~p\n", [Line]),
-            PrefixLenLF = byte_size(Line)   - 2 - 8 - 1 - 1,
             PrefixLenLF_E = byte_size(Line) - 2 - ?EpochIDSpace - 8 - 1,
-            PrefixLenCRLF = byte_size(Line) - 2 - 8 - 1 - 2,
-            FileLenLF = byte_size(Line)   - 2 - 16 - 1 - 8 - 1 - 1,
-            FileLenCRLF = byte_size(Line) - 2 - 16 - 1 - 8 - 1 - 2,
+            FileLenLF_E = byte_size(Line)   - 2 - ?EpochIDSpace - 16 - 8 - 1,
             CSumFileLenLF = byte_size(Line) - 2 - 1,
             CSumFileLenCRLF = byte_size(Line) - 2 - 2,
             WriteFileLenLF = byte_size(Line) - 7 - 16 - 1 - 8 - 1 - 1,
             DelFileLenLF = byte_size(Line) - 14 - 1,
             case Line of
                 %% For normal use
-                <<"A ", LenHex:8/binary, " ",
-                  Prefix:PrefixLenLF/binary, "\n">> ->
-                    do_net_server_append(RegName, Sock, LenHex, Prefix);
-%% BEGIN epoch-id hack
                 <<"A ",
                   _EpochIDRaw:(?EpochIDSpace)/binary,
                   LenHex:8/binary,
                   Prefix:PrefixLenLF_E/binary, "\n">> ->
                     do_net_server_append(RegName, Sock, LenHex, Prefix);
-%% END   epoch-id hack
-                <<"A ", LenHex:8/binary, " ",
-                  Prefix:PrefixLenCRLF/binary, "\r\n">> ->
-                    do_net_server_append(RegName, Sock, LenHex, Prefix);
-                <<"R ", OffsetHex:16/binary, " ", LenHex:8/binary, " ",
-                  File:FileLenLF/binary, "\n">> ->
-                    do_net_server_read(Sock, OffsetHex, LenHex, File, DataDir);
-                <<"R ", OffsetHex:16/binary, " ", LenHex:8/binary, " ",
-                  File:FileLenCRLF/binary, "\r\n">> ->
+                <<"R ",
+                  _EpochIDRaw:(?EpochIDSpace)/binary,
+                  OffsetHex:16/binary, LenHex:8/binary,
+                  File:FileLenLF_E/binary, "\n">> ->
                     do_net_server_read(Sock, OffsetHex, LenHex, File, DataDir);
                 <<"L\n">> ->
                     do_net_server_listing(Sock, DataDir);

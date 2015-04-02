@@ -24,7 +24,7 @@
 
 -export([
          append_chunk/4, append_chunk/5,
-         read_chunk/4, read_chunk/5,
+         read_chunk/5, read_chunk/6,
          checksum_list/2, checksum_list/3,
          list_files/1, list_files/2,
          quit/1
@@ -77,21 +77,22 @@ append_chunk(Host, TcpPort, EpochID, Prefix, Chunk) ->
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
--spec read_chunk(port(), file_name(), file_offset(), chunk_size()) ->
+-spec read_chunk(port(), epoch_id(), file_name(), file_offset(), chunk_size()) ->
       {ok, chunk_s()} | {error, term()}.
-read_chunk(Sock, File, Offset, Size)
+read_chunk(Sock, EpochID, File, Offset, Size)
   when Offset >= ?MINIMUM_OFFSET, Size >= 0 ->
-    read_chunk2(Sock, File, Offset, Size).
+    read_chunk2(Sock, EpochID, File, Offset, Size).
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
--spec read_chunk(inet_host(), inet_port(), file_name(), file_offset(), chunk_size()) ->
+-spec read_chunk(inet_host(), inet_port(), epoch_id(),
+                 file_name(), file_offset(), chunk_size()) ->
       {ok, chunk_s()} | {error, term()}.
-read_chunk(Host, TcpPort, File, Offset, Size)
+read_chunk(Host, TcpPort, EpochID, File, Offset, Size)
   when Offset >= ?MINIMUM_OFFSET, Size >= 0 ->
     Sock = machi_util:connect(Host, TcpPort),
     try
-        read_chunk2(Sock, File, Offset, Size)
+        read_chunk2(Sock, EpochID, File, Offset, Size)
     after
         catch gen_tcp:close(Sock)
     end.
@@ -244,11 +245,13 @@ append_chunk2(Sock, EpochID, Prefix0, Chunk0) ->
             {error, {badmatch, BadMatch, erlang:get_stacktrace()}}
     end.
 
-read_chunk2(Sock, File0, Offset, Size) ->
+read_chunk2(Sock, EpochID, File0, Offset, Size) ->
+    {EpochNum, EpochCSum} = EpochID,
+    EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
     File = machi_util:make_binary(File0),
     PrefixHex = machi_util:int_to_hexbin(Offset, 64),
     SizeHex = machi_util:int_to_hexbin(Size, 32),
-    CmdLF = [$R, 32, PrefixHex, 32, SizeHex, 32, File, 10],
+    CmdLF = [$R, 32, EpochIDRaw, PrefixHex, SizeHex, File, 10],
     ok = gen_tcp:send(Sock, CmdLF),
     case gen_tcp:recv(Sock, 3) of
         {ok, <<"OK\n">>} ->
