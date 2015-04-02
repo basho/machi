@@ -7,7 +7,9 @@
   Done via compare() func.
 
 ** TODO Change all protocol ops to add epoch ID
+** TODO Move the FLU server to gen_server behavior?
 ** TODO Add projection store to each FLU.
+** TODO Change all protocol ops to enforce the epoch ID
 ** TODO Add projection wedging logic to each FLU.
 
 - Add no-wedging state to make testing easier?

@@ -64,8 +64,11 @@ main2(RegName, TcpPort, DataDir, Rest) ->
                           dbg_props=DbgProps,
                           props=lists:keydelete(dbg, 1, Rest)}
          end,
-    _Pid1 = start_listen_server(S2),
-    _Pid2 = start_append_server(S2),
+    AppendPid = start_append_server(S2),
+    ListenPid = start_listen_server(S2),
+    put(flu_reg_name, RegName),
+    put(flu_append_pid, AppendPid),
+    put(flu_listen_pid, ListenPid),
     receive forever -> ok end.
 
 start_listen_server(S) ->
@@ -86,7 +89,7 @@ run_append_server(#state{reg_name=Name}=S) ->
 
 listen_server_loop(LSock, S) ->
     {ok, Sock} = gen_tcp:accept(LSock),
-    spawn(fun() -> net_server_loop(Sock, S) end),
+    spawn_link(fun() -> net_server_loop(Sock, S) end),
     listen_server_loop(LSock, S).
 
 append_server_loop(#state{data_dir=DataDir}=S) ->
