@@ -29,9 +29,13 @@
 -define(FLU_C, machi_flu1_client).
 
 setup_test_flu(RegName, TcpPort, DataDir) ->
+    setup_test_flu(RegName, TcpPort, DataDir, []).
+
+setup_test_flu(RegName, TcpPort, DataDir, DbgProps) ->
     clean_up_data_dir(DataDir),
 
-    {ok, FLU1} = ?FLU:start_link([{RegName, TcpPort, DataDir}]),
+    {ok, FLU1} = ?FLU:start_link([{RegName, TcpPort, DataDir},
+                                  {dbg, DbgProps}]),
     FLU1.
 
 flu_smoke_test() ->
