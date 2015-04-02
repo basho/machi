@@ -26,7 +26,7 @@
          append_chunk/4, append_chunk/5,
          read_chunk/5, read_chunk/6,
          checksum_list/3, checksum_list/4,
-         list_files/1, list_files/2,
+         list_files/2, list_files/3,
          quit/1
         ]).
 %% For "internal" replication only.
@@ -120,19 +120,19 @@ checksum_list(Host, TcpPort, EpochID, File) when is_integer(TcpPort) ->
 
 %% @doc Fetch the list of all files on the remote FLU.
 
--spec list_files(port()) ->
+-spec list_files(port(), epoch_id()) ->
       {ok, [file_info()]} | {error, term()}.
-list_files(Sock) when is_port(Sock) ->
-    list2(Sock).
+list_files(Sock, EpochID) when is_port(Sock) ->
+    list2(Sock, EpochID).
 
 %% @doc Fetch the list of all files on the remote FLU.
 
--spec list_files(inet_host(), inet_port()) ->
+-spec list_files(inet_host(), inet_port(), epoch_id()) ->
       {ok, [file_info()]} | {error, term()}.
-list_files(Host, TcpPort) when is_integer(TcpPort) ->
+list_files(Host, TcpPort, EpochID) when is_integer(TcpPort) ->
     Sock = machi_util:connect(Host, TcpPort),
     try
-        list2(Sock)
+        list2(Sock, EpochID)
     after
         catch gen_tcp:close(Sock)
     end.
@@ -285,12 +285,14 @@ read_chunk2(Sock, EpochID, File0, Offset, Size) ->
             end
     end.
 
-list2(Sock) ->
+list2(Sock, EpochID) ->
     try
-        ok = gen_tcp:send(Sock, <<"L\n">>),
+        {EpochNum, EpochCSum} = EpochID,
+        EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
+        ok = gen_tcp:send(Sock, [<<"L ">>, EpochIDRaw, <<"\n">>]),
         ok = inet:setopts(Sock, [{packet, line}]),
         {ok, <<"OK\n">>} = gen_tcp:recv(Sock, 0),
-        Res = list2(gen_tcp:recv(Sock, 0), Sock),
+        Res = list3(gen_tcp:recv(Sock, 0), Sock),
         ok = inet:setopts(Sock, [{packet, raw}]),
         {ok, Res}
     catch
@@ -300,14 +302,14 @@ list2(Sock) ->
             {error, {badmatch, BadMatch}}
     end.
 
-list2({ok, <<".\n">>}, _Sock) ->
+list3({ok, <<".\n">>}, _Sock) ->
     [];
-list2({ok, Line}, Sock) ->
+list3({ok, Line}, Sock) ->
     FileLen = byte_size(Line) - 16 - 1 - 1,
     <<SizeHex:16/binary, " ", File:FileLen/binary, _/binary>> = Line,
     Size = machi_util:hexstr_to_int(SizeHex),
-    [{Size, File}|list2(gen_tcp:recv(Sock, 0), Sock)];
-list2(Else, _Sock) ->
+    [{Size, File}|list3(gen_tcp:recv(Sock, 0), Sock)];
+list3(Else, _Sock) ->
     throw({server_protocol_error, Else}).
 
 checksum_list2(Sock, EpochID, File) ->

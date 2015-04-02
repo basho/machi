@@ -124,9 +124,7 @@ net_server_loop(Sock, #state{reg_name=RegName, data_dir=DataDir}=S) ->
                   OffsetHex:16/binary, LenHex:8/binary,
                   File:FileLenLF/binary, "\n">> ->
                     do_net_server_read(Sock, OffsetHex, LenHex, File, DataDir);
-                <<"L\n">> ->
-                    do_net_server_listing(Sock, DataDir);
-                <<"L\r\n">> ->
+                <<"L ", _EpochIDRaw:(?EpochIDSpace)/binary, "\n">> ->
                     do_net_server_listing(Sock, DataDir);
                 <<"C ",
                   _EpochIDRaw:(?EpochIDSpace)/binary,

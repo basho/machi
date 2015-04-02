@@ -54,7 +54,7 @@ flu_smoke_test() ->
         {error, bad_arg} = ?FLU_C:checksum_list(Host, TcpPort,
                                                 ?DUMMY_PV1_EPOCH, BadFile),
 
-        {ok, []} = ?FLU_C:list_files(Host, TcpPort),
+        {ok, []} = ?FLU_C:list_files(Host, TcpPort, ?DUMMY_PV1_EPOCH),
 
         Chunk1 = <<"yo!">>,
         {ok, {Off1,Len1,File1}} = ?FLU_C:append_chunk(Host, TcpPort,
@@ -67,7 +67,7 @@ flu_smoke_test() ->
         {error, bad_arg} = ?FLU_C:append_chunk(Host, TcpPort,
                                                ?DUMMY_PV1_EPOCH,
                                                BadPrefix, Chunk1),
-        {ok, [{_,File1}]} = ?FLU_C:list_files(Host, TcpPort),
+        {ok, [{_,File1}]} = ?FLU_C:list_files(Host, TcpPort, ?DUMMY_PV1_EPOCH),
         Len1 = size(Chunk1),
         {error, no_such_file} = ?FLU_C:read_chunk(Host, TcpPort,
                                                   ?DUMMY_PV1_EPOCH,

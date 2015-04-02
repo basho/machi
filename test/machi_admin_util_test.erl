@@ -40,7 +40,7 @@ verify_file_checksums_test() ->
         [{ok, _} = ?FLU_C:append_chunk(Sock1, ?DUMMY_PV1_EPOCH,
                                        Prefix, <<X:(X*8)/big>>) ||
             X <- lists:seq(1,10)],
-        {ok, [{_FileSize,File}]} = ?FLU_C:list_files(Sock1),
+        {ok, [{_FileSize,File}]} = ?FLU_C:list_files(Sock1, ?DUMMY_PV1_EPOCH),
         {ok, []} = machi_admin_util:verify_file_checksums_remote(
                      Host, TcpPort, ?DUMMY_PV1_EPOCH, File),
 
