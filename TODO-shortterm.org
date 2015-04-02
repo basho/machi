@@ -1,0 +1,17 @@
+* To Do list
+
+** Done: remove the escript* stuff from machi_util.erl
+
+** TODO Add functions to manipulate 1-chain projections
+
+- Add epoch ID = epoch number + checksum of projection!
+
+** TODO Change all protocol ops to add epoch ID
+** TODO Add projection store to each FLU.
+** TODO Add projection wedging logic to each FLU.
+
+- Add no-wedging state to make testing easier?
+    
+** TODO Move prototype/chain-manager code to "top" of source tree
+*** TODO Preserve current test code (leave as-is? tiny changes?)
+*** TODO Make chain manager code flexible enough to run "real world" or "sim"

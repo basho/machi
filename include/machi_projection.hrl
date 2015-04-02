@@ -18,16 +18,23 @@
 %%
 %% -------------------------------------------------------------------
 
+-type m_csum()      :: {none | sha1 | sha1_excl_final_20, binary()}.
+%% -type m_epoch()     :: {m_epoch_n(), m_csum()}.
+-type m_epoch_n()   :: non_neg_integer().
+-type m_server()    :: atom().
+-type timestamp()   :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
+
 -record(projection, {
-          %% hard state
-          epoch :: non_neg_integer(),
-          last_epoch :: non_neg_integer(),
-          float_map,
-          last_float_map,
-          %% soft state
-          migrating :: boolean(),
-          tree,
-          last_tree
-         }).
+            epoch_number    :: m_epoch_n(),
+            epoch_csum      :: m_csum(),
+            all_members     :: [m_server()],
+            down            :: [m_server()],
+            creation_time   :: timestamp(),
+            author_server   :: m_server(),
+            upi             :: [m_server()],
+            repairing       :: [m_server()],
+            dbg             :: list(), %proplist(), is checksummed
+            dbg2            :: list()  %proplist(), is not checksummed
+        }).
 
 -define(SHA_MAX, (1 bsl (20*8))).
