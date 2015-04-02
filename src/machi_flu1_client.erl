@@ -25,7 +25,7 @@
 -export([
          append_chunk/4, append_chunk/5,
          read_chunk/5, read_chunk/6,
-         checksum_list/2, checksum_list/3,
+         checksum_list/3, checksum_list/4,
          list_files/1, list_files/2,
          quit/1
         ]).
@@ -52,6 +52,8 @@
 -type file_offset() :: non_neg_integer().
 -type file_size()   :: non_neg_integer().
 -type file_prefix() :: binary() | list().
+
+-export_type([epoch_id/0]).
 
 %% @doc Append a chunk (binary- or iolist-style) of data to a file
 %% with `Prefix'.
@@ -99,19 +101,19 @@ read_chunk(Host, TcpPort, EpochID, File, Offset, Size)
 
 %% @doc Fetch the list of chunk checksums for `File'.
 
--spec checksum_list(port(), file_name()) ->
+-spec checksum_list(port(), epoch_id(), file_name()) ->
       {ok, [chunk_csum()]} | {error, term()}.
-checksum_list(Sock, File) when is_port(Sock) ->
-    checksum_list2(Sock, File).
+checksum_list(Sock, EpochID, File) when is_port(Sock) ->
+    checksum_list2(Sock, EpochID, File).
 
 %% @doc Fetch the list of chunk checksums for `File'.
 
--spec checksum_list(inet_host(), inet_port(), file_name()) ->
+-spec checksum_list(inet_host(), inet_port(), epoch_id(), file_name()) ->
       {ok, [chunk_csum()]} | {error, term()}.
-checksum_list(Host, TcpPort, File) when is_integer(TcpPort) ->
+checksum_list(Host, TcpPort, EpochID, File) when is_integer(TcpPort) ->
     Sock = machi_util:connect(Host, TcpPort),
     try
-        checksum_list2(Sock, File)
+        checksum_list2(Sock, EpochID, File)
     after
         catch gen_tcp:close(Sock)
     end.
@@ -308,9 +310,11 @@ list2({ok, Line}, Sock) ->
 list2(Else, _Sock) ->
     throw({server_protocol_error, Else}).
 
-checksum_list2(Sock, File) ->
+checksum_list2(Sock, EpochID, File) ->
     try
-        ok = gen_tcp:send(Sock, [<<"C ">>, File, <<"\n">>]),
+        {EpochNum, EpochCSum} = EpochID,
+        EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
+        ok = gen_tcp:send(Sock, [<<"C ">>, EpochIDRaw, File, <<"\n">>]),
         ok = inet:setopts(Sock, [{packet, line}]),
         case gen_tcp:recv(Sock, 0) of
             {ok, <<"OK ", Rest/binary>> = Line} ->

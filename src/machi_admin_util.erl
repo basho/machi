@@ -25,9 +25,8 @@
 -type inet_port()   :: inet:port_number().
 
 -export([
-         %% verify_file_checksums_local/2,
-         verify_file_checksums_local/3,
-         verify_file_checksums_remote/2, verify_file_checksums_remote/3
+         verify_file_checksums_local/3,  verify_file_checksums_local/4,
+         verify_file_checksums_remote/3, verify_file_checksums_remote/4
         ]).
 -compile(export_all).
 
@@ -36,26 +35,41 @@
 
 -define(FLU_C, machi_flu1_client).
 
--spec verify_file_checksums_local(inet_host(), inet_port(), binary()|list()) ->
+-spec verify_file_checksums_local(port(), machi_flu1_client:epoch_id(), binary()|list()) ->
       {ok, [tuple()]} | {error, term()}.
-verify_file_checksums_local(Host, TcpPort, Path) ->
-    Sock1 = machi_util:connect(Host, TcpPort),
-    verify_file_checksums_local2(Sock1, Path).
+verify_file_checksums_local(Sock1, EpochID, Path) when is_port(Sock1) ->
+    verify_file_checksums_local2(Sock1, EpochID, Path).
 
--spec verify_file_checksums_remote(port(), binary()|list()) ->
+-spec verify_file_checksums_local(inet_host(), inet_port(),
+                                  machi_flu1_client:epoch_id(), binary()|list()) ->
       {ok, [tuple()]} | {error, term()}.
-verify_file_checksums_remote(Sock1, File) when is_port(Sock1) ->
-    verify_file_checksums_remote2(Sock1, File).
-
--spec verify_file_checksums_remote(inet_host(), inet_port(), binary()|list()) ->
-      {ok, [tuple()]} | {error, term()}.
-verify_file_checksums_remote(Host, TcpPort, File) ->
+verify_file_checksums_local(Host, TcpPort, EpochID, Path) ->
     Sock1 = machi_util:connect(Host, TcpPort),
-    verify_file_checksums_remote2(Sock1, File).
+    try
+        verify_file_checksums_local2(Sock1, EpochID, Path)
+    after
+        catch gen_tcp:close(Sock1)
+    end.
+
+-spec verify_file_checksums_remote(port(), machi_flu1_client:epoch_id(), binary()|list()) ->
+      {ok, [tuple()]} | {error, term()}.
+verify_file_checksums_remote(Sock1, EpochID, File) when is_port(Sock1) ->
+    verify_file_checksums_remote2(Sock1, EpochID, File).
+
+-spec verify_file_checksums_remote(inet_host(), inet_port(),
+                                   machi_flu1_client:epoch_id(), binary()|list()) ->
+      {ok, [tuple()]} | {error, term()}.
+verify_file_checksums_remote(Host, TcpPort, EpochID, File) ->
+    Sock1 = machi_util:connect(Host, TcpPort),
+    try
+        verify_file_checksums_remote2(Sock1, EpochID, File)
+    after
+        catch gen_tcp:close(Sock1)
+    end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-verify_file_checksums_local2(Sock1, Path0) ->
+verify_file_checksums_local2(Sock1, EpochID, Path0) ->
     Path = machi_util:make_string(Path0),
     case file:open(Path, [read, binary, raw]) of
         {ok, FH} ->
@@ -64,7 +78,7 @@ verify_file_checksums_local2(Sock1, Path0) ->
                 ReadChunk = fun(_File, Offset, Size) ->
                                     file:pread(FH, Offset, Size)
                             end,
-                verify_file_checksums_common(Sock1, File, ReadChunk)
+                verify_file_checksums_common(Sock1, EpochID, File, ReadChunk)
             after
                 file:close(FH)
             end;
@@ -72,18 +86,17 @@ verify_file_checksums_local2(Sock1, Path0) ->
             Else
     end.
 
-verify_file_checksums_remote2(Sock1, File) ->
+verify_file_checksums_remote2(Sock1, EpochID, File) ->
     ReadChunk = fun(File_name, Offset, Size) ->
-                        ?FLU_C:read_chunk(Sock1, ?DUMMY_PV1_EPOCH,
+                        ?FLU_C:read_chunk(Sock1, EpochID,
                                           File_name, Offset, Size)
                 end,
-    verify_file_checksums_common(Sock1, File, ReadChunk).
+    verify_file_checksums_common(Sock1, EpochID, File, ReadChunk).
 
-verify_file_checksums_common(Sock1, File, ReadChunk) ->
+verify_file_checksums_common(Sock1, EpochID, File, ReadChunk) ->
     try
-        case ?FLU_C:checksum_list(Sock1, File) of
+        case ?FLU_C:checksum_list(Sock1, EpochID, File) of
             {ok, Info} ->
-                ?FLU_C:checksum_list(Sock1, File),
                 Res = lists:foldl(verify_chunk_checksum(File, ReadChunk),
                                   [], Info),
                 {ok, Res};

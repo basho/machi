@@ -42,7 +42,7 @@ verify_file_checksums_test() ->
             X <- lists:seq(1,10)],
         {ok, [{_FileSize,File}]} = ?FLU_C:list_files(Sock1),
         {ok, []} = machi_admin_util:verify_file_checksums_remote(
-                     Host, TcpPort, File),
+                     Host, TcpPort, ?DUMMY_PV1_EPOCH, File),
 
         Path = DataDir ++ "/" ++ binary_to_list(File),
         {ok, FH} = file:open(Path, [read,write]),
@@ -54,12 +54,12 @@ verify_file_checksums_test() ->
 
         %% Check the local flavor of the API
         {ok, Res1} = machi_admin_util:verify_file_checksums_local(
-                       Host, TcpPort, Path),
+                       Host, TcpPort, ?DUMMY_PV1_EPOCH, Path),
         3 = length(Res1),
 
         %% Check the remote flavor of the API
         {ok, Res2} = machi_admin_util:verify_file_checksums_remote(
-                       Host, TcpPort, File),
+                       Host, TcpPort, ?DUMMY_PV1_EPOCH, File),
         3 = length(Res2),
 
         ok

@@ -107,10 +107,9 @@ net_server_loop(Sock, #state{reg_name=RegName, data_dir=DataDir}=S) ->
     case gen_tcp:recv(Sock, 0, 60*1000) of
         {ok, Line} ->
             %% machi_util:verb("Got: ~p\n", [Line]),
-            PrefixLenLF_E = byte_size(Line) - 2 - ?EpochIDSpace - 8 - 1,
-            FileLenLF_E = byte_size(Line)   - 2 - ?EpochIDSpace - 16 - 8 - 1,
-            CSumFileLenLF = byte_size(Line) - 2 - 1,
-            CSumFileLenCRLF = byte_size(Line) - 2 - 2,
+            PrefixLenLF = byte_size(Line) - 2 - ?EpochIDSpace - 8 - 1,
+            FileLenLF = byte_size(Line)   - 2 - ?EpochIDSpace - 16 - 8 - 1,
+            CSumFileLenLF = byte_size(Line) - 2 - ?EpochIDSpace - 1,
             WriteFileLenLF = byte_size(Line) - 7 - 16 - 1 - 8 - 1 - 1,
             DelFileLenLF = byte_size(Line) - 14 - 1,
             case Line of
@@ -118,20 +117,20 @@ net_server_loop(Sock, #state{reg_name=RegName, data_dir=DataDir}=S) ->
                 <<"A ",
                   _EpochIDRaw:(?EpochIDSpace)/binary,
                   LenHex:8/binary,
-                  Prefix:PrefixLenLF_E/binary, "\n">> ->
+                  Prefix:PrefixLenLF/binary, "\n">> ->
                     do_net_server_append(RegName, Sock, LenHex, Prefix);
                 <<"R ",
                   _EpochIDRaw:(?EpochIDSpace)/binary,
                   OffsetHex:16/binary, LenHex:8/binary,
-                  File:FileLenLF_E/binary, "\n">> ->
+                  File:FileLenLF/binary, "\n">> ->
                     do_net_server_read(Sock, OffsetHex, LenHex, File, DataDir);
                 <<"L\n">> ->
                     do_net_server_listing(Sock, DataDir);
                 <<"L\r\n">> ->
                     do_net_server_listing(Sock, DataDir);
-                <<"C ", File:CSumFileLenLF/binary, "\n">> ->
-                    do_net_server_checksum_listing(Sock, File, DataDir);
-                <<"C ", File:CSumFileLenCRLF/binary, "\n">> ->
+                <<"C ",
+                  _EpochIDRaw:(?EpochIDSpace)/binary,
+                  File:CSumFileLenLF/binary, "\n">> ->
                     do_net_server_checksum_listing(Sock, File, DataDir);
                 <<"QUIT\n">> ->
                     catch gen_tcp:close(Sock),

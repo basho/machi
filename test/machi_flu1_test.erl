@@ -49,8 +49,10 @@ flu_smoke_test() ->
     FLU1 = setup_test_flu(smoke_flu, TcpPort, DataDir),
     try
         {error, no_such_file} = ?FLU_C:checksum_list(Host, TcpPort,
+                                                     ?DUMMY_PV1_EPOCH,
                                                      "does-not-exist"),
-        {error, bad_arg} = ?FLU_C:checksum_list(Host, TcpPort, BadFile),
+        {error, bad_arg} = ?FLU_C:checksum_list(Host, TcpPort,
+                                                ?DUMMY_PV1_EPOCH, BadFile),
 
         {ok, []} = ?FLU_C:list_files(Host, TcpPort),
 
@@ -60,7 +62,8 @@ flu_smoke_test() ->
                                                       Prefix, Chunk1),
         {ok, Chunk1} = ?FLU_C:read_chunk(Host, TcpPort, ?DUMMY_PV1_EPOCH,
                                          File1, Off1, Len1),
-        {ok, [{_,_,_}]} = ?FLU_C:checksum_list(Host, TcpPort, File1),
+        {ok, [{_,_,_}]} = ?FLU_C:checksum_list(Host, TcpPort,
+                                               ?DUMMY_PV1_EPOCH, File1),
         {error, bad_arg} = ?FLU_C:append_chunk(Host, TcpPort,
                                                ?DUMMY_PV1_EPOCH,
                                                BadPrefix, Chunk1),
