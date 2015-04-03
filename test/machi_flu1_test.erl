@@ -124,21 +124,22 @@ flu_projection_smoke_test() ->
 
     FLU1 = setup_test_flu(projection_test_flu, TcpPort, DataDir),
     try
-        {ok, -1} = ?FLU_C:get_latest_epoch(Host, TcpPort, public),
-        {ok, -1} = ?FLU_C:get_latest_epoch(Host, TcpPort, private),
+        [begin
+             {ok, -1} = ?FLU_C:get_latest_epoch(Host, TcpPort, T),
+             {error, not_written} =
+                 ?FLU_C:read_latest_projection(Host, TcpPort, T),
+             {ok, []} = ?FLU_C:list_all(Host, TcpPort, T),
+             {ok, []} = ?FLU_C:get_all(Host, TcpPort, T),
 
-        P1 = machi_projection:new(1, a, [a], [], [a], [], []),
-        ok = ?FLU_C:write_projection(Host, TcpPort, public, P1),
-        {error, written} = ?FLU_C:write_projection(Host, TcpPort, public, P1),
-        {ok, P1} = ?FLU_C:read_projection(Host, TcpPort, public, 1),
-        {error, not_written} = ?FLU_C:read_projection(Host, TcpPort, public, 2),
-
-        ok = ?FLU_C:write_projection(Host, TcpPort, private, P1),
-        {error, written} = ?FLU_C:write_projection(Host, TcpPort, private, P1),
-        {ok, P1} = ?FLU_C:read_projection(Host, TcpPort, private, 1),
-        {error, not_written} = ?FLU_C:read_projection(Host, TcpPort, private, 2),
-
-        ok = ?FLU_C:quit(machi_util:connect(Host, TcpPort))
+             P1 = machi_projection:new(1, a, [a], [], [a], [], []),
+             ok = ?FLU_C:write_projection(Host, TcpPort, T, P1),
+             {error, written} = ?FLU_C:write_projection(Host, TcpPort, T, P1),
+             {ok, P1} = ?FLU_C:read_projection(Host, TcpPort, T, 1),
+             {ok, P1} = ?FLU_C:read_latest_projection(Host, TcpPort, T),
+             {ok, [1]} = ?FLU_C:list_all(Host, TcpPort, T),
+             {ok, [P1]} = ?FLU_C:get_all(Host, TcpPort, T),
+             {error, not_written} = ?FLU_C:read_projection(Host, TcpPort, T, 2)
+         end || T <- [public, private] ]
     after
         ok = ?FLU:stop(FLU1)
     end.

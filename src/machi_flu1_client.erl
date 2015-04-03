@@ -32,8 +32,11 @@
 
          %% Projection API
          get_latest_epoch/2, get_latest_epoch/3,
+         read_latest_projection/2, read_latest_projection/3,
          read_projection/3, read_projection/4,
          write_projection/3, write_projection/4,
+         get_all/2, get_all/3,
+         list_all/2, list_all/3,
 
          %% Common API
          quit/1
@@ -170,10 +173,32 @@ get_latest_epoch(Host, TcpPort, ProjType)
         catch gen_tcp:close(Sock)
     end.
 
+%% @doc Get the latest epoch number from the FLU's projection store.
+
+-spec read_latest_projection(port(), projection_type()) ->
+      {ok, projection()} | {error, not_written} | {error, term()}.
+read_latest_projection(Sock, ProjType)
+  when ProjType == 'public' orelse ProjType == 'private' ->
+    read_latest_projection2(Sock, ProjType).
+
+%% @doc Get the latest epoch number from the FLU's projection store.
+
+-spec read_latest_projection(inet_host(), inet_port(),
+                       projection_type()) ->
+      {ok, projection()} | {error, not_written} | {error, term()}.
+read_latest_projection(Host, TcpPort, ProjType)
+  when ProjType == 'public' orelse ProjType == 'private' ->
+    Sock = machi_util:connect(Host, TcpPort),
+    try
+        read_latest_projection2(Sock, ProjType)
+    after
+        catch gen_tcp:close(Sock)
+    end.
+
 %% @doc Read a projection `Proj' of type `ProjType'.
 
 -spec read_projection(port(), projection_type(), epoch_num()) ->
-      'ok' | {error, written} | {error, term()}.
+      {ok, projection()} | {error, written} | {error, term()}.
 read_projection(Sock, ProjType, Epoch)
   when ProjType == 'public' orelse ProjType == 'private' ->
     read_projection2(Sock, ProjType, Epoch).
@@ -182,7 +207,7 @@ read_projection(Sock, ProjType, Epoch)
 
 -spec read_projection(inet_host(), inet_port(),
                        projection_type(), epoch_num()) ->
-      'ok' | {error, written} | {error, term()}.
+      {ok, projection()} | {error, written} | {error, term()}.
 read_projection(Host, TcpPort, ProjType, Epoch)
   when ProjType == 'public' orelse ProjType == 'private' ->
     Sock = machi_util:connect(Host, TcpPort),
@@ -212,6 +237,50 @@ write_projection(Host, TcpPort, ProjType, Proj)
     Sock = machi_util:connect(Host, TcpPort),
     try
         write_projection2(Sock, ProjType, Proj)
+    after
+        catch gen_tcp:close(Sock)
+    end.
+
+%% @doc Get all projections from the FLU's projection store.
+
+-spec get_all(port(), projection_type()) ->
+      {ok, [projection()]} | {error, term()}.
+get_all(Sock, ProjType)
+  when ProjType == 'public' orelse ProjType == 'private' ->
+    get_all2(Sock, ProjType).
+
+%% @doc Get all projections from the FLU's projection store.
+
+-spec get_all(inet_host(), inet_port(),
+               projection_type()) ->
+      {ok, [projection()]} | {error, term()}.
+get_all(Host, TcpPort, ProjType)
+  when ProjType == 'public' orelse ProjType == 'private' ->
+    Sock = machi_util:connect(Host, TcpPort),
+    try
+        get_all2(Sock, ProjType)
+    after
+        catch gen_tcp:close(Sock)
+    end.
+
+%% @doc Get all epoch numbers from the FLU's projection store.
+
+-spec list_all(port(), projection_type()) ->
+      {ok, [non_neg_integer()]} | {error, term()}.
+list_all(Sock, ProjType)
+  when ProjType == 'public' orelse ProjType == 'private' ->
+    list_all2(Sock, ProjType).
+
+%% @doc Get all epoch numbers from the FLU's projection store.
+
+-spec list_all(inet_host(), inet_port(),
+                       projection_type()) ->
+      {ok, [non_neg_integer()]} | {error, term()}.
+list_all(Host, TcpPort, ProjType)
+  when ProjType == 'public' orelse ProjType == 'private' ->
+    Sock = machi_util:connect(Host, TcpPort),
+    try
+        list_all2(Sock, ProjType)
     after
         catch gen_tcp:close(Sock)
     end.
@@ -530,12 +599,24 @@ get_latest_epoch2(Sock, ProjType) ->
     ProjCmd = {get_latest_epoch, ProjType},
     do_projection_common(Sock, ProjCmd).
 
+read_latest_projection2(Sock, ProjType) ->
+    ProjCmd = {read_latest_projection, ProjType},
+    do_projection_common(Sock, ProjCmd).
+
 read_projection2(Sock, ProjType, Epoch) ->
     ProjCmd = {read_projection, ProjType, Epoch},
     do_projection_common(Sock, ProjCmd).
 
 write_projection2(Sock, ProjType, Proj) ->
     ProjCmd = {write_projection, ProjType, Proj},
+    do_projection_common(Sock, ProjCmd).
+
+get_all2(Sock, ProjType) ->
+    ProjCmd = {get_all, ProjType},
+    do_projection_common(Sock, ProjCmd).
+
+list_all2(Sock, ProjType) ->
+    ProjCmd = {list_all, ProjType},
     do_projection_common(Sock, ProjCmd).
 
 do_projection_common(Sock, ProjCmd) ->

@@ -26,8 +26,11 @@
 -export([
          start_link/3,
          get_latest_epoch/2, get_latest_epoch/3,
+         read_latest_projection/2, read_latest_projection/3,
          read/3, read/4,
-         write/3, write/4
+         write/3, write/4,
+         get_all/2, get_all/3,
+         list_all/2, list_all/3
         ]).
 
 %% gen_server callbacks
@@ -54,11 +57,19 @@ get_latest_epoch(PidSpec, ProjType, Timeout)
   when ProjType == 'public' orelse ProjType == 'private' ->
     g_call(PidSpec, {get_latest_epoch, ProjType}, Timeout).
 
+read_latest_projection(PidSpec, ProjType) ->
+    read_latest_projection(PidSpec, ProjType, infinity).
+
+read_latest_projection(PidSpec, ProjType, Timeout)
+  when ProjType == 'public' orelse ProjType == 'private' ->
+    g_call(PidSpec, {read_latest_projection, ProjType}, Timeout).
+
 read(PidSpec, ProjType, Epoch) ->
     read(PidSpec, ProjType, Epoch, infinity).
 
 read(PidSpec, ProjType, Epoch, Timeout)
-  when ProjType == 'public' orelse ProjType == 'private' ->
+  when ProjType == 'public' orelse ProjType == 'private',
+       is_integer(Epoch), Epoch >= 0 ->
     g_call(PidSpec, {read, ProjType, Epoch}, Timeout).
 
 write(PidSpec, ProjType, Proj) ->
@@ -66,8 +77,34 @@ write(PidSpec, ProjType, Proj) ->
 
 write(PidSpec, ProjType, Proj, Timeout)
   when ProjType == 'public' orelse ProjType == 'private',
-       is_record(Proj, projection_v1) ->
+       is_record(Proj, projection_v1),
+       is_integer(Proj#projection_v1.epoch_number),
+       Proj#projection_v1.epoch_number >= 0 ->
     g_call(PidSpec, {write, ProjType, Proj}, Timeout).
+
+get_all(PidSpec, ProjType) ->
+    get_all(PidSpec, ProjType, infinity).
+
+get_all(PidSpec, ProjType, Timeout)
+  when ProjType == 'public' orelse ProjType == 'private' ->
+    g_call(PidSpec, {get_all, ProjType}, Timeout).
+
+list_all(PidSpec, ProjType) ->
+    list_all(PidSpec, ProjType, infinity).
+
+list_all(PidSpec, ProjType, Timeout)
+  when ProjType == 'public' orelse ProjType == 'private' ->
+    g_call(PidSpec, {list_all, ProjType}, Timeout).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+g_call(PidSpec, Arg, Timeout) ->
+    LC1 = lclock_get(),
+    {Res, LC2} = gen_server:call(PidSpec, {Arg, LC1}, Timeout),
+    lclock_update(LC2),
+    Res.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init([DataDir, NotifyWedgeStateChanges]) ->
     lclock_init(),
@@ -85,22 +122,19 @@ init([DataDir, NotifyWedgeStateChanges]) ->
                 max_public_epoch=MaxPublicEpoch,
                 max_private_epoch=MaxPrivateEpoch}}.
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-g_call(PidSpec, Arg, Timeout) ->
-    LC1 = lclock_get(),
-    {Res, LC2} = gen_server:call(PidSpec, {Arg, LC1}, Timeout),
-    lclock_update(LC2),
-    Res.
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
 handle_call({{get_latest_epoch, ProjType}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
     Epoch = if ProjType == public  -> S#state.max_public_epoch;
                ProjType == private -> S#state.max_private_epoch
             end,
     {reply, {{ok, Epoch}, LC2}, S};
+handle_call({{read_latest_projection, ProjType}, LC1}, _From, S) ->
+    LC2 = lclock_update(LC1),
+    Epoch = if ProjType == public  -> S#state.max_public_epoch;
+               ProjType == private -> S#state.max_private_epoch
+            end,
+    {Reply, NewS} = do_proj_read(ProjType, Epoch, S),
+    {reply, {Reply, LC2}, NewS};
 handle_call({{read, ProjType, Epoch}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
     {Reply, NewS} = do_proj_read(ProjType, Epoch, S),
@@ -109,6 +143,19 @@ handle_call({{write, ProjType, Proj}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
     {Reply, NewS} = do_proj_write(ProjType, Proj, S),
     {reply, {Reply, LC2}, NewS};
+handle_call({{get_all, ProjType}, LC1}, _From, S) ->
+    LC2 = lclock_update(LC1),
+    Dir = pick_path(ProjType, S),
+    Epochs = find_all(Dir),
+    All = [begin
+               {{ok, Proj}, _} = do_proj_read(ProjType, Epoch, S),
+               Proj
+           end || Epoch <- Epochs],
+    {reply, {{ok, All}, LC2}, S};
+handle_call({{list_all, ProjType}, LC1}, _From, S) ->
+    LC2 = lclock_update(LC1),
+    Dir = pick_path(ProjType, S),
+    {reply, {{ok, find_all(Dir)}, LC2}, S};
 handle_call(_Request, _From, S) ->
     Reply = whaaaaaaaaaaaaa,
     {reply, Reply, S}.
@@ -127,6 +174,8 @@ code_change(_OldVsn, S, _Extra) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+do_proj_read(_ProjType, Epoch, S) when Epoch < 0 ->
+    {{error, not_written}, S};
 do_proj_read(ProjType, Epoch, S) ->
     Dir = pick_path(ProjType, S),
     Path = filename:join(Dir, epoch2name(Epoch)),
@@ -152,7 +201,16 @@ do_proj_write(ProjType, #projection_v1{epoch_number=Epoch}=Proj, S) ->
             ok = file:write(FH, term_to_binary(Proj)),
             ok = file:sync(FH),
             ok = file:close(FH),
-            {ok, S};
+            NewS = if ProjType == public, Epoch > S#state.max_public_epoch ->
+                           io:format(user, "TODO: tell ~p we are wedged by epoch ~p\n", [S#state.wedge_notify_pid, Epoch]),
+                           S#state{max_public_epoch=Epoch, wedged=true};
+                      ProjType == private, Epoch > S#state.max_private_epoch ->
+                           io:format(user, "TODO: tell ~p we are unwedged by epoch ~p\n", [S#state.wedge_notify_pid, Epoch]),
+                           S#state{max_private_epoch=Epoch, wedged=false};
+                      true ->
+                           S
+                   end,
+            {ok, NewS};
         {error, Else} ->
             {{error, Else}, S}
     end.
@@ -167,6 +225,10 @@ epoch2name(Epoch) ->
 
 name2epoch(Name) ->
     machi_util:hexstr_to_int(Name).
+
+find_all(Dir) ->
+    Fs = filelib:wildcard("*", Dir),
+    lists:sort([name2epoch(F) || F <- Fs]).
 
 find_max_epoch(Dir) ->
     Fs = lists:sort(filelib:wildcard("*", Dir)),

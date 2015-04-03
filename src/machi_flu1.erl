@@ -567,12 +567,21 @@ do_projection_command(Sock, LenHex, S) ->
 handle_projection_command({get_latest_epoch, ProjType},
                           #state{proj_store=ProjStore}) ->
     machi_projection_store:get_latest_epoch(ProjStore, ProjType);
+handle_projection_command({read_latest_projection, ProjType},
+                          #state{proj_store=ProjStore}) ->
+    machi_projection_store:read_latest_projection(ProjStore, ProjType);
 handle_projection_command({read_projection, ProjType, Epoch},
                           #state{proj_store=ProjStore}) ->
     machi_projection_store:read(ProjStore, ProjType, Epoch);
 handle_projection_command({write_projection, ProjType, Proj},
                           #state{proj_store=ProjStore}) ->
     machi_projection_store:write(ProjStore, ProjType, Proj);
+handle_projection_command({get_all, ProjType},
+                          #state{proj_store=ProjStore}) ->
+    machi_projection_store:get_all(ProjStore, ProjType);
+handle_projection_command({list_all, ProjType},
+                          #state{proj_store=ProjStore}) ->
+    machi_projection_store:list_all(ProjStore, ProjType);
 handle_projection_command(Else, _S) ->
     {error, unknown_cmd, Else}.
 
