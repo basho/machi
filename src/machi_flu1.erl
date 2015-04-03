@@ -550,24 +550,26 @@ do_projection_command(Sock, LenHex, S) ->
         {ok, ProjCmdBin} = gen_tcp:recv(Sock, Len),
         ok = inet:setopts(Sock, [{packet, line}]),
         ProjCmd = binary_to_term(ProjCmdBin),
-        case handle_projection_command(ProjCmd, S) of
-            ok ->
-                ok = gen_tcp:send(Sock, <<"OK\n">>);
-            {error, written} ->
-                ok = gen_tcp:send(Sock, <<"ERROR WRITTEN\n">>);
-            {error, not_written} ->
-                ok = gen_tcp:send(Sock, <<"ERROR NOT-WRITTEN\n">>);
-            Else ->
-                TODO = list_to_binary(io_lib:format("TODO-YOLO-~w", [Else])),
-                ok = gen_tcp:send(Sock, [<<"ERROR ">>, TODO, <<"\n">>])
-        end
+        put(hack, ProjCmd),
+        Res = handle_projection_command(ProjCmd, S),
+        ResBin = term_to_binary(Res),
+        ResLenHex = machi_util:int_to_hexbin(byte_size(ResBin), 32),
+        ok = gen_tcp:send(Sock, [<<"OK ">>, ResLenHex, <<"\n">>, ResBin])
     catch
         What:Why ->
+            io:format(user, "OOPS ~p\n", [get(hack)]),
+            io:format(user, "OOPS ~p ~p ~p\n", [What, Why, erlang:get_stacktrace()]),
             WHA = list_to_binary(io_lib:format("TODO-YOLO.~w:~w-~w",
                                                [What, Why, erlang:get_stacktrace()])),
             _ = (catch gen_tcp:send(Sock, [<<"ERROR ">>, WHA, <<"\n">>]))
     end.
 
+handle_projection_command({get_latest_epoch, ProjType},
+                          #state{proj_store=ProjStore}) ->
+    machi_projection_store:get_latest_epoch(ProjStore, ProjType);
+handle_projection_command({read_projection, ProjType, Epoch},
+                          #state{proj_store=ProjStore}) ->
+    machi_projection_store:read(ProjStore, ProjType, Epoch);
 handle_projection_command({write_projection, ProjType, Proj},
                           #state{proj_store=ProjStore}) ->
     machi_projection_store:write(ProjStore, ProjType, Proj);

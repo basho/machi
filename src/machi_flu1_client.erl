@@ -31,6 +31,8 @@
          list_files/2, list_files/3,
 
          %% Projection API
+         get_latest_epoch/2, get_latest_epoch/3,
+         read_projection/3, read_projection/4,
          write_projection/3, write_projection/4,
 
          %% Common API
@@ -142,6 +144,50 @@ list_files(Host, TcpPort, EpochID) when is_integer(TcpPort) ->
     Sock = machi_util:connect(Host, TcpPort),
     try
         list2(Sock, EpochID)
+    after
+        catch gen_tcp:close(Sock)
+    end.
+
+%% @doc Get the latest epoch number from the FLU's projection store.
+
+-spec get_latest_epoch(port(), projection_type()) ->
+      {ok, -1|non_neg_integer()} | {error, term()}.
+get_latest_epoch(Sock, ProjType)
+  when ProjType == 'public' orelse ProjType == 'private' ->
+    get_latest_epoch2(Sock, ProjType).
+
+%% @doc Get the latest epoch number from the FLU's projection store.
+
+-spec get_latest_epoch(inet_host(), inet_port(),
+                       projection_type()) ->
+      {ok, -1|non_neg_integer()} | {error, term()}.
+get_latest_epoch(Host, TcpPort, ProjType)
+  when ProjType == 'public' orelse ProjType == 'private' ->
+    Sock = machi_util:connect(Host, TcpPort),
+    try
+        get_latest_epoch2(Sock, ProjType)
+    after
+        catch gen_tcp:close(Sock)
+    end.
+
+%% @doc Read a projection `Proj' of type `ProjType'.
+
+-spec read_projection(port(), projection_type(), epoch_num()) ->
+      'ok' | {error, written} | {error, term()}.
+read_projection(Sock, ProjType, Epoch)
+  when ProjType == 'public' orelse ProjType == 'private' ->
+    read_projection2(Sock, ProjType, Epoch).
+
+%% @doc Read a projection `Proj' of type `ProjType'.
+
+-spec read_projection(inet_host(), inet_port(),
+                       projection_type(), epoch_num()) ->
+      'ok' | {error, written} | {error, term()}.
+read_projection(Host, TcpPort, ProjType, Epoch)
+  when ProjType == 'public' orelse ProjType == 'private' ->
+    Sock = machi_util:connect(Host, TcpPort),
+    try
+        read_projection2(Sock, ProjType, Epoch)
     after
         catch gen_tcp:close(Sock)
     end.
@@ -480,9 +526,17 @@ trunc_hack2(Sock, EpochID, File) ->
             {error, {badmatch, BadMatch}}
     end.
 
+get_latest_epoch2(Sock, ProjType) ->
+    ProjCmd = {get_latest_epoch, ProjType},
+    do_projection_common(Sock, ProjCmd).
+
+read_projection2(Sock, ProjType, Epoch) ->
+    ProjCmd = {read_projection, ProjType, Epoch},
+    do_projection_common(Sock, ProjCmd).
+
 write_projection2(Sock, ProjType, Proj) ->
-        ProjCmd = {write_projection, ProjType, Proj},
-        do_projection_common(Sock, ProjCmd).
+    ProjCmd = {write_projection, ProjType, Proj},
+    do_projection_common(Sock, ProjCmd).
 
 do_projection_common(Sock, ProjCmd) ->
     try
@@ -492,13 +546,15 @@ do_projection_common(Sock, ProjCmd) ->
         LenHex = machi_util:int_to_hexbin(Len, 32),
         Cmd = [<<"PROJ ">>, LenHex, <<"\n">>],
         ok = gen_tcp:send(Sock, [Cmd, ProjCmdBin]),
+        ok = inet:setopts(Sock, [{packet, line}]),
         {ok, Line} = gen_tcp:recv(Sock, 0),
-        PathLen = byte_size(Line) - 3 - 16 - 1 - 1,
         case Line of
-            <<"OK\n">> ->
-                ok;
-            <<"ERROR WRITTEN\n">> ->
-                {error, written};
+            <<"OK ", ResLenHex:8/binary, "\n">> ->
+                ResLen = machi_util:hexstr_to_int(ResLenHex),
+                ok = inet:setopts(Sock, [{packet, raw}]),
+                {ok, ResBin} = gen_tcp:recv(Sock, ResLen),
+                ok = inet:setopts(Sock, [{packet, line}]),
+                binary_to_term(ResBin);
             Else ->
                 {error, Else}
         end

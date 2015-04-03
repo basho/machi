@@ -25,6 +25,8 @@
 %% API
 -export([
          start_link/3,
+         get_latest_epoch/2, get_latest_epoch/3,
+         read/3, read/4,
          write/3, write/4
         ]).
 
@@ -37,13 +39,27 @@
           private_dir = ""       :: string(),
           wedged = true          :: boolean(),
           wedge_notify_pid       :: pid() | atom(),
-          max_public_epoch = -1  :: non_neg_integer(),
-          max_private_epoch = -1 :: non_neg_integer()
+          max_public_epoch = -1  :: -1 | non_neg_integer(),
+          max_private_epoch = -1 :: -1 | non_neg_integer()
          }).
 
 start_link(RegName, DataDir, NotifyWedgeStateChanges) ->
     gen_server:start_link({local, RegName},
                           ?MODULE, [DataDir, NotifyWedgeStateChanges], []).
+
+get_latest_epoch(PidSpec, ProjType) ->
+    get_latest_epoch(PidSpec, ProjType, infinity).
+
+get_latest_epoch(PidSpec, ProjType, Timeout)
+  when ProjType == 'public' orelse ProjType == 'private' ->
+    g_call(PidSpec, {get_latest_epoch, ProjType}, Timeout).
+
+read(PidSpec, ProjType, Epoch) ->
+    read(PidSpec, ProjType, Epoch, infinity).
+
+read(PidSpec, ProjType, Epoch, Timeout)
+  when ProjType == 'public' orelse ProjType == 'private' ->
+    g_call(PidSpec, {read, ProjType, Epoch}, Timeout).
 
 write(PidSpec, ProjType, Proj) ->
     write(PidSpec, ProjType, Proj, infinity).
@@ -79,6 +95,16 @@ g_call(PidSpec, Arg, Timeout) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+handle_call({{get_latest_epoch, ProjType}, LC1}, _From, S) ->
+    LC2 = lclock_update(LC1),
+    Epoch = if ProjType == public  -> S#state.max_public_epoch;
+               ProjType == private -> S#state.max_private_epoch
+            end,
+    {reply, {{ok, Epoch}, LC2}, S};
+handle_call({{read, ProjType, Epoch}, LC1}, _From, S) ->
+    LC2 = lclock_update(LC1),
+    {Reply, NewS} = do_proj_read(ProjType, Epoch, S),
+    {reply, {Reply, LC2}, NewS};
 handle_call({{write, ProjType, Proj}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
     {Reply, NewS} = do_proj_write(ProjType, Proj, S),
@@ -100,6 +126,19 @@ code_change(_OldVsn, S, _Extra) ->
     {ok, S}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+do_proj_read(ProjType, Epoch, S) ->
+    Dir = pick_path(ProjType, S),
+    Path = filename:join(Dir, epoch2name(Epoch)),
+    case file:read_file(Path) of
+        {ok, Bin} ->
+            %% TODO and if Bin is corrupt? (even if binary_to_term() succeeds)
+            {{ok, binary_to_term(Bin)}, S};
+        {error, enoent} ->
+            {{error, not_written}, S};
+        {error, Else} ->
+            {{error, Else}, S}
+    end.
 
 do_proj_write(ProjType, #projection_v1{epoch_number=Epoch}=Proj, S) ->
     %% TODO: We probably ought to check the projection checksum for sanity, eh?
