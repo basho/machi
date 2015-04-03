@@ -23,11 +23,14 @@
 -include_lib("kernel/include/file.hrl").
 
 -include("machi.hrl").
+-include("machi_projection.hrl").
 
 -export([start_link/1, stop/1]).
 
 -record(state, {
           reg_name        :: atom(),
+          proj_store      :: pid(),
+          append_pid      :: pid(),
           tcp_port        :: non_neg_integer(),
           data_dir        :: string(),
           wedge = true    :: 'disabled' | boolean(),
@@ -52,10 +55,16 @@ stop(Pid) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 main2(RegName, TcpPort, DataDir, Rest) ->
-    S1 = #state{reg_name=RegName,
+    S0 = #state{reg_name=RegName,
                 tcp_port=TcpPort,
                 data_dir=DataDir,
                 props=Rest},
+    AppendPid = start_append_server(S0),
+    ProjRegName = make_projection_server_regname(RegName),
+    {ok, ProjectionPid} =
+        machi_projection_store:start_link(ProjRegName, DataDir, AppendPid),
+    S1 = S0#state{append_pid=AppendPid,
+                  proj_store=ProjectionPid},
     S2 = case proplists:get_value(dbg, Rest) of
              undefined ->
                  S1;
@@ -64,10 +73,18 @@ main2(RegName, TcpPort, DataDir, Rest) ->
                           dbg_props=DbgProps,
                           props=lists:keydelete(dbg, 1, Rest)}
          end,
-    AppendPid = start_append_server(S2),
     ListenPid = start_listen_server(S2),
+
+    Config_e = machi_util:make_config_filename(DataDir, "unused"),
+    ok = filelib:ensure_dir(Config_e),
+    {_, Data_e} = machi_util:make_data_filename(DataDir, "unused"),
+    ok = filelib:ensure_dir(Data_e),
+    Projection_e = machi_util:make_projection_filename(DataDir, "unused"),
+    ok = filelib:ensure_dir(Projection_e),
+
     put(flu_reg_name, RegName),
     put(flu_append_pid, AppendPid),
+    put(flu_projection_pid, ProjectionPid),
     put(flu_listen_pid, ListenPid),
     receive forever -> ok end.
 
@@ -76,6 +93,9 @@ start_listen_server(S) ->
 
 start_append_server(S) ->
     spawn_link(fun() -> run_append_server(S) end).
+
+%% start_projection_server(S) ->
+%%     spawn_link(fun() -> run_projection_server(S) end).
 
 run_listen_server(#state{tcp_port=TcpPort}=S) ->
     SockOpts = [{reuseaddr, true},
@@ -97,7 +117,9 @@ append_server_loop(#state{data_dir=DataDir}=S) ->
         {seq_append, From, Prefix, Chunk, CSum} ->
             spawn(fun() -> append_server_dispatch(From, Prefix, Chunk, CSum,
                                                   DataDir) end),
-            append_server_loop(S)
+            append_server_loop(S);
+        {wedge_state_change, Boolean} ->
+            append_server_loop(S#state{wedge=Boolean})
     end.
 
 -define(EpochIDSpace, (4+20)).
@@ -152,6 +174,8 @@ net_server_loop(Sock, #state{reg_name=RegName, data_dir=DataDir}=S) ->
                   _EpochIDRaw:(?EpochIDSpace)/binary,
                   File:DelFileLenLF/binary, "\n">> ->
                     do_net_server_truncate_hackityhack(Sock, File, DataDir);
+                <<"PROJ ", LenHex:8/binary, "\n">> ->
+                    do_projection_command(Sock, LenHex, S);
                 _ ->
                     machi_util:verb("Else Got: ~p\n", [Line]),
                     gen_tcp:send(Sock, "ERROR SYNTAX\n"),
@@ -249,7 +273,6 @@ do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin, DataDir,
                 file:close(FH)
             end;
         {error, enoent} when OptsHasWrite ->
-            ok = filelib:ensure_dir(Path),
             do_net_server_readwrite_common(
               Sock, OffsetHex, LenHex, FileBin, DataDir,
               FileOpts, DoItFun);
@@ -315,10 +338,11 @@ decode_and_reply_net_server_ec_read_version_a(Sock, Rest) ->
     ok = gen_tcp:send(Sock, ["ERASURE ", BodyLenHex, " ", Hdr, Body]).
 
 do_net_server_listing(Sock, DataDir) ->
-    Files = filelib:wildcard("*", DataDir) -- ["config"],
+    {_, WildPath} = machi_util:make_data_filename(DataDir, ""),
+    Files = filelib:wildcard("*", WildPath),
     Out = ["OK\n",
            [begin
-                {ok, FI} = file:read_file_info(DataDir ++ "/" ++ File),
+                {ok, FI} = file:read_file_info(WildPath ++ "/" ++ File),
                 Size = FI#file_info.size,
                 SizeBin = <<Size:64/big>>,
                 [machi_util:bin_to_hexstr(SizeBin), <<" ">>,
@@ -453,8 +477,6 @@ start_seq_append_server(Prefix, DataDir) ->
 
 run_seq_append_server(Prefix, DataDir) ->
     true = register(machi_util:make_regname(Prefix), self()),
-    ok = filelib:ensure_dir(DataDir ++ "/unused"),
-    ok = filelib:ensure_dir(DataDir ++ "/config/unused"),
     run_seq_append_server2(Prefix, DataDir).
 
 run_seq_append_server2(Prefix, DataDir) ->
@@ -521,3 +543,36 @@ seq_append_server_loop(DataDir, Prefix, File, {FHd,FHc}=FH_, FileNum, Offset) ->
             exit(normal)
     end.
 
+do_projection_command(Sock, LenHex, S) ->
+    try
+        Len = machi_util:hexstr_to_int(LenHex),
+        ok = inet:setopts(Sock, [{packet, raw}]),
+        {ok, ProjCmdBin} = gen_tcp:recv(Sock, Len),
+        ok = inet:setopts(Sock, [{packet, line}]),
+        ProjCmd = binary_to_term(ProjCmdBin),
+        case handle_projection_command(ProjCmd, S) of
+            ok ->
+                ok = gen_tcp:send(Sock, <<"OK\n">>);
+            {error, written} ->
+                ok = gen_tcp:send(Sock, <<"ERROR WRITTEN\n">>);
+            {error, not_written} ->
+                ok = gen_tcp:send(Sock, <<"ERROR NOT-WRITTEN\n">>);
+            Else ->
+                TODO = list_to_binary(io_lib:format("TODO-YOLO-~w", [Else])),
+                ok = gen_tcp:send(Sock, [<<"ERROR ">>, TODO, <<"\n">>])
+        end
+    catch
+        What:Why ->
+            WHA = list_to_binary(io_lib:format("TODO-YOLO.~w:~w-~w",
+                                               [What, Why, erlang:get_stacktrace()])),
+            _ = (catch gen_tcp:send(Sock, [<<"ERROR ">>, WHA, <<"\n">>]))
+    end.
+
+handle_projection_command({write_projection, ProjType, Proj},
+                          #state{proj_store=ProjStore}) ->
+    machi_projection_store:write(ProjStore, ProjType, Proj);
+handle_projection_command(Else, _S) ->
+    {error, unknown_cmd, Else}.
+
+make_projection_server_regname(BaseName) ->
+    list_to_atom(atom_to_list(BaseName) ++ "_projection").

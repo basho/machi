@@ -37,6 +37,10 @@ setup_test_flu(RegName, TcpPort, DataDir, DbgProps) ->
 
     {ok, FLU1} = ?FLU:start_link([{RegName, TcpPort, DataDir},
                                   {dbg, DbgProps}]),
+    %% TODO the process structuring/racy-ness of the various processes
+    %% of the FLU needs to be deterministic to remove this sleep race
+    %% "prevention".
+    timer:sleep(10),
     FLU1.
 
 flu_smoke_test() ->
@@ -113,22 +117,18 @@ flu_smoke_test() ->
         ok = ?FLU:stop(FLU1)
     end.
 
-flu_projection_test() ->
+flu_projection_smoke_test() ->
     Host = "localhost",
     TcpPort = 32959,
     DataDir = "./data",
-    Prefix = <<"prefix!">>,
-    BadPrefix = BadFile = "no/good",
 
     FLU1 = setup_test_flu(projection_test_flu, TcpPort, DataDir),
     try
-        {error, no_such_file} = ?FLU_C:checksum_list(Host, TcpPort,
-                                                     ?DUMMY_PV1_EPOCH,
-                                                     "does-not-exist"),
-
         P1 = machi_projection:new(1, a, [a], [], [a], [], []),
         ok = ?FLU_C:write_projection(Host, TcpPort, public, P1),
         {error, written} = ?FLU_C:write_projection(Host, TcpPort, public, P1),
+        ok = ?FLU_C:write_projection(Host, TcpPort, private, P1),
+        {error, written} = ?FLU_C:write_projection(Host, TcpPort, private, P1),
 
         ok = ?FLU_C:quit(machi_util:connect(Host, TcpPort))
     after
@@ -136,12 +136,11 @@ flu_projection_test() ->
     end.
 
 clean_up_data_dir(DataDir) ->
-    Dir1 = DataDir ++ "/config",
-    Fs1 = filelib:wildcard(Dir1 ++ "/*"),
-    [file:delete(F) || F <- Fs1],
-    _ = file:del_dir(Dir1),
-    Fs2 = filelib:wildcard(DataDir ++ "/*"),
-    [file:delete(F) || F <- Fs2],
+    [begin
+         Fs = filelib:wildcard(DataDir ++ Glob),
+         [file:delete(F) || F <- Fs],
+         [file:del_dir(F) || F <- Fs]
+     end || Glob <- ["*/*/*/*", "*/*/*", "*/*", "*"] ],
     _ = file:del_dir(DataDir),
     ok.
 

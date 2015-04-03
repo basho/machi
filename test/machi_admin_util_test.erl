@@ -44,7 +44,7 @@ verify_file_checksums_test() ->
         {ok, []} = machi_admin_util:verify_file_checksums_remote(
                      Host, TcpPort, ?DUMMY_PV1_EPOCH, File),
 
-        Path = DataDir ++ "/" ++ binary_to_list(File),
+        {_, Path} = machi_util:make_data_filename(DataDir,binary_to_list(File)),
         {ok, FH} = file:open(Path, [read,write]),
         {ok, _} = file:position(FH, ?MINIMUM_OFFSET),
         ok = file:write(FH, "y"),

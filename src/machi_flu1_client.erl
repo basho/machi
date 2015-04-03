@@ -150,7 +150,9 @@ list_files(Host, TcpPort, EpochID) when is_integer(TcpPort) ->
 
 -spec write_projection(port(), projection_type(), projection()) ->
       'ok' | {error, written} | {error, term()}.
-write_projection(Sock, ProjType, Proj) ->
+write_projection(Sock, ProjType, Proj)
+  when ProjType == 'public' orelse ProjType == 'private',
+       is_record(Proj, projection_v1) ->
     write_projection2(Sock, ProjType, Proj).
 
 %% @doc Write a projection `Proj' of type `ProjType'.
@@ -158,7 +160,9 @@ write_projection(Sock, ProjType, Proj) ->
 -spec write_projection(inet_host(), inet_port(),
                        projection_type(), projection()) ->
       'ok' | {error, written} | {error, term()}.
-write_projection(Host, TcpPort, ProjType, Proj) ->
+write_projection(Host, TcpPort, ProjType, Proj)
+  when ProjType == 'public' orelse ProjType == 'private',
+       is_record(Proj, projection_v1) ->
     Sock = machi_util:connect(Host, TcpPort),
     try
         write_projection2(Sock, ProjType, Proj)

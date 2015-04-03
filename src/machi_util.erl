@@ -27,6 +27,7 @@
          make_binary/1, make_string/1,
          make_regname/1,
          make_checksum_filename/2, make_data_filename/2,
+         make_projection_filename/2,
          read_max_filenum/2, increment_max_filenum/2,
          info_msg/2, verb/1, verb/2,
          %% TCP protocol helpers
@@ -60,18 +61,28 @@ make_checksum_filename(DataDir, Prefix, SequencerName, FileNum) ->
     lists:flatten(io_lib:format("~s/config/~s.~s.~w.csum",
                                 [DataDir, Prefix, SequencerName, FileNum])).
 
+make_checksum_filename(DataDir, "") ->
+    lists:flatten(io_lib:format("~s/config", [DataDir]));
 make_checksum_filename(DataDir, FileName) ->
     lists:flatten(io_lib:format("~s/config/~s.csum", [DataDir, FileName])).
 
+make_data_filename(DataDir, "") ->
+    FullPath = lists:flatten(io_lib:format("~s/data",  [DataDir])),
+    {"", FullPath};
 make_data_filename(DataDir, File) ->
-    FullPath = lists:flatten(io_lib:format("~s/~s",  [DataDir, File])),
+    FullPath = lists:flatten(io_lib:format("~s/data/~s",  [DataDir, File])),
     {File, FullPath}.
 
 make_data_filename(DataDir, Prefix, SequencerName, FileNum) ->
     File = erlang:iolist_to_binary(io_lib:format("~s.~s.~w",
                                                  [Prefix, SequencerName, FileNum])),
-    FullPath = lists:flatten(io_lib:format("~s/~s",  [DataDir, File])),
+    FullPath = lists:flatten(io_lib:format("~s/data/~s",  [DataDir, File])),
     {File, FullPath}.
+
+make_projection_filename(DataDir, "") ->
+    lists:flatten(io_lib:format("~s/projection",  [DataDir]));
+make_projection_filename(DataDir, File) ->
+    lists:flatten(io_lib:format("~s/projection/~s",  [DataDir, File])).
 
 read_max_filenum(DataDir, Prefix) ->
     case file:read_file_info(make_config_filename(DataDir, Prefix)) of
