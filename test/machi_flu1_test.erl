@@ -113,6 +113,28 @@ flu_smoke_test() ->
         ok = ?FLU:stop(FLU1)
     end.
 
+flu_projection_test() ->
+    Host = "localhost",
+    TcpPort = 32959,
+    DataDir = "./data",
+    Prefix = <<"prefix!">>,
+    BadPrefix = BadFile = "no/good",
+
+    FLU1 = setup_test_flu(projection_test_flu, TcpPort, DataDir),
+    try
+        {error, no_such_file} = ?FLU_C:checksum_list(Host, TcpPort,
+                                                     ?DUMMY_PV1_EPOCH,
+                                                     "does-not-exist"),
+
+        P1 = machi_projection:new(1, a, [a], [], [a], [], []),
+        ok = ?FLU_C:write_projection(Host, TcpPort, public, P1),
+        {error, written} = ?FLU_C:write_projection(Host, TcpPort, public, P1),
+
+        ok = ?FLU_C:quit(machi_util:connect(Host, TcpPort))
+    after
+        ok = ?FLU:stop(FLU1)
+    end.
+
 clean_up_data_dir(DataDir) ->
     Dir1 = DataDir ++ "/config",
     Fs1 = filelib:wildcard(Dir1 ++ "/*"),

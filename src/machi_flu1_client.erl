@@ -21,12 +21,19 @@
 -module(machi_flu1_client).
 
 -include("machi.hrl").
+-include("machi_projection.hrl").
 
 -export([
+         %% File API
          append_chunk/4, append_chunk/5,
          read_chunk/5, read_chunk/6,
          checksum_list/3, checksum_list/4,
          list_files/2, list_files/3,
+
+         %% Projection API
+         write_projection/3, write_projection/4,
+
+         %% Common API
          quit/1
         ]).
 %% For "internal" replication only.
@@ -44,14 +51,16 @@
 -type epoch_csum()  :: binary().
 -type epoch_num()   :: non_neg_integer().
 -type epoch_id()    :: {epoch_num(), epoch_csum()}.
--type inet_host()   :: inet:ip_address() | inet:hostname().
--type inet_port()   :: inet:port_number().
 -type file_info()   :: {file_size(), file_name_s()}.
 -type file_name()   :: binary() | list().
 -type file_name_s() :: binary().                % server reply
 -type file_offset() :: non_neg_integer().
 -type file_size()   :: non_neg_integer().
 -type file_prefix() :: binary() | list().
+-type inet_host()   :: inet:ip_address() | inet:hostname().
+-type inet_port()   :: inet:port_number().
+-type projection()      :: #projection_v1{}.
+-type projection_type() :: 'public' | 'private'.
 
 -export_type([epoch_id/0]).
 
@@ -133,6 +142,26 @@ list_files(Host, TcpPort, EpochID) when is_integer(TcpPort) ->
     Sock = machi_util:connect(Host, TcpPort),
     try
         list2(Sock, EpochID)
+    after
+        catch gen_tcp:close(Sock)
+    end.
+
+%% @doc Write a projection `Proj' of type `ProjType'.
+
+-spec write_projection(port(), projection_type(), projection()) ->
+      'ok' | {error, written} | {error, term()}.
+write_projection(Sock, ProjType, Proj) ->
+    write_projection2(Sock, ProjType, Proj).
+
+%% @doc Write a projection `Proj' of type `ProjType'.
+
+-spec write_projection(inet_host(), inet_port(),
+                       projection_type(), projection()) ->
+      'ok' | {error, written} | {error, term()}.
+write_projection(Host, TcpPort, ProjType, Proj) ->
+    Sock = machi_util:connect(Host, TcpPort),
+    try
+        write_projection2(Sock, ProjType, Proj)
     after
         catch gen_tcp:close(Sock)
     end.
@@ -445,4 +474,33 @@ trunc_hack2(Sock, EpochID, File) ->
             Error;
         error:{badmatch,_}=BadMatch ->
             {error, {badmatch, BadMatch}}
+    end.
+
+write_projection2(Sock, ProjType, Proj) ->
+        ProjCmd = {write_projection, ProjType, Proj},
+        do_projection_common(Sock, ProjCmd).
+
+do_projection_common(Sock, ProjCmd) ->
+    try
+        ProjCmdBin = term_to_binary(ProjCmd),
+        Len = iolist_size(ProjCmdBin),
+        true = (Len =< ?MAX_CHUNK_SIZE),
+        LenHex = machi_util:int_to_hexbin(Len, 32),
+        Cmd = [<<"PROJ ">>, LenHex, <<"\n">>],
+        ok = gen_tcp:send(Sock, [Cmd, ProjCmdBin]),
+        {ok, Line} = gen_tcp:recv(Sock, 0),
+        PathLen = byte_size(Line) - 3 - 16 - 1 - 1,
+        case Line of
+            <<"OK\n">> ->
+                ok;
+            <<"ERROR WRITTEN\n">> ->
+                {error, written};
+            Else ->
+                {error, Else}
+        end
+    catch
+        throw:Error ->
+            Error;
+        error:{badmatch,_}=BadMatch ->
+            {error, {badmatch, BadMatch, erlang:get_stacktrace()}}
     end.

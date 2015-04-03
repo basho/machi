@@ -1,14 +1,30 @@
 * To Do list
 
-** Done: remove the escript* stuff from machi_util.erl
-** Done: Add functions to manipulate 1-chain projections
+** DONE remove the escript* stuff from machi_util.erl
+** DONE Add functions to manipulate 1-chain projections
 
 - Add epoch ID = epoch number + checksum of projection!
   Done via compare() func.
 
-** TODO Change all protocol ops to add epoch ID
-** TODO Move the FLU server to gen_server behavior?
+** DONE Change all protocol ops to add epoch ID
 ** TODO Add projection store to each FLU.
+
+*** DONE What should the API look like? (borrow from chain mgr PoC?)
+
+Yeah, I think that's pretty complete.  Steal it now, worry later.
+
+*** DONE Choose protocol & TCP port. Share with get/put? Separate?
+
+Hrm, I like the idea of having a single TCP port to talk to any single
+FLU.
+
+To make the protocol "easy" to hack, how about using the same basic
+method as append/write where there's a variable size blob.  But we'll
+format that blob as a term_to_binary().  Then dispatch to a single
+func, and pattern match Erlang style in that func.
+
+*** TODO Do it.
+
 ** TODO Change all protocol ops to enforce the epoch ID
 ** TODO Add projection wedging logic to each FLU.
 
@@ -18,3 +34,4 @@
 *** TODO Preserve current test code (leave as-is? tiny changes?)
 *** TODO Make chain manager code flexible enough to run "real world" or "sim"
 ** TODO Replace registered name use from FLU write/append dispatcher
+** TODO Move the FLU server to gen_server behavior?
