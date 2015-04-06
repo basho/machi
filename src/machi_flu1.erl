@@ -46,7 +46,7 @@ start_link([{FluName, TcpPort, DataDir}|Rest])
 stop(Pid) ->
     case erlang:is_process_alive(Pid) of
         true ->
-            Pid ! forever,
+            Pid ! killme,
             ok;
         false ->
             error
@@ -86,7 +86,11 @@ main2(RegName, TcpPort, DataDir, Rest) ->
     put(flu_append_pid, AppendPid),
     put(flu_projection_pid, ProjectionPid),
     put(flu_listen_pid, ListenPid),
-    receive forever -> ok end.
+    receive killme -> ok end,
+    (catch exit(AppendPid, kill)),
+    (catch exit(ProjectionPid, kill)),
+    (catch exit(ListenPid, kill)),
+    ok.
 
 start_listen_server(S) ->
     spawn_link(fun() -> run_listen_server(S) end).
