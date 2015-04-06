@@ -11,7 +11,7 @@ for helpful hints.
 
 ## Initial re-porting on 'prototype' directory
 
-* `demo-day-hack`: work started on the `slf/otp-refactoring-step1` branch
+* `demo-day-hack`: work started on the `slf/otp-refactoring-step2` branch
   to copy code from an internal Basho "Demo Day" from the `prototype/demo-day-hack`
   directory to the "official" top of this repo.  The end goal of this branch
   (and perhaps other branches with the `slf/otp-refactoring` prefix!) is
