@@ -31,7 +31,7 @@
          read_max_filenum/2, increment_max_filenum/2,
          info_msg/2, verb/1, verb/2,
          %% TCP protocol helpers
-         connect/2
+         connect/2, connect/3
         ]).
 -compile(export_all).
 
@@ -168,13 +168,19 @@ info_msg(Fmt, Args) ->
 -spec connect(inet:ip_address() | inet:hostname(), inet:port_number()) ->
       port().
 connect(Host, Port) ->
-    escript_connect(Host, Port).
+    escript_connect(Host, Port, 4500).
 
-escript_connect(Host, PortStr) when is_list(PortStr) ->
+-spec connect(inet:ip_address() | inet:hostname(), inet:port_number(),
+              timeout()) ->
+      port().
+connect(Host, Port, Timeout) ->
+    escript_connect(Host, Port, Timeout).
+
+escript_connect(Host, PortStr, Timeout) when is_list(PortStr) ->
     Port = list_to_integer(PortStr),
-    escript_connect(Host, Port);
-escript_connect(Host, Port) when is_integer(Port) ->
+    escript_connect(Host, Port, Timeout);
+escript_connect(Host, Port, Timeout) when is_integer(Port) ->
     {ok, Sock} = gen_tcp:connect(Host, Port, [{active,false}, {mode,binary},
-                                              {packet, raw}]),
+                                              {packet, raw}], Timeout),
     Sock.
 

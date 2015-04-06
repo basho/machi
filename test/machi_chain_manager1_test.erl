@@ -133,13 +133,13 @@ chain_to_projection(MyName, Epoch, UPI_list, Repairing_list, All_list) ->
 
 -ifndef(PULSE).
 
-smoke0_test() ->
+smoke0_testXXX() ->
     {ok, _} = machi_partition_simulator:start_link({1,2,3}, 50, 50),
     Host = "localhost",
     TcpPort = 6623,
     {ok, FLUa} = machi_flu1:start_link([{a,TcpPort,"./data.a"}]),
     {ok, M0} = ?MGR:start_link(a, [a,b,c], a),
-    SockA = machi_util:connect(Host, TcpPort),
+    _SockA = machi_util:connect(Host, TcpPort),
     try
         pong = ?MGR:ping(M0)
     after

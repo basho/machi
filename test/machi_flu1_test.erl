@@ -33,7 +33,12 @@ setup_test_flu(RegName, TcpPort, DataDir) ->
     setup_test_flu(RegName, TcpPort, DataDir, []).
 
 setup_test_flu(RegName, TcpPort, DataDir, DbgProps) ->
-    clean_up_data_dir(DataDir),
+    case proplists:get_value(save_data_dir, DbgProps) of
+        true ->
+            ok;
+        _ ->
+            clean_up_data_dir(DataDir)
+    end,
 
     {ok, FLU1} = ?FLU:start_link([{RegName, TcpPort, DataDir},
                                   {dbg, DbgProps}]),
@@ -128,8 +133,8 @@ flu_projection_smoke_test() ->
              {ok, {-1,_}} = ?FLU_C:get_latest_epoch(Host, TcpPort, T),
              {error, not_written} =
                  ?FLU_C:read_latest_projection(Host, TcpPort, T),
-             {ok, []} = ?FLU_C:list_all(Host, TcpPort, T),
-             {ok, []} = ?FLU_C:get_all(Host, TcpPort, T),
+             {ok, []} = ?FLU_C:list_all_projections(Host, TcpPort, T),
+             {ok, []} = ?FLU_C:get_all_projections(Host, TcpPort, T),
 
              P1 = machi_projection:new(1, a, [a], [], [a], [], []),
              ok = ?FLU_C:write_projection(Host, TcpPort, T, P1),
@@ -137,8 +142,8 @@ flu_projection_smoke_test() ->
              {ok, P1} = ?FLU_C:read_projection(Host, TcpPort, T, 1),
              {ok, {1,_}} = ?FLU_C:get_latest_epoch(Host, TcpPort, T),
              {ok, P1} = ?FLU_C:read_latest_projection(Host, TcpPort, T),
-             {ok, [1]} = ?FLU_C:list_all(Host, TcpPort, T),
-             {ok, [P1]} = ?FLU_C:get_all(Host, TcpPort, T),
+             {ok, [1]} = ?FLU_C:list_all_projections(Host, TcpPort, T),
+             {ok, [P1]} = ?FLU_C:get_all_projections(Host, TcpPort, T),
              {error, not_written} = ?FLU_C:read_projection(Host, TcpPort, T, 2)
          end || T <- [public, private] ]
     after

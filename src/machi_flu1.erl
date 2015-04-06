@@ -580,12 +580,12 @@ handle_projection_command({read_projection, ProjType, Epoch},
 handle_projection_command({write_projection, ProjType, Proj},
                           #state{proj_store=ProjStore}) ->
     machi_projection_store:write(ProjStore, ProjType, Proj);
-handle_projection_command({get_all, ProjType},
+handle_projection_command({get_all_projections, ProjType},
                           #state{proj_store=ProjStore}) ->
-    machi_projection_store:get_all(ProjStore, ProjType);
-handle_projection_command({list_all, ProjType},
+    machi_projection_store:get_all_projections(ProjStore, ProjType);
+handle_projection_command({list_all_projections, ProjType},
                           #state{proj_store=ProjStore}) ->
-    machi_projection_store:list_all(ProjStore, ProjType);
+    machi_projection_store:list_all_projections(ProjStore, ProjType);
 handle_projection_command(Else, _S) ->
     {error, unknown_cmd, Else}.
 

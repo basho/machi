@@ -29,21 +29,23 @@
          read_latest_projection/2, read_latest_projection/3,
          read/3, read/4,
          write/3, write/4,
-         get_all/2, get_all/3,
-         list_all/2, list_all/3
+         get_all_projections/2, get_all_projections/3,
+         list_all_projections/2, list_all_projections/3
         ]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
+-define(NO_EPOCH, {-1,<<0:(20*8)/big>>}).
+
 -record(state, {
           public_dir = ""        :: string(),
           private_dir = ""       :: string(),
           wedged = true          :: boolean(),
           wedge_notify_pid       :: pid() | atom(),
-          max_public_epoch =  {-1,<<>>} :: -1 | non_neg_integer(),
-          max_private_epoch = {-1,<<>>} :: -1 | non_neg_integer()
+          max_public_epoch =  ?NO_EPOCH :: {-1 | non_neg_integer(), binary()},
+          max_private_epoch = ?NO_EPOCH :: {-1 | non_neg_integer(), binary()}
          }).
 
 start_link(RegName, DataDir, NotifyWedgeStateChanges) ->
@@ -82,19 +84,19 @@ write(PidSpec, ProjType, Proj, Timeout)
        Proj#projection_v1.epoch_number >= 0 ->
     g_call(PidSpec, {write, ProjType, Proj}, Timeout).
 
-get_all(PidSpec, ProjType) ->
-    get_all(PidSpec, ProjType, infinity).
+get_all_projections(PidSpec, ProjType) ->
+    get_all_projections(PidSpec, ProjType, infinity).
 
-get_all(PidSpec, ProjType, Timeout)
+get_all_projections(PidSpec, ProjType, Timeout)
   when ProjType == 'public' orelse ProjType == 'private' ->
-    g_call(PidSpec, {get_all, ProjType}, Timeout).
+    g_call(PidSpec, {get_all_projections, ProjType}, Timeout).
 
-list_all(PidSpec, ProjType) ->
-    list_all(PidSpec, ProjType, infinity).
+list_all_projections(PidSpec, ProjType) ->
+    list_all_projections(PidSpec, ProjType, infinity).
 
-list_all(PidSpec, ProjType, Timeout)
+list_all_projections(PidSpec, ProjType, Timeout)
   when ProjType == 'public' orelse ProjType == 'private' ->
-    g_call(PidSpec, {list_all, ProjType}, Timeout).
+    g_call(PidSpec, {list_all_projections, ProjType}, Timeout).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -143,7 +145,7 @@ handle_call({{write, ProjType, Proj}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
     {Reply, NewS} = do_proj_write(ProjType, Proj, S),
     {reply, {Reply, LC2}, NewS};
-handle_call({{get_all, ProjType}, LC1}, _From, S) ->
+handle_call({{get_all_projections, ProjType}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
     Dir = pick_path(ProjType, S),
     Epochs = find_all(Dir),
@@ -152,7 +154,7 @@ handle_call({{get_all, ProjType}, LC1}, _From, S) ->
                Proj
            end || Epoch <- Epochs],
     {reply, {{ok, All}, LC2}, S};
-handle_call({{list_all, ProjType}, LC1}, _From, S) ->
+handle_call({{list_all_projections, ProjType}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
     Dir = pick_path(ProjType, S),
     {reply, {{ok, find_all(Dir)}, LC2}, S};
@@ -205,7 +207,7 @@ do_proj_write(ProjType, #projection_v1{epoch_number=Epoch}=Proj, S) ->
             ok = file:write(FH, term_to_binary(Proj)),
             ok = file:sync(FH),
             ok = file:close(FH),
-            EpochT = {Epoch, Proj},
+            EpochT = {Epoch, Proj#projection_v1.epoch_csum},
             NewS = if ProjType == public,
                       Epoch > element(1, S#state.max_public_epoch) ->
                            io:format(user, "TODO: tell ~p we are wedged by epoch ~p\n", [S#state.wedge_notify_pid, Epoch]),
@@ -240,7 +242,7 @@ find_all(Dir) ->
 find_max_epoch(Dir) ->
     Fs = lists:sort(filelib:wildcard("*", Dir)),
     if Fs == [] ->
-            {-1, <<>>};
+            ?NO_EPOCH;
        true ->
             EpochNum = name2epoch(lists:last(Fs)),
             {{ok, Proj}, _} = do_proj_read(proj_type_ignored, EpochNum, Dir),
