@@ -154,7 +154,7 @@ list_files(Host, TcpPort, EpochID) when is_integer(TcpPort) ->
 %% @doc Get the latest epoch number from the FLU's projection store.
 
 -spec get_latest_epoch(port(), projection_type()) ->
-      {ok, -1|non_neg_integer()} | {error, term()}.
+      {ok, epoch_id()} | {error, term()}.
 get_latest_epoch(Sock, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
     get_latest_epoch2(Sock, ProjType).
@@ -163,7 +163,7 @@ get_latest_epoch(Sock, ProjType)
 
 -spec get_latest_epoch(inet_host(), inet_port(),
                        projection_type()) ->
-      {ok, -1|non_neg_integer()} | {error, term()}.
+      {ok, epoch_id()} | {error, term()}.
 get_latest_epoch(Host, TcpPort, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
     Sock = machi_util:connect(Host, TcpPort),
