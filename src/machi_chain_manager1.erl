@@ -35,6 +35,9 @@
 -define(D(X), io:format(user, "~s ~p\n", [??X, X])).
 -define(Dw(X), io:format(user, "~s ~w\n", [??X, X])).
 
+-define(FLU_C,  machi_flu1_client).
+-define(FLU_PC, machi_proxy_flu1_client).
+
 %% Keep a history of our flowchart execution in the process dictionary.
 -define(REACT(T), put(react, [T|get(react)])).
 
@@ -202,13 +205,13 @@ code_change(_OldVsn, S, _Extra) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 finish_init(BestProj, #ch_mgr{init_finished=false, myflu=MyFLU} = S) ->
-    case machi_flu0:proj_read_latest(MyFLU, private) of
-        error_unwritten ->
+    case ?FLU_PC:read_latest_projection(MyFLU, private) of
+        {error, not_written} ->
             Epoch = BestProj#projection_v1.epoch_number,
-            case machi_flu0:proj_write(MyFLU, Epoch, private, BestProj) of
+            case ?FLU_PC:write_projection(MyFLU, private, BestProj) of
                 ok ->
                     S#ch_mgr{init_finished=true, proj=BestProj};
-                error_written ->
+                {error, not_written} ->
                     exit({yo_impossible, ?LINE});
                 Else ->
                     ?D({retry,Else}),

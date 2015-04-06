@@ -28,7 +28,8 @@
 
 -define(D(X), io:format(user, "~s ~p\n", [??X, X])).
 -define(Dw(X), io:format(user, "~s ~w\n", [??X, X])).
--define(FLU_C, machi_flu1_client).
+-define(FLU_C,  machi_flu1_client).
+-define(FLU_PC, machi_proxy_flu1_client).
 
 -export([]).
 
@@ -133,18 +134,23 @@ chain_to_projection(MyName, Epoch, UPI_list, Repairing_list, All_list) ->
 
 -ifndef(PULSE).
 
-smoke0_testXXX() ->
+smoke0_test() ->
     {ok, _} = machi_partition_simulator:start_link({1,2,3}, 50, 50),
     Host = "localhost",
     TcpPort = 6623,
     {ok, FLUa} = machi_flu1:start_link([{a,TcpPort,"./data.a"}]),
-    {ok, M0} = ?MGR:start_link(a, [a,b,c], a),
+    Pa = #p_srvr{name=a, proto=ipv4, address=Host, port=TcpPort},
+    %% Egadz, more racing on startup, yay.  TODO fix.
+    timer:sleep(1),
+    {ok, FLUaP} = ?FLU_PC:start_link(Pa),
+    {ok, M0} = ?MGR:start_link(a, [a,b,c], FLUaP),
     _SockA = machi_util:connect(Host, TcpPort),
     try
         pong = ?MGR:ping(M0)
     after
         ok = ?MGR:stop(M0),
-        ok = machi_flu0:stop(FLUa),
+        ok = machi_flu1:stop(FLUa),
+        ok = ?FLU_PC:quit(FLUaP),
         ok = machi_partition_simulator:stop()
     end.
 
