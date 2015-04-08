@@ -18,6 +18,33 @@
 %%
 %% -------------------------------------------------------------------
 
+%% @doc The Machi FLU file server + file location sequencer.
+%%
+%% This module implements only the Machi FLU file server and its
+%% implicit sequencer.  
+%% Please see the EDoc "Overview" for details about the FLU as a
+%% primitive file server process vs. the larger Machi design of a FLU
+%% as a sequencer + file server + chain manager group of processes.
+%%
+%% For the moment, this module also implements a rudimentary TCP-based
+%% protocol as the sole supported access method to the server,
+%% sequencer, and projection store.  Conceptually, those three
+%% services are independent and ought to have their own protocols.  As
+%% a practical matter, there is no need for wire protocol
+%% compatibility.  Furthermore, from the perspective of failure
+%% detection, it is very convenient that all three FLU-related
+%% services are accessed using the same single TCP port.
+%%
+%% The FLU is named after the CORFU server "FLU" or "FLash Unit" server.
+%%
+%% TODO There is one major missing feature in this FLU implementation:
+%% there is no "write-once" enforcement for any position in a Machi
+%% file.  At the moment, we rely on correct behavior of the client
+%% &amp; the sequencer to avoid overwriting data.  In the Real World,
+%% however, all Machi file data is supposed to be exactly write-once
+%% to avoid problems with bugs, wire protocol corruption, malicious
+%% clients, etc.
+
 -module(machi_flu1).
 
 -include_lib("kernel/include/file.hrl").
@@ -218,7 +245,7 @@ do_net_server_append2(RegName, Sock, LenHex, Prefix) ->
     <<Len:32/big>> = machi_util:hexstr_to_bin(LenHex),
     ok = inet:setopts(Sock, [{packet, raw}]),
     {ok, Chunk} = gen_tcp:recv(Sock, Len, 60*1000),
-    CSum = machi_util:checksum(Chunk),
+    CSum = machi_util:checksum_chunk(Chunk),
     try
         RegName ! {seq_append, self(), Prefix, Chunk, CSum}
     catch error:badarg ->
@@ -300,7 +327,7 @@ do_net_server_write2(Sock, OffsetHex, LenHex, FileBin, DataDir, FHc) ->
     DoItFun = fun(FHd, Offset, Len) ->
                       ok = inet:setopts(Sock, [{packet, raw}]),
                       {ok, Chunk} = gen_tcp:recv(Sock, Len),
-                      CSum = machi_util:checksum(Chunk),
+                      CSum = machi_util:checksum_chunk(Chunk),
                       case file:pwrite(FHd, Offset, Chunk) of
                           ok ->
                               CSumHex = machi_util:bin_to_hexstr(CSum),

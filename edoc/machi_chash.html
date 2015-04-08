@@ -1,0 +1,171 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Module machi_chash</title>
+<link rel="stylesheet" type="text/css" href="stylesheet.css" title="EDoc">
+</head>
+<body bgcolor="white">
+<div class="navbar"><a name="#navbar_top"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<hr>
+
+<h1>Module machi_chash</h1>
+<ul class="index"><li><a href="#description">Description</a></li><li><a href="#types">Data Types</a></li><li><a href="#index">Function Index</a></li><li><a href="#functions">Function Details</a></li></ul>Consistent hashing library.
+
+
+<h2><a name="description">Description</a></h2><p>Consistent hashing library.  Also known as "random slicing".</p>
+ 
+  This code was originally from the Hibari DB source code at
+  <a href="https://github.com/hibari" target="_top"><tt>https://github.com/hibari</tt></a>
+<h2><a name="types">Data Types</a></h2>
+
+<h3 class="typedecl"><a name="type-float_map">float_map()</a></h3>
+<p><tt>float_map() = [{<a href="#type-owner_name">owner_name()</a>, float()}]</tt></p>
+<p>  A float map subdivides the unit interval, starting at 0.0, to
+  partitions that are assigned to various owners.  The sum of all
+  floats must be exactly 1.0 (or close enough for floating point
+  purposes).</p>
+
+<h3 class="typedecl"><a name="type-float_tree">float_tree()</a></h3>
+<p><b>abstract datatype</b>: <tt>float_tree()</tt></p>
+<p>  We can't use gb_trees:tree() because 'nil' (the empty tree) is
+  never valid in our case.  But teaching Dialyzer that is difficult.</p>
+
+<h3 class="typedecl"><a name="type-nextfloat_list">nextfloat_list()</a></h3>
+<p><tt>nextfloat_list() = [{float(), <a href="#type-brick">brick()</a>}]</tt></p>
+<p>A nextfloat_list
+  differs from a float_map in two respects: 1) nextfloat_list contains
+  tuples with the brick name in 2nd position, 2) the float() at each
+  position I_n &gt; I_m, for all n, m such that n &gt; m.
+  For example, a nextfloat_list of the float_map example above,
+  [{0.25, {br1, nd1}}, {0.75, {br2, nd1}}, {1.0, {br3, nd1}].</p>
+
+<h3 class="typedecl"><a name="type-owner_int_range">owner_int_range()</a></h3>
+<p><tt>owner_int_range() = {<a href="#type-owner_name">owner_name()</a>, non_neg_integer(), non_neg_integer()}</tt></p>
+<p>  Used when "prettying" a float map.</p>
+
+<h3 class="typedecl"><a name="type-owner_name">owner_name()</a></h3>
+<p><tt>owner_name() = term()</tt></p>
+<p>  Owner for a range on the unit interval.  We are agnostic about its
+  type.</p>
+
+<h3 class="typedecl"><a name="type-owner_weight">owner_weight()</a></h3>
+<p><tt>owner_weight() = {<a href="#type-owner_name">owner_name()</a>, <a href="#type-weight">weight()</a>}</tt></p>
+
+
+<h3 class="typedecl"><a name="type-owner_weight_list">owner_weight_list()</a></h3>
+<p><tt>owner_weight_list() = [<a href="#type-owner_weight">owner_weight()</a>]</tt></p>
+<p>  A owner_weight_list is a definition of brick assignments over the
+  unit interval [0.0, 1.0].  The sum of all floats must be 1.0.  For
+  example, [{{br1,nd1}, 0.25}, {{br2,nd1}, 0.5}, {{br3,nd1}, 0.25}].</p>
+
+<h3 class="typedecl"><a name="type-weight">weight()</a></h3>
+<p><tt>weight() = non_neg_integer()</tt></p>
+<p>  For this library, a weight is an integer which specifies the
+  capacity of a "owner" relative to other owners.  For example, if
+  owner A with a weight of 10, and if owner B has a weight of 20,
+  then B will be assigned twice as much of the unit interval as A.</p>
+
+<h2><a name="index">Function Index</a></h2>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#hash_binary_via_float_map-2">hash_binary_via_float_map/2</a></td><td>Query a float map with a binary (inefficient).</td></tr>
+<tr><td valign="top"><a href="#hash_binary_via_float_tree-2">hash_binary_via_float_tree/2</a></td><td>Query a float tree with a binary.</td></tr>
+<tr><td valign="top"><a href="#make_demo_map1-0">make_demo_map1/0</a></td><td>Create a sample float map.</td></tr>
+<tr><td valign="top"><a href="#make_demo_map2-0">make_demo_map2/0</a></td><td>Create a sample float map.</td></tr>
+<tr><td valign="top"><a href="#make_float_map-1">make_float_map/1</a></td><td>Create a float map, based on a basic owner weight list.</td></tr>
+<tr><td valign="top"><a href="#make_float_map-2">make_float_map/2</a></td><td>Create a float map, based on an older float map and a new weight  
+list.</td></tr>
+<tr><td valign="top"><a href="#make_tree-1">make_tree/1</a></td><td>Create a float tree, which is the rapid lookup data structure
+  for consistent hash queries.</td></tr>
+<tr><td valign="top"><a href="#pretty_with_integers-2">pretty_with_integers/2</a></td><td>Make a pretty/human-friendly version of a float map that describes
+  integer ranges between 1 and <code>Scale</code>.</td></tr>
+<tr><td valign="top"><a href="#pretty_with_integers-3">pretty_with_integers/3</a></td><td>Make a pretty/human-friendly version of a float map (based
+  upon a float map created from <code>OldWeights</code> and <code>NewWeights</code>) that
+  describes integer ranges between 1 and <code>Scale</code>.</td></tr>
+<tr><td valign="top"><a href="#query_tree-2">query_tree/2</a></td><td>Low-level function for querying a float tree: the (floating
+  point) point within the unit interval.</td></tr>
+<tr><td valign="top"><a href="#sum_map_weights-1">sum_map_weights/1</a></td><td>Create a human-friendly summary of a float map.</td></tr>
+<tr><td valign="top"><a href="#zzz_usage_details-0">zzz_usage_details/0</a></td><td>Various usage examples, see source code below this function
+     for full details.</td></tr>
+</table>
+
+<h2><a name="functions">Function Details</a></h2>
+
+<h3 class="function"><a name="hash_binary_via_float_map-2">hash_binary_via_float_map/2</a></h3>
+<div class="spec">
+<p><tt>hash_binary_via_float_map(Key::binary(), Map::<a href="#type-float_map">float_map()</a>) -&gt; {float(), <a href="#type-owner_name">owner_name()</a>}</tt><br></p>
+</div><p>Query a float map with a binary (inefficient).</p>
+
+<h3 class="function"><a name="hash_binary_via_float_tree-2">hash_binary_via_float_tree/2</a></h3>
+<div class="spec">
+<p><tt>hash_binary_via_float_tree(Key::binary(), Tree::<a href="#type-float_tree">float_tree()</a>) -&gt; {float(), <a href="#type-owner_name">owner_name()</a>}</tt><br></p>
+</div><p>Query a float tree with a binary.</p>
+
+<h3 class="function"><a name="make_demo_map1-0">make_demo_map1/0</a></h3>
+<div class="spec">
+<p><tt>make_demo_map1() -&gt; <a href="#type-float_map">float_map()</a></tt><br></p>
+</div><p>Create a sample float map.</p>
+
+<h3 class="function"><a name="make_demo_map2-0">make_demo_map2/0</a></h3>
+<div class="spec">
+<p><tt>make_demo_map2() -&gt; <a href="#type-float_map">float_map()</a></tt><br></p>
+</div><p>Create a sample float map.</p>
+
+<h3 class="function"><a name="make_float_map-1">make_float_map/1</a></h3>
+<div class="spec">
+<p><tt>make_float_map(NewOwnerWeights::<a href="#type-owner_weight_list">owner_weight_list()</a>) -&gt; <a href="#type-float_map">float_map()</a></tt><br></p>
+</div><p>Create a float map, based on a basic owner weight list.</p>
+
+<h3 class="function"><a name="make_float_map-2">make_float_map/2</a></h3>
+<div class="spec">
+<p><tt>make_float_map(OldFloatMap::<a href="#type-float_map">float_map()</a>, NewOwnerWeights::<a href="#type-owner_weight_list">owner_weight_list()</a>) -&gt; <a href="#type-float_map">float_map()</a></tt><br></p>
+</div><p><p>Create a float map, based on an older float map and a new weight  
+list.</p>
+ 
+  The weights in the new weight list may be different than (or the
+  same as) whatever weights were used to make the older float map.</p>
+
+<h3 class="function"><a name="make_tree-1">make_tree/1</a></h3>
+<div class="spec">
+<p><tt>make_tree(Map::<a href="#type-float_map">float_map()</a>) -&gt; <a href="#type-float_tree">float_tree()</a></tt><br></p>
+</div><p>Create a float tree, which is the rapid lookup data structure
+  for consistent hash queries.</p>
+
+<h3 class="function"><a name="pretty_with_integers-2">pretty_with_integers/2</a></h3>
+<div class="spec">
+<p><tt>pretty_with_integers(Map::<a href="#type-float_map">float_map()</a>, Scale::integer()) -&gt; [<a href="#type-owner_int_range">owner_int_range()</a>]</tt><br></p>
+</div><p>Make a pretty/human-friendly version of a float map that describes
+  integer ranges between 1 and <code>Scale</code>.</p>
+
+<h3 class="function"><a name="pretty_with_integers-3">pretty_with_integers/3</a></h3>
+<div class="spec">
+<p><tt>pretty_with_integers(OldWeights::<a href="#type-owner_weight_list">owner_weight_list()</a>, NewWeights::<a href="#type-owner_weight_list">owner_weight_list()</a>, Scale::integer()) -&gt; [<a href="#type-owner_int_range">owner_int_range()</a>]</tt><br></p>
+</div><p>Make a pretty/human-friendly version of a float map (based
+  upon a float map created from <code>OldWeights</code> and <code>NewWeights</code>) that
+  describes integer ranges between 1 and <code>Scale</code>.</p>
+
+<h3 class="function"><a name="query_tree-2">query_tree/2</a></h3>
+<div class="spec">
+<p><tt>query_tree(Val::float(), Tree::<a href="#type-float_tree">float_tree()</a>) -&gt; {float(), <a href="#type-owner_name">owner_name()</a>}</tt><br></p>
+</div><p>Low-level function for querying a float tree: the (floating
+  point) point within the unit interval.</p>
+
+<h3 class="function"><a name="sum_map_weights-1">sum_map_weights/1</a></h3>
+<div class="spec">
+<p><tt>sum_map_weights(Map::<a href="#type-float_map">float_map()</a>) -&gt; {{per_owner, <a href="#type-float_map">float_map()</a>}, {weight_sum, float()}}</tt><br></p>
+</div><p><p>Create a human-friendly summary of a float map.</p>
+ 
+  The two parts of the summary are: a per-owner total of the unit
+  interval range(s) owned by each owner, and a total sum of all
+  per-owner ranges (which should be 1.0 but is not enforced).</p>
+
+<h3 class="function"><a name="zzz_usage_details-0">zzz_usage_details/0</a></h3>
+<div class="spec">
+<p><tt>zzz_usage_details() -&gt; any()</tt></p>
+</div><p>Various usage examples, see source code below this function
+     for full details.</p>
+<hr>
+
+<div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<p><i>Generated by EDoc, Apr 8 2015, 17:31:11.</i></p>
+</body>
+</html>

@@ -18,6 +18,9 @@
 %%
 %% -------------------------------------------------------------------
 
+%% @doc Supervisor for Machi FLU servers and their related support
+%% servers.
+
 -module(machi_flu_sup).
 
 -behaviour(supervisor).

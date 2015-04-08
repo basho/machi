@@ -18,6 +18,25 @@
 %%
 %% -------------------------------------------------------------------
 
+%% @doc The Machi write-once projection store service.
+%%
+%% This API is gen_server-style message passing, intended for use
+%% within a single Erlang node to glue together the projection store
+%% server with the node-local process that implements Machi's TCP
+%% client access protocol (on the "server side" of the TCP connection).
+%%
+%% All Machi client access to the projection store SHOULD NOT use this
+%% module's API.
+%%
+%% The projection store is implemented by an Erlang/OTP `gen_server'
+%% process that is associated with each FLU.  Conceptually, the
+%% projection store is an array of write-once registers.  For each
+%% projection store register, the key is a 2-tuple of an epoch number
+%% (`non_neg_integer()' type) and a projection type (`public' or
+%% `private' type); the value is a projection data structure
+%% (`projection_v1()' type).
+
+
 -module(machi_projection_store).
 
 -include("machi_projection.hrl").
@@ -48,34 +67,59 @@
           max_private_epoch = ?NO_EPOCH :: {-1 | non_neg_integer(), binary()}
          }).
 
+%% @doc Start a new projection store server.
+%%
+%% The `DataDir' argument should be the same directory as specified
+%% for use by our companion FLU data server -- all file system paths
+%% used by this server are intended to be stored underneath a common
+%% file system parent directory as the FLU data server &amp; sequencer
+%% servers.
+
 start_link(RegName, DataDir, NotifyWedgeStateChanges) ->
     gen_server:start_link({local, RegName},
                           ?MODULE, [DataDir, NotifyWedgeStateChanges], []).
 
+%% @doc Fetch the latest epoch number + checksum for type `ProjType'.
+
 get_latest_epoch(PidSpec, ProjType) ->
     get_latest_epoch(PidSpec, ProjType, infinity).
+
+%% @doc Fetch the latest epoch number + checksum for type `ProjType'.
+%% projection.
 
 get_latest_epoch(PidSpec, ProjType, Timeout)
   when ProjType == 'public' orelse ProjType == 'private' ->
     g_call(PidSpec, {get_latest_epoch, ProjType}, Timeout).
 
+%% @doc Fetch the latest projection record for type `ProjType'.
+
 read_latest_projection(PidSpec, ProjType) ->
     read_latest_projection(PidSpec, ProjType, infinity).
+
+%% @doc Fetch the latest projection record for type `ProjType'.
 
 read_latest_projection(PidSpec, ProjType, Timeout)
   when ProjType == 'public' orelse ProjType == 'private' ->
     g_call(PidSpec, {read_latest_projection, ProjType}, Timeout).
 
+%% @doc Fetch the projection record type `ProjType' for epoch number `Epoch' .
+
 read(PidSpec, ProjType, Epoch) ->
     read(PidSpec, ProjType, Epoch, infinity).
+
+%% @doc Fetch the projection record type `ProjType' for epoch number `Epoch' .
 
 read(PidSpec, ProjType, Epoch, Timeout)
   when ProjType == 'public' orelse ProjType == 'private',
        is_integer(Epoch), Epoch >= 0 ->
     g_call(PidSpec, {read, ProjType, Epoch}, Timeout).
 
+%% @doc Write the projection record type `ProjType' for epoch number `Epoch' .
+
 write(PidSpec, ProjType, Proj) ->
     write(PidSpec, ProjType, Proj, infinity).
+
+%% @doc Write the projection record type `ProjType' for epoch number `Epoch' .
 
 write(PidSpec, ProjType, Proj, Timeout)
   when ProjType == 'public' orelse ProjType == 'private',
@@ -84,15 +128,23 @@ write(PidSpec, ProjType, Proj, Timeout)
        Proj#projection_v1.epoch_number >= 0 ->
     g_call(PidSpec, {write, ProjType, Proj}, Timeout).
 
+%% @doc Fetch all projection records of type `ProjType'.
+
 get_all_projections(PidSpec, ProjType) ->
     get_all_projections(PidSpec, ProjType, infinity).
+
+%% @doc Fetch all projection records of type `ProjType'.
 
 get_all_projections(PidSpec, ProjType, Timeout)
   when ProjType == 'public' orelse ProjType == 'private' ->
     g_call(PidSpec, {get_all_projections, ProjType}, Timeout).
 
+%% @doc Fetch all projection epoch numbers of type `ProjType'.
+
 list_all_projections(PidSpec, ProjType) ->
     list_all_projections(PidSpec, ProjType, infinity).
+
+%% @doc Fetch all projection epoch numbers of type `ProjType'.
 
 list_all_projections(PidSpec, ProjType, Timeout)
   when ProjType == 'public' orelse ProjType == 'private' ->

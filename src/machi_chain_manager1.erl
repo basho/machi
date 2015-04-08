@@ -19,6 +19,28 @@
 %% under the License.
 %%
 %% -------------------------------------------------------------------
+
+%% @doc The Machi chain manager, Guardian of all things related to
+%% Chain Replication state, status, and data replica safety.
+%%
+%% The Chain Manager is responsible for managing the state of Machi's
+%% "Chain Replication" state.  This role is roughly analogous to the
+%% "Riak Core" application inside of Riak, which takes care of
+%% coordinating replica placement and replica repair.
+%% 
+%% For each primitive data server in the cluster, a Machi FLU, there
+%% is a Chain Manager process that manages its FLU's role within the
+%% Machi cluster's Chain Replication scheme.  Each Chain Manager
+%% process executes locally and independently to manage the
+%% distributed state of a single Machi Chain Replication chain.
+%%
+%% Machi's Chain Manager process performs similar tasks as Riak Core's
+%% claimant.  However, Machi has several active Chain Manager
+%% processes, one per FLU server, instead of a single active process
+%% like Core's claimant.  Each Chain Manager process acts
+%% independently; each is constrained so that it will reach consensus
+%% via independent computation &amp; action.
+
 -module(machi_chain_manager1).
 
 %% TODO: I am going to sever the connection between the flowchart and the

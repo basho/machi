@@ -18,6 +18,8 @@
 %%
 %% -------------------------------------------------------------------
 
+%% @doc API for manipulating Machi projection data structures (i.e., records).
+
 -module(machi_projection).
 
 -include("machi_projection.hrl").
@@ -30,12 +32,18 @@
          make_projection_summary/1
         ]).
 
+%% @doc Create a new projection record.
+
 new(MyName, All_list, UPI_list, Down_list, Repairing_list, Ps) ->
     new(0, MyName, All_list, Down_list, UPI_list, Repairing_list, Ps).
+
+%% @doc Create a new projection record.
 
 new(EpochNum, MyName, All_list, Down_list, UPI_list, Repairing_list, Dbg) ->
     new(EpochNum, MyName, All_list, Down_list, UPI_list, Repairing_list,
         Dbg, []).
+
+%% @doc Create a new projection record.
 
 new(EpochNum, MyName, All_list0, Down_list, UPI_list, Repairing_list,
     Dbg, Dbg2)
@@ -87,14 +95,21 @@ new(EpochNum, MyName, All_list0, Down_list, UPI_list, Repairing_list,
                       },
     update_projection_dbg2(update_projection_checksum(P), Dbg2).
 
+%% @doc Update the checksum element of a projection record.
+
 update_projection_checksum(P) ->
     CSum = crypto:hash(sha,
                        term_to_binary(P#projection_v1{epoch_csum= <<>>,
                                                       dbg2=[]})),
     P#projection_v1{epoch_csum=CSum}.
 
+%% @doc Update the `dbg2' element of a projection record.
+
 update_projection_dbg2(P, Dbg2) when is_list(Dbg2) ->
     P#projection_v1{dbg2=Dbg2}.
+
+%% @doc Compare two projection records for equality (assuming that the
+%% checksum element has been correctly calculated).
 
 -spec compare(#projection_v1{}, #projection_v1{}) ->
       integer().
@@ -106,6 +121,8 @@ compare(#projection_v1{epoch_number=E1},
     if E1 =< E2 -> -1;
        E1 >  E2 ->  1
     end.
+
+%% @doc Create a proplist-style summary of a projection record.
 
 make_projection_summary(#projection_v1{epoch_number=EpochNum,
                                        all_members=_All_list,

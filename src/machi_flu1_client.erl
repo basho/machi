@@ -18,6 +18,8 @@
 %%
 %% -------------------------------------------------------------------
 
+%% @doc Erlang API for the Machi FLU TCP protocol version 1.
+
 -module(machi_flu1_client).
 
 -include("machi.hrl").
@@ -151,7 +153,7 @@ list_files(Host, TcpPort, EpochID) when is_integer(TcpPort) ->
         catch gen_tcp:close(Sock)
     end.
 
-%% @doc Get the latest epoch number from the FLU's projection store.
+%% @doc Get the latest epoch number + checksum from the FLU's projection store.
 
 -spec get_latest_epoch(port(), projection_type()) ->
       {ok, epoch_id()} | {error, term()}.
@@ -159,7 +161,7 @@ get_latest_epoch(Sock, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
     get_latest_epoch2(Sock, ProjType).
 
-%% @doc Get the latest epoch number from the FLU's projection store.
+%% @doc Get the latest epoch number + checksum from the FLU's projection store.
 
 -spec get_latest_epoch(inet_host(), inet_port(),
                        projection_type()) ->
@@ -173,7 +175,7 @@ get_latest_epoch(Host, TcpPort, ProjType)
         catch gen_tcp:close(Sock)
     end.
 
-%% @doc Get the latest epoch number from the FLU's projection store.
+%% @doc Get the latest projection from the FLU's projection store for `ProjType'
 
 -spec read_latest_projection(port(), projection_type()) ->
       {ok, projection()} | {error, not_written} | {error, term()}.
@@ -181,7 +183,7 @@ read_latest_projection(Sock, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
     read_latest_projection2(Sock, ProjType).
 
-%% @doc Get the latest epoch number from the FLU's projection store.
+%% @doc Get the latest projection from the FLU's projection store for `ProjType'
 
 -spec read_latest_projection(inet_host(), inet_port(),
                        projection_type()) ->
@@ -368,7 +370,7 @@ append_chunk2(Sock, EpochID, Prefix0, Chunk0) ->
     erase(bad_sock),
     try
         %% TODO: add client-side checksum to the server's protocol
-        %% _ = crypto:hash(md5, Chunk),
+        %% _ = machi_util:checksum_chunk(Chunk),
         Prefix = machi_util:make_binary(Prefix0),
         Chunk = machi_util:make_binary(Chunk0),
         Len = iolist_size(Chunk0),
@@ -536,7 +538,7 @@ write_chunk2(Sock, EpochID, File0, Offset, Chunk0) ->
         {EpochNum, EpochCSum} = EpochID,
         EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
         %% TODO: add client-side checksum to the server's protocol
-        %% _ = crypto:hash(md5, Chunk),
+        %% _ = machi_util:checksum_chunk(Chunk),
         File = machi_util:make_binary(File0),
         true = (Offset >= ?MINIMUM_OFFSET),
         OffsetHex = machi_util:int_to_hexbin(Offset, 64),

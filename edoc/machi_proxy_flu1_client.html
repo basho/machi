@@ -1,0 +1,222 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Module machi_proxy_flu1_client</title>
+<link rel="stylesheet" type="text/css" href="stylesheet.css" title="EDoc">
+</head>
+<body bgcolor="white">
+<div class="navbar"><a name="#navbar_top"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<hr>
+
+<h1>Module machi_proxy_flu1_client</h1>
+<ul class="index"><li><a href="#description">Description</a></li><li><a href="#index">Function Index</a></li><li><a href="#functions">Function Details</a></li></ul>Erlang API for the Machi FLU TCP protocol version 1, with a  
+proxy-process style API for hiding messy details such as TCP  
+connection/disconnection with the remote Machi server.
+
+<p><b>Behaviours:</b> <a href="gen_server.html"><tt>gen_server</tt></a>.</p>
+
+<h2><a name="description">Description</a></h2><p>Erlang API for the Machi FLU TCP protocol version 1, with a  
+proxy-process style API for hiding messy details such as TCP  
+connection/disconnection with the remote Machi server.</p>
+ 
+  <p>Machi is intentionally avoiding using distributed Erlang for
+  Machi's communication.  This design decision makes Erlang-side code
+  more difficult &amp; complex, but it's the price to pay for some  
+language independence.  Later in Machi's life cycle, we need to  
+(re-)implement some components in a non-Erlang/BEAM-based language.</p>
+ 
+  This module implements a "man in the middle" proxy between the
+  Erlang client and Machi server (which is on the "far side" of a TCP
+  connection to somewhere).  This proxy process will always execute
+  on the same Erlang node as the Erlang client that uses it.  The
+  proxy is intended to be a stable, long-lived process that survives
+  TCP communication problems with the remote server.
+<h2><a name="index">Function Index</a></h2>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#append_chunk-4">append_chunk/4</a></td><td>Append a chunk (binary- or iolist-style) of data to a file
+  with <code>Prefix</code>.</td></tr>
+<tr><td valign="top"><a href="#append_chunk-5">append_chunk/5</a></td><td>Append a chunk (binary- or iolist-style) of data to a file
+  with <code>Prefix</code>.</td></tr>
+<tr><td valign="top"><a href="#checksum_list-3">checksum_list/3</a></td><td>Fetch the list of chunk checksums for <code>File</code>.</td></tr>
+<tr><td valign="top"><a href="#checksum_list-4">checksum_list/4</a></td><td>Fetch the list of chunk checksums for <code>File</code>.</td></tr>
+<tr><td valign="top"><a href="#code_change-3">code_change/3</a></td><td></td></tr>
+<tr><td valign="top"><a href="#get_all_projections-2">get_all_projections/2</a></td><td>Get all projections from the FLU's projection store.</td></tr>
+<tr><td valign="top"><a href="#get_all_projections-3">get_all_projections/3</a></td><td>Get all projections from the FLU's projection store.</td></tr>
+<tr><td valign="top"><a href="#get_latest_epoch-2">get_latest_epoch/2</a></td><td>Get the latest epoch number + checksum from the FLU's projection store.</td></tr>
+<tr><td valign="top"><a href="#get_latest_epoch-3">get_latest_epoch/3</a></td><td>Get the latest epoch number + checksum from the FLU's projection store.</td></tr>
+<tr><td valign="top"><a href="#handle_call-3">handle_call/3</a></td><td></td></tr>
+<tr><td valign="top"><a href="#handle_cast-2">handle_cast/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#handle_info-2">handle_info/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#init-1">init/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#list_all_projections-2">list_all_projections/2</a></td><td>Get all epoch numbers from the FLU's projection store.</td></tr>
+<tr><td valign="top"><a href="#list_all_projections-3">list_all_projections/3</a></td><td>Get all epoch numbers from the FLU's projection store.</td></tr>
+<tr><td valign="top"><a href="#list_files-2">list_files/2</a></td><td>Fetch the list of all files on the remote FLU.</td></tr>
+<tr><td valign="top"><a href="#list_files-3">list_files/3</a></td><td>Fetch the list of all files on the remote FLU.</td></tr>
+<tr><td valign="top"><a href="#quit-1">quit/1</a></td><td>Quit &amp; close the connection to remote FLU and stop our
+  proxy process.</td></tr>
+<tr><td valign="top"><a href="#read_chunk-5">read_chunk/5</a></td><td>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</td></tr>
+<tr><td valign="top"><a href="#read_chunk-6">read_chunk/6</a></td><td>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</td></tr>
+<tr><td valign="top"><a href="#read_latest_projection-2">read_latest_projection/2</a></td><td>Get the latest projection from the FLU's projection store for <code>ProjType</code></td></tr>
+<tr><td valign="top"><a href="#read_latest_projection-3">read_latest_projection/3</a></td><td>Get the latest projection from the FLU's projection store for <code>ProjType</code></td></tr>
+<tr><td valign="top"><a href="#read_projection-3">read_projection/3</a></td><td>Read a projection <code>Proj</code> of type <code>ProjType</code>.</td></tr>
+<tr><td valign="top"><a href="#read_projection-4">read_projection/4</a></td><td>Read a projection <code>Proj</code> of type <code>ProjType</code>.</td></tr>
+<tr><td valign="top"><a href="#start_link-1">start_link/1</a></td><td>Start a local, long-lived process that will be our steady
+  &amp; reliable communication proxy with the fickle &amp; flaky
+  remote Machi server.</td></tr>
+<tr><td valign="top"><a href="#terminate-2">terminate/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#write_projection-3">write_projection/3</a></td><td>Write a projection <code>Proj</code> of type <code>ProjType</code>.</td></tr>
+<tr><td valign="top"><a href="#write_projection-4">write_projection/4</a></td><td>Write a projection <code>Proj</code> of type <code>ProjType</code>.</td></tr>
+</table>
+
+<h2><a name="functions">Function Details</a></h2>
+
+<h3 class="function"><a name="append_chunk-4">append_chunk/4</a></h3>
+<div class="spec">
+<p><tt>append_chunk(PidSpec, EpochID, Prefix, Chunk) -&gt; any()</tt></p>
+</div><p>Append a chunk (binary- or iolist-style) of data to a file
+  with <code>Prefix</code>.</p>
+
+<h3 class="function"><a name="append_chunk-5">append_chunk/5</a></h3>
+<div class="spec">
+<p><tt>append_chunk(PidSpec, EpochID, Prefix, Chunk, Timeout) -&gt; any()</tt></p>
+</div><p>Append a chunk (binary- or iolist-style) of data to a file
+  with <code>Prefix</code>.</p>
+
+<h3 class="function"><a name="checksum_list-3">checksum_list/3</a></h3>
+<div class="spec">
+<p><tt>checksum_list(PidSpec, EpochID, File) -&gt; any()</tt></p>
+</div><p>Fetch the list of chunk checksums for <code>File</code>.</p>
+
+<h3 class="function"><a name="checksum_list-4">checksum_list/4</a></h3>
+<div class="spec">
+<p><tt>checksum_list(PidSpec, EpochID, File, Timeout) -&gt; any()</tt></p>
+</div><p>Fetch the list of chunk checksums for <code>File</code>.</p>
+
+<h3 class="function"><a name="code_change-3">code_change/3</a></h3>
+<div class="spec">
+<p><tt>code_change(OldVsn, S, Extra) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="get_all_projections-2">get_all_projections/2</a></h3>
+<div class="spec">
+<p><tt>get_all_projections(PidSpec, ProjType) -&gt; any()</tt></p>
+</div><p>Get all projections from the FLU's projection store.</p>
+
+<h3 class="function"><a name="get_all_projections-3">get_all_projections/3</a></h3>
+<div class="spec">
+<p><tt>get_all_projections(PidSpec, ProjType, Timeout) -&gt; any()</tt></p>
+</div><p>Get all projections from the FLU's projection store.</p>
+
+<h3 class="function"><a name="get_latest_epoch-2">get_latest_epoch/2</a></h3>
+<div class="spec">
+<p><tt>get_latest_epoch(PidSpec, ProjType) -&gt; any()</tt></p>
+</div><p>Get the latest epoch number + checksum from the FLU's projection store.</p>
+
+<h3 class="function"><a name="get_latest_epoch-3">get_latest_epoch/3</a></h3>
+<div class="spec">
+<p><tt>get_latest_epoch(PidSpec, ProjType, Timeout) -&gt; any()</tt></p>
+</div><p>Get the latest epoch number + checksum from the FLU's projection store.</p>
+
+<h3 class="function"><a name="handle_call-3">handle_call/3</a></h3>
+<div class="spec">
+<p><tt>handle_call(Request, From, S) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="handle_cast-2">handle_cast/2</a></h3>
+<div class="spec">
+<p><tt>handle_cast(Msg, S) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="handle_info-2">handle_info/2</a></h3>
+<div class="spec">
+<p><tt>handle_info(Info, S) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="init-1">init/1</a></h3>
+<div class="spec">
+<p><tt>init(X1) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="list_all_projections-2">list_all_projections/2</a></h3>
+<div class="spec">
+<p><tt>list_all_projections(PidSpec, ProjType) -&gt; any()</tt></p>
+</div><p>Get all epoch numbers from the FLU's projection store.</p>
+
+<h3 class="function"><a name="list_all_projections-3">list_all_projections/3</a></h3>
+<div class="spec">
+<p><tt>list_all_projections(PidSpec, ProjType, Timeout) -&gt; any()</tt></p>
+</div><p>Get all epoch numbers from the FLU's projection store.</p>
+
+<h3 class="function"><a name="list_files-2">list_files/2</a></h3>
+<div class="spec">
+<p><tt>list_files(PidSpec, EpochID) -&gt; any()</tt></p>
+</div><p>Fetch the list of all files on the remote FLU.</p>
+
+<h3 class="function"><a name="list_files-3">list_files/3</a></h3>
+<div class="spec">
+<p><tt>list_files(PidSpec, EpochID, Timeout) -&gt; any()</tt></p>
+</div><p>Fetch the list of all files on the remote FLU.</p>
+
+<h3 class="function"><a name="quit-1">quit/1</a></h3>
+<div class="spec">
+<p><tt>quit(PidSpec) -&gt; any()</tt></p>
+</div><p>Quit &amp; close the connection to remote FLU and stop our
+  proxy process.</p>
+
+<h3 class="function"><a name="read_chunk-5">read_chunk/5</a></h3>
+<div class="spec">
+<p><tt>read_chunk(PidSpec, EpochID, File, Offset, Size) -&gt; any()</tt></p>
+</div><p>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</p>
+
+<h3 class="function"><a name="read_chunk-6">read_chunk/6</a></h3>
+<div class="spec">
+<p><tt>read_chunk(PidSpec, EpochID, File, Offset, Size, Timeout) -&gt; any()</tt></p>
+</div><p>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</p>
+
+<h3 class="function"><a name="read_latest_projection-2">read_latest_projection/2</a></h3>
+<div class="spec">
+<p><tt>read_latest_projection(PidSpec, ProjType) -&gt; any()</tt></p>
+</div><p>Get the latest projection from the FLU's projection store for <code>ProjType</code></p>
+
+<h3 class="function"><a name="read_latest_projection-3">read_latest_projection/3</a></h3>
+<div class="spec">
+<p><tt>read_latest_projection(PidSpec, ProjType, Timeout) -&gt; any()</tt></p>
+</div><p>Get the latest projection from the FLU's projection store for <code>ProjType</code></p>
+
+<h3 class="function"><a name="read_projection-3">read_projection/3</a></h3>
+<div class="spec">
+<p><tt>read_projection(PidSpec, ProjType, Epoch) -&gt; any()</tt></p>
+</div><p>Read a projection <code>Proj</code> of type <code>ProjType</code>.</p>
+
+<h3 class="function"><a name="read_projection-4">read_projection/4</a></h3>
+<div class="spec">
+<p><tt>read_projection(PidSpec, ProjType, Epoch, Timeout) -&gt; any()</tt></p>
+</div><p>Read a projection <code>Proj</code> of type <code>ProjType</code>.</p>
+
+<h3 class="function"><a name="start_link-1">start_link/1</a></h3>
+<div class="spec">
+<p><tt>start_link(P_srvr) -&gt; any()</tt></p>
+</div><p>Start a local, long-lived process that will be our steady
+  &amp; reliable communication proxy with the fickle &amp; flaky
+  remote Machi server.</p>
+
+<h3 class="function"><a name="terminate-2">terminate/2</a></h3>
+<div class="spec">
+<p><tt>terminate(Reason, S) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="write_projection-3">write_projection/3</a></h3>
+<div class="spec">
+<p><tt>write_projection(PidSpec, ProjType, Proj) -&gt; any()</tt></p>
+</div><p>Write a projection <code>Proj</code> of type <code>ProjType</code>.</p>
+
+<h3 class="function"><a name="write_projection-4">write_projection/4</a></h3>
+<div class="spec">
+<p><tt>write_projection(PidSpec, ProjType, Proj, Timeout) -&gt; any()</tt></p>
+</div><p>Write a projection <code>Proj</code> of type <code>ProjType</code>.</p>
+<hr>
+
+<div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<p><i>Generated by EDoc, Apr 8 2015, 17:31:11.</i></p>
+</body>
+</html>

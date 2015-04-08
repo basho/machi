@@ -16,17 +16,19 @@
 %%%
 %%%-------------------------------------------------------------------
 
-%% Consistent hashing library.  Also known as "random slicing".
-%% Originally from the Hibari DB source code at https://github.com/hibari
+%% @doc Consistent hashing library.  Also known as "random slicing".
 %%
+%% This code was originally from the Hibari DB source code at
+%% [https://github.com/hibari]
+
+-module(machi_chash).
+
 %% TODO items:
 %%
 %%  1. Refactor to use bigints instead of floating point numbers.  The
 %%     ?SMALLEST_SIGNIFICANT_FLOAT_SIZE macro below doesn't allow as
 %%     much wiggle-room for making really small hashing range
 %%     definitions.
-
--module(machi_chash).
 
 -define(SMALLEST_SIGNIFICANT_FLOAT_SIZE, 0.1e-12).
 -define(SHA_MAX, (1 bsl (20*8))).

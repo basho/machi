@@ -18,6 +18,23 @@
 %%
 %% -------------------------------------------------------------------
 
+%% @doc Erlang API for the Machi FLU TCP protocol version 1, with a
+%% proxy-process style API for hiding messy details such as TCP
+%% connection/disconnection with the remote Machi server.
+%%
+%% Machi is intentionally avoiding using distributed Erlang for
+%% Machi's communication.  This design decision makes Erlang-side code
+%% more difficult &amp; complex, but it's the price to pay for some
+%% language independence.  Later in Machi's life cycle, we need to
+%% (re-)implement some components in a non-Erlang/BEAM-based language.
+%%
+%% This module implements a "man in the middle" proxy between the
+%% Erlang client and Machi server (which is on the "far side" of a TCP
+%% connection to somewhere).  This proxy process will always execute
+%% on the same Erlang node as the Erlang client that uses it.  The
+%% proxy is intended to be a stable, long-lived process that survives
+%% TCP communication problems with the remote server.
+
 -module(machi_proxy_flu1_client).
 
 -behaviour(gen_server).
@@ -61,78 +78,127 @@
           sock :: 'undefined' | port()
          }).
 
+%% @doc Start a local, long-lived process that will be our steady
+%% &amp; reliable communication proxy with the fickle &amp; flaky
+%% remote Machi server.
+
 start_link(#p_srvr{}=I) ->
     gen_server:start_link(?MODULE, [I], []).
 
+%% @doc Append a chunk (binary- or iolist-style) of data to a file
+%% with `Prefix'.
+
 append_chunk(PidSpec, EpochID, Prefix, Chunk) ->
     append_chunk(PidSpec, EpochID, Prefix, Chunk, infinity).
+
+%% @doc Append a chunk (binary- or iolist-style) of data to a file
+%% with `Prefix'.
 
 append_chunk(PidSpec, EpochID, Prefix, Chunk, Timeout) ->
     gen_server:call(PidSpec, {req, {append_chunk, EpochID, Prefix, Chunk}},
                     Timeout).
 
+%% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
+
 read_chunk(PidSpec, EpochID, File, Offset, Size) ->
     read_chunk(PidSpec, EpochID, File, Offset, Size, infinity).
+
+%% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
 read_chunk(PidSpec, EpochID, File, Offset, Size, Timeout) ->
     gen_server:call(PidSpec, {req, {read_chunk, EpochID, File, Offset, Size}},
                     Timeout).
 
+%% @doc Fetch the list of chunk checksums for `File'.
+
 checksum_list(PidSpec, EpochID, File) ->
     checksum_list(PidSpec, EpochID, File, infinity).
+
+%% @doc Fetch the list of chunk checksums for `File'.
 
 checksum_list(PidSpec, EpochID, File, Timeout) ->
     gen_server:call(PidSpec, {req, {checksum_list, EpochID, File}},
                     Timeout).
 
+%% @doc Fetch the list of all files on the remote FLU.
+
 list_files(PidSpec, EpochID) ->
     list_files(PidSpec, EpochID, infinity).
+
+%% @doc Fetch the list of all files on the remote FLU.
 
 list_files(PidSpec, EpochID, Timeout) ->
     gen_server:call(PidSpec, {req, {list_files, EpochID}},
                     Timeout).
 
+%% @doc Get the latest epoch number + checksum from the FLU's projection store.
+
 get_latest_epoch(PidSpec, ProjType) ->
     get_latest_epoch(PidSpec, ProjType, infinity).
+
+%% @doc Get the latest epoch number + checksum from the FLU's projection store.
 
 get_latest_epoch(PidSpec, ProjType, Timeout) ->
     gen_server:call(PidSpec, {req, {get_latest_epoch, ProjType}},
                     Timeout).
 
+%% @doc Get the latest projection from the FLU's projection store for `ProjType'
+
 read_latest_projection(PidSpec, ProjType) ->
     read_latest_projection(PidSpec, ProjType, infinity).
+
+%% @doc Get the latest projection from the FLU's projection store for `ProjType'
 
 read_latest_projection(PidSpec, ProjType, Timeout) ->
     gen_server:call(PidSpec, {req, {read_latest_projection, ProjType}},
                     Timeout).
 
+%% @doc Read a projection `Proj' of type `ProjType'.
+
 read_projection(PidSpec, ProjType, Epoch) ->
     read_projection(PidSpec, ProjType, Epoch, infinity).
+
+%% @doc Read a projection `Proj' of type `ProjType'.
 
 read_projection(PidSpec, ProjType, Epoch, Timeout) ->
     gen_server:call(PidSpec, {req, {read_projection, ProjType, Epoch}},
                     Timeout).
 
+%% @doc Write a projection `Proj' of type `ProjType'.
+
 write_projection(PidSpec, ProjType, Proj) ->
     write_projection(PidSpec, ProjType, Proj, infinity).
+
+%% @doc Write a projection `Proj' of type `ProjType'.
 
 write_projection(PidSpec, ProjType, Proj, Timeout) ->
     gen_server:call(PidSpec, {req, {write_projection, ProjType, Proj}},
                     Timeout).
 
+%% @doc Get all projections from the FLU's projection store.
+
 get_all_projections(PidSpec, ProjType) ->
     get_all_projections(PidSpec, ProjType, infinity).
+
+%% @doc Get all projections from the FLU's projection store.
 
 get_all_projections(PidSpec, ProjType, Timeout) ->
     gen_server:call(PidSpec, {req, {get_all_projections, ProjType}},
                     Timeout).
 
+%% @doc Get all epoch numbers from the FLU's projection store.
+
 list_all_projections(PidSpec, ProjType) ->
     list_all_projections(PidSpec, ProjType, infinity).
+
+%% @doc Get all epoch numbers from the FLU's projection store.
 
 list_all_projections(PidSpec, ProjType, Timeout) ->
     gen_server:call(PidSpec, {req, {list_all_projections, ProjType}},
                     Timeout).
+
+%% @doc Quit &amp; close the connection to remote FLU and stop our
+%% proxy process.
 
 quit(PidSpec) ->
     gen_server:call(PidSpec, quit, infinity).
