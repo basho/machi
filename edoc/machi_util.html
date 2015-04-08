@@ -1,0 +1,150 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Module machi_util</title>
+<link rel="stylesheet" type="text/css" href="stylesheet.css" title="EDoc">
+</head>
+<body bgcolor="white">
+<div class="navbar"><a name="#navbar_top"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<hr>
+
+<h1>Module machi_util</h1>
+<ul class="index"><li><a href="#description">Description</a></li><li><a href="#index">Function Index</a></li><li><a href="#functions">Function Details</a></li></ul>Miscellaneous utility functions.
+
+
+<h2><a name="description">Description</a></h2>Miscellaneous utility functions.
+<h2><a name="index">Function Index</a></h2>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#bin_to_hexstr-1">bin_to_hexstr/1</a></td><td>Convert a <code>binary()</code> to a hexadecimal string.</td></tr>
+<tr><td valign="top"><a href="#checksum_chunk-1">checksum_chunk/1</a></td><td>Calculate a checksum for a chunk of file data.</td></tr>
+<tr><td valign="top"><a href="#connect-2">connect/2</a></td><td>Create a TCP connection to a remote Machi server.</td></tr>
+<tr><td valign="top"><a href="#connect-3">connect/3</a></td><td>Create a TCP connection to a remote Machi server.</td></tr>
+<tr><td valign="top"><a href="#hexstr_to_bin-1">hexstr_to_bin/1</a></td><td>Convert a hexadecimal string to a <code>binary()</code>.</td></tr>
+<tr><td valign="top"><a href="#hexstr_to_int-1">hexstr_to_int/1</a></td><td>Convert a hexadecimal string to an integer.</td></tr>
+<tr><td valign="top"><a href="#increment_max_filenum-2">increment_max_filenum/2</a></td><td>Increase the file size of a config file, which is used as the
+  basis for a minimum sequence number.</td></tr>
+<tr><td valign="top"><a href="#info_msg-2">info_msg/2</a></td><td>Log an 'info' level message.</td></tr>
+<tr><td valign="top"><a href="#int_to_hexbin-2">int_to_hexbin/2</a></td><td>Convert an integer into a hexadecimal string (in <code>binary()</code>
+  form) whose length is based on <code>I_size</code>.</td></tr>
+<tr><td valign="top"><a href="#int_to_hexstr-2">int_to_hexstr/2</a></td><td>Convert an integer into a hexadecimal string whose length is
+  based on <code>I_size</code>.</td></tr>
+<tr><td valign="top"><a href="#make_binary-1">make_binary/1</a></td><td>Convert a compatible Erlang data type into a <code>binary()</code> equivalent.</td></tr>
+<tr><td valign="top"><a href="#make_checksum_filename-2">make_checksum_filename/2</a></td><td>Calculate a checksum file path, by common convention.</td></tr>
+<tr><td valign="top"><a href="#make_data_filename-2">make_data_filename/2</a></td><td>Calculate a file data file path, by common convention.</td></tr>
+<tr><td valign="top"><a href="#make_projection_filename-2">make_projection_filename/2</a></td><td>Calculate a projection store file path, by common convention.</td></tr>
+<tr><td valign="top"><a href="#make_regname-1">make_regname/1</a></td><td>Create a registered name atom for FLU sequencer internal
+  rendezvous/message passing use.</td></tr>
+<tr><td valign="top"><a href="#make_string-1">make_string/1</a></td><td>Convert a compatible Erlang data type into a <code>string()</code> equivalent.</td></tr>
+<tr><td valign="top"><a href="#read_max_filenum-2">read_max_filenum/2</a></td><td>Read the file size of a config file, which is used as the
+  basis for a minimum sequence number.</td></tr>
+<tr><td valign="top"><a href="#verb-1">verb/1</a></td><td>Log a verbose message.</td></tr>
+<tr><td valign="top"><a href="#verb-2">verb/2</a></td><td>Log a verbose message.</td></tr>
+</table>
+
+<h2><a name="functions">Function Details</a></h2>
+
+<h3 class="function"><a name="bin_to_hexstr-1">bin_to_hexstr/1</a></h3>
+<div class="spec">
+<p><tt>bin_to_hexstr(X1) -&gt; any()</tt></p>
+</div><p>Convert a <code>binary()</code> to a hexadecimal string.</p>
+
+<h3 class="function"><a name="checksum_chunk-1">checksum_chunk/1</a></h3>
+<div class="spec">
+<p><tt>checksum_chunk(Chunk) -&gt; any()</tt></p>
+</div><p>Calculate a checksum for a chunk of file data.</p>
+
+<h3 class="function"><a name="connect-2">connect/2</a></h3>
+<div class="spec">
+<p><tt>connect(Host::<a href="inet.html#type-ip_address">inet:ip_address()</a> | <a href="inet.html#type-hostname">inet:hostname()</a>, Port::<a href="inet.html#type-port_number">inet:port_number()</a>) -&gt; port()</tt><br></p>
+</div><p>Create a TCP connection to a remote Machi server.</p>
+
+<h3 class="function"><a name="connect-3">connect/3</a></h3>
+<div class="spec">
+<p><tt>connect(Host::<a href="inet.html#type-ip_address">inet:ip_address()</a> | <a href="inet.html#type-hostname">inet:hostname()</a>, Port::<a href="inet.html#type-port_number">inet:port_number()</a>, Timeout::timeout()) -&gt; port()</tt><br></p>
+</div><p>Create a TCP connection to a remote Machi server.</p>
+
+<h3 class="function"><a name="hexstr_to_bin-1">hexstr_to_bin/1</a></h3>
+<div class="spec">
+<p><tt>hexstr_to_bin(S) -&gt; any()</tt></p>
+</div><p>Convert a hexadecimal string to a <code>binary()</code>.</p>
+
+<h3 class="function"><a name="hexstr_to_int-1">hexstr_to_int/1</a></h3>
+<div class="spec">
+<p><tt>hexstr_to_int(X) -&gt; any()</tt></p>
+</div><p>Convert a hexadecimal string to an integer.</p>
+
+<h3 class="function"><a name="increment_max_filenum-2">increment_max_filenum/2</a></h3>
+<div class="spec">
+<p><tt>increment_max_filenum(DataDir, Prefix) -&gt; any()</tt></p>
+</div><p>Increase the file size of a config file, which is used as the
+  basis for a minimum sequence number.</p>
+
+<h3 class="function"><a name="info_msg-2">info_msg/2</a></h3>
+<div class="spec">
+<p><tt>info_msg(Fmt, Args) -&gt; any()</tt></p>
+</div><p>Log an 'info' level message.</p>
+
+<h3 class="function"><a name="int_to_hexbin-2">int_to_hexbin/2</a></h3>
+<div class="spec">
+<p><tt>int_to_hexbin(I, I_size) -&gt; any()</tt></p>
+</div><p>Convert an integer into a hexadecimal string (in <code>binary()</code>
+  form) whose length is based on <code>I_size</code>.</p>
+
+<h3 class="function"><a name="int_to_hexstr-2">int_to_hexstr/2</a></h3>
+<div class="spec">
+<p><tt>int_to_hexstr(I, I_size) -&gt; any()</tt></p>
+</div><p>Convert an integer into a hexadecimal string whose length is
+  based on <code>I_size</code>.</p>
+
+<h3 class="function"><a name="make_binary-1">make_binary/1</a></h3>
+<div class="spec">
+<p><tt>make_binary(X) -&gt; any()</tt></p>
+</div><p>Convert a compatible Erlang data type into a <code>binary()</code> equivalent.</p>
+
+<h3 class="function"><a name="make_checksum_filename-2">make_checksum_filename/2</a></h3>
+<div class="spec">
+<p><tt>make_checksum_filename(DataDir, FileName) -&gt; any()</tt></p>
+</div><p>Calculate a checksum file path, by common convention.</p>
+
+<h3 class="function"><a name="make_data_filename-2">make_data_filename/2</a></h3>
+<div class="spec">
+<p><tt>make_data_filename(DataDir, File) -&gt; any()</tt></p>
+</div><p>Calculate a file data file path, by common convention.</p>
+
+<h3 class="function"><a name="make_projection_filename-2">make_projection_filename/2</a></h3>
+<div class="spec">
+<p><tt>make_projection_filename(DataDir, File) -&gt; any()</tt></p>
+</div><p>Calculate a projection store file path, by common convention.</p>
+
+<h3 class="function"><a name="make_regname-1">make_regname/1</a></h3>
+<div class="spec">
+<p><tt>make_regname(Prefix) -&gt; any()</tt></p>
+</div><p>Create a registered name atom for FLU sequencer internal
+  rendezvous/message passing use.</p>
+
+<h3 class="function"><a name="make_string-1">make_string/1</a></h3>
+<div class="spec">
+<p><tt>make_string(X) -&gt; any()</tt></p>
+</div><p>Convert a compatible Erlang data type into a <code>string()</code> equivalent.</p>
+
+<h3 class="function"><a name="read_max_filenum-2">read_max_filenum/2</a></h3>
+<div class="spec">
+<p><tt>read_max_filenum(DataDir, Prefix) -&gt; any()</tt></p>
+</div><p>Read the file size of a config file, which is used as the
+  basis for a minimum sequence number.</p>
+
+<h3 class="function"><a name="verb-1">verb/1</a></h3>
+<div class="spec">
+<p><tt>verb(Fmt) -&gt; any()</tt></p>
+</div><p>Log a verbose message.</p>
+
+<h3 class="function"><a name="verb-2">verb/2</a></h3>
+<div class="spec">
+<p><tt>verb(Fmt, Args) -&gt; any()</tt></p>
+</div><p>Log a verbose message.</p>
+<hr>
+
+<div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<p><i>Generated by EDoc, Apr 8 2015, 17:31:11.</i></p>
+</body>
+</html>

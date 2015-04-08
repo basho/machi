@@ -1,0 +1,155 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Module machi_chain_manager1</title>
+<link rel="stylesheet" type="text/css" href="stylesheet.css" title="EDoc">
+</head>
+<body bgcolor="white">
+<div class="navbar"><a name="#navbar_top"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<hr>
+
+<h1>Module machi_chain_manager1</h1>
+<ul class="index"><li><a href="#description">Description</a></li><li><a href="#index">Function Index</a></li><li><a href="#functions">Function Details</a></li></ul>The Machi chain manager, Guardian of all things related to  
+Chain Replication state, status, and data replica safety.
+
+<p><b>Behaviours:</b> <a href="gen_server.html"><tt>gen_server</tt></a>.</p>
+
+<h2><a name="description">Description</a></h2><p>The Machi chain manager, Guardian of all things related to  
+Chain Replication state, status, and data replica safety.</p>
+ 
+  <p>The Chain Manager is responsible for managing the state of Machi's  
+"Chain Replication" state.  This role is roughly analogous to the  
+"Riak Core" application inside of Riak, which takes care of  
+coordinating replica placement and replica repair.</p>
+ 
+  <p>For each primitive data server in the cluster, a Machi FLU, there  
+is a Chain Manager process that manages its FLU's role within the  
+Machi cluster's Chain Replication scheme.  Each Chain Manager  
+process executes locally and independently to manage the  
+distributed state of a single Machi Chain Replication chain.</p>
+ 
+  Machi's Chain Manager process performs similar tasks as Riak Core's
+  claimant.  However, Machi has several active Chain Manager
+  processes, one per FLU server, instead of a single active process
+  like Core's claimant.  Each Chain Manager process acts
+  independently; each is constrained so that it will reach consensus
+  via independent computation &amp; action.
+<h2><a name="index">Function Index</a></h2>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#code_change-3">code_change/3</a></td><td></td></tr>
+<tr><td valign="top"><a href="#get_all_hosed-1">get_all_hosed/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#handle_call-3">handle_call/3</a></td><td></td></tr>
+<tr><td valign="top"><a href="#handle_cast-2">handle_cast/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#handle_info-2">handle_info/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#init-1">init/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#make_projection_summary-1">make_projection_summary/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#ping-1">ping/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#projection_transitions_are_sane-2">projection_transitions_are_sane/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#start_link-3">start_link/3</a></td><td></td></tr>
+<tr><td valign="top"><a href="#start_link-4">start_link/4</a></td><td></td></tr>
+<tr><td valign="top"><a href="#stop-1">stop/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#terminate-2">terminate/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#test_calc_projection-2">test_calc_projection/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#test_calc_proposed_projection-1">test_calc_proposed_projection/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#test_react_to_env-1">test_react_to_env/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#test_read_latest_public_projection-2">test_read_latest_public_projection/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#test_write_proposed_projection-1">test_write_proposed_projection/1</a></td><td></td></tr>
+</table>
+
+<h2><a name="functions">Function Details</a></h2>
+
+<h3 class="function"><a name="code_change-3">code_change/3</a></h3>
+<div class="spec">
+<p><tt>code_change(OldVsn, S, Extra) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="get_all_hosed-1">get_all_hosed/1</a></h3>
+<div class="spec">
+<p><tt>get_all_hosed(P) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="handle_call-3">handle_call/3</a></h3>
+<div class="spec">
+<p><tt>handle_call(Call, From, Ch_mgr) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="handle_cast-2">handle_cast/2</a></h3>
+<div class="spec">
+<p><tt>handle_cast(Cast, Ch_mgr) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="handle_info-2">handle_info/2</a></h3>
+<div class="spec">
+<p><tt>handle_info(Msg, S) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="init-1">init/1</a></h3>
+<div class="spec">
+<p><tt>init(X1) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="make_projection_summary-1">make_projection_summary/1</a></h3>
+<div class="spec">
+<p><tt>make_projection_summary(Projection_v1) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="ping-1">ping/1</a></h3>
+<div class="spec">
+<p><tt>ping(Pid) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="projection_transitions_are_sane-2">projection_transitions_are_sane/2</a></h3>
+<div class="spec">
+<p><tt>projection_transitions_are_sane(Ps, RelativeToServer) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="start_link-3">start_link/3</a></h3>
+<div class="spec">
+<p><tt>start_link(MyName, All_list, MyFLUPid) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="start_link-4">start_link/4</a></h3>
+<div class="spec">
+<p><tt>start_link(MyName, All_list, MyFLUPid, MgrOpts) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="stop-1">stop/1</a></h3>
+<div class="spec">
+<p><tt>stop(Pid) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="terminate-2">terminate/2</a></h3>
+<div class="spec">
+<p><tt>terminate(Reason, S) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="test_calc_projection-2">test_calc_projection/2</a></h3>
+<div class="spec">
+<p><tt>test_calc_projection(Pid, KeepRunenvP) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="test_calc_proposed_projection-1">test_calc_proposed_projection/1</a></h3>
+<div class="spec">
+<p><tt>test_calc_proposed_projection(Pid) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="test_react_to_env-1">test_react_to_env/1</a></h3>
+<div class="spec">
+<p><tt>test_react_to_env(Pid) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="test_read_latest_public_projection-2">test_read_latest_public_projection/2</a></h3>
+<div class="spec">
+<p><tt>test_read_latest_public_projection(Pid, ReadRepairP) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="test_write_proposed_projection-1">test_write_proposed_projection/1</a></h3>
+<div class="spec">
+<p><tt>test_write_proposed_projection(Pid) -&gt; any()</tt></p>
+</div>
+<hr>
+
+<div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<p><i>Generated by EDoc, Apr 8 2015, 17:31:11.</i></p>
+</body>
+</html>

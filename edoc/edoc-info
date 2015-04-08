@@ -1,0 +1,7 @@
+%% encoding: UTF-8
+{application,machi}.
+{packages,[]}.
+{modules,[machi_admin_util,machi_app,machi_chain_manager1,machi_chash,
+          machi_flu1,machi_flu1_client,machi_flu_sup,machi_projection,
+          machi_projection_store,machi_proxy_flu1_client,machi_sequencer,
+          machi_sup,machi_util]}.

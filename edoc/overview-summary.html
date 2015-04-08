@@ -1,0 +1,185 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Machi: a small village of replicated files
+</title>
+<link rel="stylesheet" type="text/css" href="stylesheet.css" title="EDoc">
+</head>
+<body bgcolor="white">
+<div class="navbar"><a name="#navbar_top"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<h1>Machi: a small village of replicated files
+</h1>
+
+
+<h3><a name="About_This_EDoc_Documentation">About This EDoc Documentation</a></h3>
+
+<p>This EDoc-style documentation will concern itself only with Erlang
+function APIs and function &amp; data types.  Higher-level design and
+commentary will remain outside of the Erlang EDoc system; please see
+the "Pointers to Other Machi Documentation" section below for more
+details.</p>
+
+<p>Readers should beware that this documentation may be out-of-sync with
+the source code.  When in doubt, use the <code>make edoc</code> command to
+regenerate all HTML pages.</p>
+
+<p>It is the developer's responsibility to re-generate the documentation
+periodically and commit it to the Git repo.</p>
+
+<h3><a name="Machi_Code_Overview">Machi Code Overview</a></h3>
+
+<h4><a name="Chain_Manager">Chain Manager</a></h4>
+
+<p>The Chain Manager is responsible for managing the state of Machi's
+"Chain Replication" state.  This role is roughly analogous to the
+"Riak Core" application inside of Riak, which takes care of
+coordinating replica placement and replica repair.</p>
+
+<p>For each primitive data server in the cluster, a Machi FLU, there is a
+Chain Manager process that manages its FLU's role within the Machi
+cluster's Chain Replication scheme.  Each Chain Manager process
+executes locally and independently to manage the distributed state of
+a single Machi Chain Replication chain.</p>
+
+  <ul>
+
+  <li><p> To contrast with Riak Core ... Riak Core's claimant process is
+       solely responsible for managing certain critical aspects of
+       Riak Core distributed state.  Machi's Chain Manager process
+       performs similar tasks as Riak Core's claimant.  However, Machi
+       has several active Chain Manager processes, one per FLU server,
+       instead of a single active process like Core's claimant.  Each
+       Chain Manager process acts independently; each is constrained
+       so that it will reach consensus via independent computation
+       &amp; action.</p>
+
+       Full discussion of this distributed consensus is outside the
+       scope of this document; see the "Pointers to Other Machi
+       Documentation" section below for more information.
+  </li>
+  <li> Machi differs from a Riak Core application because Machi's
+       replica placement policy is simply, "All Machi servers store
+       replicas of all Machi files".
+       Machi is intended to be a primitive building block for creating larger
+       cluster-of-clusters where files are
+       distributed/fragmented/sharded across a large pool of
+       independent Machi clusters.
+  </li>
+  <li> See
+       <a href="https://www.usenix.org/legacy/events/osdi04/tech/renesse.html" target="_top"><tt>https://www.usenix.org/legacy/events/osdi04/tech/renesse.html</tt></a>
+       for a copy of the paper, "Chain Replication for Supporting High
+       Throughput and Availability" by Robbert van Renesse and Fred
+       B. Schneider.
+  </li>
+  </ul>
+
+<h4><a name="FLU">FLU</a></h4>
+
+<p>The FLU is the basic storage server for Machi.</p>
+
+  <ul>
+  <li> The name FLU is taken from "flash storage unit" from the paper
+       "CORFU: A Shared Log Design for Flash Clusters" by
+       Balakrishnan, Malkhi, Prabhakaran, and Wobber.  See
+       <a href="https://www.usenix.org/conference/nsdi12/technical-sessions/presentation/balakrishnan" target="_top"><tt>https://www.usenix.org/conference/nsdi12/technical-sessions/presentation/balakrishnan</tt></a>
+  </li>
+  <li> In CORFU, the sequencer step is a prerequisite step that is
+       performed by a separate component, the Sequencer.
+       In Machi, the <code>append_chunk()</code> protocol message has
+       an implicit "sequencer" operation applied by the "head" of the
+       Machi Chain Replication chain.  If a client wishes to write
+       data that has already been assigned a sequencer position, then
+       the <code>write_chunk()</code> API function is used.
+  </li>
+  </ul>
+
+<p>For each FLU, there are three independent tasks that are implemented
+using three different Erlang processes:</p>
+
+  <ul>
+  <li> A FLU server, implemented primarily by <code>machi_flu.erl</code>.
+  </li>
+  <li> A projection store server, implemented primarily by
+      <code>machi_projection_store.erl</code>. 
+  </li>
+  <li> A chain state manager server, implemented primarily by
+       <code>machi_chain_manager1.erl</code>.
+  </li>
+  </ul>
+
+<p>From the perspective of failure detection, it is very convenient that
+all three FLU-related services (file server, sequencer server, and
+projection server) are accessed using the same single TCP port.</p>
+
+<h4><a name="Projection_(data_structure)">Projection (data structure)</a></h4>
+
+<p>The projection is a data structure that specifies the current state
+of the Machi cluster: all FLUs, which FLUS are considered
+up/running or down/crashed/stopped, which FLUs are actively
+participants in the Chain Replication protocol, and which FLUs are
+under "repair" (i.e., having their data resyncronized when
+newly-added to a cluster or when restarting after a crash).</p>
+
+<h4><a name="Projection_Store_(server)">Projection Store (server)</a></h4>
+
+<p>The projection store is a storage service that is implemented by an
+Erlang/OTP <code>gen_server</code> process that is associated with each
+FLU.  Conceptually, the projection store is an array of
+write-once registers.  For each projection store register, the
+key is a 2-tuple of an epoch number (<code>non_neg_integer()</code> type)
+and a projection type (<code>public</code> or <code>private</code> type); the value is
+a projection data structure (<code>projection_v1()</code> type).</p>
+
+<h4><a name="Client_and_Proxy_Client">Client and Proxy Client</a></h4>
+
+<p>Machi is intentionally avoiding using distributed Erlang for Machi's
+communication.  This design decision makes Erlang-side code more
+difficult &amp; complex but allows us the freedom of implementing
+parts of Machi in other languages without major
+protocol&amp;API&amp;glue code changes later in the product's
+lifetime.</p>
+
+<p>There are two layers of interface for Machi clients.</p>
+
+  <ul>
+  <li> The <code>machi_flu1_client</code> module implements an API that uses a
+       TCP socket directly.
+  </li>
+  <li> The <code>machi_proxy_flu1_client</code> module implements an API that
+       uses a local, long-lived <code>gen_server</code> process as a proxy for
+       the remote, perhaps disconnected-or-crashed Machi FLU server.
+  </li>
+  </ul>
+
+<p>The types for both modules ought to be the same.  However, due to
+rapid code churn, some differences might exist.  Any major difference
+is (almost by definition) a bug: please open a GitHub issue to request
+a correction.</p>
+
+<h3><a name="TODO_notes">TODO notes</a></h3>
+
+<p>Any use of the string "TODO" in upper/lower/mixed case, anywhere in
+the code, is a reminder signal of unfinished work.</p>
+
+<h3><a name="Pointers_to_Other_Machi_Documentation">Pointers to Other Machi Documentation</a></h3>
+
+<ul>
+<li> If you are viewing this document locally, please look in the
+     <code>../doc/</code> directory,
+</li>
+<li> If you are viewing this document via the Web, please find the
+     documentation via this link: 
+     <a href="http://github.com/basho/machi/tree/master/doc/" target="_top"><tt>http://github.com/basho/machi/tree/master/doc/</tt></a>
+     Please be aware that this link points to the <code>master</code> branch
+     of the Machi source repository and therefore may be
+     out-of-sync with non-<code>master</code> branch code.
+</li>
+
+</ul>
+
+<hr>
+<div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<p><i>Generated by EDoc, Apr 8 2015, 17:31:11.</i></p>
+</body>
+</html>
