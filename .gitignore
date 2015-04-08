@@ -5,7 +5,4 @@ deps
 erl_crash.dump
 .concrete/DEV_MODE
 .rebar
-doc/edoc-info
-doc/erlang.png
-doc/*.html
-doc/stylesheet.css
+edoc

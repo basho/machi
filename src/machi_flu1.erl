@@ -525,11 +525,14 @@ run_seq_append_server2(Prefix, DataDir) ->
 
     end.
 
+-spec seq_name_hack() -> string().
+seq_name_hack() ->
+    lists:flatten(io_lib:format("~.36B~.36B",
+                                [element(3,now()),
+                                 list_to_integer(os:getpid())])).
+
 seq_append_server_loop(DataDir, Prefix, FileNum) ->
-    SequencerNameHack = lists:flatten(io_lib:format(
-                                        "~.36B~.36B",
-                                        [element(3,now()),
-                                         list_to_integer(os:getpid())])),
+    SequencerNameHack = seq_name_hack(),
     {File, FullPath} = machi_util:make_data_filename(
                          DataDir, Prefix, SequencerNameHack, FileNum),
     {ok, FHd} = file:open(FullPath,
