@@ -59,6 +59,7 @@
 
 -define(FLU_C,  machi_flu1_client).
 -define(FLU_PC, machi_proxy_flu1_client).
+-define(TO, (2*1000)).                          % default timeout
 
 %% Keep a history of our flowchart execution in the process dictionary.
 -define(REACT(T), put(react, [T|get(react)])).
@@ -73,8 +74,7 @@
 -ifdef(TEST).
 
 -export([test_calc_projection/2,
-         test_calc_proposed_projection/1,
-         test_write_proposed_projection/1,
+         test_write_public_projection/2,
          test_read_latest_public_projection/2,
          test_react_to_env/1,
          get_all_hosed/1]).
@@ -90,11 +90,11 @@
 -compile(export_all).
 -endif. %TEST
 
-start_link(MyName, All_list, MyFLUPid) ->
-    start_link(MyName, All_list, MyFLUPid, []).
+start_link(MyName, All_list, MembersDict) ->
+    start_link(MyName, All_list, MembersDict, []).
 
-start_link(MyName, All_list, MyFLUPid, MgrOpts) ->
-    gen_server:start_link(?MODULE, {MyName, All_list, MyFLUPid, MgrOpts}, []).
+start_link(MyName, All_list, MembersDict, MgrOpts) ->
+    gen_server:start_link(?MODULE, {MyName, All_list, MembersDict, MgrOpts}, []).
 
 stop(Pid) ->
     gen_server:call(Pid, {stop}, infinity).
@@ -106,20 +106,14 @@ ping(Pid) ->
 
 %% Test/debugging code only.
 
-test_write_proposed_projection(Pid) ->
-    gen_server:call(Pid, {test_write_proposed_projection}, infinity).
+test_write_public_projection(Pid, Proj) ->
+    gen_server:call(Pid, {test_write_public_projection, Proj}, infinity).
 
 %% Calculate a projection and return it to us.
 %% If KeepRunenvP is true, the server will retain its change in its
 %% runtime environment, e.g., changes in simulated network partitions.
-%% The server's internal proposed projection is not altered.
 test_calc_projection(Pid, KeepRunenvP) ->
     gen_server:call(Pid, {test_calc_projection, KeepRunenvP}, infinity).
-
-%% Async!
-%% The server's internal proposed projection *is* altered.
-test_calc_proposed_projection(Pid) ->
-    gen_server:cast(Pid, {test_calc_proposed_projection}).
 
 test_read_latest_public_projection(Pid, ReadRepairP) ->
     gen_server:call(Pid, {test_read_latest_public_projection, ReadRepairP},
@@ -143,6 +137,11 @@ init({MyName, All_list, MembersDict, MgrOpts}) ->
                                        [], []),
     NoneProj = make_initial_projection(MyName, All_list, [],
                                        [], []),
+    Proxies = orddict:fold(
+                fun(K, P, Acc) ->
+                        {ok, Pid} = ?FLU_PC:start_link(P),
+                        [{K, Pid}|Acc]
+                end, [], MembersDict),
     S = #ch_mgr{init_finished=false,
                 active_p=proplists:get_value(active_mode, MgrOpts, true),
                 name=MyName,
@@ -150,6 +149,7 @@ init({MyName, All_list, MembersDict, MgrOpts}) ->
                 proj_history=queue:new(),
                 myflu=MyName,
                 members_dict=MembersDict,
+                proxies_dict=orddict:from_list(Proxies),
                 %% TODO 2015-03-04: revisit, should this constant be bigger?
                 %% Yes, this should be bigger, but it's a hack.  There is
                 %% no guarantee that all parties will advance to a minimum
@@ -176,15 +176,6 @@ handle_call({ping}, _From, S) ->
     {reply, pong, S};
 handle_call({stop}, _From, S) ->
     {stop, normal, ok, S};
-handle_call(_Call, _From, #ch_mgr{init_finished=false} = S) ->
-    {reply, not_initialized, S};
-handle_call({test_write_proposed_projection}, _From, S) ->
-    if S#ch_mgr.proj_proposed == none ->
-            {reply, none, S};
-       true ->
-            {Res, S2} = do_cl_write_proposed_proj(S),
-            {reply, Res, S2}
-    end;
 handle_call({test_calc_projection, KeepRunenvP}, _From,
             #ch_mgr{name=MyName}=S) ->
     RelativeToServer = MyName,
@@ -192,11 +183,16 @@ handle_call({test_calc_projection, KeepRunenvP}, _From,
     {reply, {ok, P}, if KeepRunenvP -> S2;
                         true        -> S
                      end};
+handle_call({test_write_public_projection, Proj}, _From, S) ->
+    {Res, S2} = do_cl_write_public_proj(Proj, S),
+    {reply, Res, S2};
 handle_call({test_read_latest_public_projection, ReadRepairP}, _From, S) ->
     {Perhaps, Val, ExtraInfo, S2} =
         do_cl_read_latest_public_projection(ReadRepairP, S),
     Res = {Perhaps, Val, ExtraInfo},
     {reply, Res, S2};
+handle_call(_Call, _From, #ch_mgr{init_finished=false} = S) ->
+    {reply, not_initialized, S};
 handle_call({test_react_to_env}, _From, S) ->
     {TODOtodo, S2} =  do_react_to_env(S),
     {reply, TODOtodo, S2};
@@ -205,10 +201,6 @@ handle_call(_Call, _From, S) ->
 
 handle_cast(_Cast, #ch_mgr{init_finished=false} = S) ->
     {noreply, S};
-handle_cast({test_calc_proposed_projection}, #ch_mgr{name=MyName}=S) ->
-    RelativeToServer = MyName,
-    {Proj, S2} = calc_projection(S, RelativeToServer),
-    {noreply, S2#ch_mgr{proj_proposed=Proj}};
 handle_cast(_Cast, S) ->
     ?D({cast_whaaaaaaaaaaa, _Cast}),
     {noreply, S}.
@@ -232,9 +224,10 @@ finish_init(BestProj, #ch_mgr{active_p=false}=S) ->
     _ = erlang:send_after(1000, self(), {finish_init, BestProj}),
     S;
 finish_init(BestProj, #ch_mgr{init_finished=false, myflu=MyFLU} = S) ->
-    case ?FLU_PC:read_latest_projection(MyFLU, private) of
+    MyFLUPid = proxy_pid(MyFLU, S),
+    case ?FLU_PC:read_latest_projection(MyFLUPid, private) of
         {error, not_written} ->
-            case ?FLU_PC:write_projection(MyFLU, private, BestProj) of
+            case ?FLU_PC:write_projection(MyFLUPid, private, BestProj) of
                 ok ->
                     S#ch_mgr{init_finished=true, proj=BestProj};
                 {error, not_written} ->
@@ -251,14 +244,9 @@ finish_init(BestProj, #ch_mgr{init_finished=false, myflu=MyFLU} = S) ->
             exit({yo_weird, Else})
     end.
 
-do_cl_write_proposed_proj(#ch_mgr{proj_proposed=Proj} = S) ->
+do_cl_write_public_proj(Proj, S) ->
     #projection_v1{epoch_number=Epoch} = Proj,
-    case cl_write_public_proj(Epoch, Proj, S) of
-        {ok, _S2}=Res ->
-            Res;
-        {_Other2, _S2}=Else2 ->
-            Else2
-    end.
+    cl_write_public_proj(Epoch, Proj, S).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -278,7 +266,7 @@ cl_write_public_proj_local(Epoch, Proj, SkipLocalWriteErrorP,
     {_UpNodes, Partitions, S2} = calc_up_nodes(S),
     Res0 = perhaps_call_t(
              S, Partitions, MyFLU,
-             fun() -> machi_flu0:proj_write(MyFLU, Epoch, public, Proj) end),
+             fun(Pid) -> ?FLU_PC:write_projection(Pid, public, Proj, ?TO) end),
     Continue = fun() ->
                   FLUs = Proj#projection_v1.all_members -- [MyFLU],
                   cl_write_public_proj_remote(FLUs, Partitions, Epoch, Proj, S)
@@ -294,11 +282,11 @@ cl_write_public_proj_local(Epoch, Proj, SkipLocalWriteErrorP,
             {Else, S2}
     end.
 
-cl_write_public_proj_remote(FLUs, Partitions, Epoch, Proj, S) ->
+cl_write_public_proj_remote(FLUs, Partitions, _Epoch, Proj, S) ->
     %% We're going to be very care-free about this write because we'll rely
     %% on the read side to do any read repair.
-    DoIt = fun(X) -> machi_flu0:proj_write(X, Epoch, public, Proj) end,
-    Rs = [{FLU, perhaps_call_t(S, Partitions, FLU, fun() -> DoIt(FLU) end)} ||
+    DoIt = fun(Pid) -> ?FLU_PC:write_projection(Pid, public, Proj, ?TO) end,
+    Rs = [{FLU, perhaps_call_t(S, Partitions, FLU, fun(Pid) -> DoIt(Pid) end)} ||
              FLU <- FLUs],
     {{remote_write_results, Rs}, S}.
 
@@ -323,13 +311,13 @@ read_latest_projection_call_only(ProjectionType, AllHosed,
     All_queried_list = All_list -- AllHosed,
 
     {_UpNodes, Partitions, S2} = calc_up_nodes(S),
-    DoIt = fun(X) ->
-                   case machi_flu0:proj_read_latest(X, ProjectionType) of
+    DoIt = fun(Pid) ->
+                   case ?FLU_PC:read_latest_projection(Pid, ProjectionType, ?TO) of
                        {ok, P} -> P;
                        Else    -> Else
                    end
            end,
-    Rs = [perhaps_call_t(S, Partitions, FLU, fun() -> DoIt(FLU) end) ||
+    Rs = [perhaps_call_t(S, Partitions, FLU, fun(Pid) -> DoIt(Pid) end) ||
              FLU <- All_queried_list],
     FLUsRs = lists:zip(All_queried_list, Rs),
     {All_queried_list, FLUsRs, S2}.
@@ -523,8 +511,8 @@ check_latest_private_projections(FLUs, MyProj, Partitions, S) ->
     FoldFun = fun(_FLU, false) ->
                       false;
                  (FLU, true) ->
-                      F = fun() ->
-                                  machi_flu0:proj_read_latest(FLU, private)
+                      F = fun(Pid) ->
+                                  ?FLU_PC:read_latest_projection(Pid, private, ?TO)
                           end,
                       case perhaps_call_t(S, Partitions, FLU, F) of
                           {ok, RemotePrivateProj} ->
@@ -1003,8 +991,8 @@ react_to_env_C110(P_latest, #ch_mgr{myflu=MyFLU} = S) ->
                    Islands--Islands
                    |Extra_todo]),
 
-    Epoch = P_latest2#projection_v1.epoch_number,
-    ok = machi_flu0:proj_write(MyFLU, Epoch, private, P_latest2),
+    MyFLUPid = proxy_pid(MyFLU, S),
+    ok = ?FLU_PC:write_projection(MyFLUPid, private, P_latest2, ?TO),
     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
         true ->
             {_,_,C} = os:timestamp(),
@@ -1039,7 +1027,7 @@ react_to_env_C120(P_latest, #ch_mgr{proj_history=H} = S) ->
 
     ?REACT({c120, [{latest, make_projection_summary(P_latest)}]}),
     {{now_using, P_latest#projection_v1.epoch_number},
-     S#ch_mgr{proj=P_latest, proj_history=H3, proj_proposed=none}}.
+     S#ch_mgr{proj=P_latest, proj_history=H3}}.
 
 react_to_env_C200(Retries, P_latest, S) ->
     ?REACT(c200),
@@ -1454,14 +1442,14 @@ projection_transition_is_sane(
          S1 = make_projection_summary(P1),
          S2 = make_projection_summary(P2),
          Trace = erlang:get_stacktrace(),
-         %% TODO: this history goop is useful sometimes for debugging but
-         %% not for any "real" use.  Get rid of it, for the long term.
-         H = (catch [{FLUName, Type, P#projection_v1.epoch_number, make_projection_summary(P)} ||
-                 FLUName <- P1#projection_v1.all_members,
-                 Type <- [public,private],
-                 P <- machi_flu0:proj_get_all(FLUName, Type)]),
+         %% %% TODO: this history goop is useful sometimes for debugging but
+         %% %% not for any "real" use.  Get rid of it, for the long term.
+         %% H = (catch [{FLUName, Type, P#projection_v1.epoch_number, make_projection_summary(P)} ||
+         %%         FLUName <- P1#projection_v1.all_members,
+         %%         Type <- [public,private],
+         %%         P <- ?FLU_PC:proj_get_all(orddict:fetch(FLUName, What?), Type)]),
          {err, _Type, _Err, from, S1, to, S2, relative_to, RelativeToServer,
-          history, (catch lists:sort(H)),
+          history, (catch lists:sort([no_history])),
           stack, Trace}
  end.
 
@@ -1545,6 +1533,9 @@ merge_flap_counts([FlapCount|Rest], D1) ->
                        end, D1, D2),
     merge_flap_counts(Rest, D3).
 
+proxy_pid(Name, #ch_mgr{proxies_dict=ProxiesDict}) ->
+    orddict:fetch(Name, ProxiesDict).
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 perhaps_call_t(S, Partitions, FLU, DoIt) ->
@@ -1555,11 +1546,12 @@ perhaps_call_t(S, Partitions, FLU, DoIt) ->
             t_timeout
     end.
 
-perhaps_call(#ch_mgr{name=MyName, myflu=MyFLU}, Partitions, FLU, DoIt) ->
+perhaps_call(#ch_mgr{name=MyName, myflu=MyFLU}=S, Partitions, FLU, DoIt) ->
+    ProxyPid = proxy_pid(FLU, S),
     RemoteFLU_p = FLU /= MyFLU,
     case RemoteFLU_p andalso lists:member({MyName, FLU}, Partitions) of
         false ->
-            Res = DoIt(),
+            Res = DoIt(ProxyPid),
             case RemoteFLU_p andalso lists:member({FLU, MyName}, Partitions) of
                 false ->
                     Res;

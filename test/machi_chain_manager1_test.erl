@@ -136,7 +136,7 @@ chain_to_projection(MyName, Epoch, UPI_list, Repairing_list, All_list) ->
 
 smoke0_test() ->
     %% TODO attack list:
-    %% 0. Add start option to chain manager to be "passive" only, i.e.,
+    %% __ Add start option to chain manager to be "passive" only, i.e.,
     %%    not immediately go to work on
     %% 1. Start FLUs with full complement of FLU+proj+chmgr.
     %% 2. Put each of them under a supervisor?
@@ -166,28 +166,29 @@ smoke0_test() ->
         ok = machi_partition_simulator:stop()
     end.
 
-smoke1_testTODO() ->
+smoke1_test() ->
     machi_partition_simulator:start_link({1,2,3}, 100, 0),
-    {ok, FLUa} = machi_flu0:start_link(a),
-    {ok, FLUb} = machi_flu0:start_link(b),
-    {ok, FLUc} = machi_flu0:start_link(c),
-    I_represent = I_am = a,
-    {ok, M0} = ?MGR:start_link(I_represent, [a,b,c], I_am),
+    TcpPort = 62777,
+    FluInfo = [{a,TcpPort+0,"./data.a"}, {b,TcpPort+1,"./data.b"}, {c,TcpPort+2,"./data.c"}],
+    P_s = [#p_srvr{name=Name, address="localhost", port=Port} ||
+              {Name,Port,_Dir} <- FluInfo],
+    
+    FLUs = [element(2, machi_flu1:start_link([{Name,Port,Dir}])) ||
+               {Name,Port,Dir} <- FluInfo],
+    MembersDict = machi_projection:make_members_dict(P_s),
+    I_represent = a,
+    {ok, M0} = ?MGR:start_link(I_represent, [a,b,c], MembersDict, [{active_mode,false}]),
     try
-        {ok, _P1} = ?MGR:test_calc_projection(M0, false),
-
-        _ = ?MGR:test_calc_proposed_projection(M0),
+        {ok, P1} = ?MGR:test_calc_projection(M0, false),
         {local_write_result, ok,
          {remote_write_results, [{b,ok},{c,ok}]}} =
-            ?MGR:test_write_proposed_projection(M0),
+            ?MGR:test_write_public_projection(M0, P1),
         {unanimous, P1, Extra1} = ?MGR:test_read_latest_public_projection(M0, false),
 
         ok
     after
         ok = ?MGR:stop(M0),
-        ok = machi_flu0:stop(FLUa),
-        ok = machi_flu0:stop(FLUb),
-        ok = machi_flu0:stop(FLUc),
+        [ok = machi_flu1:stop(X) || X <- FLUs],
         ok = machi_partition_simulator:stop()
     end.
 

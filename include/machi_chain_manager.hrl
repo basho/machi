@@ -39,7 +39,5 @@
           runenv          :: list(), %proplist()
           opts            :: list(),  %proplist()
           members_dict    :: p_srvr_dict(),
-
-          %% Deprecated ... TODO: remove when old test unit test code is removed
-          proj_proposed   :: 'none' | projection()
+          proxies_dict    :: orddict:orddict(pv1_server(), pid())
          }).
