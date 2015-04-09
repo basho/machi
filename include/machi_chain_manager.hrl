@@ -29,13 +29,13 @@
           flap_limit      :: non_neg_integer(),
           proj            :: projection(),
           %%
-          timer           :: 'undefined' | reference(),
-          proj_history    :: queue(),
+          timer           :: 'undefined' | timer:tref(),
+          proj_history    :: queue:queue(),
           flaps=0         :: integer(),
           flap_start = ?NOT_FLAPPING
-                          :: erlang:now(),
+                          :: erlang:timestamp(),
           runenv          :: list(), %proplist()
           opts            :: list(),  %proplist()
           members_dict    :: p_srvr_dict(),
-          proxies_dict    :: orddict:orddict(pv1_server(), pid())
+          proxies_dict    :: orddict:orddict()
          }).

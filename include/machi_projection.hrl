@@ -36,7 +36,7 @@
          }).
 
 -type p_srvr() :: #p_srvr{}.
--type p_srvr_dict() :: orddict:orddict(pv1_server(), p_srvr()).
+-type p_srvr_dict() :: orddict:orddict().
 
 -define(DUMMY_PV1_EPOCH, {0,<<0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0>>}).
 

@@ -128,11 +128,11 @@ long_doc() ->
     n of a naive/1st draft detection algorithm.
 ".
 
-convergence_demo_test_() ->
-    {timeout, 98*300, fun() -> convergence_demo_testfun() end}.
+%% convergence_demo_test_() ->
+%%     {timeout, 98*300, fun() -> convergence_demo_testfun() end}.
 
-convergence_demo_testfun() ->
-    convergence_demo_testfun(3).
+%% convergence_demo_testfun() ->
+%%     convergence_demo_testfun(3).
 
 t() ->
     t(3).
@@ -355,7 +355,7 @@ convergence_demo_testfun(NumFLUs) ->
     after
         [ok = ?MGR:stop(MgrPid) || {_, MgrPid} <- MgrNamez],
         [ok = ?FLU_PC:quit(PPid) || {_, PPid} <- Namez],
-        [ok = ?FLU_C:stop(FLUPid) || FLUPid <- FLU_pids],
+        [ok = machi_flu1:stop(FLUPid) || FLUPid <- FLU_pids],
         ok = machi_partition_simulator:stop()
     end.
 

@@ -48,12 +48,12 @@
 unanimous_report(Namez) ->
     UniquePrivateEs =
         lists:usort(lists:flatten(
-                      [machi_flu0:proj_list_all(FLU, private) ||
+                      [element(2, ?FLU_PC:list_all_projections(FLU, private)) ||
                           {_FLUName, FLU} <- Namez])),
     [unanimous_report(Epoch, Namez) || Epoch <- UniquePrivateEs].
 
 unanimous_report(Epoch, Namez) ->
-    Projs = [{FLUName, case machi_flu0:proj_read(FLU, Epoch, private) of
+    Projs = [{FLUName, case ?FLU_PC:read_projection(FLU, private, Epoch) of
                            {ok, T} -> T;
                            _Else   -> not_in_this_epoch
                        end} || {FLUName, FLU} <- Namez],
@@ -128,7 +128,8 @@ extract_chains_relative_to_flu(FLU, Report) ->
               lists:member(FLU, UPI) orelse lists:member(FLU, Repairing)]}.
 
 chain_to_projection(MyName, Epoch, UPI_list, Repairing_list, All_list) ->
-    ?MGR:make_projection(Epoch, MyName, All_list,
+    exit({todo_broken_fixme,?MODULE,?LINE}),
+    machi_projection:new(Epoch, MyName, All_list,
                          All_list -- (UPI_list ++ Repairing_list),
                          UPI_list, Repairing_list, []).
 

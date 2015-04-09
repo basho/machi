@@ -192,8 +192,8 @@ handle_call({test_set_active, Boolean}, _From, #ch_mgr{timer=TRef}=S) ->
         {true, undefined} ->
             S2 = set_active_timer(S),
             {reply, ok, S2};
-        {false, TRef} when is_reference(TRef) ->
-            timer:cancel(TRef),
+        {false, _} ->
+            (catch timer:cancel(TRef)),
             {reply, ok, S#ch_mgr{timer=undefined}};
         _ ->
             {reply, error, S}
