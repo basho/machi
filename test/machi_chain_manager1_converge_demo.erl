@@ -128,11 +128,11 @@ long_doc() ->
     n of a naive/1st draft detection algorithm.
 ".
 
-%% convergence_demo_test_() ->
-%%     {timeout, 98*300, fun() -> convergence_demo_testfun() end}.
+convergence_demo_test_() ->
+    {timeout, 98*300, fun() -> convergence_demo_testfun() end}.
 
-%% convergence_demo_testfun() ->
-%%     convergence_demo_testfun(3).
+convergence_demo_testfun() ->
+    convergence_demo_testfun(3).
 
 t() ->
     t(3).
@@ -142,33 +142,42 @@ t(N) ->
 
 convergence_demo_testfun(NumFLUs) ->
     timer:sleep(100),
-    io:format(user, short_doc(), []),
+    %% Faster test startup, commented: io:format(user, short_doc(), []),
     %% Faster test startup, commented: timer:sleep(3000),
 
-    FLU_biglist = [a,b,c,d,e,f,g],
+    TcpPort = 62877,
+    FluInfo = [{a,TcpPort+0,"./data.a"}, {b,TcpPort+1,"./data.b"},
+               {c,TcpPort+2,"./data.c"}, {d,TcpPort+3,"./data.d"},
+               {e,TcpPort+4,"./data.e"}, {f,TcpPort+5,"./data.f"}],
+    FLU_biglist = [X || {X,_,_} <- FluInfo],
     All_list = lists:sublist(FLU_biglist, NumFLUs),
     io:format(user, "\nSET # of FLus = ~w members ~w).\n",
               [NumFLUs, All_list]),
     machi_partition_simulator:start_link({111,222,33}, 0, 100),
     _ = machi_partition_simulator:get(All_list),
 
-    Namez =
-        [begin
-             {ok, Pid} = machi_flu0:start_link(Name),
-             {Name, Pid}
-         end || Name <- All_list ],
-
-    MgrOpts = [private_write_verbose],
+    Ps = [#p_srvr{name=Name,address="localhost",port=Port} ||
+             {Name,Port,_Dir} <- lists:sublist(FluInfo, NumFLUs)],
+    PsDirs = lists:zip(Ps,
+                       [Dir || {_,_,Dir} <- lists:sublist(FluInfo, NumFLUs)]),
+    FLU_pids = [machi_flu1_test:setup_test_flu(Name, Port, Dir) ||
+                   {#p_srvr{name=Name,port=Port}=P, Dir} <- PsDirs],
+    Namez = [begin
+                 {ok, PPid} = ?FLU_PC:start_link(P),
+                 {Name, PPid}
+             end || {#p_srvr{name=Name,port=Port}=P, Dir} <- PsDirs],
+    MembersDict = machi_projection:make_members_dict(Ps),
+    MgrOpts = [private_write_verbose, {active_mode,false}],
     MgrNamez =
         [begin
-             {ok, MPid} = ?MGR:start_link(Name, All_list, FLUPid, MgrOpts),
-             {Name, MPid}
-         end || {Name, FLUPid} <- Namez],
+             {ok, MPid} = ?MGR:start_link(P#p_srvr.name, MembersDict, MgrOpts),
+             {P#p_srvr.name, MPid}
+         end || P <- Ps],
+
     try
       [{_, Ma}|_] = MgrNamez,
       {ok, P1} = ?MGR:test_calc_projection(Ma, false),
-      P1Epoch = P1#projection_v1.epoch_number,
-      [ok = machi_flu0:proj_write(FLUPid, P1Epoch, public, P1) ||
+      [ok = ?FLU_PC:write_projection(FLUPid, public, P1) ||
           {_, FLUPid} <- Namez, FLUPid /= Ma],
 
       machi_partition_simulator:reset_thresholds(10, 50),
@@ -240,20 +249,21 @@ convergence_demo_testfun(NumFLUs) ->
            [DoIt(50, 10, 100) || _ <- [1,2,3,4] ],
            PPP =
                [begin
-                    PPPallPubs = machi_flu0:proj_list_all(FLU, public),
+                    {ok, PPPallPubs} = ?FLU_PC:list_all_projections(FLU,public),
                     [begin
-                         {ok, Pr} = machi_flu0:proj_read(FLU, PPPepoch, public),
+                         {ok, Pr} = ?FLU_PC:read_projection(FLU,
+                                                            public, PPPepoch),
                          {Pr#projection_v1.epoch_number, FLUName, Pr}
                      end || PPPepoch <- PPPallPubs]
                 end || {FLUName, FLU} <- Namez],
-           io:format(user, "PPP ~p\n", [lists:sort(lists:append(PPP))]),
+           %% io:format(user, "PPP ~p\n", [lists:sort(lists:append(PPP))]),
 
            %%%%%%%% {stable,true} = {stable,private_projections_are_stable(Namez, DoIt)},
            {hosed_ok,true} = {hosed_ok,all_hosed_lists_are_identical(Namez, Partition)},
            io:format(user, "\nSweet, all_hosed are identical-or-islands-inconclusive.\n", []),
            timer:sleep(1000),
            ok
-       end || Partition <- AllPartitionCombinations
+       %% end || Partition <- AllPartitionCombinations
        %% end || Partition <- [ [{a,b},{b,d},{c,b}],
        %%                       [{a,b},{b,d},{c,b}, {a,b},{b,a},{a,c},{c,a},{a,d},{d,a}],
        %%                       %% [{a,b},{b,d},{c,b}, {b,a},{a,b},{b,c},{c,b},{b,d},{d,b}],
@@ -262,6 +272,7 @@ convergence_demo_testfun(NumFLUs) ->
        %% end || Partition <- [ [{a,b}, {b,c}],
        %%                       [{a,b}, {c,b}]  ]
        %% end || Partition <- [ [{a,b}, {b,c}]  ]  %% hosed-not-equal @ 3 FLUs
+       end || Partition <- [ [{a,b}, {b,a}] ]
        %% end || Partition <- [ [{a,b}],
        %%                       [{b,a}] ]
        %% end || Partition <- [ [{a,b}, {c,b}],
@@ -336,23 +347,30 @@ convergence_demo_testfun(NumFLUs) ->
       %% ?D(R_Projs),
 
       ok
+    catch
+        XX:YY ->
+            io:format(user, "BUMMER ~p ~p @ ~p\n",
+                      [XX, YY, erlang:get_stacktrace()]),
+            exit({bummer,XX,YY})
     after
         [ok = ?MGR:stop(MgrPid) || {_, MgrPid} <- MgrNamez],
-        [ok = machi_flu0:stop(FLUPid) || {_, FLUPid} <- Namez],
+        [ok = ?FLU_PC:quit(PPid) || {_, PPid} <- Namez],
+        [ok = ?FLU_C:stop(FLUPid) || FLUPid <- FLU_pids],
         ok = machi_partition_simulator:stop()
     end.
 
 private_projections_are_stable(Namez, PollFunc) ->
-    Private1 = [machi_flu0:proj_get_latest_num(FLU, private) ||
+    Private1 = [?FLU_PC:get_latest_epoch(FLU, private) ||
                    {_Name, FLU} <- Namez],
     PollFunc(5, 1, 10),
-    Private2 = [machi_flu0:proj_get_latest_num(FLU, private) ||
+    Private2 = [?FLU_PC:get_latest_epoch(FLU, private) ||
                    {_Name, FLU} <- Namez],
     true = (Private1 == Private2).
 
 all_hosed_lists_are_identical(Namez, Partition0) ->
     Partition = lists:usort(Partition0),
-    Ps = [machi_flu0:proj_read_latest(FLU, private) || {_Name, FLU} <- Namez],
+    Ps = [element(2,?FLU_PC:read_latest_projection(FLU, private)) ||
+             {_Name, FLU} <- Namez],
     UniqueAllHoseds = lists:usort([machi_chain_manager1:get_all_hosed(P) ||
                                       {ok, P} <- Ps]),
     Members = [M || {M, _Pid} <- Namez],

@@ -221,9 +221,9 @@ code_change(_OldVsn, S, _Extra) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 set_active_timer(#ch_mgr{name=MyName, members_dict=MembersDict}=S) ->
-    FLU_list = [P#p_srvr.name || P <- MembersDict],
+    FLU_list = [P#p_srvr.name || {_,P} <- orddict:to_list(MembersDict)],
     USec = calc_sleep_ranked_order(1000, 2000, MyName, FLU_list),
-    {ok, TRef} = timer:send_interval(USec),
+    {ok, TRef} = timer:send_interval(USec, yo_yo_yo),
     S#ch_mgr{timer=TRef}.
 
 do_cl_write_public_proj(Proj, S) ->
