@@ -135,27 +135,16 @@ chain_to_projection(MyName, Epoch, UPI_list, Repairing_list, All_list) ->
 -ifndef(PULSE).
 
 smoke0_test() ->
-    %% TODO attack list:
-    %% __ Add start option to chain manager to be "passive" only, i.e.,
-    %%    not immediately go to work on
-    %% 1. Start FLUs with full complement of FLU+proj+chmgr.
-    %% 2. Put each of them under a supervisor?
-    %%    - Sup proc could be a created-specifically-for-test thing, perhaps?
-    %%      Rather than relying on a supervisor with reg name + OTP app started
-    %%      plus plus more more yaddayadda?
-    %% 3. Add projection catalog/orddict of #p_srvr records??
-    %% 4. Backport the changes to smoke0_test().
-    %% 5. Do it to smoke1 test, yadda...
     {ok, _} = machi_partition_simulator:start_link({1,2,3}, 50, 50),
     Host = "localhost",
     TcpPort = 6623,
     {ok, FLUa} = machi_flu1:start_link([{a,TcpPort,"./data.a"}]),
     Pa = #p_srvr{name=a, proto=ipv4, address=Host, port=TcpPort},
-    P_Srvr_Dict = machi_projection:make_members_dict([Pa]),
+    Members_Dict = machi_projection:make_members_dict([Pa]),
     %% Egadz, more racing on startup, yay.  TODO fix.
     timer:sleep(1),
     {ok, FLUaP} = ?FLU_PC:start_link(Pa),
-    {ok, M0} = ?MGR:start_link(a, [a,b,c], P_Srvr_Dict, [{active_mode, false}]),
+    {ok, M0} = ?MGR:start_link(a, Members_Dict, [{active_mode, false}]),
     _SockA = machi_util:connect(Host, TcpPort),
     try
         pong = ?MGR:ping(M0)
@@ -172,12 +161,12 @@ smoke1_test() ->
     FluInfo = [{a,TcpPort+0,"./data.a"}, {b,TcpPort+1,"./data.b"}, {c,TcpPort+2,"./data.c"}],
     P_s = [#p_srvr{name=Name, address="localhost", port=Port} ||
               {Name,Port,_Dir} <- FluInfo],
-    
+
+    [machi_flu1_test:clean_up_data_dir(Dir) || {_,_,Dir} <- FluInfo],
     FLUs = [element(2, machi_flu1:start_link([{Name,Port,Dir}])) ||
                {Name,Port,Dir} <- FluInfo],
     MembersDict = machi_projection:make_members_dict(P_s),
-    I_represent = a,
-    {ok, M0} = ?MGR:start_link(I_represent, [a,b,c], MembersDict, [{active_mode,false}]),
+    {ok, M0} = ?MGR:start_link(a, MembersDict, [{active_mode,false}]),
     try
         {ok, P1} = ?MGR:test_calc_projection(M0, false),
         {local_write_result, ok,
@@ -192,24 +181,44 @@ smoke1_test() ->
         ok = machi_partition_simulator:stop()
     end.
 
-nonunanimous_setup_and_fix_testTODO() ->
+nonunanimous_setup_and_fix_test() ->
+    %% TODO attack list:
+    %% __ Add start option to chain manager to be "passive" only, i.e.,
+    %%    not immediately go to work on
+    %% 1. Start FLUs with full complement of FLU+proj+chmgr.
+    %% 2. Put each of them under a supervisor?
+    %%    - Sup proc could be a created-specifically-for-test thing, perhaps?
+    %%      Rather than relying on a supervisor with reg name + OTP app started
+    %%      plus plus more more yaddayadda?
+    %% 3. Add projection catalog/orddict of #p_srvr records??
+    %% 4. Fix this test, etc etc.
     machi_partition_simulator:start_link({1,2,3}, 100, 0),
-    {ok, FLUa} = machi_flu0:start_link(a),
-    {ok, FLUb} = machi_flu0:start_link(b),
-    I_represent = I_am = a,
-    {ok, Ma} = ?MGR:start_link(I_represent, [a,b], I_am),
-    {ok, Mb} = ?MGR:start_link(b, [a,b], b),
+    TcpPort = 62877,
+    FluInfo = [{a,TcpPort+0,"./data.a"}, {b,TcpPort+1,"./data.b"}],
+    P_s = [#p_srvr{name=Name, address="localhost", port=Port} ||
+              {Name,Port,_Dir} <- FluInfo],
+    
+    [machi_flu1_test:clean_up_data_dir(Dir) || {_,_,Dir} <- FluInfo],
+    FLUs = [element(2, machi_flu1:start_link([{Name,Port,Dir}])) ||
+               {Name,Port,Dir} <- FluInfo],
+    [Proxy_a, Proxy_b] = Proxies =
+        [element(2,?FLU_PC:start_link(P)) || P <- P_s],
+    MembersDict = machi_projection:make_members_dict(P_s),
+    {ok, Ma} = ?MGR:start_link(a, MembersDict, [{active_mode, false}]),
+    {ok, Mb} = ?MGR:start_link(b, MembersDict, [{active_mode, false}]),
     try
+io:format(user, "LINE ~p\n", [?LINE]),
         {ok, P1} = ?MGR:test_calc_projection(Ma, false),
 
-        P1a = ?MGR:update_projection_checksum(
-                P1#projection_v1{down=[b], upi=[a], dbg=[{hackhack, ?LINE}]}),
-        P1b = ?MGR:update_projection_checksum(
-                P1#projection_v1{author_server=b, creation_time=now(),
-                              down=[a], upi=[b], dbg=[{hackhack, ?LINE}]}),
-        P1Epoch = P1#projection_v1.epoch_number,
-        ok = machi_flu0:proj_write(FLUa, P1Epoch, public, P1a),
-        ok = machi_flu0:proj_write(FLUb, P1Epoch, public, P1b),
+        P1a = machi_projection:update_checksum(
+                 P1#projection_v1{down=[b], upi=[a], dbg=[{hackhack, ?LINE}]}),
+        P1b = machi_projection:update_checksum(
+                 P1#projection_v1{author_server=b, creation_time=now(),
+                                  down=[a], upi=[b], dbg=[{hackhack, ?LINE}]}),
+        %% Scribble different projections
+        ok = ?FLU_PC:write_projection(Proxy_a, public, P1a),
+        ok = ?FLU_PC:write_projection(Proxy_b, public, P1b),
+io:format(user, "LINE ~p\n", [?LINE]),
 
         ?D(x),
         {not_unanimous,_,_}=_XX = ?MGR:test_read_latest_public_projection(Ma, false),
@@ -220,27 +229,40 @@ nonunanimous_setup_and_fix_testTODO() ->
         %% we expect nothing to change when called again.
         {not_unanimous,_,_}=_YY = ?MGR:test_read_latest_public_projection(Ma, true),
 
+io:format(user, "LINE ~p\n", [?LINE]),
+        _ = ?MGR:test_react_to_env(Ma),
+io:format(user, "LINE ~p\n", [?LINE]),
         {now_using, _} = ?MGR:test_react_to_env(Ma),
+io:format(user, "LINE ~p\n", [?LINE]),
         {unanimous,P2,E2} = ?MGR:test_read_latest_public_projection(Ma, false),
-        {ok, P2pa} = machi_flu0:proj_read_latest(FLUa, private),
+io:format(user, "LINE ~p\n", [?LINE]),
+        {ok, P2pa} = ?FLU_PC:read_latest_projection(Proxy_a, private),
+io:format(user, "LINE ~p\n", [?LINE]),
         P2 = P2pa#projection_v1{dbg2=[]},
+io:format(user, "LINE ~p\n", [?LINE]),
 
-        %% FLUb should still be using proj #0 for its private use
-        {ok, P0pb} = machi_flu0:proj_read_latest(FLUb, private),
-        0 = P0pb#projection_v1.epoch_number,
+        %% FLUb should have nothing written to private because it hasn't
+        %% reacted yet.
+        {error, not_written} = ?FLU_PC:read_latest_projection(Proxy_b, private),
+io:format(user, "LINE ~p\n", [?LINE]),
 
         %% Poke FLUb to react ... should be using the same private proj
         %% as FLUa.
         {now_using, _} = ?MGR:test_react_to_env(Mb),
-        {ok, P2pb} = machi_flu0:proj_read_latest(FLUb, private),
+io:format(user, "LINE ~p\n", [?LINE]),
+        {ok, P2pb} = ?FLU_PC:read_latest_projection(Proxy_b, private),
+io:format(user, "LINE ~p\n", [?LINE]),
+io:format(user, "P2   ~p\n", [machi_projection:make_summary(P2)]),
+io:format(user, "P2pb ~p\n", [machi_projection:make_summary(P2pb)]),
         P2 = P2pb#projection_v1{dbg2=[]},
+io:format(user, "LINE ~p\n", [?LINE]),
 
         ok
     after
         ok = ?MGR:stop(Ma),
         ok = ?MGR:stop(Mb),
-        ok = machi_flu0:stop(FLUa),
-        ok = machi_flu0:stop(FLUb),
+        [ok = ?FLU_PC:quit(X) || X <- Proxies],
+        [ok = machi_flu1:stop(X) || X <- FLUs],
         ok = machi_partition_simulator:stop()
     end.
 

@@ -25,14 +25,12 @@
 -type projection() :: #projection_v1{}.
 
 -record(ch_mgr, {
-          init_finished   :: boolean(),
-          active_p        :: boolean(),
           name            :: pv1_server(),
-          proj            :: projection(),
-          proj_history    :: queue(),
-          myflu           :: pid() | atom(),
           flap_limit      :: non_neg_integer(),
+          proj            :: projection(),
           %%
+          timer           :: 'undefined' | reference(),
+          proj_history    :: queue(),
           flaps=0         :: integer(),
           flap_start = ?NOT_FLAPPING
                           :: erlang:now(),

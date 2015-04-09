@@ -26,10 +26,10 @@
 
 -export([
          new/6, new/7, new/8,
-         update_projection_checksum/1,
-         update_projection_dbg2/2,
+         update_checksum/1,
+         update_dbg2/2,
          compare/2,
-         make_projection_summary/1,
+         make_summary/1,
          make_members_dict/1
         ]).
 
@@ -51,13 +51,13 @@ new(EpochNum, MyName, MemberDict, Down_list, UPI_list, Repairing_list, Dbg) ->
 %% or it may be simply `list(p_srvr())', in which case we'll convert it
 %% to a `p_srvr_dict()'.
 
-new(EpochNum, MyName, MemberDict0, Down_list, UPI_list, Repairing_list,
+new(EpochNum, MyName, MembersDict0, Down_list, UPI_list, Repairing_list,
     Dbg, Dbg2)
   when is_integer(EpochNum), EpochNum >= 0,
        is_atom(MyName) orelse is_binary(MyName),
-       is_list(MemberDict0), is_list(Down_list), is_list(UPI_list),
+       is_list(MembersDict0), is_list(Down_list), is_list(UPI_list),
        is_list(Repairing_list), is_list(Dbg), is_list(Dbg2) ->
-    MembersDict = make_members_dict(MemberDict0),
+    MembersDict = make_members_dict(MembersDict0),
     All_list = [Name || {Name, _P} <- MembersDict],
     true = lists:all(fun(X) when is_atom(X) orelse is_binary(X) -> true;
                         (_)                                     -> false
@@ -85,11 +85,11 @@ new(EpochNum, MyName, MemberDict0, Down_list, UPI_list, Repairing_list,
                        repairing=Repairing_list,
                        dbg=Dbg
                       },
-    update_projection_dbg2(update_projection_checksum(P), Dbg2).
+    update_dbg2(update_checksum(P), Dbg2).
 
 %% @doc Update the checksum element of a projection record.
 
-update_projection_checksum(P) ->
+update_checksum(P) ->
     CSum = crypto:hash(sha,
                        term_to_binary(P#projection_v1{epoch_csum= <<>>,
                                                       dbg2=[]})),
@@ -97,7 +97,7 @@ update_projection_checksum(P) ->
 
 %% @doc Update the `dbg2' element of a projection record.
 
-update_projection_dbg2(P, Dbg2) when is_list(Dbg2) ->
+update_dbg2(P, Dbg2) when is_list(Dbg2) ->
     P#projection_v1{dbg2=Dbg2}.
 
 %% @doc Compare two projection records for equality (assuming that the
@@ -120,13 +120,13 @@ compare(#projection_v1{epoch_number=E1},
 
 %% @doc Create a proplist-style summary of a projection record.
 
-make_projection_summary(#projection_v1{epoch_number=EpochNum,
-                                       all_members=_All_list,
-                                       down=Down_list,
-                                       author_server=Author,
-                                       upi=UPI_list,
-                                       repairing=Repairing_list,
-                                       dbg=Dbg, dbg2=Dbg2}) ->
+make_summary(#projection_v1{epoch_number=EpochNum,
+                            all_members=_All_list,
+                            down=Down_list,
+                            author_server=Author,
+                            upi=UPI_list,
+                            repairing=Repairing_list,
+                            dbg=Dbg, dbg2=Dbg2}) ->
     [{epoch,EpochNum},{author,Author},
      {upi,UPI_list},{repair,Repairing_list},{down,Down_list},
      {d,Dbg}, {d2,Dbg2}].
@@ -145,16 +145,21 @@ make_projection_summary(#projection_v1{epoch_number=EpochNum,
 -spec make_members_dict(list(p_srvr()) | p_srvr_dict()) ->
       p_srvr_dict().
 make_members_dict(Ps) ->
-    case lists:all(fun(P) when is_record(P, p_srvr) -> true;
-                      (_)                           -> false
-                   end, Ps) of
+    F_rec = fun(P) when is_record(P, p_srvr) -> true;
+                      (_)                    -> false
+               end,
+    F_tup = fun({_K, P}) when is_record(P, p_srvr) -> true;
+               (_)                                 -> false
+            end,
+    case lists:all(F_rec, Ps) of
         true ->
             orddict:from_list([{P#p_srvr.name, P} || P <- Ps]);
         false ->
-            case lists:all(fun({_K, P}) when is_record(P, p_srvr) -> true;
-                              (_)                                 -> false
-                           end, Ps) of
+            case lists:all(F_tup, Ps) of
                 true ->
-                    orddict:from_list(Ps)
-            end                                 % No false clause, crash it!
+                    orddict:from_list(Ps);
+                false ->
+                    F_neither = fun(X) -> not (F_rec(X) or F_tup(X)) end,
+                    exit({badarg, {make_members_dict, lists:filter(F_neither, Ps)}})
+            end
     end.
