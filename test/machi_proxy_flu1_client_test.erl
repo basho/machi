@@ -19,52 +19,14 @@
 %% -------------------------------------------------------------------
 
 -module(machi_proxy_flu1_client_test).
+-compile(export_all).
 
 -include("machi_projection.hrl").
+-include_lib("eunit/include/eunit.hrl").
 
 -define(MUT, machi_proxy_flu1_client).
 
 -ifdef(TEST).
-
-%% dummy_server(Parent, TcpPort) ->
-%%     spawn_link(fun() ->
-%%                        {ok, LSock} = gen_tcp:listen(TcpPort,
-%%                                                     [{reuseaddr,true},
-%%                                                      {packet, line},
-%%                                                      {mode, binary},
-%%                                                      {active, false}]),
-%%                        dummy_ack(Parent),
-%%                        {ok, Sock} = gen_tcp:accept(LSock),
-%%                        ok = inet:setopts(Sock, [{packet, line}]),
-%%                        {ok, _Line} = gen_tcp:recv(Sock, 0),
-%%                        ok = gen_tcp:send(Sock, "ERROR BADARG\n"),
-%%                        (catch gen_tcp:close(Sock)),
-%%                        unlink(Parent),
-%%                        exit(normal)
-%%                end).
-
-%% dummy_ack(Parent) ->
-%%     Parent ! go.
-
-%% dummy_wait_for_ack() ->
-%%     receive go -> ok end.    
-
-%% smoke_test() ->
-%%     TcpPort = 57123,
-%%     Me = self(),
-%%     _ServerPid = dummy_server(Me, TcpPort),
-%%     dummy_wait_for_ack(),
-
-%%     I = #p_srvr{name=smoke, proto=ipv4, address="localhost", port=TcpPort},
-%%     S0 = #state{i=I},
-%%     false = connected_p(S0),
-%%     S1 = try_connect(S0),
-%%     true = connected_p(S1),
-%%     gen_tcp:send(S1#state.sock, "yo dawg\n"),
-%%     {ok, _Answer} = gen_tcp:recv(S1#state.sock, 0),
-%%     _S2 = disconnect(S1),
-    
-%%     ok.
 
 api_smoke_test() ->
     RegName = api_smoke_flu,

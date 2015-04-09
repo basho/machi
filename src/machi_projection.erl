@@ -102,6 +102,10 @@ update_projection_dbg2(P, Dbg2) when is_list(Dbg2) ->
 
 %% @doc Compare two projection records for equality (assuming that the
 %% checksum element has been correctly calculated).
+%%
+%% The name "compare" is probably too close to "rank"?  This
+%% comparison has nothing to do with projection ranking.
+%% TODO: change the name of this function?
 
 -spec compare(#projection_v1{}, #projection_v1{}) ->
       integer().
