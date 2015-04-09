@@ -666,7 +666,9 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                                      P_newprop#projection_v1.down),
 
     if
-        P_latest#projection_v1.epoch_number > P_current#projection_v1.epoch_number
+        (P_current#projection_v1.epoch_number > 0
+         andalso
+         P_latest#projection_v1.epoch_number > P_current#projection_v1.epoch_number)
         orelse
         not LatestUnanimousP ->
             ?REACT({a40, ?LINE,
@@ -784,7 +786,7 @@ react_to_env_A50(P_latest, S) ->
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                  Rank_newprop, Rank_latest,
-                 #ch_mgr{name=MyName, flap_limit=FlapLimit}=S) ->
+                 #ch_mgr{name=MyName, flap_limit=FlapLimit}=S)->
     ?REACT(b10),
 
     {_P_newprop_flap_time, P_newprop_flap_count} = get_flap_count(P_newprop),
@@ -896,6 +898,9 @@ react_to_env_C100(P_newprop, P_latest,
 
     case {ShortCircuit_p, projection_transition_is_sane(P_current, P_latest,
                                                         MyName)} of
+        _ when P_current#projection_v1.epoch_number =< 0 ->
+            ?REACT({c100, ?LINE, [first_write]}),
+            react_to_env_C110(P_latest, S);
         {true, _} ->
             %% Someone else believes that I am repairing.  We assume
             %% that nobody is being Byzantine, so we'll believe that I

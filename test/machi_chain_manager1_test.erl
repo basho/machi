@@ -204,10 +204,11 @@ nonunanimous_setup_and_fix_test() ->
     [Proxy_a, Proxy_b] = Proxies =
         [element(2,?FLU_PC:start_link(P)) || P <- P_s],
     MembersDict = machi_projection:make_members_dict(P_s),
-    {ok, Ma} = ?MGR:start_link(a, MembersDict, [{active_mode, false}]),
-    {ok, Mb} = ?MGR:start_link(b, MembersDict, [{active_mode, false}]),
+    XX = [],
+    %% XX = [{private_write_verbose,true}],
+    {ok, Ma} = ?MGR:start_link(a, MembersDict, [{active_mode, false}]++XX),
+    {ok, Mb} = ?MGR:start_link(b, MembersDict, [{active_mode, false}]++XX),
     try
-io:format(user, "LINE ~p\n", [?LINE]),
         {ok, P1} = ?MGR:test_calc_projection(Ma, false),
 
         P1a = machi_projection:update_checksum(
@@ -218,44 +219,31 @@ io:format(user, "LINE ~p\n", [?LINE]),
         %% Scribble different projections
         ok = ?FLU_PC:write_projection(Proxy_a, public, P1a),
         ok = ?FLU_PC:write_projection(Proxy_b, public, P1b),
-io:format(user, "LINE ~p\n", [?LINE]),
 
-        ?D(x),
+        %% ?D(x),
         {not_unanimous,_,_}=_XX = ?MGR:test_read_latest_public_projection(Ma, false),
-        ?Dw(_XX),
+        %% ?Dw(_XX),
         {not_unanimous,_,_}=_YY = ?MGR:test_read_latest_public_projection(Ma, true),
         %% The read repair here doesn't automatically trigger the creation of
         %% a new projection (to try to create a unanimous projection).  So
         %% we expect nothing to change when called again.
         {not_unanimous,_,_}=_YY = ?MGR:test_read_latest_public_projection(Ma, true),
 
-io:format(user, "LINE ~p\n", [?LINE]),
-        _ = ?MGR:test_react_to_env(Ma),
-io:format(user, "LINE ~p\n", [?LINE]),
-        {now_using, _} = ?MGR:test_react_to_env(Ma),
-io:format(user, "LINE ~p\n", [?LINE]),
-        {unanimous,P2,E2} = ?MGR:test_read_latest_public_projection(Ma, false),
-io:format(user, "LINE ~p\n", [?LINE]),
+        {now_using, EpochNum_a} = ?MGR:test_react_to_env(Ma),
+        {no_change, EpochNum_a} = ?MGR:test_react_to_env(Ma),
+        {unanimous,P2,_E2} = ?MGR:test_read_latest_public_projection(Ma, false),
         {ok, P2pa} = ?FLU_PC:read_latest_projection(Proxy_a, private),
-io:format(user, "LINE ~p\n", [?LINE]),
         P2 = P2pa#projection_v1{dbg2=[]},
-io:format(user, "LINE ~p\n", [?LINE]),
 
         %% FLUb should have nothing written to private because it hasn't
         %% reacted yet.
         {error, not_written} = ?FLU_PC:read_latest_projection(Proxy_b, private),
-io:format(user, "LINE ~p\n", [?LINE]),
 
         %% Poke FLUb to react ... should be using the same private proj
         %% as FLUa.
-        {now_using, _} = ?MGR:test_react_to_env(Mb),
-io:format(user, "LINE ~p\n", [?LINE]),
+        {now_using, EpochNum_a} = ?MGR:test_react_to_env(Mb),
         {ok, P2pb} = ?FLU_PC:read_latest_projection(Proxy_b, private),
-io:format(user, "LINE ~p\n", [?LINE]),
-io:format(user, "P2   ~p\n", [machi_projection:make_summary(P2)]),
-io:format(user, "P2pb ~p\n", [machi_projection:make_summary(P2pb)]),
         P2 = P2pb#projection_v1{dbg2=[]},
-io:format(user, "LINE ~p\n", [?LINE]),
 
         ok
     after
