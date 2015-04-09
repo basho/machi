@@ -135,15 +135,27 @@ chain_to_projection(MyName, Epoch, UPI_list, Repairing_list, All_list) ->
 -ifndef(PULSE).
 
 smoke0_test() ->
+    %% TODO attack list:
+    %% 0. Add start option to chain manager to be "passive" only, i.e.,
+    %%    not immediately go to work on
+    %% 1. Start FLUs with full complement of FLU+proj+chmgr.
+    %% 2. Put each of them under a supervisor?
+    %%    - Sup proc could be a created-specifically-for-test thing, perhaps?
+    %%      Rather than relying on a supervisor with reg name + OTP app started
+    %%      plus plus more more yaddayadda?
+    %% 3. Add projection catalog/orddict of #p_srvr records??
+    %% 4. Backport the changes to smoke0_test().
+    %% 5. Do it to smoke1 test, yadda...
     {ok, _} = machi_partition_simulator:start_link({1,2,3}, 50, 50),
     Host = "localhost",
     TcpPort = 6623,
     {ok, FLUa} = machi_flu1:start_link([{a,TcpPort,"./data.a"}]),
     Pa = #p_srvr{name=a, proto=ipv4, address=Host, port=TcpPort},
+    P_Srvr_Dict = machi_projection:make_members_dict([Pa]),
     %% Egadz, more racing on startup, yay.  TODO fix.
     timer:sleep(1),
     {ok, FLUaP} = ?FLU_PC:start_link(Pa),
-    {ok, M0} = ?MGR:start_link(a, [a,b,c], FLUaP),
+    {ok, M0} = ?MGR:start_link(a, [a,b,c], P_Srvr_Dict, [{active_mode, false}]),
     _SockA = machi_util:connect(Host, TcpPort),
     try
         pong = ?MGR:ping(M0)

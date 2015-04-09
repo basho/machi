@@ -136,7 +136,8 @@ flu_projection_smoke_test() ->
              {ok, []} = ?FLU_C:list_all_projections(Host, TcpPort, T),
              {ok, []} = ?FLU_C:get_all_projections(Host, TcpPort, T),
 
-             P1 = machi_projection:new(1, a, [a], [], [a], [], []),
+             P_a = #p_srvr{name=a},
+             P1 = machi_projection:new(1, a, [P_a], [], [a], [], []),
              ok = ?FLU_C:write_projection(Host, TcpPort, T, P1),
              {error, written} = ?FLU_C:write_projection(Host, TcpPort, T, P1),
              {ok, P1} = ?FLU_C:read_projection(Host, TcpPort, T, 1),

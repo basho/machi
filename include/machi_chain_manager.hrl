@@ -18,23 +18,27 @@
 %%
 %% -------------------------------------------------------------------
 
+-include("machi_projection.hrl").
+
 -define(NOT_FLAPPING, {0,0,0}).
 
 -type projection() :: #projection_v1{}.
 
 -record(ch_mgr, {
           init_finished   :: boolean(),
+          active_p        :: boolean(),
           name            :: pv1_server(),
           proj            :: projection(),
           proj_history    :: queue(),
           myflu           :: pid() | atom(),
           flap_limit      :: non_neg_integer(),
           %%
-          runenv          :: list(), %proplist()
-          opts            :: list(),  %proplist()
           flaps=0         :: integer(),
           flap_start = ?NOT_FLAPPING
                           :: erlang:now(),
+          runenv          :: list(), %proplist()
+          opts            :: list(),  %proplist()
+          members_dict    :: p_srvr_dict(),
 
           %% Deprecated ... TODO: remove when old test unit test code is removed
           proj_proposed   :: 'none' | projection()

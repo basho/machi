@@ -132,7 +132,7 @@ test_react_to_env(Pid) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init({MyName, All_list, MyFLUPid, MgrOpts}) ->
+init({MyName, All_list, MembersDict, MgrOpts}) ->
     RunEnv = [%% {seed, Seed},
               {seed, now()},
               {network_partitions, []},
@@ -144,10 +144,12 @@ init({MyName, All_list, MyFLUPid, MgrOpts}) ->
     NoneProj = make_initial_projection(MyName, All_list, [],
                                        [], []),
     S = #ch_mgr{init_finished=false,
+                active_p=proplists:get_value(active_mode, MgrOpts, true),
                 name=MyName,
                 proj=NoneProj,
                 proj_history=queue:new(),
-                myflu=MyFLUPid, % pid or atom local name
+                myflu=MyName,
+                members_dict=MembersDict,
                 %% TODO 2015-03-04: revisit, should this constant be bigger?
                 %% Yes, this should be bigger, but it's a hack.  There is
                 %% no guarantee that all parties will advance to a minimum
@@ -170,6 +172,10 @@ init({MyName, All_list, MyFLUPid, MgrOpts}) ->
     self() ! {finish_init, BestProj},
     {ok, S}.
 
+handle_call({ping}, _From, S) ->
+    {reply, pong, S};
+handle_call({stop}, _From, S) ->
+    {stop, normal, ok, S};
 handle_call(_Call, _From, #ch_mgr{init_finished=false} = S) ->
     {reply, not_initialized, S};
 handle_call({test_write_proposed_projection}, _From, S) ->
@@ -179,10 +185,6 @@ handle_call({test_write_proposed_projection}, _From, S) ->
             {Res, S2} = do_cl_write_proposed_proj(S),
             {reply, Res, S2}
     end;
-handle_call({ping}, _From, S) ->
-    {reply, pong, S};
-handle_call({stop}, _From, S) ->
-    {stop, normal, ok, S};
 handle_call({test_calc_projection, KeepRunenvP}, _From,
             #ch_mgr{name=MyName}=S) ->
     RelativeToServer = MyName,
@@ -226,10 +228,12 @@ code_change(_OldVsn, S, _Extra) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+finish_init(BestProj, #ch_mgr{active_p=false}=S) ->
+    _ = erlang:send_after(1000, self(), {finish_init, BestProj}),
+    S;
 finish_init(BestProj, #ch_mgr{init_finished=false, myflu=MyFLU} = S) ->
     case ?FLU_PC:read_latest_projection(MyFLU, private) of
         {error, not_written} ->
-            Epoch = BestProj#projection_v1.epoch_number,
             case ?FLU_PC:write_projection(MyFLU, private, BestProj) of
                 ok ->
                     S#ch_mgr{init_finished=true, proj=BestProj};

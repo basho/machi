@@ -29,44 +29,36 @@
          update_projection_checksum/1,
          update_projection_dbg2/2,
          compare/2,
-         make_projection_summary/1
+         make_projection_summary/1,
+         make_members_dict/1
         ]).
 
 %% @doc Create a new projection record.
 
-new(MyName, All_list, UPI_list, Down_list, Repairing_list, Ps) ->
-    new(0, MyName, All_list, Down_list, UPI_list, Repairing_list, Ps).
+new(MyName, MemberDict, UPI_list, Down_list, Repairing_list, Ps) ->
+    new(0, MyName, MemberDict, Down_list, UPI_list, Repairing_list, Ps).
 
 %% @doc Create a new projection record.
 
-new(EpochNum, MyName, All_list, Down_list, UPI_list, Repairing_list, Dbg) ->
-    new(EpochNum, MyName, All_list, Down_list, UPI_list, Repairing_list,
+new(EpochNum, MyName, MemberDict, Down_list, UPI_list, Repairing_list, Dbg) ->
+    new(EpochNum, MyName, MemberDict, Down_list, UPI_list, Repairing_list,
         Dbg, []).
 
 %% @doc Create a new projection record.
+%%
+%% The `MemberDict0' argument may be a true `p_srvr_dict()' (i.e, it
+%% is a well-formed `orddict' with the correct 2-tuple key-value form)
+%% or it may be simply `list(p_srvr())', in which case we'll convert it
+%% to a `p_srvr_dict()'.
 
-new(EpochNum, MyName, All_list0, Down_list, UPI_list, Repairing_list,
+new(EpochNum, MyName, MemberDict0, Down_list, UPI_list, Repairing_list,
     Dbg, Dbg2)
   when is_integer(EpochNum), EpochNum >= 0,
        is_atom(MyName) orelse is_binary(MyName),
-       is_list(All_list0), is_list(Down_list), is_list(UPI_list),
+       is_list(MemberDict0), is_list(Down_list), is_list(UPI_list),
        is_list(Repairing_list), is_list(Dbg), is_list(Dbg2) ->
-    {All_list, MemberDict} =
-        case lists:all(fun(P) when is_record(P, p_srvr) -> true;
-                          (_)                           -> false
-                       end, All_list0) of
-            true ->
-                All = [S#p_srvr.name || S <- All_list0],
-                TmpL = [{S#p_srvr.name, S} || S <- All_list0],
-                {All, orddict:from_list(TmpL)};
-            false ->
-                All_list1 = lists:zip(All_list0,lists:seq(0,length(All_list0)-1)),
-                All_list2 = [#p_srvr{name=S, address="localhost",
-                                     port=?MACHI_DEFAULT_TCP_PORT+I} ||
-                                {S, I} <- All_list1],
-                TmpL = [{S#p_srvr.name, S} || S <- All_list2],
-                {All_list0, orddict:from_list(TmpL)}
-        end,
+    MembersDict = make_members_dict(MemberDict0),
+    All_list = [Name || {Name, _P} <- MembersDict],
     true = lists:all(fun(X) when is_atom(X) orelse is_binary(X) -> true;
                         (_)                                     -> false
                      end, All_list),
@@ -87,7 +79,7 @@ new(EpochNum, MyName, All_list0, Down_list, UPI_list, Repairing_list,
                        creation_time=now(),
                        author_server=MyName,
                        all_members=All_list,
-                       member_dict=MemberDict,
+                       members_dict=MembersDict,
                        down=Down_list,
                        upi=UPI_list,
                        repairing=Repairing_list,
@@ -134,3 +126,31 @@ make_projection_summary(#projection_v1{epoch_number=EpochNum,
     [{epoch,EpochNum},{author,Author},
      {upi,UPI_list},{repair,Repairing_list},{down,Down_list},
      {d,Dbg}, {d2,Dbg2}].
+
+%% @doc Make a `p_srvr_dict()' out of a list of `p_srvr()' or out of a
+%% `p_srvr_dict()'.
+%%
+%% If `Ps' is a `p_srvr_dict()', then this function is usually a
+%% no-op.  However, if someone has tampered with the list and screwed
+%% up its order, then we should fix it so `orddict' can work
+%% correctly.
+%%
+%% If `Ps' is simply `list(p_srvr())', in which case we'll convert it
+%% to a `p_srvr_dict()'.
+
+-spec make_members_dict(list(p_srvr()) | p_srvr_dict()) ->
+      p_srvr_dict().
+make_members_dict(Ps) ->
+    case lists:all(fun(P) when is_record(P, p_srvr) -> true;
+                      (_)                           -> false
+                   end, Ps) of
+        true ->
+            orddict:from_list([{P#p_srvr.name, P} || P <- Ps]);
+        false ->
+            case lists:all(fun({_K, P}) when is_record(P, p_srvr) -> true;
+                              (_)                                 -> false
+                           end, Ps) of
+                true ->
+                    orddict:from_list(Ps)
+            end                                 % No false clause, crash it!
+    end.
