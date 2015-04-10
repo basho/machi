@@ -262,11 +262,11 @@ do_proj_write(ProjType, #projection_v1{epoch_number=Epoch}=Proj, S) ->
             EpochT = {Epoch, Proj#projection_v1.epoch_csum},
             NewS = if ProjType == public,
                       Epoch > element(1, S#state.max_public_epoch) ->
-                           io:format(user, "TODO: tell ~p we are wedged by epoch ~p\n", [S#state.wedge_notify_pid, Epoch]),
+                           %io:format(user, "TODO: tell ~p we are wedged by epoch ~p\n", [S#state.wedge_notify_pid, Epoch]),
                            S#state{max_public_epoch=EpochT, wedged=true};
                       ProjType == private,
                       Epoch > element(1, S#state.max_private_epoch) ->
-                           io:format(user, "TODO: tell ~p we are unwedged by epoch ~p\n", [S#state.wedge_notify_pid, Epoch]),
+                           %io:format(user, "TODO: tell ~p we are unwedged by epoch ~p\n", [S#state.wedge_notify_pid, Epoch]),
                            S#state{max_private_epoch=EpochT, wedged=false};
                       true ->
                            S

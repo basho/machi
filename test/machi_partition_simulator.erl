@@ -198,7 +198,6 @@ partitions2num_islands(Members0, Partition0) ->
     %% Ignore duplicates in either arg, if any.
     Members = lists:usort(Members0),
     Partition = lists:usort(Partition0),
-io:format(user, "\npartitions2num_islands(Members, Partition)\n~p ~p\n", [Members, Partition]),
 
     Connections = partition2connection(Members, Partition),
     Cs = [lists:member({X,Y}, Connections)

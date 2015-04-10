@@ -43,15 +43,15 @@
 -record(projection_v1, {
           epoch_number    :: pv1_epoch_n(),
           epoch_csum      :: pv1_csum(),
-          all_members     :: [pv1_server()],
-          members_dict    :: p_srvr_dict(),
-          down            :: [pv1_server()],
-          creation_time   :: pv1_timestamp(),
           author_server   :: pv1_server(),
+          creation_time   :: pv1_timestamp(),
+          all_members     :: [pv1_server()],
+          down            :: [pv1_server()],
           upi             :: [pv1_server()],
           repairing       :: [pv1_server()],
           dbg             :: list(), %proplist(), is checksummed
-          dbg2            :: list()  %proplist(), is not checksummed
+          dbg2            :: list(), %proplist(), is not checksummed
+          members_dict    :: p_srvr_dict()
          }).
 
 -define(MACHI_DEFAULT_TCP_PORT, 50000).

@@ -237,8 +237,12 @@ convergence_demo_testfun(NumFLUs) ->
       io:format(user, "\nLet loose the dogs of war!\n", []),
       DoIt(30, 0, 0),
       [begin
+           %% io:format(user, "\nSET partitions = ~w.\n", [ [] ]),machi_partition_simulator:no_partitions(),
+           %% [DoIt(50, 10, 100) || _ <- [1,2,3]],
+           io:format(user, "\nLet loose the dogs of war!\n", []),
+           DoIt(30, 0, 0),
            io:format(user, "\nSET partitions = ~w.\n", [ [] ]),machi_partition_simulator:no_partitions(),
-           [DoIt(50, 10, 100) || _ <- [1,2,3]],
+           [DoIt(10, 10, 100) || _ <- [1]],
 
            %% machi_partition_simulator:reset_thresholds(10, 50),
            %% io:format(user, "\nLet loose the dogs of war!\n", []),
@@ -251,8 +255,8 @@ convergence_demo_testfun(NumFLUs) ->
                [begin
                     {ok, PPPallPubs} = ?FLU_PC:list_all_projections(FLU,public),
                     [begin
-                         {ok, Pr} = ?FLU_PC:read_projection(FLU,
-                                                            public, PPPepoch),
+                         {ok, Pr} = todo_why_does_this_crash_sometimes(
+                                      FLUName, FLU, PPPepoch),
                          {Pr#projection_v1.epoch_number, FLUName, Pr}
                      end || PPPepoch <- PPPallPubs]
                 end || {FLUName, FLU} <- Namez],
@@ -269,10 +273,12 @@ convergence_demo_testfun(NumFLUs) ->
        %%                       %% [{a,b},{b,d},{c,b}, {b,a},{a,b},{b,c},{c,b},{b,d},{d,b}],
        %%                       [{a,b},{b,d},{c,b}, {c,a},{a,c},{c,b},{b,c},{c,d},{d,c}],
        %%                       [{a,b},{b,d},{c,b}, {d,a},{a,d},{d,b},{b,d},{d,c},{c,d}] ]
-       %% end || Partition <- [ [{a,b}, {b,c}],
-       %%                       [{a,b}, {c,b}]  ]
+       end || Partition <- [ [{a,b}, {b,c}],
+                             [{a,b}, {c,b}]  ]
        %% end || Partition <- [ [{a,b}, {b,c}]  ]  %% hosed-not-equal @ 3 FLUs
-       end || Partition <- [ [{a,b}, {b,a}] ]
+       %% end || Partition <- [ [{b,d}] ]
+       %% end || Partition <- [ [{a,b}, {b,a}] ]
+       %% end || Partition <- [ [{a,b}, {b,a}, {a,c},{c,a}] ]
        %% end || Partition <- [ [{a,b}],
        %%                       [{b,a}] ]
        %% end || Partition <- [ [{a,b}, {c,b}],
@@ -357,6 +363,17 @@ convergence_demo_testfun(NumFLUs) ->
         [ok = ?FLU_PC:quit(PPid) || {_, PPid} <- Namez],
         [ok = machi_flu1:stop(FLUPid) || FLUPid <- FLU_pids],
         ok = machi_partition_simulator:stop()
+    end.
+
+todo_why_does_this_crash_sometimes(FLUName, FLU, PPPepoch) ->
+    try
+        {ok, _}=Res = ?FLU_PC:read_projection(FLU, public, PPPepoch),
+        Res
+    catch _:_ ->
+            io:format(user, "QQQ Whoa, it crashed this time for ~p at epoch ~p\n",
+                      [FLUName, PPPepoch]),
+            timer:sleep(1000),
+            ?FLU_PC:read_projection(FLU, public, PPPepoch)
     end.
 
 private_projections_are_stable(Namez, PollFunc) ->
