@@ -934,12 +934,23 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
                    |Extra_todo]),
 
     MyNamePid = proxy_pid(MyName, S),
+    %% TODO: We need to fetch the inner projection, if it exists, and
+    %%       write it to the private store.  Put the outer projection
+    %%       into dbg2 for forensics and perhaps re-start use?
     ok = ?FLU_PC:write_projection(MyNamePid, private, P_latest2, ?TO),
     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
         true ->
             {_,_,C} = os:timestamp(),
             MSec = trunc(C / 1000),
             {HH,MM,SS} = time(),
+            case proplists:get_value(inner_projection, P_latest2#projection_v1.dbg) of
+                undefined ->
+                    ok;
+                P_inner when is_record(P_inner, projection_v1) ->
+                    io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses INNER: ~w\n",
+                              [HH,MM,SS,MSec, S#ch_mgr.name,
+                               machi_projection:make_summary(P_inner)])
+            end,
             io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses: ~w\n",
                       [HH,MM,SS,MSec, S#ch_mgr.name,
                        machi_projection:make_summary(P_latest2)]);
