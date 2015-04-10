@@ -161,11 +161,11 @@ convergence_demo_testfun(NumFLUs) ->
     PsDirs = lists:zip(Ps,
                        [Dir || {_,_,Dir} <- lists:sublist(FluInfo, NumFLUs)]),
     FLU_pids = [machi_flu1_test:setup_test_flu(Name, Port, Dir) ||
-                   {#p_srvr{name=Name,port=Port}=P, Dir} <- PsDirs],
+                   {#p_srvr{name=Name,port=Port}, Dir} <- PsDirs],
     Namez = [begin
                  {ok, PPid} = ?FLU_PC:start_link(P),
                  {Name, PPid}
-             end || {#p_srvr{name=Name,port=Port}=P, Dir} <- PsDirs],
+             end || {#p_srvr{name=Name}=P, _Dir} <- PsDirs],
     MembersDict = machi_projection:make_members_dict(Ps),
     MgrOpts = [private_write_verbose, {active_mode,false}],
     MgrNamez =
@@ -247,7 +247,7 @@ convergence_demo_testfun(NumFLUs) ->
            machi_partition_simulator:always_these_partitions(Partition),
            io:format(user, "\nSET partitions = ~w.\n", [Partition]),
            [DoIt(50, 10, 100) || _ <- [1,2,3,4] ],
-           PPP =
+           _PPP =
                [begin
                     {ok, PPPallPubs} = ?FLU_PC:list_all_projections(FLU,public),
                     [begin
@@ -256,7 +256,7 @@ convergence_demo_testfun(NumFLUs) ->
                          {Pr#projection_v1.epoch_number, FLUName, Pr}
                      end || PPPepoch <- PPPallPubs]
                 end || {FLUName, FLU} <- Namez],
-           %% io:format(user, "PPP ~p\n", [lists:sort(lists:append(PPP))]),
+           %% io:format(user, "PPP ~p\n", [lists:sort(lists:append(_PPP))]),
 
            %%%%%%%% {stable,true} = {stable,private_projections_are_stable(Namez, DoIt)},
            {hosed_ok,true} = {hosed_ok,all_hosed_lists_are_identical(Namez, Partition)},
@@ -337,8 +337,8 @@ convergence_demo_testfun(NumFLUs) ->
       %% For each chain transition experienced by a particular FLU,
       %% confirm that each state transition is OK.
       try
-          [{FLU, true} = {FLU, ?MGR:projection_transitions_are_sane(Ps, FLU)} ||
-              {FLU, Ps} <- R_Projs],
+          [{FLU, true} = {FLU, ?MGR:projection_transitions_are_sane(Psx, FLU)} ||
+              {FLU, Psx} <- R_Projs],
           io:format(user, "\nAll sanity checks pass, hooray!\n", [])
       catch _Err:_What ->
               io:format(user, "Report ~p\n", [Report]),
