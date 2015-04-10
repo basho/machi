@@ -903,9 +903,25 @@ io:format(user, "<--x=~w-oooo-~w-~w-~w->", [X, MyName, P_newprop_flap_count,Flap
 react_to_env_C100(P_newprop, P_latest,
                   #ch_mgr{name=MyName, proj=P_current}=S) ->
     ?REACT(c100),
+
+    %% TODO 2015-04-10
+    %% OK, well, we need to be checking sanity on inner projections here,
+    %% but how to do it is still a bit of a mystery.
+    %%
+    %% If the *Y bindings are identical to incoming args, then we aren't
+    %% checking at all.  That's bad, but we don't go into Infinite Loops of
+    %% ReallyReallyBad.
+
+    P_newpropY = P_newprop,
+    P_latestY = P_latest,
+    P_currentY = P_current,
+    %% P_newpropY = inner_projection_or_self(P_newprop),
+    %% P_latestY = inner_projection_or_self(P_latest),
+    %% P_currentY = inner_projection_or_self(P_current),
+
     I_am_UPI_in_newprop_p = lists:member(MyName, P_newprop#projection_v1.upi),
     I_am_Repairing_in_latest_p = lists:member(MyName,
-                                              P_latest#projection_v1.repairing),
+                                             P_latest#projection_v1.repairing),
     ShortCircuit_p =
         P_latest#projection_v1.epoch_number > P_current#projection_v1.epoch_number
         andalso
@@ -913,9 +929,18 @@ react_to_env_C100(P_newprop, P_latest,
         andalso
         I_am_Repairing_in_latest_p,
 
-    case {ShortCircuit_p, projection_transition_is_sane(P_current, P_latest,
-                                                        MyName)} of
-        _ when P_current#projection_v1.epoch_number =< 0 ->
+    Current_sane_p = projection_transition_is_sane(P_current, P_latest,
+                                                   MyName),
+    Inner_sane_p =
+        if P_currentY == P_current, P_latestY == P_latest ->
+                true;
+           true ->
+                projection_transition_is_sane(P_currentY, P_latestY, MyName)
+        end,
+
+    case {ShortCircuit_p, Current_sane_p} of
+        _ when P_current#projection_v1.epoch_number == 0 ->
+            %% Epoch == 0 is reserved for first-time, just booting conditions.
             ?REACT({c100, ?LINE, [first_write]}),
             react_to_env_C110(P_latest, S);
         {true, _} ->
@@ -924,14 +949,21 @@ react_to_env_C100(P_newprop, P_latest,
             %% am/should be repairing.  We ignore our proposal and try
             %% to go with the latest.
             ?REACT({c100, ?LINE, [repairing_short_circuit]}),
+            if Inner_sane_p == false -> io:format(user, "QQQ line ~p false\n", [?LINE]), timer:sleep(500); true -> ok end,
             react_to_env_C110(P_latest, S);
-        {_, true} ->
+        {_, true} when Inner_sane_p ->
             ?REACT({c100, ?LINE, [sane]}),
+            if Inner_sane_p == false -> io:format(user, "QQQ line ~p false\n", [?LINE]), timer:sleep(500); true -> ok end,
             react_to_env_C110(P_latest, S);
         {_, _AnyOtherReturnValue} ->
-            %% P_latest is not sane.
+            %% P_latest is not sane or else P_latestY is not sane.
             %% By process of elimination, P_newprop is best,
             %% so let's write it.
+io:format(user, "\nUrp: ~p ~p ~p ~p\n", [MyName, ShortCircuit_p, _AnyOtherReturnValue, Inner_sane_p]),
+io:format(user, "c100 P_newprop : ~w\n", [machi_projection:make_summary(P_newprop)]),
+io:format(user, "c100 P_newpropY: ~w\n", [machi_projection:make_summary(P_newpropY)]),
+io:format(user, "c100 P_latest : ~w\n", [machi_projection:make_summary(P_latest)]),
+io:format(user, "c100 P_latestY: ~w\n", [machi_projection:make_summary(P_latestY)]),
             ?REACT({c100, ?LINE, [not_sane]}),
             react_to_env_C300(P_newprop, P_latest, S)
     end.
