@@ -18,22 +18,24 @@
 %%
 %% -------------------------------------------------------------------
 
-%% @doc Top-level supervisor for the Machi application.
+-include("machi_projection.hrl").
 
--module(machi_app).
+-define(NOT_FLAPPING, {0,0,0}).
 
--behaviour(application).
+-type projection() :: #projection_v1{}.
 
-%% Application callbacks
--export([start/2, stop/1]).
-
-start(_StartType, _StartArgs) ->
-    case machi_sup:start_link() of
-        {ok, Pid} ->
-            {ok, Pid};
-        Error ->
-            Error
-                end.
-
-stop(_State) ->
-    ok.
+-record(ch_mgr, {
+          name            :: pv1_server(),
+          flap_limit      :: non_neg_integer(),
+          proj            :: projection(),
+          %%
+          timer           :: 'undefined' | timer:tref(),
+          proj_history    :: queue:queue(),
+          flaps=0         :: integer(),
+          flap_start = ?NOT_FLAPPING
+                          :: erlang:timestamp(),
+          runenv          :: list(), %proplist()
+          opts            :: list(),  %proplist()
+          members_dict    :: p_srvr_dict(),
+          proxies_dict    :: orddict:orddict()
+         }).

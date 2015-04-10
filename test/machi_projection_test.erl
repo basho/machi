@@ -25,36 +25,45 @@
 
 -include("machi_projection.hrl").
 
+new_fake(Name) ->
+    #p_srvr{name=Name}.
+
+%% Bleh, hey QuickCheck ... except that any model probably equals
+%% code under test, bleh.
+
 new_test() ->
-    %% Bleh, hey QuickCheck ... except that any model probably equals
-    %% code under test, bleh.
-    true = try_it(a, [a,b,c], [a,b], [], [c], []),
-    true = try_it(<<"a">>, [<<"a">>,b,c], [<<"a">>,b], [], [c], []),
-    Servers =      [#p_srvr{name=a}, #p_srvr{name=b}, #p_srvr{name=c}],
-    Servers_bad1 = [#p_srvr{name= <<"a">>}, #p_srvr{name=b}, #p_srvr{name=c}],
-    Servers_bad2 = [#p_srvr{name=z},       #p_srvr{name=b}, #p_srvr{name=c}],
+    All0 = [new_fake(X) || X <- [a,b,c]],
+    All_binA = [new_fake(<<"a">>)] ++ [new_fake(X) || X <- [b,c]],
+
+    true = try_it(a, All0, [a,b], [], [c], []),
+    true = try_it(<<"a">>, All_binA, [<<"a">>,b], [], [c], []),
+    Servers =  All0,
+    Servers_bad1 = [new_fake(X) || X <- [<<"a">>,b,c]],
+    Servers_bad2 = [new_fake(X) || X <- [z,b,c]],
     true = try_it(a, Servers, [a,b], [], [c], []),
 
     false = try_it(a, not_list, [a,b], [], [c], []),
-    false = try_it(a, [a,b,c], not_list, [], [c], []),
-    false = try_it(a, [a,b,c], [a,b], not_list, [c], []),
-    false = try_it(a, [a,b,c], [a,b], [], not_list, []),
-    false = try_it(a, [a,b,c], [a,b], [], [c], not_list),
+    false = try_it(a, All0, not_list, [], [c], []),
+    false = try_it(a, All0, [a,b], not_list, [c], []),
+    false = try_it(a, All0, [a,b], [], not_list, []),
+    false = try_it(a, All0, [a,b], [], [c], not_list),
 
-    false = try_it(<<"x">>, [a,b,c], [a,b], [], [c], []),
-    false = try_it(a, [a,b,c], [a,b,c], [], [c], []),
-    false = try_it(a, [a,b,c], [a,b], [c], [c], []),
-    false = try_it(a, [a,b,c], [a,b], [], [c,c], []),
+    false = try_it(<<"x">>, All0, [a,b], [], [c], []),
+    false = try_it(a, All0, [a,b,c], [], [c], []),
+    false = try_it(a, All0, [a,b], [c], [c], []),
+    false = try_it(a, All0, [a,b], [], [c,c], []),
     false = try_it(a, Servers_bad1, [a,b], [], [c], []),
     false = try_it(a, Servers_bad2, [a,b], [], [c], []),
 
     ok.
 
 compare_test() ->
-    P0  = machi_projection:new(0, a, [a,b,c], [a,b], [], [c], []),
-    P1a = machi_projection:new(1, a, [a,b,c], [a,b], [], [c], []),
-    P1b = machi_projection:new(1, b, [a,b,c], [a,b], [], [c], []),
-    P2  = machi_projection:new(2, a, [a,b,c], [a,b], [], [c], []),
+    All0 = [new_fake(X) || X <- [a,b,c]],
+
+    P0  = machi_projection:new(0, a, All0, [a,b], [], [c], []),
+    P1a = machi_projection:new(1, a, All0, [a,b], [], [c], []),
+    P1b = machi_projection:new(1, b, All0, [a,b], [], [c], []),
+    P2  = machi_projection:new(2, a, All0, [a,b], [], [c], []),
 
     0  = machi_projection:compare(P0,  P0),
     -1 = machi_projection:compare(P0,  P1a),

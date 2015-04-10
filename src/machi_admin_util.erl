@@ -18,6 +18,8 @@
 %%
 %% -------------------------------------------------------------------
 
+%% @doc Machi chain replication administration utilities.
+
 -module(machi_admin_util).
 
 %% TODO Move these types to a common header file? (also machi_flu1_client.erl?)
@@ -114,7 +116,7 @@ verify_chunk_checksum(File, ReadChunk) ->
     fun({Offset, Size, CSum}, Acc) ->
             case ReadChunk(File, Offset, Size) of
                 {ok, Chunk} ->
-                    CSum2 = machi_util:checksum(Chunk),
+                    CSum2 = machi_util:checksum_chunk(Chunk),
                     if CSum == CSum2 ->
                             Acc;
                        true ->

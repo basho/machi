@@ -18,6 +18,33 @@
 %%
 %% -------------------------------------------------------------------
 
+%% @doc The Machi FLU file server + file location sequencer.
+%%
+%% This module implements only the Machi FLU file server and its
+%% implicit sequencer.  
+%% Please see the EDoc "Overview" for details about the FLU as a
+%% primitive file server process vs. the larger Machi design of a FLU
+%% as a sequencer + file server + chain manager group of processes.
+%%
+%% For the moment, this module also implements a rudimentary TCP-based
+%% protocol as the sole supported access method to the server,
+%% sequencer, and projection store.  Conceptually, those three
+%% services are independent and ought to have their own protocols.  As
+%% a practical matter, there is no need for wire protocol
+%% compatibility.  Furthermore, from the perspective of failure
+%% detection, it is very convenient that all three FLU-related
+%% services are accessed using the same single TCP port.
+%%
+%% The FLU is named after the CORFU server "FLU" or "FLash Unit" server.
+%%
+%% TODO There is one major missing feature in this FLU implementation:
+%% there is no "write-once" enforcement for any position in a Machi
+%% file.  At the moment, we rely on correct behavior of the client
+%% &amp; the sequencer to avoid overwriting data.  In the Real World,
+%% however, all Machi file data is supposed to be exactly write-once
+%% to avoid problems with bugs, wire protocol corruption, malicious
+%% clients, etc.
+
 -module(machi_flu1).
 
 -include_lib("kernel/include/file.hrl").
@@ -46,7 +73,7 @@ start_link([{FluName, TcpPort, DataDir}|Rest])
 stop(Pid) ->
     case erlang:is_process_alive(Pid) of
         true ->
-            Pid ! forever,
+            Pid ! killme,
             ok;
         false ->
             error
@@ -86,7 +113,11 @@ main2(RegName, TcpPort, DataDir, Rest) ->
     put(flu_append_pid, AppendPid),
     put(flu_projection_pid, ProjectionPid),
     put(flu_listen_pid, ListenPid),
-    receive forever -> ok end.
+    receive killme -> ok end,
+    (catch exit(AppendPid, kill)),
+    (catch exit(ProjectionPid, kill)),
+    (catch exit(ListenPid, kill)),
+    ok.
 
 start_listen_server(S) ->
     spawn_link(fun() -> run_listen_server(S) end).
@@ -214,7 +245,7 @@ do_net_server_append2(RegName, Sock, LenHex, Prefix) ->
     <<Len:32/big>> = machi_util:hexstr_to_bin(LenHex),
     ok = inet:setopts(Sock, [{packet, raw}]),
     {ok, Chunk} = gen_tcp:recv(Sock, Len, 60*1000),
-    CSum = machi_util:checksum(Chunk),
+    CSum = machi_util:checksum_chunk(Chunk),
     try
         RegName ! {seq_append, self(), Prefix, Chunk, CSum}
     catch error:badarg ->
@@ -296,7 +327,7 @@ do_net_server_write2(Sock, OffsetHex, LenHex, FileBin, DataDir, FHc) ->
     DoItFun = fun(FHd, Offset, Len) ->
                       ok = inet:setopts(Sock, [{packet, raw}]),
                       {ok, Chunk} = gen_tcp:recv(Sock, Len),
-                      CSum = machi_util:checksum(Chunk),
+                      CSum = machi_util:checksum_chunk(Chunk),
                       case file:pwrite(FHd, Offset, Chunk) of
                           ok ->
                               CSumHex = machi_util:bin_to_hexstr(CSum),
@@ -494,11 +525,14 @@ run_seq_append_server2(Prefix, DataDir) ->
 
     end.
 
+-spec seq_name_hack() -> string().
+seq_name_hack() ->
+    lists:flatten(io_lib:format("~.36B~.36B",
+                                [element(3,now()),
+                                 list_to_integer(os:getpid())])).
+
 seq_append_server_loop(DataDir, Prefix, FileNum) ->
-    SequencerNameHack = lists:flatten(io_lib:format(
-                                        "~.36B~.36B",
-                                        [element(3,now()),
-                                         list_to_integer(os:getpid())])),
+    SequencerNameHack = seq_name_hack(),
     {File, FullPath} = machi_util:make_data_filename(
                          DataDir, Prefix, SequencerNameHack, FileNum),
     {ok, FHd} = file:open(FullPath,
@@ -576,12 +610,12 @@ handle_projection_command({read_projection, ProjType, Epoch},
 handle_projection_command({write_projection, ProjType, Proj},
                           #state{proj_store=ProjStore}) ->
     machi_projection_store:write(ProjStore, ProjType, Proj);
-handle_projection_command({get_all, ProjType},
+handle_projection_command({get_all_projections, ProjType},
                           #state{proj_store=ProjStore}) ->
-    machi_projection_store:get_all(ProjStore, ProjType);
-handle_projection_command({list_all, ProjType},
+    machi_projection_store:get_all_projections(ProjStore, ProjType);
+handle_projection_command({list_all_projections, ProjType},
                           #state{proj_store=ProjStore}) ->
-    machi_projection_store:list_all(ProjStore, ProjType);
+    machi_projection_store:list_all_projections(ProjStore, ProjType);
 handle_projection_command(Else, _S) ->
     {error, unknown_cmd, Else}.
 

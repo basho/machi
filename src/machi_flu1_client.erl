@@ -18,6 +18,8 @@
 %%
 %% -------------------------------------------------------------------
 
+%% @doc Erlang API for the Machi FLU TCP protocol version 1.
+
 -module(machi_flu1_client).
 
 -include("machi.hrl").
@@ -35,8 +37,8 @@
          read_latest_projection/2, read_latest_projection/3,
          read_projection/3, read_projection/4,
          write_projection/3, write_projection/4,
-         get_all/2, get_all/3,
-         list_all/2, list_all/3,
+         get_all_projections/2, get_all_projections/3,
+         list_all_projections/2, list_all_projections/3,
 
          %% Common API
          quit/1
@@ -54,7 +56,7 @@
 -type chunk_pos()   :: {file_offset(), chunk_size(), file_name_s()}.
 -type chunk_size()  :: non_neg_integer().
 -type epoch_csum()  :: binary().
--type epoch_num()   :: non_neg_integer().
+-type epoch_num()   :: -1 | non_neg_integer().
 -type epoch_id()    :: {epoch_num(), epoch_csum()}.
 -type file_info()   :: {file_size(), file_name_s()}.
 -type file_name()   :: binary() | list().
@@ -151,19 +153,19 @@ list_files(Host, TcpPort, EpochID) when is_integer(TcpPort) ->
         catch gen_tcp:close(Sock)
     end.
 
-%% @doc Get the latest epoch number from the FLU's projection store.
+%% @doc Get the latest epoch number + checksum from the FLU's projection store.
 
 -spec get_latest_epoch(port(), projection_type()) ->
-      {ok, -1|non_neg_integer()} | {error, term()}.
+      {ok, epoch_id()} | {error, term()}.
 get_latest_epoch(Sock, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
     get_latest_epoch2(Sock, ProjType).
 
-%% @doc Get the latest epoch number from the FLU's projection store.
+%% @doc Get the latest epoch number + checksum from the FLU's projection store.
 
 -spec get_latest_epoch(inet_host(), inet_port(),
                        projection_type()) ->
-      {ok, -1|non_neg_integer()} | {error, term()}.
+      {ok, epoch_id()} | {error, term()}.
 get_latest_epoch(Host, TcpPort, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
     Sock = machi_util:connect(Host, TcpPort),
@@ -173,7 +175,7 @@ get_latest_epoch(Host, TcpPort, ProjType)
         catch gen_tcp:close(Sock)
     end.
 
-%% @doc Get the latest epoch number from the FLU's projection store.
+%% @doc Get the latest projection from the FLU's projection store for `ProjType'
 
 -spec read_latest_projection(port(), projection_type()) ->
       {ok, projection()} | {error, not_written} | {error, term()}.
@@ -181,7 +183,7 @@ read_latest_projection(Sock, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
     read_latest_projection2(Sock, ProjType).
 
-%% @doc Get the latest epoch number from the FLU's projection store.
+%% @doc Get the latest projection from the FLU's projection store for `ProjType'
 
 -spec read_latest_projection(inet_host(), inet_port(),
                        projection_type()) ->
@@ -243,44 +245,44 @@ write_projection(Host, TcpPort, ProjType, Proj)
 
 %% @doc Get all projections from the FLU's projection store.
 
--spec get_all(port(), projection_type()) ->
+-spec get_all_projections(port(), projection_type()) ->
       {ok, [projection()]} | {error, term()}.
-get_all(Sock, ProjType)
+get_all_projections(Sock, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
-    get_all2(Sock, ProjType).
+    get_all_projections2(Sock, ProjType).
 
 %% @doc Get all projections from the FLU's projection store.
 
--spec get_all(inet_host(), inet_port(),
+-spec get_all_projections(inet_host(), inet_port(),
                projection_type()) ->
       {ok, [projection()]} | {error, term()}.
-get_all(Host, TcpPort, ProjType)
+get_all_projections(Host, TcpPort, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
     Sock = machi_util:connect(Host, TcpPort),
     try
-        get_all2(Sock, ProjType)
+        get_all_projections2(Sock, ProjType)
     after
         catch gen_tcp:close(Sock)
     end.
 
 %% @doc Get all epoch numbers from the FLU's projection store.
 
--spec list_all(port(), projection_type()) ->
+-spec list_all_projections(port(), projection_type()) ->
       {ok, [non_neg_integer()]} | {error, term()}.
-list_all(Sock, ProjType)
+list_all_projections(Sock, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
-    list_all2(Sock, ProjType).
+    list_all_projections2(Sock, ProjType).
 
 %% @doc Get all epoch numbers from the FLU's projection store.
 
--spec list_all(inet_host(), inet_port(),
+-spec list_all_projections(inet_host(), inet_port(),
                        projection_type()) ->
       {ok, [non_neg_integer()]} | {error, term()}.
-list_all(Host, TcpPort, ProjType)
+list_all_projections(Host, TcpPort, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
     Sock = machi_util:connect(Host, TcpPort),
     try
-        list_all2(Sock, ProjType)
+        list_all_projections2(Sock, ProjType)
     after
         catch gen_tcp:close(Sock)
     end.
@@ -365,9 +367,10 @@ trunc_hack(Host, TcpPort, EpochID, File) when is_integer(TcpPort) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 append_chunk2(Sock, EpochID, Prefix0, Chunk0) ->
+    erase(bad_sock),
     try
         %% TODO: add client-side checksum to the server's protocol
-        %% _ = crypto:hash(md5, Chunk),
+        %% _ = machi_util:checksum_chunk(Chunk),
         Prefix = machi_util:make_binary(Prefix0),
         Chunk = machi_util:make_binary(Chunk0),
         Len = iolist_size(Chunk0),
@@ -391,47 +394,59 @@ append_chunk2(Sock, EpochID, Prefix0, Chunk0) ->
         end
     catch
         throw:Error ->
+            put(bad_sock, Sock),
             Error;
         error:{badmatch,_}=BadMatch ->
+            put(bad_sock, Sock),
             {error, {badmatch, BadMatch, erlang:get_stacktrace()}}
     end.
 
 read_chunk2(Sock, EpochID, File0, Offset, Size) ->
-    {EpochNum, EpochCSum} = EpochID,
-    EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
-    File = machi_util:make_binary(File0),
-    PrefixHex = machi_util:int_to_hexbin(Offset, 64),
-    SizeHex = machi_util:int_to_hexbin(Size, 32),
-    CmdLF = [$R, 32, EpochIDRaw, PrefixHex, SizeHex, File, 10],
-    ok = gen_tcp:send(Sock, CmdLF),
-    case gen_tcp:recv(Sock, 3) of
-        {ok, <<"OK\n">>} ->
-            {ok, _Chunk}=Res = gen_tcp:recv(Sock, Size),
-            Res;
-        {ok, Else} ->
-            {ok, OldOpts} = inet:getopts(Sock, [packet]),
-            ok = inet:setopts(Sock, [{packet, line}]),
-            {ok, Else2} = gen_tcp:recv(Sock, 0),
-            ok = inet:setopts(Sock, OldOpts),
-            case Else of
-                <<"ERA">> ->
-                    {error, todo_erasure_coded}; %% escript_cc_parse_ec_info(Sock, Line, Else2);
-                <<"ERR">> ->
-                    case Else2 of
-                        <<"OR BAD-IO\n">> ->
-                            {error, no_such_file};
-                        <<"OR NOT-ERASURE\n">> ->
-                            {error, no_such_file};
-                        <<"OR BAD-ARG\n">> ->
-                            {error, bad_arg};
-                        <<"OR PARTIAL-READ\n">> ->
-                            {error, partial_read};
-                        _ ->
-                            {error, Else2}
-                    end;
-                _ ->
-                    {error, {whaaa, <<Else/binary, Else2/binary>>}}
-            end
+    erase(bad_sock),
+    try
+        {EpochNum, EpochCSum} = EpochID,
+        EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
+        File = machi_util:make_binary(File0),
+        PrefixHex = machi_util:int_to_hexbin(Offset, 64),
+        SizeHex = machi_util:int_to_hexbin(Size, 32),
+        CmdLF = [$R, 32, EpochIDRaw, PrefixHex, SizeHex, File, 10],
+        ok = gen_tcp:send(Sock, CmdLF),
+        case gen_tcp:recv(Sock, 3) of
+            {ok, <<"OK\n">>} ->
+                {ok, _Chunk}=Res = gen_tcp:recv(Sock, Size),
+                Res;
+            {ok, Else} ->
+                {ok, OldOpts} = inet:getopts(Sock, [packet]),
+                ok = inet:setopts(Sock, [{packet, line}]),
+                {ok, Else2} = gen_tcp:recv(Sock, 0),
+                ok = inet:setopts(Sock, OldOpts),
+                case Else of
+                    <<"ERA">> ->
+                        {error, todo_erasure_coded}; %% escript_cc_parse_ec_info(Sock, Line, Else2);
+                    <<"ERR">> ->
+                        case Else2 of
+                            <<"OR BAD-IO\n">> ->
+                                {error, no_such_file};
+                            <<"OR NOT-ERASURE\n">> ->
+                                {error, no_such_file};
+                            <<"OR BAD-ARG\n">> ->
+                                {error, bad_arg};
+                            <<"OR PARTIAL-READ\n">> ->
+                                {error, partial_read};
+                            _ ->
+                                {error, Else2}
+                        end;
+                    _ ->
+                        {error, {whaaa_todo, <<Else/binary, Else2/binary>>}}
+                end
+        end
+    catch
+        throw:Error ->
+            put(bad_sock, Sock),
+            Error;
+        error:{badmatch,_}=BadMatch ->
+            put(bad_sock, Sock),
+            {error, {badmatch, BadMatch, erlang:get_stacktrace()}}
     end.
 
 list2(Sock, EpochID) ->
@@ -462,6 +477,7 @@ list3(Else, _Sock) ->
     throw({server_protocol_error, Else}).
 
 checksum_list2(Sock, EpochID, File) ->
+    erase(bad_sock),
     try
         {EpochNum, EpochCSum} = EpochID,
         EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
@@ -484,8 +500,10 @@ checksum_list2(Sock, EpochID, File) ->
         end
     catch
         throw:Error ->
+            put(bad_sock, Sock),
             Error;
         error:{badmatch,_}=BadMatch ->
+            put(bad_sock, Sock),
             {error, {badmatch, BadMatch}}
     end.
 
@@ -515,11 +533,12 @@ checksum_list_finish(Chunks) ->
             Line /= <<>>].
 
 write_chunk2(Sock, EpochID, File0, Offset, Chunk0) ->
+    erase(bad_sock),
     try
         {EpochNum, EpochCSum} = EpochID,
         EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
         %% TODO: add client-side checksum to the server's protocol
-        %% _ = crypto:hash(md5, Chunk),
+        %% _ = machi_util:checksum_chunk(Chunk),
         File = machi_util:make_binary(File0),
         true = (Offset >= ?MINIMUM_OFFSET),
         OffsetHex = machi_util:int_to_hexbin(Offset, 64),
@@ -542,12 +561,15 @@ write_chunk2(Sock, EpochID, File0, Offset, Chunk0) ->
         end
     catch
         throw:Error ->
+            put(bad_sock, Sock),
             Error;
         error:{badmatch,_}=BadMatch ->
+            put(bad_sock, Sock),
             {error, {badmatch, BadMatch, erlang:get_stacktrace()}}
     end.
 
 delete_migration2(Sock, EpochID, File) ->
+    erase(bad_sock),
     try
         {EpochNum, EpochCSum} = EpochID,
         EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
@@ -566,12 +588,15 @@ delete_migration2(Sock, EpochID, File) ->
         end
     catch
         throw:Error ->
+            put(bad_sock, Sock),
             Error;
         error:{badmatch,_}=BadMatch ->
+            put(bad_sock, Sock),
             {error, {badmatch, BadMatch}}
     end.
 
 trunc_hack2(Sock, EpochID, File) ->
+    erase(bad_sock),
     try
         {EpochNum, EpochCSum} = EpochID,
         EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
@@ -590,8 +615,10 @@ trunc_hack2(Sock, EpochID, File) ->
         end
     catch
         throw:Error ->
+            put(bad_sock, Sock),
             Error;
         error:{badmatch,_}=BadMatch ->
+            put(bad_sock, Sock),
             {error, {badmatch, BadMatch}}
     end.
 
@@ -611,15 +638,16 @@ write_projection2(Sock, ProjType, Proj) ->
     ProjCmd = {write_projection, ProjType, Proj},
     do_projection_common(Sock, ProjCmd).
 
-get_all2(Sock, ProjType) ->
-    ProjCmd = {get_all, ProjType},
+get_all_projections2(Sock, ProjType) ->
+    ProjCmd = {get_all_projections, ProjType},
     do_projection_common(Sock, ProjCmd).
 
-list_all2(Sock, ProjType) ->
-    ProjCmd = {list_all, ProjType},
+list_all_projections2(Sock, ProjType) ->
+    ProjCmd = {list_all_projections, ProjType},
     do_projection_common(Sock, ProjCmd).
 
 do_projection_common(Sock, ProjCmd) ->
+    erase(bad_sock),
     try
         ProjCmdBin = term_to_binary(ProjCmd),
         Len = iolist_size(ProjCmdBin),
@@ -641,7 +669,9 @@ do_projection_common(Sock, ProjCmd) ->
         end
     catch
         throw:Error ->
+            put(bad_sock, Sock),
             Error;
         error:{badmatch,_}=BadMatch ->
+            put(bad_sock, Sock),
             {error, {badmatch, BadMatch, erlang:get_stacktrace()}}
     end.

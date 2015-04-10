@@ -3,7 +3,7 @@ ifeq ($(REBAR_BIN),)
 REBAR_BIN = ./rebar
 endif
 
-.PHONY: rel deps package pkgclean
+.PHONY: rel deps package pkgclean edoc
 
 all: deps compile
 
@@ -20,6 +20,12 @@ test: deps compile eunit
 
 eunit:
 	$(REBAR_BIN) -v skip_deps=true eunit
+
+edoc: edoc-clean
+	$(REBAR_BIN) skip_deps=true doc
+
+edoc-clean:
+	rm -f edoc/*.png edoc/*.html edoc/*.css edoc/edoc-info
 
 pulse: compile
 	env USE_PULSE=1 $(REBAR_BIN) skip_deps=true clean compile

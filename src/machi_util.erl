@@ -18,20 +18,24 @@
 %%
 %% -------------------------------------------------------------------
 
+%% @doc Miscellaneous utility functions.
+
 -module(machi_util).
 
 -export([
-         checksum/1,
+         checksum_chunk/1,
          hexstr_to_bin/1, bin_to_hexstr/1,
          hexstr_to_int/1, int_to_hexstr/2, int_to_hexbin/2,
          make_binary/1, make_string/1,
          make_regname/1,
-         make_checksum_filename/2, make_data_filename/2,
+         make_config_filename/2,
+         make_checksum_filename/4, make_checksum_filename/2,
+         make_data_filename/4, make_data_filename/2,
          make_projection_filename/2,
          read_max_filenum/2, increment_max_filenum/2,
          info_msg/2, verb/1, verb/2,
          %% TCP protocol helpers
-         connect/2
+         connect/2, connect/3
         ]).
 -compile(export_all).
 
@@ -39,33 +43,54 @@
 -include("machi_projection.hrl").
 -include_lib("kernel/include/file.hrl").
 
-append(Server, Prefix, Chunk) when is_binary(Prefix), is_binary(Chunk) ->
-    CSum = checksum(Chunk),
-    Server ! {seq_append, self(), Prefix, Chunk, CSum},
-    receive
-        {assignment, Offset, File} ->
-            {Offset, File}
-    after 10*1000 ->
-            bummer
-    end.
+%% @doc Create a registered name atom for FLU sequencer internal
+%% rendezvous/message passing use.
 
+-spec make_regname(binary()|list()) ->
+      atom().
 make_regname(Prefix) when is_binary(Prefix) ->
     erlang:binary_to_atom(Prefix, latin1);
 make_regname(Prefix) when is_list(Prefix) ->
     erlang:list_to_atom(Prefix).
 
+%% @doc Calculate a config file path, by common convention.
+
+-spec make_config_filename(string(), string()) ->
+      string().
 make_config_filename(DataDir, Prefix) ->
     lists:flatten(io_lib:format("~s/config/~s", [DataDir, Prefix])).
 
+%% @doc Calculate a checksum file path, by common convention.
+
+-spec make_checksum_filename(string(), string(), atom()|string()|binary(), integer()) ->
+      string().
 make_checksum_filename(DataDir, Prefix, SequencerName, FileNum) ->
     lists:flatten(io_lib:format("~s/config/~s.~s.~w.csum",
                                 [DataDir, Prefix, SequencerName, FileNum])).
 
+%% @doc Calculate a checksum file path, by common convention.
+
+-spec make_checksum_filename(string(), [] | string() | binary()) ->
+      string().
 make_checksum_filename(DataDir, "") ->
     lists:flatten(io_lib:format("~s/config", [DataDir]));
 make_checksum_filename(DataDir, FileName) ->
     lists:flatten(io_lib:format("~s/config/~s.csum", [DataDir, FileName])).
 
+%% @doc Calculate a file data file path, by common convention.
+
+-spec make_data_filename(string(), string(), atom()|string()|binary(), integer()) ->
+      {binary(), string()}.
+make_data_filename(DataDir, Prefix, SequencerName, FileNum) ->
+    File = erlang:iolist_to_binary(io_lib:format("~s.~s.~w",
+                                                 [Prefix, SequencerName, FileNum])),
+    FullPath = lists:flatten(io_lib:format("~s/data/~s",  [DataDir, File])),
+    {File, FullPath}.
+
+%% @doc Calculate a file data file path, by common convention.
+
+-spec make_data_filename(string(), [] | string() | binary()) ->
+      {binary(), string()}.
 make_data_filename(DataDir, "") ->
     FullPath = lists:flatten(io_lib:format("~s/data",  [DataDir])),
     {"", FullPath};
@@ -73,17 +98,20 @@ make_data_filename(DataDir, File) ->
     FullPath = lists:flatten(io_lib:format("~s/data/~s",  [DataDir, File])),
     {File, FullPath}.
 
-make_data_filename(DataDir, Prefix, SequencerName, FileNum) ->
-    File = erlang:iolist_to_binary(io_lib:format("~s.~s.~w",
-                                                 [Prefix, SequencerName, FileNum])),
-    FullPath = lists:flatten(io_lib:format("~s/data/~s",  [DataDir, File])),
-    {File, FullPath}.
+%% @doc Calculate a projection store file path, by common convention.
 
+-spec make_projection_filename(string(), [] | string()) ->
+      string().
 make_projection_filename(DataDir, "") ->
     lists:flatten(io_lib:format("~s/projection",  [DataDir]));
 make_projection_filename(DataDir, File) ->
     lists:flatten(io_lib:format("~s/projection/~s",  [DataDir, File])).
 
+%% @doc Read the file size of a config file, which is used as the
+%% basis for a minimum sequence number.
+
+-spec read_max_filenum(string(), string()) ->
+      non_neg_integer().
 read_max_filenum(DataDir, Prefix) ->
     case file:read_file_info(make_config_filename(DataDir, Prefix)) of
         {error, enoent} ->
@@ -92,6 +120,11 @@ read_max_filenum(DataDir, Prefix) ->
             FI#file_info.size
     end.
 
+%% @doc Increase the file size of a config file, which is used as the
+%% basis for a minimum sequence number.
+
+-spec increment_max_filenum(string(), string()) ->
+      ok | {error, term()}.
 increment_max_filenum(DataDir, Prefix) ->
     try
         {ok, FH} = file:open(make_config_filename(DataDir, Prefix), [append]),
@@ -100,9 +133,13 @@ increment_max_filenum(DataDir, Prefix) ->
         ok = file:close(FH)
     catch
         error:{badmatch,_}=Error ->
-            {error, Error, erlang:get_stacktrace()}
+            {error, {Error, erlang:get_stacktrace()}}
     end.
 
+%% @doc Convert a hexadecimal string to a `binary()'.
+
+-spec hexstr_to_bin(string() | binary()) ->
+      binary().
 hexstr_to_bin(S) when is_list(S) ->
   hexstr_to_bin(S, []);
 hexstr_to_bin(B) when is_binary(B) ->
@@ -114,6 +151,10 @@ hexstr_to_bin([X,Y|T], Acc) ->
   {ok, [V], []} = io_lib:fread("~16u", [X,Y]),
   hexstr_to_bin(T, [V | Acc]).
 
+%% @doc Convert a `binary()' to a hexadecimal string.
+
+-spec bin_to_hexstr(binary()) ->
+      string().
 bin_to_hexstr(<<>>) ->
     [];
 bin_to_hexstr(<<X:4, Y:4, Rest/binary>>) ->
@@ -124,40 +165,75 @@ hex_digit(X) when X < 10 ->
 hex_digit(X) ->
     X - 10 + $a.
 
+%% @doc Convert a compatible Erlang data type into a `binary()' equivalent.
+
+-spec make_binary(binary() | iolist()) ->
+      binary().
 make_binary(X) when is_binary(X) ->
     X;
 make_binary(X) when is_list(X) ->
     iolist_to_binary(X).
 
+%% @doc Convert a compatible Erlang data type into a `string()' equivalent.
+
+-spec make_string(binary() | iolist()) ->
+      string().
 make_string(X) when is_list(X) ->
     lists:flatten(X);
 make_string(X) when is_binary(X) ->
     binary_to_list(X).
 
+%% @doc Convert a hexadecimal string to an integer.
+
+-spec hexstr_to_int(string() | binary()) ->
+      non_neg_integer().
 hexstr_to_int(X) ->
     B = hexstr_to_bin(X),
     B_size = byte_size(B) * 8,
     <<I:B_size/big>> = B,
     I.
 
+%% @doc Convert an integer into a hexadecimal string whose length is
+%% based on `I_size'.
+
+-spec int_to_hexstr(non_neg_integer(), non_neg_integer()) ->
+      string().
 int_to_hexstr(I, I_size) ->
     bin_to_hexstr(<<I:I_size/big>>).
 
+%% @doc Convert an integer into a hexadecimal string (in `binary()'
+%% form) whose length is based on `I_size'.
+
+-spec int_to_hexbin(non_neg_integer(), non_neg_integer()) ->
+      binary().
 int_to_hexbin(I, I_size) ->
     list_to_binary(int_to_hexstr(I, I_size)).
 
-checksum(Bin) when is_binary(Bin) ->
-    crypto:hash(md5, Bin).
+%% @doc Calculate a checksum for a chunk of file data.
 
+-spec checksum_chunk(binary() | iolist()) ->
+    binary().
+checksum_chunk(Chunk) when is_binary(Chunk); is_list(Chunk) ->
+    crypto:hash(sha, Chunk).
+
+%% @doc Log a verbose message.
+
+-spec verb(string()) -> term().
 verb(Fmt) ->
     verb(Fmt, []).
 
+%% @doc Log a verbose message.
+
+-spec verb(string(), list()) -> term().
 verb(Fmt, Args) ->
     case application:get_env(kernel, verbose) of
         {ok, true} -> io:format(Fmt, Args);
         _          -> ok
     end.
 
+%% @doc Log an 'info' level message.
+
+-spec info_msg(string(), list()) -> term().
 info_msg(Fmt, Args) ->
     case application:get_env(kernel, verbose) of {ok, false} -> ok;
                                                  _     -> error_logger:info_msg(Fmt, Args)
@@ -165,16 +241,26 @@ info_msg(Fmt, Args) ->
 
 %%%%%%%%%%%%%%%%%
 
+%% @doc Create a TCP connection to a remote Machi server.
+
 -spec connect(inet:ip_address() | inet:hostname(), inet:port_number()) ->
       port().
 connect(Host, Port) ->
-    escript_connect(Host, Port).
+    escript_connect(Host, Port, 4500).
 
-escript_connect(Host, PortStr) when is_list(PortStr) ->
+%% @doc Create a TCP connection to a remote Machi server.
+
+-spec connect(inet:ip_address() | inet:hostname(), inet:port_number(),
+              timeout()) ->
+      port().
+connect(Host, Port, Timeout) ->
+    escript_connect(Host, Port, Timeout).
+
+escript_connect(Host, PortStr, Timeout) when is_list(PortStr) ->
     Port = list_to_integer(PortStr),
-    escript_connect(Host, Port);
-escript_connect(Host, Port) when is_integer(Port) ->
+    escript_connect(Host, Port, Timeout);
+escript_connect(Host, Port, Timeout) when is_integer(Port) ->
     {ok, Sock} = gen_tcp:connect(Host, Port, [{active,false}, {mode,binary},
-                                              {packet, raw}]),
+                                              {packet, raw}], Timeout),
     Sock.
 

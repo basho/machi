@@ -18,6 +18,9 @@
 %%
 %% -------------------------------------------------------------------
 
+%% @doc "Mothballed" sequencer code, perhaps to be reused sometime in
+%% the future?
+
 -module(machi_sequencer).
 
 -compile(export_all).

@@ -18,6 +18,8 @@
 %%
 %% -------------------------------------------------------------------
 
+%% @doc Top Machi application supervisor.
+
 -module(machi_sup).
 
 -behaviour(supervisor).
