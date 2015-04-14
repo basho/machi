@@ -1059,16 +1059,15 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
             {HH,MM,SS} = time(),
             case inner_projection_exists(P_latest2) of
                 false ->
-                    ok;
+                    io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses plain: ~w\n",
+                              [HH,MM,SS,MSec, S#ch_mgr.name,
+                               machi_projection:make_summary(P_latest2)]);
                 true ->
                     P_inner = inner_projection_or_self(P_latest2),
-                    io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses INNER: ~w\n",
+                    io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w\n",
                               [HH,MM,SS,MSec, S#ch_mgr.name,
                                machi_projection:make_summary(P_inner)])
-            end,
-            io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses: ~w\n",
-                      [HH,MM,SS,MSec, S#ch_mgr.name,
-                       machi_projection:make_summary(P_latest2)]);
+            end;
         _ ->
             ok
     end,
