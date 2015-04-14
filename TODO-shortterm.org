@@ -43,3 +43,4 @@ func, and pattern match Erlang style in that func.
 *** TODO Make chain manager code flexible enough to run "real world" or "sim"
 ** TODO Replace registered name use from FLU write/append dispatcher
 ** TODO Move the FLU server to gen_server behavior?
+** TODO Implement real data repair, orchestrated by the chain manager

@@ -278,9 +278,9 @@ convergence_demo_testfun(NumFLUs) ->
        %% end || Partition <- [ [{a,b}, {b,c}]  ]  %% hosed-not-equal @ 3 FLUs
        %% end || Partition <- [ [{b,d}] ]
        %% end || Partition <- [ [{a,b}, {b,a}] ]
-       end || Partition <- [ [{a,b}, {b,a}, {a,c},{c,a}] ]
-       %% end || Partition <- [ [{a,b}],
-       %%                       [{b,a}] ]
+       %% end || Partition <- [ [{a,b}, {b,a}, {a,c},{c,a}] ]
+       end || Partition <- [ [{a,b}],
+                             [{b,a}] ]
        %% end || Partition <- [ [{a,b}, {c,b}],
        %%                       [{a,b}, {b,c}] ]
        %% end || Partition <- [ [{a,b}, {b,c},       {c,d}],

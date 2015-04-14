@@ -666,6 +666,11 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                             end
                     end,
 
+                %% TODO: When we implement the real chain repair function, we
+                %%       need to keep in mind that an inner projection with
+                %%       up nodes > 1, repair is required there!  In the
+                %%       current simulator, repair is not simulated and
+                %%       finished (and then growing the UPI list).  Fix.
                 P_inner2 = P_inner#projection_v1{epoch_number=FinalInnerEpoch},
                 InnerInfo = [{inner_summary, machi_projection:make_summary(P_inner2)},
                              {inner_projection, P_inner2}],
@@ -772,7 +777,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
             react_to_env_C100(P_inner2B, P_latest, S);
 
        true ->
-            ?REACT({a30, ?LINE}),
+            ?REACT({a30, ?LINE, []}),
             react_to_env_A40(Retries, P_newprop10, P_latest,
                              LatestUnanimousP, S10)
     end.
@@ -908,8 +913,36 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
     ?REACT(b10),
 
     {_P_newprop_flap_time, P_newprop_flap_count} = get_flap_count(P_newprop),
+    UnanimousLatestInnerNotRelevant_p =
+        case inner_projection_exists(P_latest) of
+            true when P_latest#projection_v1.author_server /= MyName ->
+                #projection_v1{down=Down_inner} = inner_projection_or_self(
+                                                    P_latest),
+                case lists:member(MyName, Down_inner) of
+                    true ->
+                        %% Some foreign author's inner projection thinks that
+                        %% I'm down.  Silly!  We ought to ignore this one.
+                        ?REACT({b10, ?LINE, [{down_inner, Down_inner}]}),
+                        true;
+                    false ->
+                        ?REACT({b10, ?LINE, [{down_inner, Down_inner}]}),
+                        false
+                end;
+            _Else_u ->
+                false
+        end,
 
     if
+        LatestUnanimousP
+        andalso
+        UnanimousLatestInnerNotRelevant_p ->
+            ?REACT({b10, ?LINE, []}),
+            put(b10_hack, false),
+
+            %% Do not go to C100, because we want to ignore this latest
+            %% proposal.  Write ours instead via C300.
+            react_to_env_C300(P_newprop, P_latest, S);
+
         LatestUnanimousP ->
             ?REACT({b10, ?LINE,
                     [{latest_unanimous_p, LatestUnanimousP},
@@ -992,7 +1025,9 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                      {latest_author, P_latest#projection_v1.author_server}]}),
             put(b10_hack, false),
 
-            %% Give the author of P_latest an opportunite to write a
+            %% TODO: Is a UnanimousLatestInnerNotRelevant_p test needed in this clause???
+
+            %% Give the author of P_latest an opportunity to write a
             %% new projection in a new epoch to resolve this mixed
             %% opinion.
             react_to_env_C200(Retries, P_latest, S);
@@ -1087,6 +1122,8 @@ react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H} = S) ->
              _ ->
                  H2
          end,
+    %% HH = [if is_atom(X) -> X; is_tuple(X) -> {element(1,X), element(2,X)} end || X <- get(react), is_atom(X) orelse size(X) == 3],
+    %% io:format(user, "HEE120 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(HH)]),
 
     ?REACT({c120, [{latest, machi_projection:make_summary(P_latest)}]}),
     {{now_using, FinalProps, P_latest#projection_v1.epoch_number},
