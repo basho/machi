@@ -28,7 +28,9 @@ func, and pattern match Erlang style in that func.
 ** TODO Fix all known bugs with Chain Manager
 
 *** DONE Fix known bugs
-*** TODO Clean up crufty TODO comments and other obvious cruft
+*** DONE Clean up crufty TODO comments and other obvious cruft
+*** TODO Re-add verification step of stable epochs, including inner projections!
+*** TODO Attempt to remove cruft items in flapping_i?
 
 ** TODO Finish OTP'izing the Chain Manager with FLU & proj store processes
 ** TODO Change all protocol ops to enforce the epoch ID

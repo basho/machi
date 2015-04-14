@@ -267,7 +267,7 @@ convergence_demo_testfun(NumFLUs) ->
            io:format(user, "\nSweet, all_hosed are identical-or-islands-inconclusive.\n", []),
            timer:sleep(1000),
            ok
-       end || Partition <- AllPartitionCombinations
+       %% end || Partition <- AllPartitionCombinations
        %% end || Partition <- [ [{a,b},{b,d},{c,b}],
        %%                       [{a,b},{b,d},{c,b}, {a,b},{b,a},{a,c},{c,a},{a,d},{d,a}],
        %%                       %% [{a,b},{b,d},{c,b}, {b,a},{a,b},{b,c},{c,b},{b,d},{d,b}],
@@ -278,7 +278,7 @@ convergence_demo_testfun(NumFLUs) ->
        %% end || Partition <- [ [{a,b}, {b,c}]  ]  %% hosed-not-equal @ 3 FLUs
        %% end || Partition <- [ [{b,d}] ]
        %% end || Partition <- [ [{a,b}, {b,a}] ]
-       %% end || Partition <- [ [{a,b}, {b,a}, {a,c},{c,a}] ]
+       end || Partition <- [ [{a,b}, {b,a}, {a,c},{c,a}] ]
        %% end || Partition <- [ [{a,b}],
        %%                       [{b,a}] ]
        %% end || Partition <- [ [{a,b}, {c,b}],
