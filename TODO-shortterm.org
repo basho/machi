@@ -7,7 +7,7 @@
   Done via compare() func.
 
 ** DONE Change all protocol ops to add epoch ID
-** TODO Add projection store to each FLU.
+** DONE Add projection store to each FLU.
 
 *** DONE What should the API look like? (borrow from chain mgr PoC?)
 
@@ -23,8 +23,14 @@ method as append/write where there's a variable size blob.  But we'll
 format that blob as a term_to_binary().  Then dispatch to a single
 func, and pattern match Erlang style in that func.
 
-*** TODO Do it.
+*** DONE Do it.
 
+** TODO Fix all known bugs with Chain Manager
+
+*** DONE Fix known bugs
+*** TODO Clean up crufty TODO comments and other obvious cruft
+
+** TODO Finish OTP'izing the Chain Manager with FLU & proj store processes
 ** TODO Change all protocol ops to enforce the epoch ID
 ** TODO Add projection wedging logic to each FLU.
 

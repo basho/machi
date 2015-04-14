@@ -44,11 +44,11 @@
           epoch_number    :: pv1_epoch_n(),
           epoch_csum      :: pv1_csum(),
           author_server   :: pv1_server(),
-          creation_time   :: pv1_timestamp(),
           all_members     :: [pv1_server()],
-          down            :: [pv1_server()],
+          creation_time   :: pv1_timestamp(),
           upi             :: [pv1_server()],
           repairing       :: [pv1_server()],
+          down            :: [pv1_server()],
           dbg             :: list(), %proplist(), is checksummed
           dbg2            :: list(), %proplist(), is not checksummed
           members_dict    :: p_srvr_dict()
