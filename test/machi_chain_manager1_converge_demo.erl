@@ -294,9 +294,9 @@ convergence_demo_testfun(NumFLUs) ->
        %%                       [{a,b}, {c,b}, {c,d}, {d,e}],
        %%                       [{a,b}, {b,c}, {d,c}, {d,e}],
        %%                       [{a,b}, {b,c}, {c,d}, {e,d}] ]
-       %% end || Partition <- [ [{c,a}] ]
+       end || Partition <- [ [{c,a}] ]
        %% end || Partition <- [ [{c,a}], [{c,b}, {a, b}] ]
-       end || Partition <- [ [{c,a},{a,c}, {c,b},{b,c}, {c,d},{d,c}] ]
+       %% end || Partition <- [ [{c,a},{a,c}, {c,b},{b,c}, {c,d},{d,c}] ]
        %% end || Partition <- [ [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}],
        %%                       [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}],
        %%                       [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}],

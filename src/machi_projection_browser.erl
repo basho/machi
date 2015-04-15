@@ -22,6 +22,10 @@
 
 -module(machi_projection_browser).
 
+%% TODO: Add the projection author's name to the file??
+%% TODO: Indicate somewhere when flapping state has been entered??
+%% TODO: For inner visualizations, shade the objects??
+
 -include("machi_projection.hrl").
 
 -export([]). % TODO
@@ -29,31 +33,49 @@
 
 -define(FLU_C, machi_flu1_client).
 
-visualize(ProjType, Epoch, MembersDictOrDirList, DotOut) ->
+visualize(ProjType, Epoch, MembersDictOrDirList, DotOut)
+  when ProjType == public; ProjType == private; ProjType == {private, inner} ->
     Ps = get_viz_projections(ProjType, Epoch, MembersDictOrDirList),
     Facts = compile_projections_to_facts(ProjType, Ps),
     %% io:format(user, "Facts ~p\n", [Facts]),
     make_dot_file(Facts, DotOut).
 
+visualize_all(ProjType, MembersDictOrDirList, DotOutDir) ->
+    Es = list_unique_projections(ProjType, MembersDictOrDirList),
+    [begin
+         DotOut = str("~s/~w.~8..0w.dot", [DotOutDir, ProjType, E]),
+         visualize(ProjType, E, MembersDictOrDirList, DotOut)
+     end || E <- Es],
+    ok.
+
 get_viz_projections(ProjType, Epoch, MembersDictOrDirList) ->
     get_viz_projections(ProjType, Epoch, MembersDictOrDirList, true).
 
-get_viz_projections(ProjType, Epoch, MembersDictOrDirList, GetOlderEpochs_p) ->
+get_viz_projections(ProjType__, Epoch, MembersDictOrDirList, GetOlderEpochs_p)->
+    {ProjType, ProjFilter} =
+        case ProjType__ of
+            public      -> {public, fun(X) -> X end};
+            private     -> {private, fun(X) -> X end};
+            {private,_} -> {private, fun(X) -> machi_chain_manager1:inner_projection_or_self(X) end}
+        end,
     PsAtEpoch = 
         lists:append([try
                           {ok, P} = read_projection(ProjType, Epoch, X),
-                          [P]
-                      catch _:_ ->
+                          [ProjFilter(P)]
+                      catch _X:_Y ->
                               []
                       end || X <- MembersDictOrDirList]),
-io:format("PsAtEpoch ~P\n", [PsAtEpoch, 10]),
-    if not GetOlderEpochs_p ->
+    if not GetOlderEpochs_p; ProjType__ == {private,inner} ->
             PsAtEpoch;
-       PsAtEpoch == [] ->
-            {bummer_no_projections_at_epoch, ProjType, Epoch};
        true ->
-            [#projection_v1{upi=UPI, repairing=Repairing}|_] = PsAtEpoch,
-            UPI_R = UPI ++ Repairing,
+            UPI_R = case PsAtEpoch of
+                        [] ->
+                            [];
+                        _ ->
+                            [#projection_v1{upi=UPI, repairing=Repairing}|_] =
+                                PsAtEpoch,
+                            UPI ++ Repairing
+                    end,
             Thingies_not_at_Epoch =
                 [try
                      {error, _} = read_projection(ProjType, Epoch, X),
@@ -68,7 +90,7 @@ io:format("PsAtEpoch ~P\n", [PsAtEpoch, 10]),
                                   Es = list_unique_projections(ProjType, [X]),
                                   Ep = lists:max([E || E <- Es, E < Epoch]),
                                   {ok, P} = read_projection(ProjType, Ep, X),
-                                  [P]
+                                  [ProjFilter(P)]
                               catch _:_ ->
                                       []
                               end || X <- Thingies_not_at_Epoch, X /= []]),
@@ -120,11 +142,12 @@ make_facts_heads_tails(ProjType, Ps, D0) ->
                                                Dict)
                 end, D1, lists:sort(Ps)).
 
-make_facts_heads_tails(#projection_v1{upi=UPI, repairing=Repairing}=P,
+make_facts_heads_tails(#projection_v1{upi=UPI, repairing=Repairing,
+                                      all_members=All_list}=P,
                        MaxEpoch, _AllEpochs, MaxP, D0) ->
     {Head, MidsTails, Repairs} =
         if UPI == [] ->
-                {[], [], []};
+                {no_head_upi_empty, [], []};
            true ->
                 [Hd|MsT] = UPI,
                 {Hd, MsT, Repairing}
@@ -137,17 +160,27 @@ make_facts_heads_tails(#projection_v1{upi=UPI, repairing=Repairing}=P,
                         X <- MidsTails,
                         X == lists:last(MidsTails)], D20),
     D22 = add_facts([{{virt_role, X}, repairing} || X <- Repairs], D21),
+    D23 = add_facts([{{virt_role, X}, unknown} ||
+                        X <- All_list -- ([Head|MidsTails] ++ Repairs)], D22),
 
-    DownFs = lists:flatten(
-               [{{virt_label_down, X}, str("down=~w", [P#projection_v1.down])}||
-                   X <- UPI ++ Repairing]),
-    D30 = add_facts(DownFs, D22),
+    UPI_R = UPI ++ Repairing,
+    Dn_Fs1 = lists:flatten(
+               [{{virt_label_down, X}, str("down=~w",[P#projection_v1.down])} ||
+                   X <- UPI_R]),
+    Dn_Fs2 = lists:flatten(
+               %% [{{virt_label_down, X}, str("down=?", [])} ||
+               [{{virt_label_down, X}, str("", [])} ||
+                   X <- All_list -- UPI_R,
+               get_fact_maybe({virt_label_down, X}, D23, yup) == yup]),
+    DownFs = Dn_Fs1 ++ Dn_Fs2,
+    D30 = add_facts(DownFs, D23),
 
     EpochFs = lists:flatten(
                 [{{virt_most_recent_epoch, X}, E} ||
                     E <- [P#projection_v1.epoch_number],
-                    X <- P#projection_v1.upi ++
-                         P#projection_v1.repairing]),
+                    X <- UPI_R] ++
+                [{{virt_most_recent_epoch, X}, unknown} ||
+                    X <- All_list -- UPI_R]),
     D40 = add_facts(EpochFs, D30),
     D60 = make_facts_edges(P, MaxEpoch, MaxP, D40),
     D60.
