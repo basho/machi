@@ -103,15 +103,16 @@ make_facts_heads_tails(ProjType, Ps, D0) ->
     2 = #projection_v1.epoch_number, % sanity check for sorting order.
     [MaxP|_] = lists:reverse(lists:sort(Ps)),
     MaxEpoch = MaxP#projection_v1.epoch_number,
-    AllEpochs = [P#projection_v1.epoch_number || P <- Ps],
     MaxEpochAuthor = MaxP#projection_v1.author_server,
+    AllEpochs = lists:usort([P#projection_v1.epoch_number || P <- Ps]),
     Partitions = proplists:get_value(ps, MaxP#projection_v1.dbg, []),
     D1 = add_fact(max_epoch, MaxEpoch,
          add_fact(max_epoch_author, MaxEpochAuthor,
+         add_fact(all_epochs, AllEpochs,
          add_fact(projection_type, ProjType,
          add_fact(creation_time, MaxP#projection_v1.creation_time,
          add_fact(partition_list, Partitions,
-                  D0))))),
+                  D0)))))),
 
     %% Update the facts dictionary, via sort from smallest epoch to largest
     lists:foldl(fun(P, Dict) ->
@@ -120,7 +121,7 @@ make_facts_heads_tails(ProjType, Ps, D0) ->
                 end, D1, lists:sort(Ps)).
 
 make_facts_heads_tails(#projection_v1{upi=UPI, repairing=Repairing}=P,
-                       MaxEpoch, AllEpochs, MaxP, D0) ->
+                       MaxEpoch, _AllEpochs, MaxP, D0) ->
     {Head, MidsTails, Repairs} =
         if UPI == [] ->
                 {[], [], []};
@@ -143,22 +144,12 @@ make_facts_heads_tails(#projection_v1{upi=UPI, repairing=Repairing}=P,
     D30 = add_facts(DownFs, D22),
 
     EpochFs = lists:flatten(
-                [{{virt_epoch, X}, E} ||
+                [{{virt_most_recent_epoch, X}, E} ||
                     E <- [P#projection_v1.epoch_number],
                     X <- P#projection_v1.upi ++
                          P#projection_v1.repairing]),
     D40 = add_facts(EpochFs, D30),
-    EpochLabelFs1 = [{{virt_label_epoch, X}, "Epoch=current"} ||
-                        {{virt_epoch, X}, E} <- EpochFs,
-                        E == MaxEpoch],
-    Es_not_max = AllEpochs -- [MaxEpoch],
-    EpochLabelFs2 = [{{virt_label_epoch, X}, str("Epoch=~w", [Es_not_max])} ||
-                        {{virt_epoch, X}, E} <- EpochFs,
-                        E /= MaxEpoch,
-                        get_fact_maybe({virt_epoch, X}, D30, yup) == yup],
-    D50 = add_facts(EpochLabelFs1, D40),
-    D51 = add_facts(EpochLabelFs2, D50),
-    D60 = make_facts_edges(P, MaxEpoch, MaxP, D51),
+    D60 = make_facts_edges(P, MaxEpoch, MaxP, D40),
     D60.
 
 make_facts_edges(#projection_v1{
@@ -226,14 +217,15 @@ make_dot_file2(Facts, FH) ->
     ?ON(FH, "digraph G {"),
 
     %% Make our label string
+    ProjType = get_fact(projection_type, Facts),
     MaxEpoch = get_fact(max_epoch, Facts),
     MaxEpochAuthor = get_fact(max_epoch_author, Facts),
-    ProjType = get_fact(projection_type, Facts),
+    OlderEpochs = get_fact(all_epochs, Facts) -- [MaxEpoch],
     CreationTime = get_fact(creation_time, Facts),
     Partitions = get_fact(partition_list, Facts),
     Label1 = string:join(
-               [str("~w epoch=~w author=~w",
-                    [ProjType, MaxEpoch, MaxEpochAuthor]),
+               [str("~w epoch=~w, author=~w, older=~w",
+                    [ProjType, MaxEpoch, MaxEpochAuthor, OlderEpochs]),
                 str("~s", [date_str(CreationTime)]),
                 str("Partitions=~w", [Partitions])
                ], "\\n"),
@@ -250,15 +242,14 @@ make_dot_file2(Facts, FH) ->
     %% Create vertex specs
     [begin
          DownStr = get_fact({virt_label_down, V}, Facts),
-         EpochStr = get_fact({virt_label_epoch, V}, Facts),
-         V_Epoch = get_fact({virt_epoch, V}, Facts),
+         V_Epoch = get_fact({virt_most_recent_epoch, V}, Facts),
          VertColor = dot_vertex_color(V, V_Epoch, MaxEpoch, Facts),
          VertFontColor = if VertColor == "grey" -> "grey";
                             true                -> "black"
                          end,
          Label2 = string:join(
                     [
-                     str("label=\"~w\\n~s\\n~s\"", [V, DownStr, EpochStr]),
+                     str("label=\"~w\\n~s\\n\"", [V, DownStr]),
                      str("shape=~s", [dot_vertex_shape(V, Facts)]),
                      str("color=~s", [VertColor]),
                      str("fontcolor=~s", [VertFontColor])
