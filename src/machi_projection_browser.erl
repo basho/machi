@@ -31,7 +31,8 @@
 
 visualize(ProjType, Epoch, MembersDictOrDirList, DotOut) ->
     Ps = get_viz_projections(ProjType, Epoch, MembersDictOrDirList),
-    Facts = compile_projections_to_facts(Ps),
+    Facts = compile_projections_to_facts(ProjType, Ps),
+    io:format(user, "Facts ~p\n", [Facts]),
     make_dot_file(Facts, DotOut).
 
 get_viz_projections(ProjType, Epoch, MembersDictOrDirList) ->
@@ -45,17 +46,22 @@ get_viz_projections(ProjType, Epoch, MembersDictOrDirList, GetOlderEpochs_p) ->
                       catch _:_ ->
                               []
                       end || X <- MembersDictOrDirList]),
-io:format(user, "PsAtEpoch ~p\n", [PsAtEpoch]),
     if not GetOlderEpochs_p ->
             PsAtEpoch;
+       PsAtEpoch == [] ->
+            {bummer_no_projections_at_epoch, ProjType, Epoch};
        true ->
+            [#projection_v1{upi=UPI, repairing=Repairing}|_] = PsAtEpoch,
+            UPI_R = UPI ++ Repairing,
             Thingies_not_at_Epoch =
                 [try
                      {error, _} = read_projection(ProjType, Epoch, X),
                      X
                  catch _:_ ->
                          []
-                 end || X <- MembersDictOrDirList, X /= []],
+                 end || X <- MembersDictOrDirList,
+                        X /= [],
+                        not lists:member(thingie_to_name(X), UPI_R)],
             PsPriorToEpoch =
                 lists:append([try
                                   Es = list_unique_projections(ProjType, [X]),
@@ -68,12 +74,17 @@ io:format(user, "PsAtEpoch ~p\n", [PsAtEpoch]),
             PsAtEpoch ++ PsPriorToEpoch
     end.
 
-compile_projections_to_facts(Ps) ->
-    compile_projections_to_facts(Ps, orddict:new()).
+thingie_to_name(#p_srvr{name=Name}) ->
+    Name;
+thingie_to_name(Str) when is_list(Str) ->
+    list_to_atom(re:replace(Str, ".*/?data\\.", "", [{return, list}])).
 
-compile_projections_to_facts(Ps, D0) ->
+compile_projections_to_facts(ProjType, Ps) ->
+    compile_projections_to_facts(ProjType, Ps, orddict:new()).
+
+compile_projections_to_facts(ProjType, Ps, D0) ->
     D1 = make_facts_unique_flus(Ps, D0),
-    _D2 = make_facts_heads_tails(Ps, D1).
+    _D2 = make_facts_heads_tails(ProjType, Ps, D1).
 
 make_facts_unique_flus(Ps, D) ->
     Unique = unique_flus(Ps),
@@ -87,15 +98,16 @@ unique_flus(Ps) ->
                                  P#projection_v1.repairing,
                                  P#projection_v1.down] || P <- Ps])).
 
-make_facts_heads_tails(Ps, D0) ->
+make_facts_heads_tails(ProjType, Ps, D0) ->
     2 = #projection_v1.epoch_number, % sanity check for sorting order.
     [MaxP|_] = lists:reverse(lists:sort(Ps)),
     MaxEpoch = MaxP#projection_v1.epoch_number,
     Partitions = proplists:get_value(ps, MaxP#projection_v1.dbg, []),
     D1 = add_fact(max_epoch, MaxEpoch,
+         add_fact(projection_type, ProjType,
          add_fact(creation_time, MaxP#projection_v1.creation_time,
          add_fact(partition_list, Partitions,
-                  D0))),
+                  D0)))),
 
     %% Update the facts dictionary, via sort from smallest epoch to largest
     lists:foldl(fun(P, Dict) ->
@@ -140,27 +152,27 @@ make_facts_heads_tails(#projection_v1{upi=UPI, repairing=Repairing}=P,
     D60.
 
 make_facts_edges(#projection_v1{
-               epoch_number=Epoch, upi=UPI, repairing=Repairing}=_P,
-            MaxEpoch, _MaxP, D0) ->
+                    epoch_number=Epoch, upi=UPI, repairing=Repairing}=_P,
+                 _MaxEpoch, _MaxP, D0) ->
     %% TODO: This edge pointing to self is technically wrong: there is no
     %% chain replication happening.  But it seems to be a nice visual thing?
-    D1 = case UPI of
-             [X] ->
-                 add_fact({edge, {Epoch, {X, X}}}, {Epoch == MaxEpoch, X}, D0);
+    D1 = case {UPI, Repairing} of
+             {[X], []} ->
+                 add_fact({edge, {Epoch, X, {X, X}}}, true, D0);
              _ ->
                  D0
          end,
     UPI_Hops = make_hops(UPI),
 
     UPI_R = UPI ++ Repairing,
-    %%{{edge, {Epoch, {From_vertex, To_vertex}}},{In_max_epoch_p, UPI_Rep_node}}
-    D10 = add_facts([{{edge, {Epoch, HopPair}}, {Epoch == MaxEpoch, Who}} ||
+    %%{{edge, {Epoch, In_max_epoch_p, {From_vertex, To_vertex}}}, true}
+    D10 = add_facts([{{edge, {Epoch, Who, HopPair}}, true} ||
                         HopPair <- UPI_Hops, Who <- UPI_R], D1),
     UPI_lastL = if UPI == [] -> [];
                    true      -> [lists:last(UPI)]
                 end,
     Repair_Hops = make_hops(UPI_lastL ++ Repairing),
-    D20 = add_facts([{{edge, {Epoch, HopPair}}, {Epoch == MaxEpoch, Who}} ||
+    D20 = add_facts([{{edge, {Epoch, Who, HopPair}}, true} ||
                         HopPair <- Repair_Hops, Who <- UPI_R], D10),
     D20.
 
@@ -184,7 +196,7 @@ str(Fmt, Args) ->
 make_dot_file(Facts, _OutFile) ->
     {ok, FH} = file:open(_OutFile, [write]),
     try
-        make_dot_file2(Facts, user), % debugging only
+        %% make_dot_file2(Facts, user), % debugging only
         make_dot_file2(Facts, FH)
     after
         (catch file:close(FH))
@@ -200,10 +212,11 @@ make_dot_file2(Facts, FH) ->
 
     %% Make our label string
     MaxEpoch = get_fact(max_epoch, Facts),
+    ProjType = get_fact(projection_type, Facts),
     CreationTime = get_fact(creation_time, Facts),
     Partitions = get_fact(partition_list, Facts),
     Label1 = string:join(
-               [str("Epoch=~w", [MaxEpoch]),
+               [str("~w epoch=~w", [ProjType, MaxEpoch]),
                 str("~s", [date_str(CreationTime)]),
                 str("Partitions=~w", [Partitions])
                ], "\\n"),
@@ -254,7 +267,7 @@ make_dot_file2(Facts, FH) ->
                      str("fontcolor=~s", [VertFontColor])
                     ], ","),
          ?ON(FH, " ~w -> ~w [~s]", [X, Y, Label3])
-     end || {{edge, {Epoch, {X, Y}}}, {_In_max_epoch_p, Who}} <- Facts],
+     end || {{edge, {Epoch, Who, {X, Y}}}, _} <- Facts],
     ?ON(FH, ""),
 
     %% Done!
