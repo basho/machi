@@ -29,62 +29,125 @@
 
 -define(FLU_C, machi_flu1_client).
 
-visualize(ProjType, Epoch, MembersDictOrDirList, DotOut) ->
-    PsAtEpoch0 = [try
-                      {ok, P} = read_projection(ProjType, Epoch, X),
-                      P
-                  catch _:_ ->
-                      []
-                  end || X <- MembersDictOrDirList],
-    Graph = graph_projections(PsAtEpoch0).
+visualize(ProjType, Epoch, MembersDictOrDirList, _DotOut) ->
+    PsAtEpoch = 
+        lists:append([try
+                          {ok, P} = read_projection(ProjType, Epoch, X),
+                          [P]
+                      catch _:_ ->
+                              []
+                      end || X <- MembersDictOrDirList]),
+    Thingies_not_at_Epoch =
+        [try
+             {error, _} = read_projection(ProjType, Epoch, X),
+             X
+         catch _:_ ->
+                 []
+         end || X <- MembersDictOrDirList, X /= []],
+    PsPriorToEpoch =
+        lists:append([try
+                          Es = list_unique_projections(ProjType, [X]),
+                          Ep = lists:max([E || E <- Es, E < Epoch]),
+                          {ok, P} = read_projection(ProjType, Ep, X),
+                          [P]
+                      catch _:_ ->
+                              []
+                      end || X <- Thingies_not_at_Epoch, X /= []]),
+    _Graph = graph_projections(PsAtEpoch ++ PsPriorToEpoch).
 
 graph_projections(Ps) ->
     graph_projections(Ps, orddict:new()).
 
 graph_projections(Ps, D0) ->
     D1 = graph_unique_flus(Ps, D0),
-    D2 = graph_heads_tails(Ps, D1).
+    _D2 = graph_heads_tails(Ps, D1).
 
 graph_unique_flus(Ps, D) ->
-    Unique = lists:usort(
-               lists:flatten(
-                 [ [P#projection_v1.all_members,
-                    P#projection_v1.upi,
-                    P#projection_v1.repairing,
-                    P#projection_v1.down] || P <- Ps])),
+    Unique = unique_flus(Ps),
     add_facts([{{virt, X}, true} || X <- Unique] ++
               %% Add default color
-              [{{virt_color, X}, "cyan"} || X <- Unique], D).
+              [{{virt_color, X}, "red"} || X <- Unique], D).
+
+unique_flus(Ps) ->
+    lists:usort(lists:flatten([ [P#projection_v1.all_members,
+                                 P#projection_v1.upi,
+                                 P#projection_v1.repairing,
+                                 P#projection_v1.down] || P <- Ps])).
 
 graph_heads_tails(Ps, D0) ->
-    UPIs = [P#projection_v1.upi || P <- Ps],
-    Heads = lists:usort(lists:flatten([hd(UPI) || UPI <- UPIs])),
-    MidsTails = lists:usort(lists:flatten([tl(UPI) || UPI <- UPIs])),
-    Repairs = lists:usort(lists:flatten([P#projection_v1.repairing|| P <- Ps])),
-    D1 = add_facts([{{virt_shape, X},
-                    "shape=polygon,sides=7"} || X <- Heads], D0),
-    D2 = add_facts([{{virt_shape, X},
-                    "shape=ellipse"} || X <- MidsTails ++ Repairs], D1),
+    2 = #projection_v1.epoch_number, % sanity check for sorting order.
+    [MaxP|_] = lists:reverse(lists:sort(Ps)),
+    MaxEpoch = MaxP#projection_v1.epoch_number,
+io:format(user, "line ~w MaxEpoch ~w\n", [?LINE, MaxEpoch]),
+    %% Update the facts dictionary, via sort from smallest epoch to largest
+    lists:foldl(fun(P, Dict) -> graph_heads_tails(P, MaxEpoch, MaxP, Dict) end,
+                D0, lists:sort(Ps)).
+
+graph_heads_tails(#projection_v1{upi=UPI, repairing=Repairing}=P,
+                  MaxEpoch, MaxP, D0) ->
+io:format(user, "line ~w MaxEpoch ~w\n", [?LINE, MaxEpoch]),
+    {Head, MidsTails, Repairs} =
+        if UPI == [] ->
+                {[], [], []};
+           true ->
+                [Hd|MsT] = UPI,
+                {Hd, MsT, Repairing}
+        end,
+    D10 = add_fact({virt_role, Head}, head, D0),
+    %% D20 = add_facts([{{virt_role, X}, mid_tail} || X <- MidsTails ++ Repairs], D10),
+    D20 = add_facts([{{virt_role, X}, middle} ||
+                        X <- MidsTails,
+                        X /= lists:last(MidsTails)], D10),
+    D21 = add_facts([{{virt_role, X}, tail} ||
+                        X <- MidsTails,
+                        X == lists:last(MidsTails)], D20),
+    D22 = add_facts([{{virt_role, X}, repairing} || X <- Repairs], D21),
     DownFs = lists:flatten(
                [{{virt_label_down, X}, str("down=~w", [P#projection_v1.down])}||
-                   P <- Ps, X <- P#projection_v1.upi ++
-                                 P#projection_v1.repairing]),
-    D3 = add_facts(DownFs, D2),
-    MaxEpoch = lists:max([P#projection_v1.epoch_number || P <- Ps]),
+                   X <- UPI ++ Repairing]),
+    D30 = add_facts(DownFs, D22),
     EpochFs = lists:flatten(
-                [{{virt_epoch,X}, Epoch} ||
-                    P <- Ps,
-                    Epoch <- [P#projection_v1.epoch_number],
+                [{{virt_epoch,X}, E} ||
+                    E <- [P#projection_v1.epoch_number],
                     X <- P#projection_v1.upi ++
                          P#projection_v1.repairing]),
-    D4 = add_facts(EpochFs, D3),
+    D40 = add_facts(EpochFs, D30),
     EpochLabelFs = [{{virt_label_epoch, X}, ""} ||
-                        {{virt_epoch,X}, Epoch} <- EpochFs, Epoch == MaxEpoch]
+                        {{virt_epoch,X}, E} <- EpochFs, E == MaxEpoch]
                    ++
-                   [{{virt_label_epoch, str("Epoch=~w", [Epoch])}, ""} ||
-                        {{virt_epoch,X}, Epoch} <- EpochFs, Epoch /= MaxEpoch],
-    D5 = add_facts(EpochLabelFs, D4),
-    D5.
+                   [{{virt_label_epoch, X}, str("Epoch=~w", [E])} ||
+                        {{virt_epoch,X}, E} <- EpochFs, E /= MaxEpoch],
+    D50 = add_facts(EpochLabelFs, D40),
+    D60 = graph_edges(P, MaxEpoch, MaxP, D50),
+    D60.
+
+graph_edges(#projection_v1{
+               epoch_number=Epoch, upi=UPI, repairing=Repairing}=_P,
+            MaxEpoch, _MaxP, D0) ->
+    %% TODO: This edge pointing to self is technically wrong: there is no
+    %% chain replication happening.  But it seems to be a nice visual thing?
+    D1 = case UPI of
+             [X] ->
+                 add_fact({edge, {Epoch, {X, X}}}, Epoch == MaxEpoch, D0);
+             _ ->
+                 D0
+         end,
+    UPI_Hops = make_hops(UPI),
+    D10 = add_facts([{{edge, {Epoch, HopPair}}, Epoch == MaxEpoch} ||
+                        HopPair <- UPI_Hops], D1),
+    UPI_lastL = if UPI == [] -> [];
+                   true      -> [lists:last(UPI)]
+                end,
+    Repair_Hops = make_hops(UPI_lastL ++ Repairing),
+    D20 = add_facts([{{edge, {Epoch, HopPair}}, Epoch == MaxEpoch} ||
+                        HopPair <- Repair_Hops], D10),
+    io:format(user, "Epoch ~w hops 1 ~p 2 ~p\n", [Epoch, UPI_Hops, Repair_Hops]),
+    D20.
+
+make_hops([X, Y|Rest]) ->
+    [{X,Y}|make_hops([Y|Rest])];
+make_hops(_) ->
+    [].    
 
 add_fact(K, V, D) ->
     add_facts([{K,V}], D).

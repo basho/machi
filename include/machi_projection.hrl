@@ -42,8 +42,8 @@
 
 -record(projection_v1, {
           epoch_number    :: pv1_epoch_n(),
-          epoch_csum      :: pv1_csum(),
           author_server   :: pv1_server(),
+          epoch_csum      :: pv1_csum(),
           all_members     :: [pv1_server()],
           creation_time   :: pv1_timestamp(),
           upi             :: [pv1_server()],
