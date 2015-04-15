@@ -32,7 +32,7 @@
 visualize(ProjType, Epoch, MembersDictOrDirList, DotOut) ->
     Ps = get_viz_projections(ProjType, Epoch, MembersDictOrDirList),
     Facts = compile_projections_to_facts(ProjType, Ps),
-    io:format(user, "Facts ~p\n", [Facts]),
+    %% io:format(user, "Facts ~p\n", [Facts]),
     make_dot_file(Facts, DotOut).
 
 get_viz_projections(ProjType, Epoch, MembersDictOrDirList) ->
@@ -46,6 +46,7 @@ get_viz_projections(ProjType, Epoch, MembersDictOrDirList, GetOlderEpochs_p) ->
                       catch _:_ ->
                               []
                       end || X <- MembersDictOrDirList]),
+io:format("PsAtEpoch ~P\n", [PsAtEpoch, 10]),
     if not GetOlderEpochs_p ->
             PsAtEpoch;
        PsAtEpoch == [] ->
@@ -102,20 +103,24 @@ make_facts_heads_tails(ProjType, Ps, D0) ->
     2 = #projection_v1.epoch_number, % sanity check for sorting order.
     [MaxP|_] = lists:reverse(lists:sort(Ps)),
     MaxEpoch = MaxP#projection_v1.epoch_number,
+    AllEpochs = [P#projection_v1.epoch_number || P <- Ps],
+    MaxEpochAuthor = MaxP#projection_v1.author_server,
     Partitions = proplists:get_value(ps, MaxP#projection_v1.dbg, []),
     D1 = add_fact(max_epoch, MaxEpoch,
+         add_fact(max_epoch_author, MaxEpochAuthor,
          add_fact(projection_type, ProjType,
          add_fact(creation_time, MaxP#projection_v1.creation_time,
          add_fact(partition_list, Partitions,
-                  D0)))),
+                  D0))))),
 
     %% Update the facts dictionary, via sort from smallest epoch to largest
     lists:foldl(fun(P, Dict) ->
-                        make_facts_heads_tails(P, MaxEpoch, MaxP, Dict)
+                        make_facts_heads_tails(P, MaxEpoch, AllEpochs, MaxP,
+                                               Dict)
                 end, D1, lists:sort(Ps)).
 
 make_facts_heads_tails(#projection_v1{upi=UPI, repairing=Repairing}=P,
-                  MaxEpoch, MaxP, D0) ->
+                       MaxEpoch, AllEpochs, MaxP, D0) ->
     {Head, MidsTails, Repairs} =
         if UPI == [] ->
                 {[], [], []};
@@ -124,7 +129,6 @@ make_facts_heads_tails(#projection_v1{upi=UPI, repairing=Repairing}=P,
                 {Hd, MsT, Repairing}
         end,
     D10 = add_fact({virt_role, Head}, head, D0),
-    %% D20 = add_facts([{{virt_role, X}, mid_tail} || X <- MidsTails ++ Repairs], D10),
     D20 = add_facts([{{virt_role, X}, middle} ||
                         X <- MidsTails,
                         X /= lists:last(MidsTails)], D10),
@@ -132,23 +136,29 @@ make_facts_heads_tails(#projection_v1{upi=UPI, repairing=Repairing}=P,
                         X <- MidsTails,
                         X == lists:last(MidsTails)], D20),
     D22 = add_facts([{{virt_role, X}, repairing} || X <- Repairs], D21),
+
     DownFs = lists:flatten(
                [{{virt_label_down, X}, str("down=~w", [P#projection_v1.down])}||
                    X <- UPI ++ Repairing]),
     D30 = add_facts(DownFs, D22),
+
     EpochFs = lists:flatten(
-                [{{virt_epoch,X}, E} ||
+                [{{virt_epoch, X}, E} ||
                     E <- [P#projection_v1.epoch_number],
                     X <- P#projection_v1.upi ++
                          P#projection_v1.repairing]),
     D40 = add_facts(EpochFs, D30),
-    EpochLabelFs = [{{virt_label_epoch, X}, ""} ||
-                        {{virt_epoch,X}, E} <- EpochFs, E == MaxEpoch]
-                   ++
-                   [{{virt_label_epoch, X}, str("Epoch=~w", [E])} ||
-                        {{virt_epoch,X}, E} <- EpochFs, E /= MaxEpoch],
-    D50 = add_facts(EpochLabelFs, D40),
-    D60 = make_facts_edges(P, MaxEpoch, MaxP, D50),
+    EpochLabelFs1 = [{{virt_label_epoch, X}, "Epoch=current"} ||
+                        {{virt_epoch, X}, E} <- EpochFs,
+                        E == MaxEpoch],
+    Es_not_max = AllEpochs -- [MaxEpoch],
+    EpochLabelFs2 = [{{virt_label_epoch, X}, str("Epoch=~w", [Es_not_max])} ||
+                        {{virt_epoch, X}, E} <- EpochFs,
+                        E /= MaxEpoch,
+                        get_fact_maybe({virt_epoch, X}, D30, yup) == yup],
+    D50 = add_facts(EpochLabelFs1, D40),
+    D51 = add_facts(EpochLabelFs2, D50),
+    D60 = make_facts_edges(P, MaxEpoch, MaxP, D51),
     D60.
 
 make_facts_edges(#projection_v1{
@@ -158,7 +168,7 @@ make_facts_edges(#projection_v1{
     %% chain replication happening.  But it seems to be a nice visual thing?
     D1 = case {UPI, Repairing} of
              {[X], []} ->
-                 add_fact({edge, {Epoch, X, {X, X}}}, true, D0);
+                 add_fact({edge, {Epoch, X, {X, X}}}, true_1, D0);
              _ ->
                  D0
          end,
@@ -166,13 +176,13 @@ make_facts_edges(#projection_v1{
 
     UPI_R = UPI ++ Repairing,
     %%{{edge, {Epoch, In_max_epoch_p, {From_vertex, To_vertex}}}, true}
-    D10 = add_facts([{{edge, {Epoch, Who, HopPair}}, true} ||
+    D10 = add_facts([{{edge, {Epoch, Who, HopPair}}, true_2} ||
                         HopPair <- UPI_Hops, Who <- UPI_R], D1),
     UPI_lastL = if UPI == [] -> [];
                    true      -> [lists:last(UPI)]
                 end,
     Repair_Hops = make_hops(UPI_lastL ++ Repairing),
-    D20 = add_facts([{{edge, {Epoch, Who, HopPair}}, true} ||
+    D20 = add_facts([{{edge, {Epoch, Who, HopPair}}, true_3} ||
                         HopPair <- Repair_Hops, Who <- UPI_R], D10),
     D20.
 
@@ -189,6 +199,11 @@ add_facts(KsVs, D) ->
 
 get_fact(K, D) ->
     orddict:fetch(K, D).
+
+get_fact_maybe(K, D, Default) ->
+    case orddict:find(K, D) of error   -> Default;
+                               {ok, V} -> V
+    end.
 
 str(Fmt, Args) ->
     lists:flatten(io_lib:format(Fmt, Args)).
@@ -212,11 +227,13 @@ make_dot_file2(Facts, FH) ->
 
     %% Make our label string
     MaxEpoch = get_fact(max_epoch, Facts),
+    MaxEpochAuthor = get_fact(max_epoch_author, Facts),
     ProjType = get_fact(projection_type, Facts),
     CreationTime = get_fact(creation_time, Facts),
     Partitions = get_fact(partition_list, Facts),
     Label1 = string:join(
-               [str("~w epoch=~w", [ProjType, MaxEpoch]),
+               [str("~w epoch=~w author=~w",
+                    [ProjType, MaxEpoch, MaxEpochAuthor]),
                 str("~s", [date_str(CreationTime)]),
                 str("Partitions=~w", [Partitions])
                ], "\\n"),
