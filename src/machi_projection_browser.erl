@@ -29,7 +29,15 @@
 
 -define(FLU_C, machi_flu1_client).
 
-visualize(ProjType, Epoch, MembersDictOrDirList, _DotOut) ->
+visualize(ProjType, Epoch, MembersDictOrDirList, DotOut) ->
+    Ps = get_viz_projections(ProjType, Epoch, MembersDictOrDirList),
+    Facts = compile_projections_to_facts(Ps),
+    make_dot_file(Facts, DotOut).
+
+get_viz_projections(ProjType, Epoch, MembersDictOrDirList) ->
+    get_viz_projections(ProjType, Epoch, MembersDictOrDirList, true).
+
+get_viz_projections(ProjType, Epoch, MembersDictOrDirList, GetOlderEpochs_p) ->
     PsAtEpoch = 
         lists:append([try
                           {ok, P} = read_projection(ProjType, Epoch, X),
@@ -37,32 +45,37 @@ visualize(ProjType, Epoch, MembersDictOrDirList, _DotOut) ->
                       catch _:_ ->
                               []
                       end || X <- MembersDictOrDirList]),
-    Thingies_not_at_Epoch =
-        [try
-             {error, _} = read_projection(ProjType, Epoch, X),
-             X
-         catch _:_ ->
-                 []
-         end || X <- MembersDictOrDirList, X /= []],
-    PsPriorToEpoch =
-        lists:append([try
-                          Es = list_unique_projections(ProjType, [X]),
-                          Ep = lists:max([E || E <- Es, E < Epoch]),
-                          {ok, P} = read_projection(ProjType, Ep, X),
-                          [P]
-                      catch _:_ ->
-                              []
-                      end || X <- Thingies_not_at_Epoch, X /= []]),
-    _Graph = graph_projections(PsAtEpoch ++ PsPriorToEpoch).
+io:format(user, "PsAtEpoch ~p\n", [PsAtEpoch]),
+    if not GetOlderEpochs_p ->
+            PsAtEpoch;
+       true ->
+            Thingies_not_at_Epoch =
+                [try
+                     {error, _} = read_projection(ProjType, Epoch, X),
+                     X
+                 catch _:_ ->
+                         []
+                 end || X <- MembersDictOrDirList, X /= []],
+            PsPriorToEpoch =
+                lists:append([try
+                                  Es = list_unique_projections(ProjType, [X]),
+                                  Ep = lists:max([E || E <- Es, E < Epoch]),
+                                  {ok, P} = read_projection(ProjType, Ep, X),
+                                  [P]
+                              catch _:_ ->
+                                      []
+                              end || X <- Thingies_not_at_Epoch, X /= []]),
+            PsAtEpoch ++ PsPriorToEpoch
+    end.
 
-graph_projections(Ps) ->
-    graph_projections(Ps, orddict:new()).
+compile_projections_to_facts(Ps) ->
+    compile_projections_to_facts(Ps, orddict:new()).
 
-graph_projections(Ps, D0) ->
-    D1 = graph_unique_flus(Ps, D0),
-    _D2 = graph_heads_tails(Ps, D1).
+compile_projections_to_facts(Ps, D0) ->
+    D1 = make_facts_unique_flus(Ps, D0),
+    _D2 = make_facts_heads_tails(Ps, D1).
 
-graph_unique_flus(Ps, D) ->
+make_facts_unique_flus(Ps, D) ->
     Unique = unique_flus(Ps),
     add_facts([{{virt, X}, true} || X <- Unique] ++
               %% Add default color
@@ -74,18 +87,23 @@ unique_flus(Ps) ->
                                  P#projection_v1.repairing,
                                  P#projection_v1.down] || P <- Ps])).
 
-graph_heads_tails(Ps, D0) ->
+make_facts_heads_tails(Ps, D0) ->
     2 = #projection_v1.epoch_number, % sanity check for sorting order.
     [MaxP|_] = lists:reverse(lists:sort(Ps)),
     MaxEpoch = MaxP#projection_v1.epoch_number,
-io:format(user, "line ~w MaxEpoch ~w\n", [?LINE, MaxEpoch]),
-    %% Update the facts dictionary, via sort from smallest epoch to largest
-    lists:foldl(fun(P, Dict) -> graph_heads_tails(P, MaxEpoch, MaxP, Dict) end,
-                D0, lists:sort(Ps)).
+    Partitions = proplists:get_value(ps, MaxP#projection_v1.dbg, []),
+    D1 = add_fact(max_epoch, MaxEpoch,
+         add_fact(creation_time, MaxP#projection_v1.creation_time,
+         add_fact(partition_list, Partitions,
+                  D0))),
 
-graph_heads_tails(#projection_v1{upi=UPI, repairing=Repairing}=P,
+    %% Update the facts dictionary, via sort from smallest epoch to largest
+    lists:foldl(fun(P, Dict) ->
+                        make_facts_heads_tails(P, MaxEpoch, MaxP, Dict)
+                end, D1, lists:sort(Ps)).
+
+make_facts_heads_tails(#projection_v1{upi=UPI, repairing=Repairing}=P,
                   MaxEpoch, MaxP, D0) ->
-io:format(user, "line ~w MaxEpoch ~w\n", [?LINE, MaxEpoch]),
     {Head, MidsTails, Repairs} =
         if UPI == [] ->
                 {[], [], []};
@@ -118,10 +136,10 @@ io:format(user, "line ~w MaxEpoch ~w\n", [?LINE, MaxEpoch]),
                    [{{virt_label_epoch, X}, str("Epoch=~w", [E])} ||
                         {{virt_epoch,X}, E} <- EpochFs, E /= MaxEpoch],
     D50 = add_facts(EpochLabelFs, D40),
-    D60 = graph_edges(P, MaxEpoch, MaxP, D50),
+    D60 = make_facts_edges(P, MaxEpoch, MaxP, D50),
     D60.
 
-graph_edges(#projection_v1{
+make_facts_edges(#projection_v1{
                epoch_number=Epoch, upi=UPI, repairing=Repairing}=_P,
             MaxEpoch, _MaxP, D0) ->
     %% TODO: This edge pointing to self is technically wrong: there is no
@@ -135,7 +153,7 @@ graph_edges(#projection_v1{
     UPI_Hops = make_hops(UPI),
 
     UPI_R = UPI ++ Repairing,
-    %%{{edge, {Epoch, {From_vertex, To_vertex}}, {In_max_epoch_p, UPI_Rep_node}}
+    %%{{edge, {Epoch, {From_vertex, To_vertex}}},{In_max_epoch_p, UPI_Rep_node}}
     D10 = add_facts([{{edge, {Epoch, HopPair}}, {Epoch == MaxEpoch, Who}} ||
                         HopPair <- UPI_Hops, Who <- UPI_R], D1),
     UPI_lastL = if UPI == [] -> [];
@@ -144,7 +162,6 @@ graph_edges(#projection_v1{
     Repair_Hops = make_hops(UPI_lastL ++ Repairing),
     D20 = add_facts([{{edge, {Epoch, HopPair}}, {Epoch == MaxEpoch, Who}} ||
                         HopPair <- Repair_Hops, Who <- UPI_R], D10),
-    io:format(user, "Epoch ~w hops 1 ~p 2 ~p\n", [Epoch, UPI_Hops, Repair_Hops]),
     D20.
 
 make_hops([X, Y|Rest]) ->
@@ -158,8 +175,111 @@ add_fact(K, V, D) ->
 add_facts(KsVs, D) ->
     lists:foldl(fun({K, V}, Acc) -> orddict:store(K, V, Acc) end, D, KsVs).
 
+get_fact(K, D) ->
+    orddict:fetch(K, D).
+
 str(Fmt, Args) ->
     lists:flatten(io_lib:format(Fmt, Args)).
+
+make_dot_file(Facts, _OutFile) ->
+    {ok, FH} = file:open(_OutFile, [write]),
+    try
+        make_dot_file2(Facts, user), % debugging only
+        make_dot_file2(Facts, FH)
+    after
+        (catch file:close(FH))
+    end.
+
+-define(ON(FH, FMT),       io:format(FH, FMT ++ "\n", []  )).
+-define(ON(FH, FMT, ARGS), io:format(FH, FMT ++ "\n", ARGS)).
+-define( O(FH, FMT),       io:format(FH, FMT,         []  )).
+-define( O(FH, FMT, ARGS), io:format(FH, FMT,         ARGS)).
+
+make_dot_file2(Facts, FH) ->
+    ?ON(FH, "digraph G {"),
+
+    %% Make our label string
+    MaxEpoch = get_fact(max_epoch, Facts),
+    CreationTime = get_fact(creation_time, Facts),
+    Partitions = get_fact(partition_list, Facts),
+    Label1 = string:join(
+               [str("Epoch=~w", [MaxEpoch]),
+                str("~s", [date_str(CreationTime)]),
+                str("Partitions=~w", [Partitions])
+               ], "\\n"),
+    ?ON(FH, "  label=\"~s\"", [Label1]),
+    ?ON(FH, ""),
+
+    %% Create rank spec
+    Vs = lists:sort([V || {{virt, V}, true} <- Facts]),
+    ?O(FH, "  { rank=same; ", []),
+    [?O(FH, "~w; ", [V]) || V <- Vs],
+    ?ON(FH, "};"),
+    ?ON(FH, ""),
+
+    %% Create vertex specs
+    [begin
+         DownStr = get_fact({virt_label_down, V}, Facts),
+         EpochStr = get_fact({virt_label_epoch, V}, Facts),
+         V_Epoch = get_fact({virt_epoch, V}, Facts),
+         VertColor = dot_vertex_color(V, V_Epoch, MaxEpoch, Facts),
+         VertFontColor = if VertColor == "grey" -> "grey";
+                            true                -> "black"
+                         end,
+         Label2 = string:join(
+                    [
+                     str("label=\"~w\\n~s\\n~s\"", [V, DownStr, EpochStr]),
+                     str("shape=~s", [dot_vertex_shape(V, Facts)]),
+                     str("color=~s", [VertColor]),
+                     str("fontcolor=~s", [VertFontColor])
+                    ], ","),
+         ?ON(FH, "  ~w [~s]", [V, Label2])
+     end || V <- Vs],
+    ?ON(FH, ""),
+
+    ?ON(FH, "  /* Add invisible edges so that the diagram is ordered */"),
+    ?ON(FH, "  /* left-to-right as we wish. */"),
+    [?ON(FH, "  ~w -> ~w [style=invis]", [X, Y]) || {X,Y} <- make_hops(Vs)],
+    ?ON(FH, ""),
+
+    %% Create edge specs
+    [begin
+         %% Color by the role of the destination of the edge.
+         VertColor = dot_vertex_color(Y, Epoch, MaxEpoch, Facts),
+         VertFontColor = VertColor,
+         Label3 = string:join(
+                    [
+                     str("taillabel=\"~w\"", [Who]),
+                     str("color=~s", [VertColor]),
+                     str("fontcolor=~s", [VertFontColor])
+                    ], ","),
+         ?ON(FH, " ~w -> ~w [~s]", [X, Y, Label3])
+     end || {{edge, {Epoch, {X, Y}}}, {_In_max_epoch_p, Who}} <- Facts],
+    ?ON(FH, ""),
+
+    %% Done!
+    ?ON(FH, "}").
+
+dot_vertex_shape(V, Facts) ->
+    case get_fact({virt_role, V}, Facts) of head -> "polygon,sides=7";
+                                            _    -> "ellipse"
+    end.
+
+dot_vertex_color(V, V_Epoch, MaxEpoch, Facts)
+  when V_Epoch == MaxEpoch ->
+    case get_fact({virt_role, V}, Facts) of head      -> "green";
+                                            middle    -> "green";
+                                            tail      -> "green";
+                                            repairing -> "purple";
+                                            _         -> "red"
+    end;
+dot_vertex_color(_V, _V_Epoch, _MaxEpoch, _Facts) ->
+    "grey".
+
+date_str({_A,_B,MSec}=Now) ->
+    {{YYYY,Mo,DD},{HH,MM,SS}} = calendar:now_to_local_time(Now),
+    str("~4..0w-~2..0w-~2..0w ~2..0w:~2..0w:~2..0w.~3..0w",
+        [YYYY,Mo,DD,HH,MM,SS,MSec div 1000]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
