@@ -237,12 +237,12 @@ convergence_demo_testfun(NumFLUs) ->
       io:format(user, "\nLet loose the dogs of war!\n", []),
       DoIt(30, 0, 0),
       [begin
-           %% io:format(user, "\nSET partitions = ~w.\n", [ [] ]),machi_partition_simulator:no_partitions(),
-           %% [DoIt(50, 10, 100) || _ <- [1,2,3]],
-           io:format(user, "\nLet loose the dogs of war!\n", []),
-           DoIt(30, 0, 0),
-           io:format(user, "\nSET partitions = ~w.\n", [ [] ]),machi_partition_simulator:no_partitions(),
-           [DoIt(10, 10, 100) || _ <- [1]],
+           io:format(user, "\nSET partitions = ~w.\n", [ [] ]),
+           machi_partition_simulator:no_partitions(),
+           [DoIt(50, 10, 100) || _ <- [1,2,3]],
+           %% io:format(user, "\nSET partitions = ~w.\n", [ [] ]),
+           %% machi_partition_simulator:no_partitions(),
+           %% [DoIt(10, 10, 100) || _ <- [1]],
 
            %% machi_partition_simulator:reset_thresholds(10, 50),
            %% io:format(user, "\nLet loose the dogs of war!\n", []),
@@ -250,7 +250,8 @@ convergence_demo_testfun(NumFLUs) ->
 
            machi_partition_simulator:always_these_partitions(Partition),
            io:format(user, "\nSET partitions = ~w.\n", [Partition]),
-           [DoIt(50, 10, 100) || _ <- [1,2,3,4] ],
+           [DoIt(50, 10, 300) || _ <- [1,2,3,4] ],
+           %% [DoIt(50, 10, 100) || _ <- [1,2,3,4] ],
            _PPP =
                [begin
                     {ok, PPPallPubs} = ?FLU_PC:list_all_projections(FLU,public),
@@ -279,8 +280,8 @@ convergence_demo_testfun(NumFLUs) ->
        %% end || Partition <- [ [{b,d}] ]
        %% end || Partition <- [ [{a,b}, {b,a}] ]
        %% end || Partition <- [ [{a,b}, {b,a}, {a,c},{c,a}] ]
-       end || Partition <- [ [{a,b}],
-                             [{b,a}] ]
+       %% end || Partition <- [ [{a,b}],
+       %%                       [{b,a}] ]
        %% end || Partition <- [ [{a,b}, {c,b}],
        %%                       [{a,b}, {b,c}] ]
        %% end || Partition <- [ [{a,b}, {b,c},       {c,d}],
@@ -295,6 +296,13 @@ convergence_demo_testfun(NumFLUs) ->
        %%                       [{a,b}, {b,c}, {c,d}, {e,d}] ]
        %% end || Partition <- [ [{c,a}] ]
        %% end || Partition <- [ [{c,a}], [{c,b}, {a, b}] ]
+       end || Partition <- [ [{c,a},{a,c}, {c,b},{b,c}, {c,d},{d,c}] ]
+       %% end || Partition <- [ [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}],
+       %%                       [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}],
+       %%                       [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}],
+       %%                       [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}],
+       %%                       [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}]
+       %%                       ]
        %% end || Partition <- [ [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}],
        %%                       [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {b,c}],
        %%                       [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {c,d}] ]

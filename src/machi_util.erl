@@ -31,7 +31,7 @@
          make_config_filename/2,
          make_checksum_filename/4, make_checksum_filename/2,
          make_data_filename/4, make_data_filename/2,
-         make_projection_filename/2,
+         make_projection_dirname/2, make_projection_filename/3,
          read_max_filenum/2, increment_max_filenum/2,
          info_msg/2, verb/1, verb/2,
          %% TCP protocol helpers
@@ -98,14 +98,25 @@ make_data_filename(DataDir, File) ->
     FullPath = lists:flatten(io_lib:format("~s/data/~s",  [DataDir, File])),
     {File, FullPath}.
 
+%% @doc Calculate a projection store directory path, by common convention.
+
+-spec make_projection_dirname(string(), [] | 'public'|'private') ->
+      string().
+make_projection_dirname(DataDir, "") ->
+    lists:flatten(io_lib:format("~s/projection",  [DataDir]));
+make_projection_dirname(DataDir, ProjType)
+  when ProjType == 'public'; ProjType == 'private' ->
+    lists:flatten(io_lib:format("~s/projection/~s",  [DataDir,
+                                                      atom_to_list(ProjType)])).
+
 %% @doc Calculate a projection store file path, by common convention.
 
--spec make_projection_filename(string(), [] | string()) ->
+-spec make_projection_filename(string(), 'public'|'private', non_neg_integer())->
       string().
-make_projection_filename(DataDir, "") ->
-    lists:flatten(io_lib:format("~s/projection",  [DataDir]));
-make_projection_filename(DataDir, File) ->
-    lists:flatten(io_lib:format("~s/projection/~s",  [DataDir, File])).
+make_projection_filename(DataDir, ProjType, Epoch)
+  when ProjType == 'public'; ProjType == 'private' ->
+    filename:join(make_projection_dirname(DataDir, ProjType),
+                         machi_projection_store:epoch2name(Epoch)).
 
 %% @doc Read the file size of a config file, which is used as the
 %% basis for a minimum sequence number.

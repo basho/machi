@@ -51,6 +51,8 @@
          get_all_projections/2, get_all_projections/3,
          list_all_projections/2, list_all_projections/3
         ]).
+%% Export for external tool use
+-export([find_all/1, read_proj_file/1, epoch2name/1, name2epoch/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -162,8 +164,8 @@ g_call(PidSpec, Arg, Timeout) ->
 
 init([DataDir, NotifyWedgeStateChanges]) ->
     lclock_init(),
-    PublicDir = machi_util:make_projection_filename(DataDir, "public"),
-    PrivateDir = machi_util:make_projection_filename(DataDir, "private"),
+    PublicDir = machi_util:make_projection_dirname(DataDir, 'public'),
+    PrivateDir = machi_util:make_projection_dirname(DataDir, 'private'),
     ok = filelib:ensure_dir(PublicDir ++ "/ignored"),
     ok = filelib:ensure_dir(PrivateDir ++ "/ignored"),
     MaxPublicEpoch = find_max_epoch(PublicDir),
@@ -237,10 +239,9 @@ do_proj_read(ProjType, Epoch, S_or_Dir) ->
                   S_or_Dir
           end,
     Path = filename:join(Dir, epoch2name(Epoch)),
-    case file:read_file(Path) of
-        {ok, Bin} ->
-            %% TODO and if Bin is corrupt? (even if binary_to_term() succeeds)
-            {{ok, binary_to_term(Bin)}, S_or_Dir};
+    case read_proj_file(Path) of
+        {ok, _Term}=Res ->
+            {Res, S_or_Dir};
         {error, enoent} ->
             {{error, not_written}, S_or_Dir};
         {error, Else} ->
@@ -299,6 +300,15 @@ find_max_epoch(Dir) ->
             EpochNum = name2epoch(lists:last(Fs)),
             {{ok, Proj}, _} = do_proj_read(proj_type_ignored, EpochNum, Dir),
             {EpochNum, Proj}
+    end.
+
+read_proj_file(File) ->
+    %% TODO and if Bin is corrupt? (even if binary_to_term() succeeds)
+    case file:read_file(File) of
+        {ok, Bin} ->
+            {ok, binary_to_term(Bin)};
+        Else ->
+            Else
     end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%

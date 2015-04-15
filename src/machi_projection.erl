@@ -128,8 +128,10 @@ make_summary(#projection_v1{epoch_number=EpochNum,
                             repairing=Repairing_list,
                             dbg=Dbg, dbg2=Dbg2}) ->
     [{epoch,EpochNum},{author,Author},
-     {upi,UPI_list},{repair,Repairing_list},{down,Down_list},
-     {d,Dbg}, {d2,Dbg2}].
+     {upi,UPI_list},{repair,Repairing_list},{down,Down_list}].
+    %% [{epoch,EpochNum},{author,Author},
+    %%  {upi,UPI_list},{repair,Repairing_list},{down,Down_list},
+    %%  {d,Dbg}, {d2,Dbg2}].
 
 %% @doc Make a `p_srvr_dict()' out of a list of `p_srvr()' or out of a
 %% `p_srvr_dict()'.

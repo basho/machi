@@ -106,7 +106,7 @@ main2(RegName, TcpPort, DataDir, Rest) ->
     ok = filelib:ensure_dir(Config_e),
     {_, Data_e} = machi_util:make_data_filename(DataDir, "unused"),
     ok = filelib:ensure_dir(Data_e),
-    Projection_e = machi_util:make_projection_filename(DataDir, "unused"),
+    Projection_e = machi_util:make_projection_filename(DataDir, public, 1),
     ok = filelib:ensure_dir(Projection_e),
 
     put(flu_reg_name, RegName),
