@@ -128,19 +128,22 @@ graph_edges(#projection_v1{
     %% chain replication happening.  But it seems to be a nice visual thing?
     D1 = case UPI of
              [X] ->
-                 add_fact({edge, {Epoch, {X, X}}}, Epoch == MaxEpoch, D0);
+                 add_fact({edge, {Epoch, {X, X}}}, {Epoch == MaxEpoch, X}, D0);
              _ ->
                  D0
          end,
     UPI_Hops = make_hops(UPI),
-    D10 = add_facts([{{edge, {Epoch, HopPair}}, Epoch == MaxEpoch} ||
-                        HopPair <- UPI_Hops], D1),
+
+    UPI_R = UPI ++ Repairing,
+    %%{{edge, {Epoch, {From_vertex, To_vertex}}, {In_max_epoch_p, UPI_Rep_node}}
+    D10 = add_facts([{{edge, {Epoch, HopPair}}, {Epoch == MaxEpoch, Who}} ||
+                        HopPair <- UPI_Hops, Who <- UPI_R], D1),
     UPI_lastL = if UPI == [] -> [];
                    true      -> [lists:last(UPI)]
                 end,
     Repair_Hops = make_hops(UPI_lastL ++ Repairing),
-    D20 = add_facts([{{edge, {Epoch, HopPair}}, Epoch == MaxEpoch} ||
-                        HopPair <- Repair_Hops], D10),
+    D20 = add_facts([{{edge, {Epoch, HopPair}}, {Epoch == MaxEpoch, Who}} ||
+                        HopPair <- Repair_Hops, Who <- UPI_R], D10),
     io:format(user, "Epoch ~w hops 1 ~p 2 ~p\n", [Epoch, UPI_Hops, Repair_Hops]),
     D20.
 
