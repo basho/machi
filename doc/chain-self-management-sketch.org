@@ -364,10 +364,11 @@ document presents a detailed example.)
 {epoch #, hash of the entire projection (minus hash field itself)}
 #+END_SRC
 
-* 9. Sketch of the self-management algorithm
+* 9. Diagram of the self-management algorithm
 ** Introduction
-Refer to the diagram `chain-self-management-sketch.Diagram1.pdf`, a
-flowchart of the 
+Refer to the diagram
+[[https://github.com/basho/machi/blob/master/doc/chain-self-management-sketch.Diagram1.pdf][`chain-self-management-sketch.Diagram1.pdf`]],
+a flowchart of the
 algorithm.  The code is structured as a state machine where function
 executing for the flowchart's state is named by the approximate
 location of the state within the flowchart.  The flowchart has three
