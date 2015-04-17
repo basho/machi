@@ -53,11 +53,12 @@ This is a very early experiment to try to create a distributed "rough
 consensus" algorithm that is sufficient & safe for managing the order
 of a Chain Replication chain, its members, and its chain order.
 
-* Code status: **active**!
-
 Unlike the other code projects in this repository's `prototype`
 directory, the chain management code is still under active
-development.  It is quite likely (as of early March 2015) that this
-code will be robust enough to move to the "real" Machi code base soon.
+development.  However, the chain manager code here in the `prototype`
+subdirectory will remain frozen in time.
 
-
+Efforts in April 2015 have moved the chain manager code to the "top level"
+of the repository.  All new work is being merged weekly into the `master`
+branch, see `src/machi_chain_manager1.erl` and related source at the top of
+the repo.
