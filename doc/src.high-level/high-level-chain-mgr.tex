@@ -1,0 +1,1186 @@
+
+%% \documentclass[]{report}
+\documentclass[preprint,10pt]{sigplanconf}
+% The following \documentclass options may be useful:
+
+% preprint      Remove this option only once the paper is in final form.
+% 10pt          To set in 10-point type instead of 9-point.
+% 11pt          To set in 11-point type instead of 9-point.
+% authoryear    To obtain author/year citation style instead of numeric.
+
+% \usepackage[a4paper]{geometry}
+\usepackage[dvips]{graphicx}            % to include images
+%\usepackage{pslatex}	    % to use PostScript fonts
+
+\begin{document}
+
+%%\special{papersize=8.5in,11in}
+%%\setlength{\pdfpageheight}{\paperheight}
+%%\setlength{\pdfpagewidth}{\paperwidth}
+
+\conferenceinfo{}{} 
+\copyrightyear{2014} 
+\copyrightdata{978-1-nnnn-nnnn-n/yy/mm} 
+\doi{nnnnnnn.nnnnnnn}
+
+\titlebanner{Draft \#0, April 2014}
+\preprintfooter{Draft \#0, April 2014}
+
+\title{Machi Chain Replication: management theory and design}
+\subtitle{}
+
+\authorinfo{Basho Japan KK}{}
+
+\maketitle
+
+\section{Origins}
+\label{sec:origins}
+
+This document was first written during the autumn of 2014 for a
+Basho-only internal audience.  Since its original drafts, Machi has
+been designated by Basho as a full open source software project.  This
+document has been rewritten in 2015 to address an external audience.
+For an overview of the design of the larger Machi system, please see
+\cite{machi-design}.
+
+\section{Abstract}
+\label{sec:abstract}
+
+TODO
+
+\section{Introduction}
+\label{sec:introduction}
+
+TODO
+
+\section{Projections: calculation, then storage, then (perhaps) use}
+\label{sec:projections}
+
+Machi uses a ``projection'' to determine how its Chain Replication replicas
+should operate; see \cite{machi-design} and
+\cite{corfu1}.  At runtime, a cluster must be able to respond both to
+administrative changes (e.g., substituting a failed server box with
+replacement hardware) as well as local network conditions (e.g., is
+there a network partition?).  The concept of a projection is borrowed
+from CORFU but has a longer history, e.g., the Hibari key-value store
+\cite{cr-theory-and-practice} and goes back in research for decades,
+e.g., Porcupine \cite{porcupine}.
+
+\subsection{Phases of projection change}
+
+Machi's use of projections is in four discrete phases and are
+discussed below: network monitoring,
+projection calculation, projection storage, and
+adoption of new projections.
+
+\subsubsection{Network monitoring}
+\label{sub:network-monitoring}
+
+Monitoring of local network conditions can be implemented in many
+ways.  None are mandatory, as far as this RFC is concerned.
+Easy-to-maintain code should be the primary driver for any
+implementation.  Early versions of Machi may use some/all of the
+following techniques:
+
+\begin{itemize}
+\item Internal ``no op'' FLU-level protocol request \& response.
+\item Use of distributed Erlang {\tt net\_ticktime} node monitoring
+\item Explicit connections of remote {\tt epmd} services, e.g., to
+tell the difference between a dead Erlang VM and a dead
+machine/hardware node.
+\item Network tests via ICMP {\tt ECHO\_REQUEST}, a.k.a. {\tt ping(8)}
+\end{itemize}
+
+Output of the monitor should declare the up/down (or
+available/unavailable) status of each server in the projection.  Such
+Boolean status does not eliminate ``fuzzy logic'' or probabilistic
+methods for determining status.  Instead, hard Boolean up/down status
+decisions are required by the projection calculation phase
+(Section~\ref{subsub:projection-calculation}).
+
+\subsubsection{Projection data structure calculation}
+\label{subsub:projection-calculation}
+
+Each Machi server will have an independent agent/process that is
+responsible for calculating new projections.  A new projection may be
+required whenever an administrative change is requested or in response
+to network conditions (e.g., network partitions).
+
+Projection calculation will be a pure computation, based on input of:
+
+\begin{enumerate}
+\item The current projection epoch's data structure
+\item Administrative request (if any)
+\item Status of each server, as determined by network monitoring
+(Section~\ref{sub:network-monitoring}).
+\end{enumerate}
+
+All decisions about {\em when} to calculate a projection must be made
+using additional runtime information.  Administrative change requests
+probably should happen immediately.  Change based on network status
+changes may require retry logic and delay/sleep time intervals.
+
+\subsection{Projection storage: writing}
+\label{sub:proj-storage-writing}
+
+All projection data structures are stored in the write-once Projection
+Store that is run by each FLU.  (See also \cite{machi-design}.)
+
+Writing the projection follows the two-step sequence below.
+In cases of writing
+failure at any stage, the process is aborted.  The most common case is
+{\tt error\_written}, which signifies that another actor in the system has
+already calculated another (perhaps different) projection using the
+same projection epoch number and that
+read repair is necessary.  Note that {\tt error\_written} may also
+indicate that another actor has performed read repair on the exact
+projection value that the local actor is trying to write!
+
+\begin{enumerate}
+\item Write $P_{new}$ to the local projection store.  This will trigger
+  ``wedge'' status in the local FLU, which will then cascade to other
+  projection-related behavior within the FLU.
+\item Write $P_{new}$ to the remote projection store of {\tt all\_members}.
+  Some members may be unavailable, but that is OK.
+\end{enumerate}
+
+(Recall: Other parts of the system are responsible for reading new
+projections from other actors in the system and for deciding to try to
+create a new projection locally.)
+
+\subsection{Projection storage: reading}
+\label{sub:proj-storage-reading}
+
+Reading data from the projection store is similar in principle to
+reading from a Chain Replication-managed FLU system.  However, the
+projection store does not require the strict replica ordering that
+Chain Replication does.  For any projection store key $K_n$, the
+participating servers may have different values for $K_n$.  As a
+write-once store, it is impossible to mutate a replica of $K_n$.  If
+replicas of $K_n$ differ, then other parts of the system (projection
+calculation and storage) are responsible for reconciling the
+differences by writing a later key,
+$K_{n+x}$ when $x>0$, with a new projection.
+
+Projection store reads are ``best effort''.  The projection used is chosen from
+all replica servers that are available at the time of the read.  The
+minimum number of replicas is only one: the local projection store
+should always be available, even if no other remote replica projection
+stores are available.
+
+For any key $K$, different projection stores $S_a$ and $S_b$ may store
+nothing (i.e., {\tt error\_unwritten} when queried) or store different
+values, $P_a \ne P_b$, despite having the same projection epoch
+number.  The following ranking rules are used to
+determine the ``best value'' of a projection, where highest rank of
+{\em any single projection} is considered the ``best value'':
+
+\begin{enumerate}
+\item An unwritten value is ranked at a value of $-1$.
+\item A value whose {\tt author\_server} is at the $I^{th}$ position
+  in the {\tt all\_members} list has a rank of $I$.
+\item A value whose {\tt dbg\_annotations} and/or other fields have
+  additional information may increase/decrease its rank, e.g.,
+  increase the rank by $10.25$.
+\end{enumerate}
+
+Rank rules \#2 and \#3 are intended to avoid worst-case ``thrashing''
+of different projection proposals.
+
+The concept of ``read repair'' of an unwritten key is the same as
+Chain Replication's.  If a read attempt for a key $K$ at some server
+$S$ results in {\tt error\_unwritten}, then all of the other stores in
+the {\tt \#projection.all\_members} list are consulted.  If there is a
+unanimous value $V_{u}$ elsewhere, then $V_{u}$ is use to repair all
+unwritten replicas.  If the value of $K$ is not unanimous, then the
+``best value'' $V_{best}$ is used for the repair.  If all respond with
+{\tt error\_unwritten}, repair is not required.
+
+\subsection{Adoption of new projections}
+
+The projection store's ``best value'' for the largest written epoch
+number at the time of the read is projection used by the FLU.
+If the read attempt for projection $P_p$
+also yields other non-best values, then the
+projection calculation subsystem is notified.  This notification
+may/may not trigger a calculation of a new projection $P_{p+1}$ which
+may eventually be stored and so
+resolve $P_p$'s replicas' ambiguity.
+
+\subsubsection{Alternative implementations: Hibari's ``Admin Server''
+  and Elastic Chain Replication}
+
+See Section 7 of \cite{cr-theory-and-practice} for details of Hibari's
+chain management agent, the ``Admin Server''.  In brief:
+
+\begin{itemize}
+\item The Admin Server is intentionally a single point of failure in
+  the same way that the instance of Stanchion in a Riak CS cluster
+  is an intentional single
+  point of failure.  In both cases, strict
+  serialization of state changes is more important than 100\%
+  availability.
+
+\item For higher availability, the Hibari Admin Server is usually
+  configured in an active/standby manner.  Status monitoring and
+  application failover logic is provided by the built-in capabilities
+  of the Erlang/OTP application controller.
+
+\end{itemize}
+
+Elastic chain replication is a technique described in
+\cite{elastic-chain-replication}.  It describes using multiple chains
+to monitor each other, as arranged in a ring where a chain at position
+$x$ is responsible for chain configuration and management of the chain
+at position $x+1$.  This technique is likely the fall-back to be used
+in case the chain management method described in this RFC proves
+infeasible.
+
+\subsection{Likely problems and possible solutions}
+\label{sub:likely-problems}
+
+There are some unanswered questions about Machi's proposed chain
+management technique.  The problems that we guess are likely/possible
+include:
+
+\begin{itemize}
+
+\item Thrashing or oscillating between a pair (or more) of
+  projections.  It's hoped that the ``best projection'' ranking system
+  will be sufficient to prevent endless thrashing of projections, but
+  it isn't yet clear that it will be.
+
+\item Partial (and/or one-way) network splits which cause partially
+  connected graphs of inter-node connectivity.  Groups of nodes that
+  are completely isolated aren't a problem.  However, partially
+  connected groups of nodes is an unknown.  Intuition says that
+  communication (via the projection store) with ``bridge nodes'' in a
+  partially-connected network ought to settle eventually on a
+  projection with high rank, e.g., the projection on an island
+  subcluster of nodes with the largest author node name.  Some corner
+  case(s) may exist where this intuition is not correct.
+
+\item CP Mode management via the method proposed in
+  Section~\ref{sec:split-brain-management} may not be sufficient in
+  all cases.
+
+\end{itemize}
+
+\section{Chain Replication: proof of correctness}
+\label{sub:cr-proof}
+
+See Section~3 of \cite{chain-replication} for a proof of the
+correctness of Chain Replication.  A short summary is provide here.
+Readers interested in good karma should read the entire paper.
+
+The three basic rules of Chain Replication and its strong
+consistency guarantee:
+
+\begin{enumerate}
+
+\item All replica servers are arranged in an ordered list $C$.
+
+\item All mutations of a datum are performed upon each replica of $C$
+  strictly in the order which they appear in $C$.  A mutation is considered
+  completely successful if the writes by all replicas are successful.
+
+\item The head of the chain makes the determination of the order of
+  all mutations to all members of the chain.  If the head determines
+  that some mutation $M_i$ happened before another mutation $M_j$,
+  then mutation $M_i$ happens before $M_j$ on all other members of
+  the chain.\footnote{While necesary for general Chain Replication,
+    Machi does not need this property.  Instead, the property is
+    provided by Machi's sequencer and the write-once register of each
+    byte in each file.}
+
+\item All read-only operations are performed by the ``tail'' replica,
+  i.e., the last replica in $C$.
+
+\end{enumerate}
+
+The basis of the proof lies in a simple logical trick, which is to
+consider the history of all operations made to any server in the chain
+as a literal list of unique symbols, one for each mutation.
+
+Each replica of a datum will have a mutation history list.  We will
+call this history list $H$. For the $i^{th}$ replica in the chain list
+$C$, we call $H_i$ the mutation history list for the $i^{th}$ replica.
+
+Before the $i^{th}$ replica in the chain list begins service, its mutation
+history $H_i$ is empty, $[]$.  After this replica runs in a Chain
+Replication system for a while, its mutation history list grows to
+look something like 
+$[M_0, M_1, M_2, ..., M_{m-1}]$ where $m$ is the total number of
+mutations of the datum that this server has processed successfully.
+
+Let's assume for a moment that all mutation operations have stopped.
+If the order of the chain was constant, and if all mutations are
+applied to each replica in the chain's order, then all replicas of a
+datum will have the exact same mutation history: $H_i = H_J$ for any
+two replicas $i$ and $j$ in the chain
+(i.e., $\forall i,j \in C, H_i = H_J$).  That's a lovely property,
+but it is much more interesting to assume that the service is
+not stopped.  Let's look next at a running system.
+
+\begin{figure*}
+\centering
+\begin{tabular}{ccc}
+{\bf {{On left side of $C$}}} & & {\bf On right side of $C$} \\
+\hline
+\multicolumn{3}{l}{Looking at replica order in chain $C$:} \\
+$i$ & $<$ & $j$ \\
+
+\multicolumn{3}{l}{For example:} \\
+
+0 & $<$ & 2 \\
+\hline
+\multicolumn{3}{l}{It {\em must} be true: history lengths per replica:} \\
+length($H_i$) & $\geq$ & length($H_j$) \\
+\multicolumn{3}{l}{For example, a quiescent chain:} \\
+48 & $\geq$ & 48 \\
+\multicolumn{3}{l}{For example, a chain being mutated:} \\
+55 & $\geq$ & 48 \\
+\multicolumn{3}{l}{Example ordered mutation sets:} \\
+$[M_0,M_1,\ldots,M_{46},M_{47},\ldots,M_{53},M_{54}]$ & $\supset$ & $[M_0,M_1,\ldots,M_{46},M_{47}]$ \\
+\multicolumn{3}{c}{\bf Therefore the right side is always an ordered
+  subset} \\
+\multicolumn{3}{c}{\bf of the left side.  Furthermore, the ordered
+  sets on both} \\
+\multicolumn{3}{c}{\bf sides have the exact same order of those elements they have in common.} \\
+\multicolumn{3}{c}{The notation used by the Chain Replication paper is
+shown below:} \\
+$[M_0,M_1,\ldots,M_{46},M_{47},\ldots,M_{53},M_{54}]$ & $\succeq$ & $[M_0,M_1,\ldots,M_{46},M_{47}]$ \\
+
+\end{tabular}
+\caption{A demonstration of Chain Replication protocol history ``Update Propagation Invariant''.}
+\label{tab:chain-order}
+\end{figure*}
+
+If the entire chain $C$ is processing any number of concurrent
+mutations, then we can still understand $C$'s behavior.
+Figure~\ref{tab:chain-order} shows us two replicas in chain $C$:
+replica $R_i$ that's on the left/earlier side of the replica chain $C$
+than some other replica $R_j$.  We know that $i$'s position index in
+the chain is smaller than $j$'s position index, so therefore $i < j$.
+The restrictions of Chain Replication make it true that length($H_i$)
+$\ge$ length($H_j$) because it's also that $H_i \supset H_j$, i.e,
+$H_i$ on the left is always is a superset of $H_j$ on the right.
+
+When considering $H_i$ and $H_j$ as strictly ordered lists, we have 
+$H_i \succeq H_j$, where the right side is always an exact prefix of the left
+side's list.  This prefixing propery is exactly what strong
+consistency requires.  If a value is read from the tail of the chain,
+then no other chain member can have a prior/older value because their
+respective mutations histories cannot be shorter than the tail
+member's history.
+
+\paragraph{``Update Propagation Invariant''}
+is the original chain replication paper's name for the
+$H_i \succeq H_j$ 
+property.  This paper will use the same name.
+
+\section{Repair of entire files}
+\label{sec:repair-entire-files}
+
+There are some situations where repair of entire files is necessary.
+
+\begin{itemize}
+\item To repair FLUs added to a chain in a projection change,
+  specifically adding a new FLU to the chain.  This case covers both
+  adding a new, data-less FLU and re-adding a previous, data-full FLU
+  back to the chain.
+\item To avoid data loss when changing the order of the chain's servers.
+\end{itemize}
+
+Both situations can set the stage for data loss in the future.
+If a violation of the Update Propagation Invariant (see end of
+Section~\ref{sub:cr-proof}) is permitted, then the strong consistency
+guarantee of Chain Replication is violated.  Because Machi uses
+write-once registers, the number of possible strong consistency
+violations is small: any client that witnesses a written $\rightarrow$
+unwritten transition is a violation of strong consistency.  But
+avoiding even this one bad scenario is a bit tricky.
+
+As explained in Section~\ref{sub:data-loss1}, data
+unavailability/loss when all chain servers fail is unavoidable.  We
+wish to avoid data loss whenever a chain has at least one surviving
+server.  Another method to avoid data loss is to preserve the Update
+Propagation Invariant at all times.
+
+\subsubsection{Just ``rsync'' it!}
+\label{ssec:just-rsync-it}
+
+A simple repair method might be perhaps 90\% sufficient.
+That method could loosely be described as ``just {\tt rsync}
+all files to all servers in an infinite loop.''\footnote{The
+  file format suggested in
+  \cite{machi-design} does not permit {\tt rsync}
+  as-is to be sufficient.  A variation of {\tt rsync} would need to be
+  aware of the data/metadata split within each file and only replicate
+  the data section \ldots and the metadata would still need to be
+  managed outside of {\tt rsync}.}
+
+However, such an informal method
+cannot tell you exactly when you are in danger of data loss and when
+data loss has actually happened.  If we maintain the Update
+Propagation Invariant, then we know exactly when data loss is immanent
+or has happened.
+
+Furthermore, we hope to use Machi for multiple use cases, including
+ones that require strong consistency.
+For uses such as CORFU, strong consistency is a non-negotiable
+requirement.  Therefore, we will use the Update Propagation Invariant
+as the foundation for Machi's data loss prevention techniques.
+
+\subsubsection{Divergence from CORFU: repair}
+\label{sub:repair-divergence}
+
+The original repair design for CORFU is simple and effective,
+mostly.  See Figure~\ref{fig:corfu-style-repair} for a full
+description of the algorithm
+Figure~\ref{fig:corfu-repair-sc-violation} for an example of a strong
+consistency violation that can follow.  (NOTE: This is a variation of
+the data loss scenario that is described in
+Figure~\ref{fig:data-loss2}.)
+
+\begin{figure}
+\begin{enumerate}
+\item Destroy all data on the repair destination FLU.
+\item Add the repair destination FLU to the tail of the chain in a new
+  projection $P_{p+1}$.
+\item Change projection from $P_p$ to $P_{p+1}$.
+\item Let single item read repair fix all of the problems.
+\end{enumerate}
+\caption{Simplest CORFU-style repair algorithm.}
+\label{fig:corfu-style-repair}
+\end{figure}
+
+\begin{figure}
+\begin{enumerate}
+\item Write value $V$ to offset $O$ in the log with chain $[F_a]$.
+  This write is considered successful.
+\item Change projection to configure chain as $[F_a,F_b]$.  Prior to
+  the change, all values on FLU $F_b$ are unwritten.
+\item FLU server $F_a$ crashes.  The new projection defines the chain
+  as $[F_b]$.
+\item A client attempts to read offset $O$ and finds an unwritten
+  value.  This is a strong consistency violation.
+%% \item The same client decides to fill $O$ with the junk value
+%%   $V_{junk}$.  Now value $V$ is lost.
+\end{enumerate}
+\caption{An example scenario where the CORFU simplest repair algorithm
+  can lead to a violation of strong consistency.}
+\label{fig:corfu-repair-sc-violation}
+\end{figure}
+
+A variation of the repair
+algorithm is presented in section~2.5 of a later CORFU paper \cite{corfu2}.
+However, the re-use a failed
+server is not discussed there, either: the example of a failed server
+$F_6$ uses a new server, $F_8$ to replace $F_6$.  Furthermore, the
+repair process is described as:
+
+\begin{quote}
+``Once $F_6$ is completely rebuilt on $F_8$ (by copying entries from
+  $F_7$), the system moves to projection (C), where $F_8$ is now used
+  to service all reads in the range $[40K,80K)$.''
+\end{quote}
+
+The phrase ``by copying entries'' does not give enough
+detail to avoid the same data race as described in
+Figure~\ref{fig:corfu-repair-sc-violation}.  We believe that if
+``copying entries'' means copying only written pages, then CORFU
+remains vulnerable.  If ``copying entries'' also means ``fill any
+unwritten pages prior to copying them'', then perhaps the
+vulnerability is eliminated.\footnote{SLF's note: Probably?  This is my
+  gut feeling right now.  However, given that I've just convinced
+  myself 100\% that fill during any possibility of split brain is {\em
+  not safe} in Machi, I'm not 100\% certain anymore than this ``easy''
+  fix for CORFU is correct.}.
+
+\subsubsection{Whole-file repair as FLUs are (re-)added to a chain}
+\label{sub:repair-add-to-chain}
+
+Machi's repair process must preserve the Update Propagation
+Invariant.  To avoid data races with data copying from
+``U.P.~Invariant preserving'' servers (i.e. fully repaired with
+respect to the Update Propagation Invariant)
+to servers of unreliable/unknown state, a
+projection like the one shown in
+Figure~\ref{fig:repair-chain-of-chains} is used.  In addition, the
+operations rules for data writes and reads must be observed in a
+projection of this type.
+
+\begin{figure*}
+\centering
+$
+[\overbrace{\underbrace{H_1}_\textbf{Head of Heads}, M_{11},
+      \underbrace{T_1}_\textbf{Tail \#1}}^\textbf{Chain \#1 (U.P.~Invariant preserving)}
+\mid
+\overbrace{H_2, M_{21},
+      \underbrace{T_2}_\textbf{Tail \#2}}^\textbf{Chain \#2 (repairing)}
+\mid \ldots \mid
+\overbrace{H_n, M_{n1},
+      \underbrace{T_n}_\textbf{Tail \#n \& Tail of Tails ($T_{tails}$)}}^\textbf{Chain \#n (repairing)}
+]
+$
+\caption{Representation of a ``chain of chains'': a chain prefix of
+  Update Propagation Invariant preserving FLUs (``Chain \#1'')
+  with FLUs from $n-1$ other chains under repair.}
+\label{fig:repair-chain-of-chains}
+\end{figure*}
+
+\begin{itemize}
+
+\item The system maintains the distinction between ``U.P.~preserving''
+  and ``repairing'' FLUs at all times.  This allows the system to
+  track exactly which servers are known to preserve the Update
+  Propagation Invariant and which servers may/may not.
+
+\item All ``repairing'' FLUs must be added only at the end of the
+  chain-of-chains.
+
+\item All write operations must flow successfully through the
+  chain-of-chains from beginning to end, i.e., from the ``head of
+  heads'' to the ``tail of tails''.  This rule also includes any
+  repair operations.
+
+\item In AP Mode, all read operations are attempted from the list of
+$[T_1,\-T_2,\-\ldots,\-T_n]$, where these FLUs are the tails of each of the
+chains involved in repair.
+In CP mode, all read operations are attempted only from $T_1$.
+The first reply of {\tt \{ok, <<...>>\}} is a correct answer;
+the rest of the FLU list can be ignored and the result returned to the
+client.  If all FLUs in the list have an unwritten value, then the
+client can return {\tt error\_unwritten}.
+
+\end{itemize}
+
+While the normal single-write and single-read operations are performed
+by the cluster, a file synchronization process is initiated.  The
+sequence of steps differs depending on the AP or CP mode of the system.
+
+\paragraph{In cases where the cluster is operating in CP Mode:}
+
+CORFU's repair method of ``just copy it all'' (from source FLU to repairing
+FLU) is correct, {\em except} for the small problem pointed out in
+Section~\ref{sub:repair-divergence}.  The problem for Machi is one of
+time \& space.  Machi wishes to avoid transferring data that is
+already correct on the repairing nodes.  If a Machi node is storing
+20TBytes of data, we really do not wish to use 20TBytes of bandwidth
+to repair only 1 GByte of truly-out-of-sync data.
+
+However, it is {\em vitally important} that all repairing FLU data be
+clobbered/overwritten with exactly the same data as the Update
+Propagation Invariant preserving chain.  If this rule is not strictly
+enforced, then fill operations can corrupt Machi file data.  The
+algorithm proposed is:
+
+\begin{enumerate}
+
+\item Change the projection to a ``chain of chains'' configuration
+  such as depicted in Figure~\ref{fig:repair-chain-of-chains}.
+
+\item For all files on all FLUs in all chains, extract the lists of
+  written/unwritten byte ranges and their corresponding file data
+  checksums.  (The checksum metadata is not strictly required for
+  recovery in AP Mode.)
+  Send these lists to the tail of tails
+  $T_{tails}$, which will collate all of the lists into a list of
+  tuples such as {\tt \{FName, $O_{start}, O_{end}$, CSum, FLU\_List\}}
+  where {\tt FLU\_List} is the list of all FLUs in the entire chain of
+  chains where the bytes at the location {\tt \{FName, $O_{start},
+    O_{end}$\}} are known to be written (as of the current repair period).
+
+\item For chain \#1 members, i.e., the
+  leftmost chain relative to Figure~\ref{fig:repair-chain-of-chains},
+  repair files byte ranges for any chain \#1 members that are not members
+  of the {\tt FLU\_List} set.  This will repair any partial
+  writes to chain \#1 that were unsuccessful (e.g., client crashed).
+  (Note however that this step only repairs FLUs in chain \#1.)
+
+\item For all file byte ranges in all files on all FLUs in all
+  repairing chains where Tail \#1's value is unwritten, force all
+  repairing FLUs to also be unwritten.
+
+\item For file byte ranges in all files on all FLUs in all repairing
+  chains where Tail \#1's value is written, send repair file byte data
+  \& metadata to any repairing FLU if the value repairing FLU's
+  value is unwritten or the checksum is not exactly equal to Tail \#1's
+  checksum.
+
+\end{enumerate}
+
+\begin{figure}
+\centering
+$
+[\overbrace{\underbrace{H_1}_\textbf{Head}, M_{11}, T_1,
+                        H_2, M_{21}, T_2,
+                        \ldots
+                        H_n, M_{n1},
+                        \underbrace{T_n}_\textbf{Tail}}^\textbf{Chain (U.P.~Invariant preserving)}
+]
+$
+\caption{Representation of Figure~\ref{fig:repair-chain-of-chains}
+  after all repairs have finished successfully and a new projection has
+  been calculated.}
+\label{fig:repair-chain-of-chains-finished}
+\end{figure}
+
+When the repair is known to have copied all missing data successfully,
+then the chain can change state via a new projection that includes the
+repaired FLU(s) at the end of the U.P.~Invariant preserving chain \#1
+in the same order in which they appeared in the chain-of-chains during
+repair.  See Figure~\ref{fig:repair-chain-of-chains-finished}.
+
+The repair can be coordinated and/or performed by the $T_{tails}$ FLU
+or any other FLU or cluster member that has spare capacity.
+
+There is no serious race condition here between the enumeration steps
+and the repair steps.  Why?  Because the change in projection at
+step \#1 will force any new data writes to adapt to a new projection.
+Consider the mutations that either happen before or after a projection
+change:
+
+
+\begin{itemize}
+
+\item For all mutations $M_1$ prior to the projection change, the
+  enumeration steps \#3 \& \#4 and \#5 will always encounter mutation
+  $M_1$.  Any repair must write through the entire chain-of-chains and
+  thus will preserve the Update Propagation Invariant when repair is
+  finished.
+
+\item For all mutations $M_2$ starting during or after the projection
+  change has finished, a new mutation $M_2$ may or may not be included in the
+  enumeration steps \#3 \& \#4 and \#5.
+  However, in the new projection, $M_2$ must be
+  written to all chain of chains members, and such
+  in-order writes will also preserve the Update
+  Propagation Invariant and therefore is also be safe.
+
+\end{itemize}
+
+%% Then the only remaining safety problem (as far as I can see) is
+%% avoiding this race:
+
+%% \begin{enumerate}
+%% \item Enumerate byte ranges $[B_0,B_1,\ldots]$ in file $F$ that must
+%%   be copied to the repair target, based on checksum differences for
+%%   those byte ranges.
+%% \item A real-time concurrent write for byte range $B_x$ arrives at the
+%%   U.P.~Invariant preserving chain for file $F$ but was not a member of
+%%   step \#1's list of byte ranges.
+%% \item Step \#2's update is propagated down the chain of chains.
+%% \item Step \#1's clobber updates are propagated down the chain of
+%%   chains.
+%% \item The value for $B_x$ is lost on the repair targets.
+%% \end{enumerate}
+
+\paragraph{In cases the cluster is operating in AP Mode:}
+
+\begin{enumerate}
+\item Follow the first two steps of the ``CP Mode''
+  sequence (above).
+\item Follow step \#3 of the ``strongly consistent mode'' sequence
+  (above), but in place of repairing only FLUs in Chain \#1, AP mode
+  will repair the byte range of any FLU that is not a member of the
+  {\tt FLU\_List} set.
+\item End of procedure.
+\end{enumerate}
+
+The end result is a huge ``merge'' where any
+{\tt \{FName, $O_{start}, O_{end}$\}} range of bytes that is written
+on FLU $F_w$ but missing/unwritten from FLU $F_m$ is written down the full chain
+of chains, skipping any FLUs where the data is known to be written.
+Such writes will also preserve Update Propagation Invariant when
+repair is finished.
+
+\subsubsection{Whole-file repair when changing FLU ordering within a chain}
+\label{sub:repair-chain-re-ordering}
+
+Changing FLU order within a chain is an operations optimization only.
+It may be that the administrator wishes the order of a chain to remain
+as originally configured during steady-state operation, e.g.,
+$[F_a,F_b,F_c]$.  As FLUs are stopped \& restarted, the chain may
+become re-ordered in a seemingly-arbitrary manner.
+
+It is certainly possible to re-order the chain, in a kludgy manner.
+For example, if the desired order is $[F_a,F_b,F_c]$ but the current
+operating order is $[F_c,F_b,F_a]$, then remove $F_b$ from the chain,
+then add $F_b$ to the end of the chain.  Then repeat the same
+procedure for $F_c$.  The end result will be the desired order.
+
+From an operations perspective, re-ordering of the chain
+using this kludgy manner has a
+negative effect on availability: the chain is temporarily reduced from
+operating with $N$ replicas down to $N-1$.  This reduced replication
+factor will not remain for long, at most a few minutes at a time, but
+even a small amount of time may be unacceptable in some environments.
+
+Reordering is possible with the introduction of a ``temporary head''
+of the chain.  This temporary FLU does not need to be a full replica
+of the entire chain --- it merely needs to store replicas of mutations
+that are made during the chain reordering process.  This method will
+not be described here.  However, {\em if reviewers believe that it should
+be included}, please let the authors know.
+
+\paragraph{In both Machi operating modes:}
+After initial implementation, it may be that the repair procedure is a
+bit too slow.  In order to accelerate repair decisions, it would be
+helpful have a quicker method to calculate which files have exactly
+the same contents.  In traditional systems, this is done with a single
+file checksum; see also the ``checksum scrub'' subsection in
+\cite{machi-design}.
+Machi's files can be written out-of-order from a file offset point of
+view, which violates the order which the traditional method for
+calculating a full-file hash.  If we recall out-of-temporal-order
+example in the ``Append-only files'' section of \cite{machi-design},
+the traditional method cannot
+continue calculating the file checksum at offset 2 until the byte at
+file offset 1 is written.
+
+It may be advantageous for each FLU to maintain for each file a
+checksum of a canonical representation of the
+{\tt \{$O_{start},O_{end},$ CSum\}} tuples that the FLU must already
+maintain.  Then for any two FLUs that claim to store a file $F$, if
+both FLUs have the same hash of $F$'s written map + checksums, then
+the copies of $F$ on both FLUs are the same.
+
+\section{``Split brain'' management in CP Mode}
+\label{sec:split-brain-management}
+
+Split brain management is a thorny problem.  The method presented here
+is one based on pragmatics.  If it doesn't work, there isn't a serious
+worry, because Machi's first serious use case all require only AP Mode.
+If we end up falling back to ``use Riak Ensemble'' or ``use ZooKeeper'',
+then perhaps that's
+fine enough.  Meanwhile, let's explore how a
+completely self-contained, no-external-dependencies
+CP Mode Machi might work.
+
+Wikipedia's description of the quorum consensus solution\footnote{See
+  {\tt http://en.wikipedia.org/wiki/Split-brain\_(computing)}.} is nice
+and short:
+
+\begin{quotation}
+A typical approach, as described by Coulouris et al.,[4] is to use a
+quorum-consensus approach. This allows the sub-partition with a
+majority of the votes to remain available, while the remaining
+sub-partitions should fall down to an auto-fencing mode.
+\end{quotation}
+
+This is the same basic technique that
+both Riak Ensemble and ZooKeeper use.  Machi's
+extensive use of write-registers are a big advantage when implementing
+this technique.  Also very useful is the Machi ``wedge'' mechanism,
+which can automatically implement the ``auto-fencing'' that the
+technique requires.  All Machi servers that can communicate with only
+a minority of other servers will automatically ``wedge'' themselves
+and refuse all requests for service until communication with the
+majority can be re-established.
+
+\subsection{The quorum: witness servers vs. full servers}
+
+In any quorum-consensus system, at least $2f+1$ participants are
+required to survive $f$ participant failures.  Machi can implement a
+technique of ``witness servers'' servers to bring the total cost
+somewhere in the middle, between $2f+1$ and $f+1$, depending on your
+point of view.
+
+A ``witness server'' is one that participates in the network protocol
+but does not store or manage all of the state that a ``full server''
+does.  A ``full server'' is a Machi server as
+described by this RFC document.  A ``witness server'' is a server that
+only participates in the projection store and projection epoch
+transition protocol and a small subset of the file access API.
+A witness server doesn't actually store any
+Machi files.  A witness server is almost stateless, when compared to a
+full Machi server.
+
+A mixed cluster of witness and full servers must still contain at
+least $2f+1$ participants.  However, only $f+1$ of them are full
+participants, and the remaining $f$ participants are witnesses.  In
+such a cluster, any majority quorum must have at least one full server
+participant.
+
+Witness FLUs are always placed at the front of the chain.  As stated
+above, there may be at most $f$ witness FLUs.  A functioning quorum
+majority
+must have at least $f+1$ FLUs that can communicate and therefore
+calculate and store a new unanimous projection.  Therefore, any FLU at
+the tail of a functioning quorum majority chain must be full FLU.  Full FLUs
+actually store Machi files, so they have no problem answering {\tt
+  read\_req} API requests.\footnote{We hope that it is now clear that
+  a witness FLU cannot answer any Machi file read API request.}
+
+Any FLU that can only communicate with a minority of other FLUs will
+find that none can calculate a new projection that includes a
+majority of FLUs.  Any such FLU, when in CP mode, would then move to
+wedge state and remain wedged until the network partition heals enough
+to communicate with the majority side.  This is a nice property: we
+automatically get ``fencing'' behavior.\footnote{Any FLU on the minority side
+  is wedged and therefore refuses to serve because it is, so to speak,
+  ``on the wrong side of the fence.''}
+
+There is one case where ``fencing'' may not happen: if both the client
+and the tail FLU are on the same minority side of a network partition.
+Assume the client and FLU $F_z$ are on the "wrong side" of a network
+split; both are using projection epoch $P_1$.  The tail of the
+chain is $F_z$.
+
+Also assume that the "right side" has reconfigured and is using
+projection epoch $P_2$.  The right side has mutated key $K$.  Meanwhile,
+nobody on the "right side" has noticed anything wrong and is happy to
+continue using projection $P_1$.
+
+\begin{itemize}
+\item {\bf Option a}: Now the wrong side client reads $K$ using $P_1$ via
+  $F_z$.  $F_z$ does not detect an epoch problem and thus returns an
+  answer.  Given our assumptions, this value is stale.  For some
+  client use cases, this kind of staleness may be OK in trade for
+  fewer network messages per read \ldots so Machi may
+  have a configurable option to permit it.
+\item {\bf Option b}: The wrong side client must confirm that $P_1$ is
+  in use by a full majority of chain members, including $F_z$.
+\end{itemize}
+
+Attempts using Option b will fail for one of two reasons.  First, if
+the client can talk to a FLU that is using $P_2$, the client's
+operation must be retried using $P_2$.  Second, the client will time
+out talking to enough FLUs so that it fails to get a quorum's worth of
+$P_1$ answers.  In either case, Option B will always fail a client
+read and thus cannot return a stale value of $K$.
+
+\subsection{Witness FLU data and protocol changes}
+
+Some small changes to the projection's data structure
+are required (relative to the initial spec described in
+\cite{machi-design}).  The projection itself
+needs new annotation to indicate the operating mode, AP mode or CP
+mode.  The state type notifies the chain manager how to
+react in network partitions and how to calculate new, safe projection
+transitions and which file repair mode to use
+(Section~\ref{sec:repair-entire-files}).
+Also, we need to label member FLU servers as full- or
+witness-type servers.
+
+Write API requests are processed by witness servers in {\em almost but
+  not quite} no-op fashion.  The only requirement of a witness server
+is to return correct interpretations of local projection epoch
+numbers, via the {\tt error\_bad\_epoch} and {\tt error\_wedged} error
+codes.  In fact, a new API call is sufficient for querying witness
+servers: {\tt \{check\_epoch, m\_epoch()\}}.
+Any client write operation sends the {\tt
+  check\_\-epoch} API command to witness FLUs and sends the usual {\tt
+  write\_\-req} command to full FLUs.
+
+\section{The safety of projection epoch transitions}
+\label{sec:safety-of-transitions}
+
+Machi uses the projection epoch transition algorithm and
+implementation from CORFU, which is believed to be safe.  However,
+CORFU assumes a single, external, strongly consistent projection
+store.  Further, CORFU assumes that new projections are calculated by
+an oracle that the rest of the CORFU system agrees is the sole agent
+for creating new projections.  Such an assumption is impractical for
+Machi's intended purpose.
+
+Machi could use Riak Ensemble or ZooKeeper as an oracle (or perhaps as a oracle
+coordinator), but we wish to keep Machi free of big external
+dependencies.  We would also like to see Machi be able to
+operate in an ``AP mode'', which means providing service even
+if all network communication to an oracle is broken.
+
+The model of projection calculation and storage described in
+Section~\ref{sec:projections} allows for each server to operate
+independently, if necessary.  This autonomy allows the server in AP
+mode to
+always accept new writes: new writes are written to unique file names
+and unique file offsets using a chain consisting of only a single FLU,
+if necessary.  How is this possible?  Let's look at a scenario in
+Section~\ref{sub:split-brain-scenario}.
+
+\subsection{A split brain scenario}
+\label{sub:split-brain-scenario}
+
+\begin{enumerate}
+
+\item Assume 3 Machi FLUs, all in good health and perfect data sync: $[F_a,
+  F_b, F_c]$ using projection epoch $P_p$.
+
+\item Assume data $D_0$ is written at offset $O_0$ in Machi file
+  $F_0$.
+
+\item Then a network partition happens.  Servers $F_a$ and $F_b$ are
+  on one side of the split, and server $F_c$ is on the other side of
+  the split.  We'll call them the ``left side'' and ``right side'',
+  respectively.
+
+\item On the left side, $F_b$ calculates a new projection and writes
+  it unanimously (to two projection stores) as epoch $P_B+1$.  The
+  subscript $_B$ denotes a
+  version of projection epoch $P_{p+1}$ that was created by server $F_B$
+  and has a unique checksum (used to detect differences after the
+  network partition heals).
+
+\item In parallel, on the right side, $F_c$ calculates a new
+  projection and writes it unanimously (to a single projection store)
+  as epoch $P_c+1$.
+
+\item In parallel, a client on the left side writes data $D_1$
+  at offset $O_1$ in Machi file $F_1$, and also
+  a client on the right side writes data $D_2$
+  at offset $O_2$ in Machi file $F_2$.  We know that $F_1 \ne F_2$
+  because each sequencer is forced to choose disjoint filenames from
+  any prior epoch whenever a new projection is available.
+
+\end{enumerate}
+
+Now, what happens when various clients attempt to read data values
+$D_0$, $D_1$, and $D_2$?
+
+\begin{itemize}
+\item All clients can read $D_0$.
+\item Clients on the left side can read $D_1$.
+\item Attempts by clients on the right side to read $D_1$ will get
+  {\tt error\_unavailable}.
+\item Clients on the right side can read $D_2$.
+\item Attempts by clients on the left side to read $D_2$ will get
+  {\tt error\_unavailable}.
+\end{itemize}
+
+The {\tt error\_unavailable} result is not an error in the CAP Theorem
+sense: it is a valid and affirmative response.  In both cases, the
+system on the client's side definitely knows that the cluster is
+partitioned.  If Machi were not a write-once store, perhaps there
+might be an old/stale value to read on the local side of the network
+partition \ldots but the system also knows definitely that no
+old/stale value exists.  Therefore Machi remains available in the
+CAP Theorem sense both for writes and reads.
+
+We know that all files $F_0$,
+$F_1$, and $F_2$ are disjoint and can be merged (in a manner analogous
+to set union) onto each server in $[F_a, F_b, F_c]$ safely
+when the network partition is healed.  However,
+unlike pure theoretical set union, Machi's data merge \& repair
+operations must operate within some constraints that are designed to
+prevent data loss.
+
+\subsection{Aside: defining data availability and data loss}
+\label{sub:define-availability}
+
+Let's take a moment to be clear about definitions:
+
+\begin{itemize}
+\item ``data is available at time $T$'' means that data is available
+  for reading at $T$: the Machi cluster knows for certain that the
+  requested data is not been written or it is written and has a single
+  value.
+\item ``data is unavailable at time $T$'' means that data is
+  unavailable for reading at $T$ due to temporary circumstances,
+  e.g. network partition.  If a read request is issued at some time
+  after $T$, the data will be available.
+\item ``data is lost at time $T$'' means that data is permanently
+  unavailable at $T$ and also all times after $T$.
+\end{itemize}
+
+Chain Replication is a fantastic technique for managing the
+consistency of data across a number of whole replicas.  There are,
+however, cases where CR can indeed lose data.  
+
+\subsection{Data loss scenario \#1: too few servers}
+\label{sub:data-loss1}
+
+If the chain is $N$ servers long, and if all $N$ servers fail, then
+of course data is unavailable.  However, if all $N$ fail
+permanently, then data is lost.
+
+If the administrator had intended to avoid data loss after $N$
+failures, then the administrator would have provisioned a Machi
+cluster with at least $N+1$ servers.
+
+\subsection{Data Loss scenario \#2: bogus configuration change sequence}
+\label{sub:data-loss2}
+
+Assume that the sequence of events in Figure~\ref{fig:data-loss2} takes place.
+
+\begin{figure}
+\begin{enumerate}
+%% NOTE: the following list 9 items long.  We use that fact later, see
+%% string YYY9 in a comment further below.  If the length of this list
+%% changes, then the counter reset below needs adjustment.
+\item Projection $P_p$ says that chain membership is $[F_a]$.
+\item A write of data $D$ to file $F$ at offset $O$ is successful.
+\item Projection $P_{p+1}$ says that chain membership is $[F_a,F_b]$, via
+   an administration API request.
+\item Machi will trigger repair operations, copying any missing data
+   files from FLU $F_a$ to FLU $F_b$.  For the purpose of this
+   example, the sync operation for file $F$'s data and metadata has
+   not yet started.
+\item FLU $F_a$ crashes.
+\item The chain manager on $F_b$ notices $F_a$'s crash, 
+   decides to create a new projection $P_{p+2}$ where chain membership is
+   $[F_b]$
+  successfully stores $P_{p+2}$ in its local store.  FLU $F_b$ is now wedged.
+\item FLU $F_a$ is down, therefore the
+   value of $P_{p+2}$ is unanimous for all currently available FLUs
+   (namely $[F_b]$).
+\item FLU $F_b$ sees that projection $P_{p+2}$ is the newest unanimous
+   projection.  It unwedges itself and continues operation using $P_{p+2}$.
+\item Data $D$ is definitely unavailable for now, perhaps lost forever?
+\end{enumerate}
+\caption{Data unavailability scenario with danger of permanent data loss}
+\label{fig:data-loss2}
+\end{figure}
+
+At this point, the data $D$ is not available on $F_b$.  However, if
+we assume that $F_a$ eventually returns to service, and Machi
+correctly acts to repair all data within its chain, then $D$
+all of its contents will be available eventually.
+
+However, if server $F_a$ never returns to service, then $D$ is lost.  The
+Machi administration API must always warn the user that data loss is
+possible.  In Figure~\ref{fig:data-loss2}'s scenario, the API must
+warn the administrator in multiple ways that fewer than the full {\tt
+  length(all\_members)} number of replicas are in full sync.
+
+A careful reader should note that $D$ is also lost if step \#5 were
+instead, ``The hardware that runs FLU $F_a$ was destroyed by fire.''
+For any possible step following \#5, $D$ is lost.  This is data loss
+for the same reason that the scenario of Section~\ref{sub:data-loss1}
+happens: the administrator has not provisioned a sufficient number of
+replicas.
+
+Let's revisit Figure~\ref{fig:data-loss2}'s scenario yet again.  This
+time, we add a final step at the end of the sequence:
+
+\begin{enumerate}
+\setcounter{enumi}{9}           % YYY9
+\item The administration API is used to change the chain
+configuration to {\tt all\_members=$[F_b]$}.
+\end{enumerate}
+
+Step \#10 causes data loss.  Specifically, the only copy of file
+$F$ is on FLU $F_a$.  By administration policy, FLU $F_a$ is now
+permanently inaccessible.
+
+The chain manager {\em must} keep track of all
+repair operations and their status.  If such information is tracked by
+all FLUs, then the data loss by bogus administrator action can be
+prevented.  In this scenario, FLU $F_b$ knows that `$F_a \rightarrow
+F_b$` repair has not yet finished and therefore it is unsafe to remove
+$F_a$ from the cluster.
+
+\subsection{Data Loss scenario \#3: chain replication repair done badly}
+\label{sub:data-loss3}
+
+It's quite possible to lose data through careless/buggy Chain
+Replication chain configuration changes.  For example, in the split
+brain scenario of Section~\ref{sub:split-brain-scenario}, we have two
+pieces of data written to different ``sides'' of the split brain,
+$D_0$ and $D_1$.  If the chain is naively reconfigured after the network
+partition heals to be $[F_a=\emptyset,F_b=\emptyset,F_c=D_1],$\footnote{Where $\emptyset$
+  denotes the unwritten value.} then $D_1$
+is in danger of being lost.  Why?
+The Update Propagation Invariant is violated.
+Any Chain Replication read will be
+directed to the tail, $F_c$.  The value exists there, so there is no
+need to do any further work; the unwritten values at $F_a$ and $F_b$
+will not be repaired.  If the $F_c$ server fails sometime
+later, then $D_1$ will be lost.  The ``Chain Replication Repair''
+section of \cite{machi-design} discusses
+how data loss can be avoided after servers are added (or re-added) to
+an active chain configuration.
+
+\subsection{Summary}
+
+We believe that maintaining the Update Propagation Invariant is a
+hassle anda pain, but that hassle and pain are well worth the
+sacrifices required to maintain the invariant at all times.  It avoids
+data loss in all cases where the U.P.~Invariant preserving chain
+contains at least one FLU.
+
+\bibliographystyle{abbrvnat}
+\begin{thebibliography}{}
+\softraggedright
+
+\bibitem{elastic-chain-replication}
+Abu-Libdeh, Hussam et al.
+Leveraging Sharding in the Design of Scalable Replication Protocols.
+Proceedings of the 4th Annual Symposium on Cloud Computing (SOCC'13), 2013.
+{\tt http://www.ymsir.com/papers/sharding-socc.pdf}
+
+\bibitem{corfu1}
+Balakrishnan, Mahesh et al.
+CORFU: A Shared Log Design for Flash Clusters.
+Proceedings of the 9th USENIX Conference on Networked Systems Design
+and Implementation (NSDI'12), 2012.
+{\tt http://research.microsoft.com/pubs/157204/ corfumain-final.pdf}
+
+\bibitem{corfu2}
+Balakrishnan, Mahesh et al.
+CORFU: A Distributed Shared Log
+ACM Transactions on Computer Systems, Vol. 31, No. 4, Article 10, December 2013.
+{\tt http://www.snookles.com/scottmp/corfu/ corfu.a10-balakrishnan.pdf}
+
+\bibitem{machi-design}
+Basho Japan KK.
+Machi: an immutable file store
+{\tt https://github.com/basho/machi/tree/ master/doc/high-level-machi.pdf}
+
+\bibitem{was}
+Calder, Brad et al.
+Windows Azure Storage: A Highly Available Cloud Storage Service with Strong Consistency
+Proceedings of the 23rd ACM Symposium on Operating Systems Principles (SOSP'11), 2011.
+{\tt http://sigops.org/sosp/sosp11/current/ 2011-Cascais/printable/11-calder.pdf}
+
+\bibitem{cr-theory-and-practice}
+Fritchie, Scott Lystig.
+Chain Replication in Theory and in Practice.
+Proceedings of the 9th ACM SIGPLAN Workshop on Erlang (Erlang'10), 2010.
+{\tt http://www.snookles.com/scott/publications/ erlang2010-slf.pdf}
+
+\bibitem{the-log-what}
+Kreps, Jay.
+The Log: What every software engineer should know about real-time data's unifying abstraction
+{\tt http://engineering.linkedin.com/distributed-
+  systems/log-what-every-software-engineer-should-
+  know-about-real-time-datas-unifying}
+
+\bibitem{kafka}
+Kreps, Jay et al.
+Kafka: a distributed messaging system for log processing.
+NetDB’11.
+{\tt http://research.microsoft.com/en-us/UM/people/
+  srikanth/netdb11/netdb11papers/netdb11-final12.pdf}
+
+\bibitem{paxos-made-simple}
+Lamport, Leslie.
+Paxos Made Simple.
+In SIGACT News \#4, Dec, 2001.
+{\tt http://research.microsoft.com/users/ lamport/pubs/paxos-simple.pdf}
+
+\bibitem{random-slicing}
+Miranda, Alberto et al.
+Random Slicing: Efficient and Scalable Data Placement for Large-Scale Storage Systems.
+ACM Transactions on Storage, Vol. 10, No. 3, Article 9, July 2014.
+{\tt http://www.snookles.com/scottmp/corfu/random- slicing.a9-miranda.pdf}
+
+\bibitem{porcupine}
+Saito, Yasushi et al.
+Manageability, availability and performance in Porcupine: a highly scalable, cluster-based mail service.
+7th ACM Symposium on Operating System Principles (SOSP’99).
+{\tt http://homes.cs.washington.edu/\%7Elevy/ porcupine.pdf}
+
+\bibitem{chain-replication}
+van Renesse, Robbert et al.
+Chain Replication for Supporting High Throughput and Availability.
+Proceedings of the 6th Conference on Symposium on Operating Systems
+Design \& Implementation (OSDI'04) - Volume 6, 2004.
+{\tt http://www.cs.cornell.edu/home/rvr/papers/ osdi04.pdf}
+
+\end{thebibliography}
+
+
+\end{document}
