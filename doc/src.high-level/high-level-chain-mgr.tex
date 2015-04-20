@@ -847,126 +847,6 @@ Any client write operation sends the {\tt
   check\_\-epoch} API command to witness servers and sends the usual {\tt
   write\_\-req} command to full servers.
 
-\section{Chain Replication: proof of correctness}
-\label{sec:cr-proof}
-
-See Section~3 of \cite{chain-replication} for a proof of the
-correctness of Chain Replication.  A short summary is provide here.
-Readers interested in good karma should read the entire paper.
-
-\subsection{The Update Propagation Invariant}
-\label{sub:upi}
-
-``Update Propagation Invariant'' is the original chain replication
-paper's name for the
-$H_i \succeq H_j$
-property mentioned in Figure~\ref{tab:chain-order}.
-This paper will use the same name.
-This property may also be referred to by its acronym, ``UPI''.
-
-\subsection{Chain Replication and strong consistency}
-
-The three basic rules of Chain Replication and its strong
-consistency guarantee:
-
-\begin{enumerate}
-
-\item All replica servers are arranged in an ordered list $C$.
-
-\item All mutations of a datum are performed upon each replica of $C$
-  strictly in the order which they appear in $C$.  A mutation is considered
-  completely successful if the writes by all replicas are successful.
-
-\item The head of the chain makes the determination of the order of
-  all mutations to all members of the chain.  If the head determines
-  that some mutation $M_i$ happened before another mutation $M_j$,
-  then mutation $M_i$ happens before $M_j$ on all other members of
-  the chain.\footnote{While necesary for general Chain Replication,
-    Machi does not need this property.  Instead, the property is
-    provided by Machi's sequencer and the write-once register of each
-    byte in each file.}
-
-\item All read-only operations are performed by the ``tail'' replica,
-  i.e., the last replica in $C$.
-
-\end{enumerate}
-
-The basis of the proof lies in a simple logical trick, which is to
-consider the history of all operations made to any server in the chain
-as a literal list of unique symbols, one for each mutation.
-
-Each replica of a datum will have a mutation history list.  We will
-call this history list $H$. For the $i^{th}$ replica in the chain list
-$C$, we call $H_i$ the mutation history list for the $i^{th}$ replica.
-
-Before the $i^{th}$ replica in the chain list begins service, its mutation
-history $H_i$ is empty, $[]$.  After this replica runs in a Chain
-Replication system for a while, its mutation history list grows to
-look something like 
-$[M_0, M_1, M_2, ..., M_{m-1}]$ where $m$ is the total number of
-mutations of the datum that this server has processed successfully.
-
-Let's assume for a moment that all mutation operations have stopped.
-If the order of the chain was constant, and if all mutations are
-applied to each replica in the chain's order, then all replicas of a
-datum will have the exact same mutation history: $H_i = H_J$ for any
-two replicas $i$ and $j$ in the chain
-(i.e., $\forall i,j \in C, H_i = H_J$).  That's a lovely property,
-but it is much more interesting to assume that the service is
-not stopped.  Let's look next at a running system.
-
-\begin{figure*}
-\centering
-\begin{tabular}{ccc}
-{\bf {{On left side of $C$}}} & & {\bf On right side of $C$} \\
-\hline
-\multicolumn{3}{l}{Looking at replica order in chain $C$:} \\
-$i$ & $<$ & $j$ \\
-
-\multicolumn{3}{l}{For example:} \\
-
-0 & $<$ & 2 \\
-\hline
-\multicolumn{3}{l}{It {\em must} be true: history lengths per replica:} \\
-length($H_i$) & $\geq$ & length($H_j$) \\
-\multicolumn{3}{l}{For example, a quiescent chain:} \\
-length($H_i$) = 48 & $\geq$ & length($H_j$) = 48 \\
-\multicolumn{3}{l}{For example, a chain being mutated:} \\
-length($H_i$) = 55 & $\geq$ & length($H_j$) = 48 \\
-\multicolumn{3}{l}{Example ordered mutation sets:} \\
-$[M_0,M_1,\ldots,M_{46},M_{47},\ldots,M_{53},M_{54}]$ & $\supset$ & $[M_0,M_1,\ldots,M_{46},M_{47}]$ \\
-\multicolumn{3}{c}{\bf Therefore the right side is always an ordered
-  subset} \\
-\multicolumn{3}{c}{\bf of the left side.  Furthermore, the ordered
-  sets on both} \\
-\multicolumn{3}{c}{\bf sides have the exact same order of those elements they have in common.} \\
-\multicolumn{3}{c}{The notation used by the Chain Replication paper is
-shown below:} \\
-$[M_0,M_1,\ldots,M_{46},M_{47},\ldots,M_{53},M_{54}]$ & $\succeq$ & $[M_0,M_1,\ldots,M_{46},M_{47}]$ \\
-
-\end{tabular}
-\caption{A demonstration of Chain Replication protocol history ``Update Propagation Invariant''.}
-\label{tab:chain-order}
-\end{figure*}
-
-If the entire chain $C$ is processing any number of concurrent
-mutations, then we can still understand $C$'s behavior.
-Figure~\ref{tab:chain-order} shows us two replicas in chain $C$:
-replica $R_i$ that's on the left/earlier side of the replica chain $C$
-than some other replica $R_j$.  We know that $i$'s position index in
-the chain is smaller than $j$'s position index, so therefore $i < j$.
-The restrictions of Chain Replication make it true that length($H_i$)
-$\ge$ length($H_j$) because it's also that $H_i \supset H_j$, i.e,
-$H_i$ on the left is always is a superset of $H_j$ on the right.
-
-When considering $H_i$ and $H_j$ as strictly ordered lists, we have 
-$H_i \succeq H_j$, where the right side is always an exact prefix of the left
-side's list.  This prefixing propery is exactly what strong
-consistency requires.  If a value is read from the tail of the chain,
-then no other chain member can have a prior/older value because their
-respective mutations histories cannot be shorter than the tail
-member's history.
-
 \section{Repair of entire files}
 \label{sec:repair-entire-files}
 
@@ -1113,7 +993,7 @@ vulnerability is eliminated.\footnote{SLF's note: Probably?  This is my
   not safe} in Machi, I'm not 100\% certain anymore than this ``easy''
   fix for CORFU is correct.}.
 
-\subsection{Whole-file repair as FLUs are (re-)added to a chain}
+\subsection{Whole file repair as servers are (re-)added to a chain}
 \label{sub:repair-add-to-chain}
 
 \begin{figure*}
@@ -1134,6 +1014,22 @@ $
   with FLUs from $n-1$ other chains under repair.}
 \label{fig:repair-chain-of-chains}
 \end{figure*}
+
+\begin{figure}
+\centering
+$
+[\overbrace{\underbrace{H_1}_\textbf{Head}, M_{11}, T_1,
+                        H_2, M_{21}, T_2,
+                        \ldots
+                        H_n, M_{n1},
+                        \underbrace{T_n}_\textbf{Tail}}^\textbf{Chain (U.P.~Invariant preserving)}
+]
+$
+\caption{Representation of Figure~\ref{fig:repair-chain-of-chains}
+  after all repairs have finished successfully and a new projection has
+  been calculated.}
+\label{fig:repair-chain-of-chains-finished}
+\end{figure}
 
 Machi's repair process must preserve the Update Propagation
 Invariant.  To avoid data races with data copying from
@@ -1175,7 +1071,7 @@ While the normal single-write and single-read operations are performed
 by the cluster, a file synchronization process is initiated.  The
 sequence of steps differs depending on the AP or CP mode of the system.
 
-\subsubsection{Cluster in CP mode}
+\subsubsection{Repair in CP mode}
 
 In cases where the cluster is operating in CP Mode,
 CORFU's repair method of ``just copy it all'' (from source FLU to repairing
@@ -1260,23 +1156,7 @@ change:
 
 \end{itemize}
 
-\begin{figure}
-\centering
-$
-[\overbrace{\underbrace{H_1}_\textbf{Head}, M_{11}, T_1,
-                        H_2, M_{21}, T_2,
-                        \ldots
-                        H_n, M_{n1},
-                        \underbrace{T_n}_\textbf{Tail}}^\textbf{Chain (U.P.~Invariant preserving)}
-]
-$
-\caption{Representation of Figure~\ref{fig:repair-chain-of-chains}
-  after all repairs have finished successfully and a new projection has
-  been calculated.}
-\label{fig:repair-chain-of-chains-finished}
-\end{figure}
-
-\subsubsection{Cluster in AP Mode}
+\subsubsection{Repair in AP Mode}
 
 In cases the cluster is operating in AP Mode:
 
@@ -1297,56 +1177,131 @@ of chains, skipping any FLUs where the data is known to be written.
 Such writes will also preserve Update Propagation Invariant when
 repair is finished.
 
-\subsection{Whole-file repair when changing FLU ordering within a chain}
+\subsection{Whole-file repair when changing server ordering within a chain}
 \label{sub:repair-chain-re-ordering}
 
-Changing FLU order within a chain is an operations optimization only.
-It may be that the administrator wishes the order of a chain to remain
-as originally configured during steady-state operation, e.g.,
-$[S_a,S_b,S_c]$.  As FLUs are stopped \& restarted, the chain may
-become re-ordered in a seemingly-arbitrary manner.
+This section has been cut --- please see Git commit history for discussion.
 
-It is certainly possible to re-order the chain, in a kludgy manner.
-For example, if the desired order is $[S_a,S_b,S_c]$ but the current
-operating order is $[S_c,S_b,S_a]$, then remove $S_b$ from the chain,
-then add $S_b$ to the end of the chain.  Then repeat the same
-procedure for $S_c$.  The end result will be the desired order.
+\section{Chain Replication: why is it correct?}
+\label{sec:cr-proof}
 
-From an operations perspective, re-ordering of the chain
-using this kludgy manner has a
-negative effect on availability: the chain is temporarily reduced from
-operating with $N$ replicas down to $N-1$.  This reduced replication
-factor will not remain for long, at most a few minutes at a time, but
-even a small amount of time may be unacceptable in some environments.
+See Section~3 of \cite{chain-replication} for a proof of the
+correctness of Chain Replication.  A short summary is provide here.
+Readers interested in good karma should read the entire paper.
 
-Reordering is possible with the introduction of a ``temporary head''
-of the chain.  This temporary FLU does not need to be a full replica
-of the entire chain --- it merely needs to store replicas of mutations
-that are made during the chain reordering process.  This method will
-not be described here.  However, {\em if reviewers believe that it should
-be included}, please let the authors know.
+\subsection{The Update Propagation Invariant}
+\label{sub:upi}
 
-\subsubsection{In both Machi operating modes:}
-After initial implementation, it may be that the repair procedure is a
-bit too slow.  In order to accelerate repair decisions, it would be
-helpful have a quicker method to calculate which files have exactly
-the same contents.  In traditional systems, this is done with a single
-file checksum; see also the ``checksum scrub'' subsection in
-\cite{machi-design}.
-Machi's files can be written out-of-order from a file offset point of
-view, which violates the order which the traditional method for
-calculating a full-file hash.  If we recall out-of-temporal-order
-example in the ``Append-only files'' section of \cite{machi-design},
-the traditional method cannot
-continue calculating the file checksum at offset 2 until the byte at
-file offset 1 is written.
+``Update Propagation Invariant'' is the original chain replication
+paper's name for the
+$H_i \succeq H_j$
+property mentioned in Figure~\ref{tab:chain-order}.
+This paper will use the same name.
+This property may also be referred to by its acronym, ``UPI''.
 
-It may be advantageous for each FLU to maintain for each file a
-checksum of a canonical representation of the
-{\tt \{$O_{start},O_{end},$ CSum\}} tuples that the FLU must already
-maintain.  Then for any two FLUs that claim to store a file $S$, if
-both FLUs have the same hash of $S$'s written map + checksums, then
-the copies of $S$ on both FLUs are the same.
+\subsection{Chain Replication and strong consistency}
+
+The three basic rules of Chain Replication and its strong
+consistency guarantee:
+
+\begin{enumerate}
+
+\item All replica servers are arranged in an ordered list $C$.
+
+\item All mutations of a datum are performed upon each replica of $C$
+  strictly in the order which they appear in $C$.  A mutation is considered
+  completely successful if the writes by all replicas are successful.
+
+\item The head of the chain makes the determination of the order of
+  all mutations to all members of the chain.  If the head determines
+  that some mutation $M_i$ happened before another mutation $M_j$,
+  then mutation $M_i$ happens before $M_j$ on all other members of
+  the chain.\footnote{While necesary for general Chain Replication,
+    Machi does not need this property.  Instead, the property is
+    provided by Machi's sequencer and the write-once register of each
+    byte in each file.}
+
+\item All read-only operations are performed by the ``tail'' replica,
+  i.e., the last replica in $C$.
+
+\end{enumerate}
+
+The basis of the proof lies in a simple logical trick, which is to
+consider the history of all operations made to any server in the chain
+as a literal list of unique symbols, one for each mutation.
+
+Each replica of a datum will have a mutation history list.  We will
+call this history list $H$. For the $i^{th}$ replica in the chain list
+$C$, we call $H_i$ the mutation history list for the $i^{th}$ replica.
+
+Before the $i^{th}$ replica in the chain list begins service, its mutation
+history $H_i$ is empty, $[]$.  After this replica runs in a Chain
+Replication system for a while, its mutation history list grows to
+look something like 
+$[M_0, M_1, M_2, ..., M_{m-1}]$ where $m$ is the total number of
+mutations of the datum that this server has processed successfully.
+
+Let's assume for a moment that all mutation operations have stopped.
+If the order of the chain was constant, and if all mutations are
+applied to each replica in the chain's order, then all replicas of a
+datum will have the exact same mutation history: $H_i = H_J$ for any
+two replicas $i$ and $j$ in the chain
+(i.e., $\forall i,j \in C, H_i = H_J$).  That's a lovely property,
+but it is much more interesting to assume that the service is
+not stopped.  Let's look next at a running system.
+
+\begin{figure*}
+\centering
+\begin{tabular}{ccc}
+{\bf {{On left side of $C$}}} & & {\bf On right side of $C$} \\
+\hline
+\multicolumn{3}{l}{Looking at replica order in chain $C$:} \\
+$i$ & $<$ & $j$ \\
+
+\multicolumn{3}{l}{For example:} \\
+
+0 & $<$ & 2 \\
+\hline
+\multicolumn{3}{l}{It {\em must} be true: history lengths per replica:} \\
+length($H_i$) & $\geq$ & length($H_j$) \\
+\multicolumn{3}{l}{For example, a quiescent chain:} \\
+length($H_i$) = 48 & $\geq$ & length($H_j$) = 48 \\
+\multicolumn{3}{l}{For example, a chain being mutated:} \\
+length($H_i$) = 55 & $\geq$ & length($H_j$) = 48 \\
+\multicolumn{3}{l}{Example ordered mutation sets:} \\
+$[M_0,M_1,\ldots,M_{46},M_{47},\ldots,M_{53},M_{54}]$ & $\supset$ & $[M_0,M_1,\ldots,M_{46},M_{47}]$ \\
+\multicolumn{3}{c}{\bf Therefore the right side is always an ordered
+  subset} \\
+\multicolumn{3}{c}{\bf of the left side.  Furthermore, the ordered
+  sets on both} \\
+\multicolumn{3}{c}{\bf sides have the exact same order of those elements they have in common.} \\
+\multicolumn{3}{c}{The notation used by the Chain Replication paper is
+shown below:} \\
+$[M_0,M_1,\ldots,M_{46},M_{47},\ldots,M_{53},M_{54}]$ & $\succeq$ & $[M_0,M_1,\ldots,M_{46},M_{47}]$ \\
+
+\end{tabular}
+\caption{The ``Update Propagation Invariant'' as
+  illustrated by Chain Replication protocol history.}
+\label{tab:chain-order}
+\end{figure*}
+
+If the entire chain $C$ is processing any number of concurrent
+mutations, then we can still understand $C$'s behavior.
+Figure~\ref{tab:chain-order} shows us two replicas in chain $C$:
+replica $R_i$ that's on the left/earlier side of the replica chain $C$
+than some other replica $R_j$.  We know that $i$'s position index in
+the chain is smaller than $j$'s position index, so therefore $i < j$.
+The restrictions of Chain Replication make it true that length($H_i$)
+$\ge$ length($H_j$) because it's also that $H_i \supset H_j$, i.e,
+$H_i$ on the left is always is a superset of $H_j$ on the right.
+
+When considering $H_i$ and $H_j$ as strictly ordered lists, we have 
+$H_i \succeq H_j$, where the right side is always an exact prefix of the left
+side's list.  This prefixing propery is exactly what strong
+consistency requires.  If a value is read from the tail of the chain,
+then no other chain member can have a prior/older value because their
+respective mutations histories cannot be shorter than the tail
+member's history.
 
 \bibliographystyle{abbrvnat}
 \begin{thebibliography}{}
