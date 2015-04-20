@@ -776,30 +776,30 @@ participants, and the remaining $f$ participants are witnesses.  In
 such a cluster, any majority quorum must have at least one full server
 participant.
 
-Witness FLUs are always placed at the front of the chain.  As stated
-above, there may be at most $f$ witness FLUs.  A functioning quorum
+Witness servers are always placed at the front of the chain.  As stated
+above, there may be at most $f$ witness servers.  A functioning quorum
 majority
-must have at least $f+1$ FLUs that can communicate and therefore
-calculate and store a new unanimous projection.  Therefore, any FLU at
-the tail of a functioning quorum majority chain must be full FLU.  Full FLUs
+must have at least $f+1$ servers that can communicate and therefore
+calculate and store a new unanimous projection.  Therefore, any server at
+the tail of a functioning quorum majority chain must be full server.  Full servers
 actually store Machi files, so they have no problem answering {\tt
   read\_req} API requests.\footnote{We hope that it is now clear that
-  a witness FLU cannot answer any Machi file read API request.}
+  a witness server cannot answer any Machi file read API request.}
 
-Any FLU that can only communicate with a minority of other FLUs will
+Any server that can only communicate with a minority of other servers will
 find that none can calculate a new projection that includes a
-majority of FLUs.  Any such FLU, when in CP mode, would then move to
+majority of servers.  Any such server, when in CP mode, would then move to
 wedge state and remain wedged until the network partition heals enough
 to communicate with the majority side.  This is a nice property: we
-automatically get ``fencing'' behavior.\footnote{Any FLU on the minority side
+automatically get ``fencing'' behavior.\footnote{Any server on the minority side
   is wedged and therefore refuses to serve because it is, so to speak,
   ``on the wrong side of the fence.''}
 
 There is one case where ``fencing'' may not happen: if both the client
-and the tail FLU are on the same minority side of a network partition.
-Assume the client and FLU $F_z$ are on the "wrong side" of a network
+and the tail server are on the same minority side of a network partition.
+Assume the client and server $S_z$ are on the "wrong side" of a network
 split; both are using projection epoch $P_1$.  The tail of the
-chain is $F_z$.
+chain is $S_z$.
 
 Also assume that the "right side" has reconfigured and is using
 projection epoch $P_2$.  The right side has mutated key $K$.  Meanwhile,
@@ -808,23 +808,23 @@ continue using projection $P_1$.
 
 \begin{itemize}
 \item {\bf Option a}: Now the wrong side client reads $K$ using $P_1$ via
-  $F_z$.  $F_z$ does not detect an epoch problem and thus returns an
+  $S_z$.  $S_z$ does not detect an epoch problem and thus returns an
   answer.  Given our assumptions, this value is stale.  For some
   client use cases, this kind of staleness may be OK in trade for
   fewer network messages per read \ldots so Machi may
   have a configurable option to permit it.
 \item {\bf Option b}: The wrong side client must confirm that $P_1$ is
-  in use by a full majority of chain members, including $F_z$.
+  in use by a full majority of chain members, including $S_z$.
 \end{itemize}
 
 Attempts using Option b will fail for one of two reasons.  First, if
-the client can talk to a FLU that is using $P_2$, the client's
+the client can talk to a server that is using $P_2$, the client's
 operation must be retried using $P_2$.  Second, the client will time
-out talking to enough FLUs so that it fails to get a quorum's worth of
+out talking to enough servers so that it fails to get a quorum's worth of
 $P_1$ answers.  In either case, Option B will always fail a client
 read and thus cannot return a stale value of $K$.
 
-\subsection{Witness FLU data and protocol changes}
+\subsection{Witness server data and protocol changes}
 
 Some small changes to the projection's data structure
 are required (relative to the initial spec described in
@@ -834,7 +834,7 @@ mode.  The state type notifies the chain manager how to
 react in network partitions and how to calculate new, safe projection
 transitions and which file repair mode to use
 (Section~\ref{sec:repair-entire-files}).
-Also, we need to label member FLU servers as full- or
+Also, we need to label member server servers as full- or
 witness-type servers.
 
 Write API requests are processed by witness servers in {\em almost but
@@ -844,8 +844,8 @@ numbers, via the {\tt error\_bad\_epoch} and {\tt error\_wedged} error
 codes.  In fact, a new API call is sufficient for querying witness
 servers: {\tt \{check\_epoch, m\_epoch()\}}.
 Any client write operation sends the {\tt
-  check\_\-epoch} API command to witness FLUs and sends the usual {\tt
-  write\_\-req} command to full FLUs.
+  check\_\-epoch} API command to witness servers and sends the usual {\tt
+  write\_\-req} command to full servers.
 
 \section{Chain Replication: proof of correctness}
 \label{sec:cr-proof}
@@ -989,7 +989,7 @@ violations is small: any client that witnesses a written $\rightarrow$
 unwritten transition is a violation of strong consistency.  But
 avoiding even this one bad scenario is a bit tricky.
 
-As explained in Section~\ref{sub:data-loss1}, data
+Data
 unavailability/loss when all chain servers fail is unavoidable.  We
 wish to avoid data loss whenever a chain has at least one surviving
 server.  Another method to avoid data loss is to preserve the Update
@@ -1045,12 +1045,12 @@ Figure~\ref{fig:data-loss2}.)
 
 \begin{figure}
 \begin{enumerate}
-\item Write value $V$ to offset $O$ in the log with chain $[F_a]$.
+\item Write value $V$ to offset $O$ in the log with chain $[S_a]$.
   This write is considered successful.
-\item Change projection to configure chain as $[F_a,F_b]$.  Prior to
-  the change, all values on FLU $F_b$ are unwritten.
-\item FLU server $F_a$ crashes.  The new projection defines the chain
-  as $[F_b]$.
+\item Change projection to configure chain as $[S_a,S_b]$.  Prior to
+  the change, all values on FLU $S_b$ are unwritten.
+\item FLU server $S_a$ crashes.  The new projection defines the chain
+  as $[S_b]$.
 \item A client attempts to read offset $O$ and finds an unwritten
   value.  This is a strong consistency violation.
 %% \item The same client decides to fill $O$ with the junk value
@@ -1061,16 +1061,43 @@ Figure~\ref{fig:data-loss2}.)
 \label{fig:corfu-repair-sc-violation}
 \end{figure}
 
+\begin{figure}
+\begin{enumerate}
+\item Projection $P_p$ says that chain membership is $[S_a]$.
+\item A write of data $D$ to file $F$ at offset $O$ is successful.
+\item Projection $P_{p+1}$ says that chain membership is $[S_a,S_b]$, via
+   an administration API request.
+\item Machi will trigger repair operations, copying any missing data
+   files from FLU $S_a$ to FLU $S_b$.  For the purpose of this
+   example, the sync operation for file $F$'s data and metadata has
+   not yet started.
+\item FLU $S_a$ crashes.
+\item The chain manager on $S_b$ notices $S_a$'s crash,
+   decides to create a new projection $P_{p+2}$ where chain membership is
+   $[S_b]$
+  successfully stores $P_{p+2}$ in its local store.  FLU $S_b$ is now wedged.
+\item FLU $S_a$ is down, therefore the
+   value of $P_{p+2}$ is unanimous for all currently available FLUs
+   (namely $[S_b]$).
+\item FLU $S_b$ sees that projection $P_{p+2}$ is the newest unanimous
+   projection.  It unwedges itself and continues operation using $P_{p+2}$.
+\item Data $D$ is definitely unavailable for now.  If server $S_a$ is
+  never re-added to the chain, then data $D$ is lost forever.
+\end{enumerate}
+\caption{Data unavailability scenario with danger of permanent data loss}
+\label{fig:data-loss2}
+\end{figure}
+
 A variation of the repair
 algorithm is presented in section~2.5 of a later CORFU paper \cite{corfu2}.
 However, the re-use a failed
 server is not discussed there, either: the example of a failed server
-$F_6$ uses a new server, $F_8$ to replace $F_6$.  Furthermore, the
+$S_6$ uses a new server, $S_8$ to replace $S_6$.  Furthermore, the
 repair process is described as:
 
 \begin{quote}
-``Once $F_6$ is completely rebuilt on $F_8$ (by copying entries from
-  $F_7$), the system moves to projection (C), where $F_8$ is now used
+``Once $S_6$ is completely rebuilt on $S_8$ (by copying entries from
+  $S_7$), the system moves to projection (C), where $S_8$ is now used
   to service all reads in the range $[40K,80K)$.''
 \end{quote}
 
@@ -1088,16 +1115,6 @@ vulnerability is eliminated.\footnote{SLF's note: Probably?  This is my
 
 \subsection{Whole-file repair as FLUs are (re-)added to a chain}
 \label{sub:repair-add-to-chain}
-
-Machi's repair process must preserve the Update Propagation
-Invariant.  To avoid data races with data copying from
-``U.P.~Invariant preserving'' servers (i.e. fully repaired with
-respect to the Update Propagation Invariant)
-to servers of unreliable/unknown state, a
-projection like the one shown in
-Figure~\ref{fig:repair-chain-of-chains} is used.  In addition, the
-operations rules for data writes and reads must be observed in a
-projection of this type.
 
 \begin{figure*}
 \centering
@@ -1117,6 +1134,16 @@ $
   with FLUs from $n-1$ other chains under repair.}
 \label{fig:repair-chain-of-chains}
 \end{figure*}
+
+Machi's repair process must preserve the Update Propagation
+Invariant.  To avoid data races with data copying from
+``U.P.~Invariant preserving'' servers (i.e. fully repaired with
+respect to the Update Propagation Invariant)
+to servers of unreliable/unknown state, a
+projection like the one shown in
+Figure~\ref{fig:repair-chain-of-chains} is used.  In addition, the
+operations rules for data writes and reads must be observed in a
+projection of this type.
 
 \begin{itemize}
 
@@ -1200,22 +1227,6 @@ algorithm proposed is:
 
 \end{enumerate}
 
-\begin{figure}
-\centering
-$
-[\overbrace{\underbrace{H_1}_\textbf{Head}, M_{11}, T_1,
-                        H_2, M_{21}, T_2,
-                        \ldots
-                        H_n, M_{n1},
-                        \underbrace{T_n}_\textbf{Tail}}^\textbf{Chain (U.P.~Invariant preserving)}
-]
-$
-\caption{Representation of Figure~\ref{fig:repair-chain-of-chains}
-  after all repairs have finished successfully and a new projection has
-  been calculated.}
-\label{fig:repair-chain-of-chains-finished}
-\end{figure}
-
 When the repair is known to have copied all missing data successfully,
 then the chain can change state via a new projection that includes the
 repaired FLU(s) at the end of the U.P.~Invariant preserving chain \#1
@@ -1230,7 +1241,6 @@ and the repair steps.  Why?  Because the change in projection at
 step \#1 will force any new data writes to adapt to a new projection.
 Consider the mutations that either happen before or after a projection
 change:
-
 
 \begin{itemize}
 
@@ -1250,6 +1260,22 @@ change:
 
 \end{itemize}
 
+\begin{figure}
+\centering
+$
+[\overbrace{\underbrace{H_1}_\textbf{Head}, M_{11}, T_1,
+                        H_2, M_{21}, T_2,
+                        \ldots
+                        H_n, M_{n1},
+                        \underbrace{T_n}_\textbf{Tail}}^\textbf{Chain (U.P.~Invariant preserving)}
+]
+$
+\caption{Representation of Figure~\ref{fig:repair-chain-of-chains}
+  after all repairs have finished successfully and a new projection has
+  been calculated.}
+\label{fig:repair-chain-of-chains-finished}
+\end{figure}
+
 \subsubsection{Cluster in AP Mode}
 
 In cases the cluster is operating in AP Mode:
@@ -1266,7 +1292,7 @@ In cases the cluster is operating in AP Mode:
 
 The end result is a huge ``merge'' where any
 {\tt \{FName, $O_{start}, O_{end}$\}} range of bytes that is written
-on FLU $F_w$ but missing/unwritten from FLU $F_m$ is written down the full chain
+on FLU $S_w$ but missing/unwritten from FLU $S_m$ is written down the full chain
 of chains, skipping any FLUs where the data is known to be written.
 Such writes will also preserve Update Propagation Invariant when
 repair is finished.
@@ -1277,14 +1303,14 @@ repair is finished.
 Changing FLU order within a chain is an operations optimization only.
 It may be that the administrator wishes the order of a chain to remain
 as originally configured during steady-state operation, e.g.,
-$[F_a,F_b,F_c]$.  As FLUs are stopped \& restarted, the chain may
+$[S_a,S_b,S_c]$.  As FLUs are stopped \& restarted, the chain may
 become re-ordered in a seemingly-arbitrary manner.
 
 It is certainly possible to re-order the chain, in a kludgy manner.
-For example, if the desired order is $[F_a,F_b,F_c]$ but the current
-operating order is $[F_c,F_b,F_a]$, then remove $F_b$ from the chain,
-then add $F_b$ to the end of the chain.  Then repeat the same
-procedure for $F_c$.  The end result will be the desired order.
+For example, if the desired order is $[S_a,S_b,S_c]$ but the current
+operating order is $[S_c,S_b,S_a]$, then remove $S_b$ from the chain,
+then add $S_b$ to the end of the chain.  Then repeat the same
+procedure for $S_c$.  The end result will be the desired order.
 
 From an operations perspective, re-ordering of the chain
 using this kludgy manner has a
@@ -1318,9 +1344,9 @@ file offset 1 is written.
 It may be advantageous for each FLU to maintain for each file a
 checksum of a canonical representation of the
 {\tt \{$O_{start},O_{end},$ CSum\}} tuples that the FLU must already
-maintain.  Then for any two FLUs that claim to store a file $F$, if
-both FLUs have the same hash of $F$'s written map + checksums, then
-the copies of $F$ on both FLUs are the same.
+maintain.  Then for any two FLUs that claim to store a file $S$, if
+both FLUs have the same hash of $S$'s written map + checksums, then
+the copies of $S$ on both FLUs are the same.
 
 \bibliographystyle{abbrvnat}
 \begin{thebibliography}{}
