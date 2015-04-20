@@ -5,10 +5,6 @@
 #+SEQ_TODO: TODO WORKING WAITING DONE
 
 * 1. Abstract
-Yo, this is the second draft of a document that attempts to describe a
-proposed self-management algorithm for Machi's chain replication.
-Welcome!  Sit back and enjoy the disjointed prose.
-
 The high level design of the Machi "chain manager" has moved to the
 [[high-level-chain-manager.pdf][Machi chain manager high level design]] document.
 
@@ -41,15 +37,7 @@ the simulator.
 #+END_SRC
 
   
-* 
-
-* 8. 
-
-#+BEGIN_SRC
-{epoch #, hash of the entire projection (minus hash field itself)}
-#+END_SRC
-
-* 9. Diagram of the self-management algorithm
+* 3. Diagram of the self-management algorithm
 ** Introduction
 Refer to the diagram
 [[https://github.com/basho/machi/blob/master/doc/chain-self-management-sketch.Diagram1.pdf][chain-self-management-sketch.Diagram1.pdf]],
@@ -264,7 +252,7 @@ use of quorum majority for UPI members is out of scope of this
 document.  Also out of scope is the use of "witness servers" to
 augment the quorum majority UPI scheme.)
 
-* 10. The Network Partition Simulator
+* 4. The Network Partition Simulator
 ** Overview
 The function machi_chain_manager1_test:convergence_demo_test()
 executes the following in a simulated network environment within a

@@ -46,12 +46,11 @@ For an overview of the design of the larger Machi system, please see
 \section{Abstract}
 \label{sec:abstract}
 
-We attempt to describe first the self-management and self-reliance
-goals of the algorithm.  Then we make a side trip to talk about
-write-once registers and how they're used by Machi, but we don't
-really fully explain exactly why write-once is so critical (why not
-general purpose registers?) ... but they are indeed critical.  Then we
-sketch the algorithm, supplemented by a detailed annotation of a flowchart.
+We describe the self-management and self-reliance
+goals of the algorithm: preserve data integrity, advance the current
+state of the art, and supporting multiple consisistency levels.
+
+TODO Fix, after all of the recent changes to this document.
 
 A discussion of ``humming consensus'' follows next.  This type of
 consensus does not require active participation by all or even a
@@ -156,7 +155,7 @@ store services that Riak KV provides today.  (Scope and timing of such
 replacement TBD.)
 
 We believe this algorithm allows a Machi cluster to fragment into
-arbitrary islands of network partition, all the way down to 100% of
+arbitrary islands of network partition, all the way down to 100\% of
 members running in complete network isolation from each other.
 Furthermore, it provides enough agreement to allow
 formerly-partitioned members to coordinate the reintegration \&
@@ -277,7 +276,7 @@ See Section~\ref{sec:humming-consensus} for detailed discussion.
 \section{The projection store}
 
 The Machi chain manager relies heavily on a key-value store of
-write-once registers called the ``projection store''.  
+write-once registers called the ``projection store''.
 Each participating chain node has its own projection store.
 The store's key is a positive integer;
 the integer represents the epoch number of the projection.  The
@@ -483,26 +482,11 @@ changes may require retry logic and delay/sleep time intervals.
 \subsection{Projection storage: writing}
 \label{sub:proj-storage-writing}
 
-All projection data structures are stored in the write-once Projection
-Store that is run by each server.  (See also \cite{machi-design}.)
-
-Writing the projection follows the two-step sequence below.
-In cases of writing
-failure at any stage, the process is aborted.  The most common case is
-{\tt error\_written}, which signifies that another actor in the system has
-already calculated another (perhaps different) projection using the
-same projection epoch number and that
-read repair is necessary.  Note that {\tt error\_written} may also
-indicate that another actor has performed read repair on the exact
-projection value that the local actor is trying to write!
-
-\begin{enumerate}
-\item Write $P_{new}$ to the local projection store.  This will trigger
-  ``wedge'' status in the local server, which will then cascade to other
-  projection-related behavior within the server.
-\item Write $P_{new}$ to the remote projection store of {\tt all\_members}.
-  Some members may be unavailable, but that is OK.
-\end{enumerate}
+Individual replicas of the projections written to participating
+projection stores are not managed by Chain Replication --- if they
+were, we would have a circular dependency!  See
+Section~\ref{sub:proj-store-writing} for the technique for writing
+projections to all participating servers' projection stores.
 
 \subsection{Adoption of new projections}
 
@@ -515,8 +499,64 @@ may/may not trigger a calculation of a new projection $P_{p+1}$ which
 may eventually be stored and so
 resolve $P_p$'s replicas' ambiguity.
 
+\section{Humming consensus's management of multiple projection store}
+
+Individual replicas of the projections written to participating
+projection stores are not managed by Chain Replication.
+
+An independent replica management technique very similar to the style
+used by both Riak Core \cite{riak-core} and Dynamo is used.
+The major difference is
+that successful return status from (minimum) a quorum of participants
+{\em is not required}.
+
+\subsection{Read repair: repair only when unwritten}
+
+The idea of ``read repair'' is also shared with Riak Core and Dynamo
+systems.  However, there is a case read repair cannot truly ``fix'' a
+key because two different values have been written by two different
+replicas.
+
+Machi's projection store is write-once, and there is no ``undo'' or
+``delete'' or ``overwrite'' in the projection store API.  It doesn't
+matter what caused the two different values.  In case of multiple
+values, all participants in humming consensus merely agree that there
+were multiple opinions at that epoch which must be resolved by the
+creation and writing of newer projections with later epoch numbers.
+
+Machi's projection store read repair can only repair values that are
+unwritten, i.e., storing $\emptyset$.
+
+\subsection{Projection storage: writing}
+\label{sub:proj-store-writing}
+
+All projection data structures are stored in the write-once Projection
+Store that is run by each server.  (See also \cite{machi-design}.)
+
+Writing the projection follows the two-step sequence below.
+
+\begin{enumerate}
+\item Write $P_{new}$ to the local projection store.  (As a side
+  effect,
+  this will trigger
+  ``wedge'' status in the local server, which will then cascade to other
+  projection-related behavior within that server.)
+\item Write $P_{new}$ to the remote projection store of {\tt all\_members}.
+  Some members may be unavailable, but that is OK.
+\end{enumerate}
+
+In cases of {\tt error\_written} status,
+the process may be aborted and read repair
+triggered.  The most common reason for {\tt error\_written} status
+is that another actor in the system has
+already calculated another (perhaps different) projection using the
+same projection epoch number and that
+read repair is necessary.  Note that {\tt error\_written} may also
+indicate that another actor has performed read repair on the exact
+projection value that the local actor is trying to write!
+
 \section{Reading from the projection store}
-\label{sub:proj-storage-reading}
+\label{sec:proj-store-reading}
 
 Reading data from the projection store is similar in principle to
 reading from a Chain Replication-managed server system.  However, the
@@ -563,6 +603,61 @@ unwritten replicas.  If the value of $K$ is not unanimous, then the
 ``best value'' $V_{best}$ is used for the repair.  If all respond with
 {\tt error\_unwritten}, repair is not required.
 
+\section{Humming Consensus}
+\label{sec:humming-consensus}
+
+Sources for background information include:
+
+\begin{itemize}
+\item ``On Consensus and Humming in the IETF'' \cite{rfc-7282}, for
+background on the use of humming during meetings of the IETF.
+
+\item ``On `Humming Consensus', an allegory'' \cite{humming-consensus-allegory},
+for an allegory in the style (?) of Leslie Lamport's original Paxos
+paper.
+\end{itemize}
+
+
+\subsection{Summary of humming consensus}
+
+"Humming consensus" describes
+consensus that is derived only from data that is visible/known at the current
+time.  This implies that a network partition may be in effect and that
+not all chain members are reachable.  The algorithm will calculate
+an approximate consensus despite not having input from all/majority
+of chain members.  Humming consensus may proceed to make a
+decision based on data from only a single participant, i.e., only the local
+node.
+
+\begin{itemize}
+
+\item When operating in AP mode, i.e., in eventual consistency mode, humming
+consensus may reconfigure chain of length $N$ into $N$
+independent chains of length 1.  When a network partition heals, the
+humming consensus is sufficient to manage the chain so that each
+replica's data can be repaired/merged/reconciled safely.
+Other features of the Machi system are designed to assist such
+repair safely.
+
+\item When operating in CP mode, i.e., in strong consistency mode, humming
+consensus would require additional restrictions.  For example, any
+chain that didn't have a minimum length of the quorum majority size of
+all members would be invalid and therefore would not move itself out
+of wedged state.  In very general terms, this requirement for a quorum
+majority of surviving participants is also a requirement for Paxos,
+Raft, and ZAB. See Section~\ref{sec:split-brain-management} for a
+proposal to handle ``split brain'' scenarios while in CPU mode.
+
+\end{itemize}
+
+If a decision is made during epoch $E$, humming consensus will
+eventually discover if other participants have made a different
+decision during epoch $E$.  When a differing decision is discovered,
+newer \& later time epochs are defined by creating new projections
+with epochs numbered by $E+\delta$ (where $\delta > 0$).
+The distribution of the $E+\delta$ projections will bring all visible
+participants into the new epoch $E+delta$ and then into consensus.
+
 \section{Just in case Humming Consensus doesn't work for us}
 
 There are some unanswered questions about Machi's proposed chain
@@ -597,6 +692,12 @@ include:
 Using Elastic Replication (Section~\ref{ssec:elastic-replication}) is
 our preferred alternative, if Humming Consensus is not usable.
 
+Elastic chain replication is a technique described in
+\cite{elastic-chain-replication}.  It describes using multiple chains
+to monitor each other, as arranged in a ring where a chain at position
+$x$ is responsible for chain configuration and management of the chain
+at position $x+1$.
+
 \subsection{Alternative: Hibari's ``Admin Server''
   and Elastic Chain Replication}
 
@@ -618,56 +719,358 @@ chain management agent, the ``Admin Server''.  In brief:
 
 \end{itemize}
 
-Elastic chain replication is a technique described in
-\cite{elastic-chain-replication}.  It describes using multiple chains
-to monitor each other, as arranged in a ring where a chain at position
-$x$ is responsible for chain configuration and management of the chain
-at position $x+1$.  This technique is likely the fall-back to be used
-in case the chain management method described in this RFC proves
-infeasible.
+\section{``Split brain'' management in CP Mode}
+\label{sec:split-brain-management}
 
-\section{Humming Consensus}
-\label{sec:humming-consensus}
+Split brain management is a thorny problem.  The method presented here
+is one based on pragmatics.  If it doesn't work, there isn't a serious
+worry, because Machi's first serious use case all require only AP Mode.
+If we end up falling back to ``use Riak Ensemble'' or ``use ZooKeeper'',
+then perhaps that's
+fine enough.  Meanwhile, let's explore how a
+completely self-contained, no-external-dependencies
+CP Mode Machi might work.
 
-Sources for background information include:
+Wikipedia's description of the quorum consensus solution\footnote{See
+  {\tt http://en.wikipedia.org/wiki/Split-brain\_(computing)}.} is nice
+and short:
+
+\begin{quotation}
+A typical approach, as described by Coulouris et al.,[4] is to use a
+quorum-consensus approach. This allows the sub-partition with a
+majority of the votes to remain available, while the remaining
+sub-partitions should fall down to an auto-fencing mode.
+\end{quotation}
+
+This is the same basic technique that
+both Riak Ensemble and ZooKeeper use.  Machi's
+extensive use of write-registers are a big advantage when implementing
+this technique.  Also very useful is the Machi ``wedge'' mechanism,
+which can automatically implement the ``auto-fencing'' that the
+technique requires.  All Machi servers that can communicate with only
+a minority of other servers will automatically ``wedge'' themselves
+and refuse all requests for service until communication with the
+majority can be re-established.
+
+\subsection{The quorum: witness servers vs. full servers}
+
+In any quorum-consensus system, at least $2f+1$ participants are
+required to survive $f$ participant failures.  Machi can implement a
+technique of ``witness servers'' servers to bring the total cost
+somewhere in the middle, between $2f+1$ and $f+1$, depending on your
+point of view.
+
+A ``witness server'' is one that participates in the network protocol
+but does not store or manage all of the state that a ``full server''
+does.  A ``full server'' is a Machi server as
+described by this RFC document.  A ``witness server'' is a server that
+only participates in the projection store and projection epoch
+transition protocol and a small subset of the file access API.
+A witness server doesn't actually store any
+Machi files.  A witness server is almost stateless, when compared to a
+full Machi server.
+
+A mixed cluster of witness and full servers must still contain at
+least $2f+1$ participants.  However, only $f+1$ of them are full
+participants, and the remaining $f$ participants are witnesses.  In
+such a cluster, any majority quorum must have at least one full server
+participant.
+
+Witness FLUs are always placed at the front of the chain.  As stated
+above, there may be at most $f$ witness FLUs.  A functioning quorum
+majority
+must have at least $f+1$ FLUs that can communicate and therefore
+calculate and store a new unanimous projection.  Therefore, any FLU at
+the tail of a functioning quorum majority chain must be full FLU.  Full FLUs
+actually store Machi files, so they have no problem answering {\tt
+  read\_req} API requests.\footnote{We hope that it is now clear that
+  a witness FLU cannot answer any Machi file read API request.}
+
+Any FLU that can only communicate with a minority of other FLUs will
+find that none can calculate a new projection that includes a
+majority of FLUs.  Any such FLU, when in CP mode, would then move to
+wedge state and remain wedged until the network partition heals enough
+to communicate with the majority side.  This is a nice property: we
+automatically get ``fencing'' behavior.\footnote{Any FLU on the minority side
+  is wedged and therefore refuses to serve because it is, so to speak,
+  ``on the wrong side of the fence.''}
+
+There is one case where ``fencing'' may not happen: if both the client
+and the tail FLU are on the same minority side of a network partition.
+Assume the client and FLU $F_z$ are on the "wrong side" of a network
+split; both are using projection epoch $P_1$.  The tail of the
+chain is $F_z$.
+
+Also assume that the "right side" has reconfigured and is using
+projection epoch $P_2$.  The right side has mutated key $K$.  Meanwhile,
+nobody on the "right side" has noticed anything wrong and is happy to
+continue using projection $P_1$.
 
 \begin{itemize}
-\item ``On Consensus and Humming in the IETF'' \cite{rfc-7282}, for
-background on the use of humming during meetings of the IETF.
-
-\item ``On `Humming Consensus', an allegory'' \cite{humming-consensus-allegory},
-for an allegory in the style (?) of Leslie Lamport's original Paxos
-paper 
+\item {\bf Option a}: Now the wrong side client reads $K$ using $P_1$ via
+  $F_z$.  $F_z$ does not detect an epoch problem and thus returns an
+  answer.  Given our assumptions, this value is stale.  For some
+  client use cases, this kind of staleness may be OK in trade for
+  fewer network messages per read \ldots so Machi may
+  have a configurable option to permit it.
+\item {\bf Option b}: The wrong side client must confirm that $P_1$ is
+  in use by a full majority of chain members, including $F_z$.
 \end{itemize}
 
+Attempts using Option b will fail for one of two reasons.  First, if
+the client can talk to a FLU that is using $P_2$, the client's
+operation must be retried using $P_2$.  Second, the client will time
+out talking to enough FLUs so that it fails to get a quorum's worth of
+$P_1$ answers.  In either case, Option B will always fail a client
+read and thus cannot return a stale value of $K$.
 
-"Humming consensus" describes
-consensus that is derived only from data that is visible/known at the current
-time.  This implies that a network partition may be in effect and that
-not all chain members are reachable.  The algorithm will calculate
-an approximate consensus despite not having input from all/majority
-of chain members.  Humming consensus may proceed to make a
-decision based on data from only a single participant, i.e., only the local
-node.
+\subsection{Witness FLU data and protocol changes}
 
-When operating in AP mode, i.e., in eventual consistency mode, humming
-consensus may reconfigure chain of length $N$ into $N$
-independent chains of length 1.  When a network partition heals, the
-humming consensus is sufficient to manage the chain so that each
-replica's data can be repaired/merged/reconciled safely.
-Other features of the Machi system are designed to assist such
-repair safely.
+Some small changes to the projection's data structure
+are required (relative to the initial spec described in
+\cite{machi-design}).  The projection itself
+needs new annotation to indicate the operating mode, AP mode or CP
+mode.  The state type notifies the chain manager how to
+react in network partitions and how to calculate new, safe projection
+transitions and which file repair mode to use
+(Section~\ref{sec:repair-entire-files}).
+Also, we need to label member FLU servers as full- or
+witness-type servers.
 
-When operating in CP mode, i.e., in strong consistency mode, humming
-consensus would require additional restrictions.  For example, any
-chain that didn't have a minimum length of the quorum majority size of
-all members would be invalid and therefore would not move itself out
-of wedged state.  In very general terms, this requirement for a quorum
-majority of surviving participants is also a requirement for Paxos,
-Raft, and ZAB. \footnote{The Machi RFC also proposes using
-``witness'' chain members to
-make service more available, e.g. quorum majority of ``real'' plus
-``witness'' nodes {\bf and} at least one member must be a ``real'' node.}
+Write API requests are processed by witness servers in {\em almost but
+  not quite} no-op fashion.  The only requirement of a witness server
+is to return correct interpretations of local projection epoch
+numbers, via the {\tt error\_bad\_epoch} and {\tt error\_wedged} error
+codes.  In fact, a new API call is sufficient for querying witness
+servers: {\tt \{check\_epoch, m\_epoch()\}}.
+Any client write operation sends the {\tt
+  check\_\-epoch} API command to witness FLUs and sends the usual {\tt
+  write\_\-req} command to full FLUs.
+
+\section{The safety of projection epoch transitions}
+\label{sec:safety-of-transitions}
+
+Machi uses the projection epoch transition algorithm and
+implementation from CORFU, which is believed to be safe.  However,
+CORFU assumes a single, external, strongly consistent projection
+store.  Further, CORFU assumes that new projections are calculated by
+an oracle that the rest of the CORFU system agrees is the sole agent
+for creating new projections.  Such an assumption is impractical for
+Machi's intended purpose.
+
+Machi could use Riak Ensemble or ZooKeeper as an oracle (or perhaps as a oracle
+coordinator), but we wish to keep Machi free of big external
+dependencies.  We would also like to see Machi be able to
+operate in an ``AP mode'', which means providing service even
+if all network communication to an oracle is broken.
+
+The model of projection calculation and storage described in
+Section~\ref{sec:projections} allows for each server to operate
+independently, if necessary.  This autonomy allows the server in AP
+mode to
+always accept new writes: new writes are written to unique file names
+and unique file offsets using a chain consisting of only a single FLU,
+if necessary.  How is this possible?  Let's look at a scenario in
+Section~\ref{sub:split-brain-scenario}.
+
+\subsection{A split brain scenario}
+\label{sub:split-brain-scenario}
+
+\begin{enumerate}
+
+\item Assume 3 Machi FLUs, all in good health and perfect data sync: $[F_a,
+  F_b, F_c]$ using projection epoch $P_p$.
+
+\item Assume data $D_0$ is written at offset $O_0$ in Machi file
+  $F_0$.
+
+\item Then a network partition happens.  Servers $F_a$ and $F_b$ are
+  on one side of the split, and server $F_c$ is on the other side of
+  the split.  We'll call them the ``left side'' and ``right side'',
+  respectively.
+
+\item On the left side, $F_b$ calculates a new projection and writes
+  it unanimously (to two projection stores) as epoch $P_B+1$.  The
+  subscript $_B$ denotes a
+  version of projection epoch $P_{p+1}$ that was created by server $F_B$
+  and has a unique checksum (used to detect differences after the
+  network partition heals).
+
+\item In parallel, on the right side, $F_c$ calculates a new
+  projection and writes it unanimously (to a single projection store)
+  as epoch $P_c+1$.
+
+\item In parallel, a client on the left side writes data $D_1$
+  at offset $O_1$ in Machi file $F_1$, and also
+  a client on the right side writes data $D_2$
+  at offset $O_2$ in Machi file $F_2$.  We know that $F_1 \ne F_2$
+  because each sequencer is forced to choose disjoint filenames from
+  any prior epoch whenever a new projection is available.
+
+\end{enumerate}
+
+Now, what happens when various clients attempt to read data values
+$D_0$, $D_1$, and $D_2$?
+
+\begin{itemize}
+\item All clients can read $D_0$.
+\item Clients on the left side can read $D_1$.
+\item Attempts by clients on the right side to read $D_1$ will get
+  {\tt error\_unavailable}.
+\item Clients on the right side can read $D_2$.
+\item Attempts by clients on the left side to read $D_2$ will get
+  {\tt error\_unavailable}.
+\end{itemize}
+
+The {\tt error\_unavailable} result is not an error in the CAP Theorem
+sense: it is a valid and affirmative response.  In both cases, the
+system on the client's side definitely knows that the cluster is
+partitioned.  If Machi were not a write-once store, perhaps there
+might be an old/stale value to read on the local side of the network
+partition \ldots but the system also knows definitely that no
+old/stale value exists.  Therefore Machi remains available in the
+CAP Theorem sense both for writes and reads.
+
+We know that all files $F_0$,
+$F_1$, and $F_2$ are disjoint and can be merged (in a manner analogous
+to set union) onto each server in $[F_a, F_b, F_c]$ safely
+when the network partition is healed.  However,
+unlike pure theoretical set union, Machi's data merge \& repair
+operations must operate within some constraints that are designed to
+prevent data loss.
+
+\subsection{Aside: defining data availability and data loss}
+\label{sub:define-availability}
+
+Let's take a moment to be clear about definitions:
+
+\begin{itemize}
+\item ``data is available at time $T$'' means that data is available
+  for reading at $T$: the Machi cluster knows for certain that the
+  requested data is not been written or it is written and has a single
+  value.
+\item ``data is unavailable at time $T$'' means that data is
+  unavailable for reading at $T$ due to temporary circumstances,
+  e.g. network partition.  If a read request is issued at some time
+  after $T$, the data will be available.
+\item ``data is lost at time $T$'' means that data is permanently
+  unavailable at $T$ and also all times after $T$.
+\end{itemize}
+
+Chain Replication is a fantastic technique for managing the
+consistency of data across a number of whole replicas.  There are,
+however, cases where CR can indeed lose data.
+
+\subsection{Data loss scenario \#1: too few servers}
+\label{sub:data-loss1}
+
+If the chain is $N$ servers long, and if all $N$ servers fail, then
+of course data is unavailable.  However, if all $N$ fail
+permanently, then data is lost.
+
+If the administrator had intended to avoid data loss after $N$
+failures, then the administrator would have provisioned a Machi
+cluster with at least $N+1$ servers.
+
+\subsection{Data Loss scenario \#2: bogus configuration change sequence}
+\label{sub:data-loss2}
+
+Assume that the sequence of events in Figure~\ref{fig:data-loss2} takes place.
+
+\begin{figure}
+\begin{enumerate}
+%% NOTE: the following list 9 items long.  We use that fact later, see
+%% string YYY9 in a comment further below.  If the length of this list
+%% changes, then the counter reset below needs adjustment.
+\item Projection $P_p$ says that chain membership is $[F_a]$.
+\item A write of data $D$ to file $F$ at offset $O$ is successful.
+\item Projection $P_{p+1}$ says that chain membership is $[F_a,F_b]$, via
+   an administration API request.
+\item Machi will trigger repair operations, copying any missing data
+   files from FLU $F_a$ to FLU $F_b$.  For the purpose of this
+   example, the sync operation for file $F$'s data and metadata has
+   not yet started.
+\item FLU $F_a$ crashes.
+\item The chain manager on $F_b$ notices $F_a$'s crash,
+   decides to create a new projection $P_{p+2}$ where chain membership is
+   $[F_b]$
+  successfully stores $P_{p+2}$ in its local store.  FLU $F_b$ is now wedged.
+\item FLU $F_a$ is down, therefore the
+   value of $P_{p+2}$ is unanimous for all currently available FLUs
+   (namely $[F_b]$).
+\item FLU $F_b$ sees that projection $P_{p+2}$ is the newest unanimous
+   projection.  It unwedges itself and continues operation using $P_{p+2}$.
+\item Data $D$ is definitely unavailable for now, perhaps lost forever?
+\end{enumerate}
+\caption{Data unavailability scenario with danger of permanent data loss}
+\label{fig:data-loss2}
+\end{figure}
+
+At this point, the data $D$ is not available on $F_b$.  However, if
+we assume that $F_a$ eventually returns to service, and Machi
+correctly acts to repair all data within its chain, then $D$
+all of its contents will be available eventually.
+
+However, if server $F_a$ never returns to service, then $D$ is lost.  The
+Machi administration API must always warn the user that data loss is
+possible.  In Figure~\ref{fig:data-loss2}'s scenario, the API must
+warn the administrator in multiple ways that fewer than the full {\tt
+  length(all\_members)} number of replicas are in full sync.
+
+A careful reader should note that $D$ is also lost if step \#5 were
+instead, ``The hardware that runs FLU $F_a$ was destroyed by fire.''
+For any possible step following \#5, $D$ is lost.  This is data loss
+for the same reason that the scenario of Section~\ref{sub:data-loss1}
+happens: the administrator has not provisioned a sufficient number of
+replicas.
+
+Let's revisit Figure~\ref{fig:data-loss2}'s scenario yet again.  This
+time, we add a final step at the end of the sequence:
+
+\begin{enumerate}
+\setcounter{enumi}{9}           % YYY9
+\item The administration API is used to change the chain
+configuration to {\tt all\_members=$[F_b]$}.
+\end{enumerate}
+
+Step \#10 causes data loss.  Specifically, the only copy of file
+$F$ is on FLU $F_a$.  By administration policy, FLU $F_a$ is now
+permanently inaccessible.
+
+The chain manager {\em must} keep track of all
+repair operations and their status.  If such information is tracked by
+all FLUs, then the data loss by bogus administrator action can be
+prevented.  In this scenario, FLU $F_b$ knows that `$F_a \rightarrow
+F_b$` repair has not yet finished and therefore it is unsafe to remove
+$F_a$ from the cluster.
+
+\subsection{Data Loss scenario \#3: chain replication repair done badly}
+\label{sub:data-loss3}
+
+It's quite possible to lose data through careless/buggy Chain
+Replication chain configuration changes.  For example, in the split
+brain scenario of Section~\ref{sub:split-brain-scenario}, we have two
+pieces of data written to different ``sides'' of the split brain,
+$D_0$ and $D_1$.  If the chain is naively reconfigured after the network
+partition heals to be $[F_a=\emptyset,F_b=\emptyset,F_c=D_1],$ then $D_1$
+is in danger of being lost.  Why?
+The Update Propagation Invariant is violated.
+Any Chain Replication read will be
+directed to the tail, $F_c$.  The value exists there, so there is no
+need to do any further work; the unwritten values at $F_a$ and $F_b$
+will not be repaired.  If the $F_c$ server fails sometime
+later, then $D_1$ will be lost.  The ``Chain Replication Repair''
+section of \cite{machi-design} discusses
+how data loss can be avoided after servers are added (or re-added) to
+an active chain configuration.
+
+\subsection{Summary}
+
+We believe that maintaining the Update Propagation Invariant is a
+hassle anda pain, but that hassle and pain are well worth the
+sacrifices required to maintain the invariant at all times.  It avoids
+data loss in all cases where the U.P.~Invariant preserving chain
+contains at least one FLU.
 
 \section{Chain Replication: proof of correctness}
 \label{sec:cr-proof}
@@ -681,7 +1084,7 @@ Readers interested in good karma should read the entire paper.
 
 ``Update Propagation Invariant'' is the original chain replication
 paper's name for the
-$H_i \succeq H_j$ 
+$H_i \succeq H_j$
 property mentioned in Figure~\ref{tab:chain-order}.
 This paper will use the same name.
 This property may also be referred to by its acronym, ``UPI''.
@@ -1144,362 +1547,16 @@ maintain.  Then for any two FLUs that claim to store a file $F$, if
 both FLUs have the same hash of $F$'s written map + checksums, then
 the copies of $F$ on both FLUs are the same.
 
-\section{``Split brain'' management in CP Mode}
-\label{sec:split-brain-management}
-
-Split brain management is a thorny problem.  The method presented here
-is one based on pragmatics.  If it doesn't work, there isn't a serious
-worry, because Machi's first serious use case all require only AP Mode.
-If we end up falling back to ``use Riak Ensemble'' or ``use ZooKeeper'',
-then perhaps that's
-fine enough.  Meanwhile, let's explore how a
-completely self-contained, no-external-dependencies
-CP Mode Machi might work.
-
-Wikipedia's description of the quorum consensus solution\footnote{See
-  {\tt http://en.wikipedia.org/wiki/Split-brain\_(computing)}.} is nice
-and short:
-
-\begin{quotation}
-A typical approach, as described by Coulouris et al.,[4] is to use a
-quorum-consensus approach. This allows the sub-partition with a
-majority of the votes to remain available, while the remaining
-sub-partitions should fall down to an auto-fencing mode.
-\end{quotation}
-
-This is the same basic technique that
-both Riak Ensemble and ZooKeeper use.  Machi's
-extensive use of write-registers are a big advantage when implementing
-this technique.  Also very useful is the Machi ``wedge'' mechanism,
-which can automatically implement the ``auto-fencing'' that the
-technique requires.  All Machi servers that can communicate with only
-a minority of other servers will automatically ``wedge'' themselves
-and refuse all requests for service until communication with the
-majority can be re-established.
-
-\subsection{The quorum: witness servers vs. full servers}
-
-In any quorum-consensus system, at least $2f+1$ participants are
-required to survive $f$ participant failures.  Machi can implement a
-technique of ``witness servers'' servers to bring the total cost
-somewhere in the middle, between $2f+1$ and $f+1$, depending on your
-point of view.
-
-A ``witness server'' is one that participates in the network protocol
-but does not store or manage all of the state that a ``full server''
-does.  A ``full server'' is a Machi server as
-described by this RFC document.  A ``witness server'' is a server that
-only participates in the projection store and projection epoch
-transition protocol and a small subset of the file access API.
-A witness server doesn't actually store any
-Machi files.  A witness server is almost stateless, when compared to a
-full Machi server.
-
-A mixed cluster of witness and full servers must still contain at
-least $2f+1$ participants.  However, only $f+1$ of them are full
-participants, and the remaining $f$ participants are witnesses.  In
-such a cluster, any majority quorum must have at least one full server
-participant.
-
-Witness FLUs are always placed at the front of the chain.  As stated
-above, there may be at most $f$ witness FLUs.  A functioning quorum
-majority
-must have at least $f+1$ FLUs that can communicate and therefore
-calculate and store a new unanimous projection.  Therefore, any FLU at
-the tail of a functioning quorum majority chain must be full FLU.  Full FLUs
-actually store Machi files, so they have no problem answering {\tt
-  read\_req} API requests.\footnote{We hope that it is now clear that
-  a witness FLU cannot answer any Machi file read API request.}
-
-Any FLU that can only communicate with a minority of other FLUs will
-find that none can calculate a new projection that includes a
-majority of FLUs.  Any such FLU, when in CP mode, would then move to
-wedge state and remain wedged until the network partition heals enough
-to communicate with the majority side.  This is a nice property: we
-automatically get ``fencing'' behavior.\footnote{Any FLU on the minority side
-  is wedged and therefore refuses to serve because it is, so to speak,
-  ``on the wrong side of the fence.''}
-
-There is one case where ``fencing'' may not happen: if both the client
-and the tail FLU are on the same minority side of a network partition.
-Assume the client and FLU $F_z$ are on the "wrong side" of a network
-split; both are using projection epoch $P_1$.  The tail of the
-chain is $F_z$.
-
-Also assume that the "right side" has reconfigured and is using
-projection epoch $P_2$.  The right side has mutated key $K$.  Meanwhile,
-nobody on the "right side" has noticed anything wrong and is happy to
-continue using projection $P_1$.
-
-\begin{itemize}
-\item {\bf Option a}: Now the wrong side client reads $K$ using $P_1$ via
-  $F_z$.  $F_z$ does not detect an epoch problem and thus returns an
-  answer.  Given our assumptions, this value is stale.  For some
-  client use cases, this kind of staleness may be OK in trade for
-  fewer network messages per read \ldots so Machi may
-  have a configurable option to permit it.
-\item {\bf Option b}: The wrong side client must confirm that $P_1$ is
-  in use by a full majority of chain members, including $F_z$.
-\end{itemize}
-
-Attempts using Option b will fail for one of two reasons.  First, if
-the client can talk to a FLU that is using $P_2$, the client's
-operation must be retried using $P_2$.  Second, the client will time
-out talking to enough FLUs so that it fails to get a quorum's worth of
-$P_1$ answers.  In either case, Option B will always fail a client
-read and thus cannot return a stale value of $K$.
-
-\subsection{Witness FLU data and protocol changes}
-
-Some small changes to the projection's data structure
-are required (relative to the initial spec described in
-\cite{machi-design}).  The projection itself
-needs new annotation to indicate the operating mode, AP mode or CP
-mode.  The state type notifies the chain manager how to
-react in network partitions and how to calculate new, safe projection
-transitions and which file repair mode to use
-(Section~\ref{sec:repair-entire-files}).
-Also, we need to label member FLU servers as full- or
-witness-type servers.
-
-Write API requests are processed by witness servers in {\em almost but
-  not quite} no-op fashion.  The only requirement of a witness server
-is to return correct interpretations of local projection epoch
-numbers, via the {\tt error\_bad\_epoch} and {\tt error\_wedged} error
-codes.  In fact, a new API call is sufficient for querying witness
-servers: {\tt \{check\_epoch, m\_epoch()\}}.
-Any client write operation sends the {\tt
-  check\_\-epoch} API command to witness FLUs and sends the usual {\tt
-  write\_\-req} command to full FLUs.
-
-\section{The safety of projection epoch transitions}
-\label{sec:safety-of-transitions}
-
-Machi uses the projection epoch transition algorithm and
-implementation from CORFU, which is believed to be safe.  However,
-CORFU assumes a single, external, strongly consistent projection
-store.  Further, CORFU assumes that new projections are calculated by
-an oracle that the rest of the CORFU system agrees is the sole agent
-for creating new projections.  Such an assumption is impractical for
-Machi's intended purpose.
-
-Machi could use Riak Ensemble or ZooKeeper as an oracle (or perhaps as a oracle
-coordinator), but we wish to keep Machi free of big external
-dependencies.  We would also like to see Machi be able to
-operate in an ``AP mode'', which means providing service even
-if all network communication to an oracle is broken.
-
-The model of projection calculation and storage described in
-Section~\ref{sec:projections} allows for each server to operate
-independently, if necessary.  This autonomy allows the server in AP
-mode to
-always accept new writes: new writes are written to unique file names
-and unique file offsets using a chain consisting of only a single FLU,
-if necessary.  How is this possible?  Let's look at a scenario in
-Section~\ref{sub:split-brain-scenario}.
-
-\subsection{A split brain scenario}
-\label{sub:split-brain-scenario}
-
-\begin{enumerate}
-
-\item Assume 3 Machi FLUs, all in good health and perfect data sync: $[F_a,
-  F_b, F_c]$ using projection epoch $P_p$.
-
-\item Assume data $D_0$ is written at offset $O_0$ in Machi file
-  $F_0$.
-
-\item Then a network partition happens.  Servers $F_a$ and $F_b$ are
-  on one side of the split, and server $F_c$ is on the other side of
-  the split.  We'll call them the ``left side'' and ``right side'',
-  respectively.
-
-\item On the left side, $F_b$ calculates a new projection and writes
-  it unanimously (to two projection stores) as epoch $P_B+1$.  The
-  subscript $_B$ denotes a
-  version of projection epoch $P_{p+1}$ that was created by server $F_B$
-  and has a unique checksum (used to detect differences after the
-  network partition heals).
-
-\item In parallel, on the right side, $F_c$ calculates a new
-  projection and writes it unanimously (to a single projection store)
-  as epoch $P_c+1$.
-
-\item In parallel, a client on the left side writes data $D_1$
-  at offset $O_1$ in Machi file $F_1$, and also
-  a client on the right side writes data $D_2$
-  at offset $O_2$ in Machi file $F_2$.  We know that $F_1 \ne F_2$
-  because each sequencer is forced to choose disjoint filenames from
-  any prior epoch whenever a new projection is available.
-
-\end{enumerate}
-
-Now, what happens when various clients attempt to read data values
-$D_0$, $D_1$, and $D_2$?
-
-\begin{itemize}
-\item All clients can read $D_0$.
-\item Clients on the left side can read $D_1$.
-\item Attempts by clients on the right side to read $D_1$ will get
-  {\tt error\_unavailable}.
-\item Clients on the right side can read $D_2$.
-\item Attempts by clients on the left side to read $D_2$ will get
-  {\tt error\_unavailable}.
-\end{itemize}
-
-The {\tt error\_unavailable} result is not an error in the CAP Theorem
-sense: it is a valid and affirmative response.  In both cases, the
-system on the client's side definitely knows that the cluster is
-partitioned.  If Machi were not a write-once store, perhaps there
-might be an old/stale value to read on the local side of the network
-partition \ldots but the system also knows definitely that no
-old/stale value exists.  Therefore Machi remains available in the
-CAP Theorem sense both for writes and reads.
-
-We know that all files $F_0$,
-$F_1$, and $F_2$ are disjoint and can be merged (in a manner analogous
-to set union) onto each server in $[F_a, F_b, F_c]$ safely
-when the network partition is healed.  However,
-unlike pure theoretical set union, Machi's data merge \& repair
-operations must operate within some constraints that are designed to
-prevent data loss.
-
-\subsection{Aside: defining data availability and data loss}
-\label{sub:define-availability}
-
-Let's take a moment to be clear about definitions:
-
-\begin{itemize}
-\item ``data is available at time $T$'' means that data is available
-  for reading at $T$: the Machi cluster knows for certain that the
-  requested data is not been written or it is written and has a single
-  value.
-\item ``data is unavailable at time $T$'' means that data is
-  unavailable for reading at $T$ due to temporary circumstances,
-  e.g. network partition.  If a read request is issued at some time
-  after $T$, the data will be available.
-\item ``data is lost at time $T$'' means that data is permanently
-  unavailable at $T$ and also all times after $T$.
-\end{itemize}
-
-Chain Replication is a fantastic technique for managing the
-consistency of data across a number of whole replicas.  There are,
-however, cases where CR can indeed lose data.  
-
-\subsection{Data loss scenario \#1: too few servers}
-\label{sub:data-loss1}
-
-If the chain is $N$ servers long, and if all $N$ servers fail, then
-of course data is unavailable.  However, if all $N$ fail
-permanently, then data is lost.
-
-If the administrator had intended to avoid data loss after $N$
-failures, then the administrator would have provisioned a Machi
-cluster with at least $N+1$ servers.
-
-\subsection{Data Loss scenario \#2: bogus configuration change sequence}
-\label{sub:data-loss2}
-
-Assume that the sequence of events in Figure~\ref{fig:data-loss2} takes place.
-
-\begin{figure}
-\begin{enumerate}
-%% NOTE: the following list 9 items long.  We use that fact later, see
-%% string YYY9 in a comment further below.  If the length of this list
-%% changes, then the counter reset below needs adjustment.
-\item Projection $P_p$ says that chain membership is $[F_a]$.
-\item A write of data $D$ to file $F$ at offset $O$ is successful.
-\item Projection $P_{p+1}$ says that chain membership is $[F_a,F_b]$, via
-   an administration API request.
-\item Machi will trigger repair operations, copying any missing data
-   files from FLU $F_a$ to FLU $F_b$.  For the purpose of this
-   example, the sync operation for file $F$'s data and metadata has
-   not yet started.
-\item FLU $F_a$ crashes.
-\item The chain manager on $F_b$ notices $F_a$'s crash, 
-   decides to create a new projection $P_{p+2}$ where chain membership is
-   $[F_b]$
-  successfully stores $P_{p+2}$ in its local store.  FLU $F_b$ is now wedged.
-\item FLU $F_a$ is down, therefore the
-   value of $P_{p+2}$ is unanimous for all currently available FLUs
-   (namely $[F_b]$).
-\item FLU $F_b$ sees that projection $P_{p+2}$ is the newest unanimous
-   projection.  It unwedges itself and continues operation using $P_{p+2}$.
-\item Data $D$ is definitely unavailable for now, perhaps lost forever?
-\end{enumerate}
-\caption{Data unavailability scenario with danger of permanent data loss}
-\label{fig:data-loss2}
-\end{figure}
-
-At this point, the data $D$ is not available on $F_b$.  However, if
-we assume that $F_a$ eventually returns to service, and Machi
-correctly acts to repair all data within its chain, then $D$
-all of its contents will be available eventually.
-
-However, if server $F_a$ never returns to service, then $D$ is lost.  The
-Machi administration API must always warn the user that data loss is
-possible.  In Figure~\ref{fig:data-loss2}'s scenario, the API must
-warn the administrator in multiple ways that fewer than the full {\tt
-  length(all\_members)} number of replicas are in full sync.
-
-A careful reader should note that $D$ is also lost if step \#5 were
-instead, ``The hardware that runs FLU $F_a$ was destroyed by fire.''
-For any possible step following \#5, $D$ is lost.  This is data loss
-for the same reason that the scenario of Section~\ref{sub:data-loss1}
-happens: the administrator has not provisioned a sufficient number of
-replicas.
-
-Let's revisit Figure~\ref{fig:data-loss2}'s scenario yet again.  This
-time, we add a final step at the end of the sequence:
-
-\begin{enumerate}
-\setcounter{enumi}{9}           % YYY9
-\item The administration API is used to change the chain
-configuration to {\tt all\_members=$[F_b]$}.
-\end{enumerate}
-
-Step \#10 causes data loss.  Specifically, the only copy of file
-$F$ is on FLU $F_a$.  By administration policy, FLU $F_a$ is now
-permanently inaccessible.
-
-The chain manager {\em must} keep track of all
-repair operations and their status.  If such information is tracked by
-all FLUs, then the data loss by bogus administrator action can be
-prevented.  In this scenario, FLU $F_b$ knows that `$F_a \rightarrow
-F_b$` repair has not yet finished and therefore it is unsafe to remove
-$F_a$ from the cluster.
-
-\subsection{Data Loss scenario \#3: chain replication repair done badly}
-\label{sub:data-loss3}
-
-It's quite possible to lose data through careless/buggy Chain
-Replication chain configuration changes.  For example, in the split
-brain scenario of Section~\ref{sub:split-brain-scenario}, we have two
-pieces of data written to different ``sides'' of the split brain,
-$D_0$ and $D_1$.  If the chain is naively reconfigured after the network
-partition heals to be $[F_a=\emptyset,F_b=\emptyset,F_c=D_1],$ then $D_1$
-is in danger of being lost.  Why?
-The Update Propagation Invariant is violated.
-Any Chain Replication read will be
-directed to the tail, $F_c$.  The value exists there, so there is no
-need to do any further work; the unwritten values at $F_a$ and $F_b$
-will not be repaired.  If the $F_c$ server fails sometime
-later, then $D_1$ will be lost.  The ``Chain Replication Repair''
-section of \cite{machi-design} discusses
-how data loss can be avoided after servers are added (or re-added) to
-an active chain configuration.
-
-\subsection{Summary}
-
-We believe that maintaining the Update Propagation Invariant is a
-hassle anda pain, but that hassle and pain are well worth the
-sacrifices required to maintain the invariant at all times.  It avoids
-data loss in all cases where the U.P.~Invariant preserving chain
-contains at least one FLU.
-
 \bibliographystyle{abbrvnat}
 \begin{thebibliography}{}
 \softraggedright
+
+\bibitem{riak-core}
+Klophaus, Rusty.
+"Riak Core."
+ACM SIGPLAN Commercial Users of Functional Programming (CUFP'10), 2010.
+{\tt http://dl.acm.org/citation.cfm?id=1900176} and
+{\tt https://github.com/basho/riak\_core}
 
 \bibitem{rfc-7282}
 RFC 7282: On Consensus and Humming in the IETF.
