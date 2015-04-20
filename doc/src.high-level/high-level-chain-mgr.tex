@@ -658,7 +658,7 @@ all members would be invalid and therefore would not move itself out
 of wedged state.  In very general terms, this requirement for a quorum
 majority of surviving participants is also a requirement for Paxos,
 Raft, and ZAB. See Section~\ref{sec:split-brain-management} for a
-proposal to handle ``split brain'' scenarios while in CPU mode.
+proposal to handle ``split brain'' scenarios while in CP mode.
 
 \end{itemize}
 
@@ -670,11 +670,13 @@ with epochs numbered by $E+\delta$ (where $\delta > 0$).
 The distribution of the $E+\delta$ projections will bring all visible
 participants into the new epoch $E+delta$ and then into consensus.
 
-The remainder of this section follows the same pattern as
+The next portion of this section follows the same pattern as
 Section~\ref{sec:phases-of-projection-change}: network monitoring,
 calculating new projections, writing projections, then perhaps
 adopting the newest projection (which may or may not be the projection
 that we just wrote).
+Beginning with Section~9.5\footnote{TODO correction needed?}, we will
+explore TODO topics.
 
 \subsubsection{Aside: origin of the analogy to humming a song}
 
