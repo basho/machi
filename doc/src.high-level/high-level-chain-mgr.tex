@@ -197,8 +197,9 @@ If the implementation of
 this self-management protocol breaks an assumption or prerequisite of
 CORFU, then we expect that Machi's implementation will be flawed.
 
-\subsection{Communication model: asyncronous message passing}
+\subsection{Communication model}
 
+The communication model is asynchronous point-to-point messaging.
 The network is unreliable: messages may be arbitrarily dropped and/or
 reordered.  Network partitions may occur at any time.
 Network partitions may be asymmetric, e.g., a message can be sent
@@ -223,7 +224,7 @@ time" between iterations of the algorithm: there is no need to "busy
 wait" by executing the algorithm as quickly as possible.  See below,
 "sleep intervals between executions".
 
-\subsection{Failure detector model: weak, fallible, boolean}
+\subsection{Failure detector model}
 
 We assume that the failure detector that the algorithm uses is weak,
 it's fallible, and it informs the algorithm in boolean status
@@ -234,8 +235,8 @@ change, then the algorithm will "churn" the operational state of the
 chain, e.g. by removing the failed node from the chain or adding a
 (re)started node (that may not be alive) to the end of the chain.
 Such extra churn is regrettable and will cause periods of delay as the
-"rough consensus" (decribed below) decision is made.  However, the
-churn cannot (we assert/believe) cause data loss.
+humming consensus algorithm (decribed below) makes decisions.  However, the
+churn cannot {\bf (we assert/believe)} cause data loss.
 
 \subsection{Use of the ``wedge state''}
 
@@ -250,7 +251,7 @@ I/O API.
 
 When in wedge state, the server will refuse all file write I/O API
 requests until the self-management algorithm has determined that
-"rough consensus" has been decided (see next bullet item).  The server
+humming consensus has been decided (see next bullet item).  The server
 may also refuse file read I/O API requests, depending on its CP/AP
 operation mode.
 
@@ -310,6 +311,16 @@ The private projection store serves multiple purposes, including:
   state of the local node
 \end{itemize}
 
+The private half of the projection store is not replicated.
+Projections that are stored in the private projection store are
+meaningful only to the local projection store and are, furthermore,
+merely ``soft state''.  Data loss in the private projection store
+cannot result in loss of ``hard state'' information.  Therefore,
+replication of the private projection store is not required.  The
+replication techniques described by
+Section~\ref{sec:managing-multiple-projection-stores} applies only to
+the public half of the projection store.
+
 \section{Projections: calculation, storage, and use}
 \label{sec:projections}
 
@@ -319,6 +330,13 @@ should operate; see \cite{machi-design} and
 administrative changes (e.g., substituting a failed server box with
 replacement hardware) as well as local network conditions (e.g., is
 there a network partition?).
+
+The projection defines the operational state of Chain Replication's
+chain order as well the (re-)synchronization of data managed by by
+newly-added/failed-and-now-recovering members of the chain.  This
+chain metadata, together with computational processes that manage the
+chain, must be managed in a safe manner in order to avoid unintended
+data loss of data managed by the chain.
 
 The concept of a projection is borrowed
 from CORFU but has a longer history, e.g., the Hibari key-value store
@@ -423,6 +441,7 @@ the epoch number and the projection checksum, as described in
 Section~\ref{sub:the-projection}.
 
 \section{Managing multiple projection stores}
+\label{sec:managing-multiple-projection-stores}
 
 An independent replica management technique very similar to the style
 used by both Riak Core \cite{riak-core} and Dynamo is used to manage
@@ -597,31 +616,30 @@ A projection $P_{new}$ is used by a server only if:
 Both of these steps are performed as part of humming consensus's
 normal operation.  It may be non-intuitive that the minimum number of
 available servers is only one, but ``one'' is the correct minimum
-number for humming consensus.
+ number for humming consensus.
 
 \section{Humming Consensus}
 \label{sec:humming-consensus}
 
-Sources for background information include:
+Additional sources for information humming consensus include:
 
 \begin{itemize}
 \item ``On Consensus and Humming in the IETF'' \cite{rfc-7282}, for
-background on the use of humming during meetings of the IETF.
+background on the use of humming by IETF meeting participants during
+IETF meetings.
 
 \item ``On `Humming Consensus', an allegory'' \cite{humming-consensus-allegory},
 for an allegory in homage to the style of Leslie Lamport's original Paxos
 paper.
 \end{itemize}
 
-
-Humming consensus describes
-consensus that is derived only from data that is visible/known at the current
-time.  This implies that a network partition may be in effect and that
-not all chain members are reachable.  The algorithm will calculate
-an approximate consensus despite not having input from all/majority
-of chain members.  Humming consensus may proceed to make a
-decision based on data from only a single participant, i.e., only the local
-node.
+Humming consensus describes consensus that is derived only from data
+that is visible/known at the current time.  It's OK if a network
+partition is in effect and that not all chain members are available;
+the algorithm will calculate an approximate consensus despite not
+having input from all/majority of chain members.  Humming consensus
+may proceed to make a decision based on data from only one
+participant, i.e., only the local node.
 
 \begin{itemize}
 
@@ -652,11 +670,38 @@ with epochs numbered by $E+\delta$ (where $\delta > 0$).
 The distribution of the $E+\delta$ projections will bring all visible
 participants into the new epoch $E+delta$ and then into consensus.
 
-The remainder of this section follows the same patter as
+The remainder of this section follows the same pattern as
 Section~\ref{sec:phases-of-projection-change}: network monitoring,
 calculating new projections, writing projections, then perhaps
 adopting the newest projection (which may or may not be the projection
 that we just wrote).
+
+\subsubsection{Aside: origin of the analogy to humming a song}
+
+The ``humming'' part of humming consensus comes from the action taken
+when the environment changes.  If we imagine an egalitarian group of
+people, all in the same room humming some pitch together, then we take
+action to change our humming pitch if:
+
+\begin{itemize}
+\item Some member departs the room (because they witness the person
+walking out the door) or if someone else in the room starts humming a
+new pitch with a new epoch number.\footnote{It's very difficult for
+  the human ear to hear the epoch number part of a hummed pitch, but
+  for the sake of the analogy, assume that it can.}
+\item If a member enters the room and starts humming with the same
+  epoch number but a different note.
+\end{itemize}
+
+If someone were to transcribe onto a musical score the pitches that
+are hummed in the room over a period of time, we might have something
+that approximates music.  If this musical core uses chord progressions
+and rhythms that obey the rules of a musical genre, e.g., Gregorian
+chant, then the final musical score is a valid Gregorian chant.
+
+By analogy, if the rules of the musical score are obeyed, then the
+Chain Replication invariants that are managed by humming consensus are
+obeyed.  Such safe management of Chain Replication is our end goal.
 
 \subsection{Network monitoring}
 
