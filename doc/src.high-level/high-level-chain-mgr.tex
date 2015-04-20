@@ -264,8 +264,8 @@ This traditional definition differs from what is described here as
 
 "Humming consensus" describes
 consensus that is derived only from data that is visible/known at the current
-time.  This implies that a network partition may be in effect and that
-not all chain members are reachable.  The algorithm will calculate
+time.
+The algorithm will calculate
 an approximate consensus despite not having input from all/majority
 of chain members.  Humming consensus may proceed to make a
 decision based on data from only a single participant, i.e., only the local
@@ -281,7 +281,7 @@ Each participating chain node has its own projection store.
 The store's key is a positive integer;
 the integer represents the epoch number of the projection.  The
 store's value is either the special `unwritten' value\footnote{We use
-  $\emptyset$ to denote the unwritten value.} or else an
+  $\bot$ to denote the unwritten value.} or else an
 application-specific binary blob that is immutable thereafter.
 
 The projection store is vital for the correct implementation of humming
@@ -422,6 +422,98 @@ Humming consensus requires that any projection be identified by both
 the epoch number and the projection checksum, as described in
 Section~\ref{sub:the-projection}.
 
+\section{Managing multiple projection stores}
+
+An independent replica management technique very similar to the style
+used by both Riak Core \cite{riak-core} and Dynamo is used to manage
+replicas of Machi's projection data structures.
+The major difference is that humming consensus
+{\em does not necessarily require}
+successful return status from a minimum number of participants (e.g.,
+a quorum).
+
+\subsection{Read repair: repair only unwritten values}
+
+The idea of ``read repair'' is also shared with Riak Core and Dynamo
+systems.  However, Machi has situations where read repair cannot truly
+``fix'' a key because two different values have been written by two
+different replicas.
+Machi's projection store is write-once, and there is no ``undo'' or
+``delete'' or ``overwrite'' in the projection store API.\footnote{It doesn't
+matter what caused the two different values.  In case of multiple
+values, all participants in humming consensus merely agree that there
+were multiple opinions at that epoch which must be resolved by the
+creation and writing of newer projections with later epoch numbers.}
+Machi's projection store read repair can only repair values that are
+unwritten, i.e., storing $\bot$.
+
+The value used to repair $\bot$ values is the ``best'' projection that
+is currently available for the current epoch $E$.  If there is a single,
+unanimous value $V_{u}$ for the projection at epoch $E$, then $V_{u}$
+is use to repair all projections stores at $E$ that contain $\bot$
+values.  If the value of $K$ is not unanimous, then the ``highest
+ranked value'' $V_{best}$ is used for the repair; see
+Section~\ref{sub:projection-ranking} for a summary of projection
+ranking.
+
+Read repair may complete successfully regardless of availability of any of the
+participants.  This applies to both phases, reading and writing.
+
+\subsection{Projection storage: writing}
+\label{sub:proj-store-writing}
+
+All projection data structures are stored in the write-once Projection
+Store that is run by each server.  (See also \cite{machi-design}.)
+
+Writing the projection follows the two-step sequence below.
+
+\begin{enumerate}
+\item Write $P_{new}$ to the local projection store.  (As a side
+  effect,
+  this will trigger
+  ``wedge'' status in the local server, which will then cascade to other
+  projection-related behavior within that server.)
+\item Write $P_{new}$ to the remote projection store of {\tt all\_members}.
+  Some members may be unavailable, but that is OK.
+\end{enumerate}
+
+In cases of {\tt error\_written} status,
+the process may be aborted and read repair
+triggered.  The most common reason for {\tt error\_written} status
+is that another actor in the system has
+already calculated another (perhaps different) projection using the
+same projection epoch number and that
+read repair is necessary.  Note that {\tt error\_written} may also
+indicate that another server has performed read repair on the exact
+projection $P_{new}$ that the local server is trying to write!
+
+The writing phase may complete successfully regardless of availability
+of any of the participants.
+
+\subsection{Reading from the projection store}
+\label{sub:proj-store-reading}
+
+Reading data from the projection store is similar in principle to
+reading from a Chain Replication-managed server system.  However, the
+projection store does not use the strict replica ordering that
+Chain Replication does.  For any projection store key $K_n$, the
+participating servers may have different values for $K_n$.  As a
+write-once store, it is impossible to mutate a replica of $K_n$.  If
+replicas of $K_n$ differ, then other parts of the system (projection
+calculation and storage) are responsible for reconciling the
+differences by writing a later key,
+$K_{n+x}$ when $x>0$, with a new projection.
+
+The reading phase may complete successfully regardless of availability
+of any of the participants.
+The minimum number of replicas is only one: the local projection store
+should always be available, even if no other remote replica projection
+stores are available.
+If all available servers return a single, unanimous value $V_u, V_u
+\ne \bot$, then $V_u$ is the final result.  Any non-unanimous value is
+considered disagreement and is resolved by writes to the projection
+store by the humming consensus algorithm.
+
 \section{Phases of projection change}
 \label{sec:phases-of-projection-change}
 
@@ -457,7 +549,7 @@ methods for determining status.  Instead, hard Boolean up/down status
 decisions are required by the projection calculation phase
 (Section~\ref{subsub:projection-calculation}).
 
-\subsection{Projection data structure calculation}
+\subsection{Calculating new projection data structures}
 \label{subsub:projection-calculation}
 
 Each Machi server will have an independent agent/process that is
@@ -474,134 +566,38 @@ Projection calculation will be a pure computation, based on input of:
 (Section~\ref{sub:network-monitoring}).
 \end{enumerate}
 
-All decisions about {\em when} to calculate a projection must be made
+Decisions about {\em when} to calculate a projection are made
 using additional runtime information.  Administrative change requests
 probably should happen immediately.  Change based on network status
 changes may require retry logic and delay/sleep time intervals.
 
-\subsection{Projection storage: writing}
+\subsection{Writing a new projection}
 \label{sub:proj-storage-writing}
 
-Individual replicas of the projections written to participating
-projection stores are not managed by Chain Replication --- if they
+The replicas of Machi projection data that are used by humming consensus
+are not managed by Chain Replication --- if they
 were, we would have a circular dependency!  See
 Section~\ref{sub:proj-store-writing} for the technique for writing
 projections to all participating servers' projection stores.
 
-\subsection{Adoption of new projections}
+\subsection{Adoption a new projection}
 
-The projection store's ``best value'' for the largest written epoch
-number at the time of the read is projection used by the server.
-If the read attempt for projection $P_p$
-also yields other non-best values, then the
-projection calculation subsystem is notified.  This notification
-may/may not trigger a calculation of a new projection $P_{p+1}$ which
-may eventually be stored and so
-resolve $P_p$'s replicas' ambiguity.
+A projection $P_{new}$ is used by a server only if:
 
-\section{Humming consensus's management of multiple projection store}
+\begin{itemize}
+\item The server can determine that the projection has been replicated
+  unanimously across all currently available servers.
+\item The change in state from the local server's current projection to new
+  projection, $P_{current} \rightarrow P_{new}$ will not cause data loss,
+  e.g., the Update Propagation Invariant and all other safety checks
+  required by chain repair in Section~\ref{sec:repair-entire-files}
+  are correct.
+\end{itemize}
 
-Individual replicas of the projections written to participating
-projection stores are not managed by Chain Replication.
-
-An independent replica management technique very similar to the style
-used by both Riak Core \cite{riak-core} and Dynamo is used.
-The major difference is
-that successful return status from (minimum) a quorum of participants
-{\em is not required}.
-
-\subsection{Read repair: repair only when unwritten}
-
-The idea of ``read repair'' is also shared with Riak Core and Dynamo
-systems.  However, there is a case read repair cannot truly ``fix'' a
-key because two different values have been written by two different
-replicas.
-
-Machi's projection store is write-once, and there is no ``undo'' or
-``delete'' or ``overwrite'' in the projection store API.  It doesn't
-matter what caused the two different values.  In case of multiple
-values, all participants in humming consensus merely agree that there
-were multiple opinions at that epoch which must be resolved by the
-creation and writing of newer projections with later epoch numbers.
-
-Machi's projection store read repair can only repair values that are
-unwritten, i.e., storing $\emptyset$.
-
-\subsection{Projection storage: writing}
-\label{sub:proj-store-writing}
-
-All projection data structures are stored in the write-once Projection
-Store that is run by each server.  (See also \cite{machi-design}.)
-
-Writing the projection follows the two-step sequence below.
-
-\begin{enumerate}
-\item Write $P_{new}$ to the local projection store.  (As a side
-  effect,
-  this will trigger
-  ``wedge'' status in the local server, which will then cascade to other
-  projection-related behavior within that server.)
-\item Write $P_{new}$ to the remote projection store of {\tt all\_members}.
-  Some members may be unavailable, but that is OK.
-\end{enumerate}
-
-In cases of {\tt error\_written} status,
-the process may be aborted and read repair
-triggered.  The most common reason for {\tt error\_written} status
-is that another actor in the system has
-already calculated another (perhaps different) projection using the
-same projection epoch number and that
-read repair is necessary.  Note that {\tt error\_written} may also
-indicate that another actor has performed read repair on the exact
-projection value that the local actor is trying to write!
-
-\section{Reading from the projection store}
-\label{sec:proj-store-reading}
-
-Reading data from the projection store is similar in principle to
-reading from a Chain Replication-managed server system.  However, the
-projection store does not use the strict replica ordering that
-Chain Replication does.  For any projection store key $K_n$, the
-participating servers may have different values for $K_n$.  As a
-write-once store, it is impossible to mutate a replica of $K_n$.  If
-replicas of $K_n$ differ, then other parts of the system (projection
-calculation and storage) are responsible for reconciling the
-differences by writing a later key,
-$K_{n+x}$ when $x>0$, with a new projection.
-
-Projection store reads are ``best effort''.  The projection used is chosen from
-all replica servers that are available at the time of the read.  The
-minimum number of replicas is only one: the local projection store
-should always be available, even if no other remote replica projection
-stores are available.
-
-For any key $K$, different projection stores $S_a$ and $S_b$ may store
-nothing (i.e., {\tt error\_unwritten} when queried) or store different
-values, $P_a \ne P_b$, despite having the same projection epoch
-number.  The following ranking rules are used to
-determine the ``best value'' of a projection, where highest rank of
-{\em any single projection} is considered the ``best value'':
-
-\begin{enumerate}
-\item An unwritten value is ranked at a value of $-1$.
-\item A value whose {\tt author\_server} is at the $I^{th}$ position
-  in the {\tt all\_members} list has a rank of $I$.
-\item A value whose {\tt dbg\_annotations} and/or other fields have
-  additional information may increase/decrease its rank, e.g.,
-  increase the rank by $10.25$.
-\end{enumerate}
-
-Rank rules \#2 and \#3 are intended to avoid worst-case ``thrashing''
-of different projection proposals.
-
-The concept of ``read repair'' of an unwritten key is the same as
-Chain Replication's.  If a read attempt for a key $K$ at some server
-$S$ results in {\tt error\_unwritten}, then all of the other stores in
-the {\tt \#projection.all\_members} list are consulted.  If there is a
-unanimous value $V_{u}$ elsewhere, then $V_{u}$ is use to repair all
-unwritten replicas.  If the value of $K$ is not unanimous, then the
-``best value'' $V_{best}$ is used for the repair.  If all respond with
-{\tt error\_unwritten}, repair is not required.
+Both of these steps are performed as part of humming consensus's
+normal operation.  It may be non-intuitive that the minimum number of
+available servers is only one, but ``one'' is the correct minimum
+number for humming consensus.
 
 \section{Humming Consensus}
 \label{sec:humming-consensus}
@@ -613,14 +609,12 @@ Sources for background information include:
 background on the use of humming during meetings of the IETF.
 
 \item ``On `Humming Consensus', an allegory'' \cite{humming-consensus-allegory},
-for an allegory in the style (?) of Leslie Lamport's original Paxos
+for an allegory in homage to the style of Leslie Lamport's original Paxos
 paper.
 \end{itemize}
 
 
-\subsection{Summary of humming consensus}
-
-"Humming consensus" describes
+Humming consensus describes
 consensus that is derived only from data that is visible/known at the current
 time.  This implies that a network partition may be in effect and that
 not all chain members are reachable.  The algorithm will calculate
@@ -657,6 +651,47 @@ newer \& later time epochs are defined by creating new projections
 with epochs numbered by $E+\delta$ (where $\delta > 0$).
 The distribution of the $E+\delta$ projections will bring all visible
 participants into the new epoch $E+delta$ and then into consensus.
+
+The remainder of this section follows the same patter as
+Section~\ref{sec:phases-of-projection-change}: network monitoring,
+calculating new projections, writing projections, then perhaps
+adopting the newest projection (which may or may not be the projection
+that we just wrote).
+
+\subsection{Network monitoring}
+
+\subsection{Calculating new projection data structures}
+
+\subsection{Projection storage: writing}
+
+\subsection{Adopting a of new projection, perhaps}
+
+TODO finish
+
+A new projection is adopted by a Machi server if two requirements are
+met:
+
+\subsubsection{All available copies of the projection are unanimous/identical}
+
+If we query all available servers for their latest projection, assume
+that $E$ is the largest epoch number found.  If we read public
+projections from all available servers, and if all are equal to some
+projection $P_E$, then projection $P_E$ is the best candidate for
+adoption by the local server.
+
+If we see a projection $P^2_E$ that has the same epoch $E$ but a
+different checksum value, then we must consider $P^2_E \ne P_E$.
+
+Any TODO FINISH
+
+The projection store's ``best value'' for the largest written epoch
+number at the time of the read is projection used by the server.
+If the read attempt for projection $P_p$
+also yields other non-best values, then the
+projection calculation subsystem is notified.  This notification
+may/may not trigger a calculation of a new projection $P_{p+1}$ which
+may eventually be stored and so
+resolve $P_p$'s replicas' ambiguity.
 
 \section{Just in case Humming Consensus doesn't work for us}
 
@@ -1302,6 +1337,33 @@ consistency requires.  If a value is read from the tail of the chain,
 then no other chain member can have a prior/older value because their
 respective mutations histories cannot be shorter than the tail
 member's history.
+
+\section{TODO: orphaned text}
+
+\subsection{1}
+
+For any key $K$, different projection stores $S_a$ and $S_b$ may store
+nothing (i.e., {\tt error\_unwritten} when queried) or store different
+values, $P_a \ne P_b$, despite having the same projection epoch
+number.  The following ranking rules are used to
+determine the ``best value'' of a projection, where highest rank of
+{\em any single projection} is considered the ``best value'':
+
+\begin{enumerate}
+\item An unwritten value is ranked at a value of $-1$.
+\item A value whose {\tt author\_server} is at the $I^{th}$ position
+  in the {\tt all\_members} list has a rank of $I$.
+\item A value whose {\tt dbg\_annotations} and/or other fields have
+  additional information may increase/decrease its rank, e.g.,
+  increase the rank by $10.25$.
+\end{enumerate}
+
+Rank rules \#2 and \#3 are intended to avoid worst-case ``thrashing''
+of different projection proposals.
+
+\subsection{ranking}
+\label{sub:projection-ranking}
+
 
 \bibliographystyle{abbrvnat}
 \begin{thebibliography}{}

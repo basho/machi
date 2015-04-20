@@ -36,8 +36,13 @@ the simulator.
 %% under the License.
 #+END_SRC
 
-  
-* 3. Diagram of the self-management algorithm
+
+* 3. Document restructuring  
+
+Much of the text previously appearing in this document has moved to the
+[[high-level-chain-manager.pdf][Machi chain manager high level design]] document.
+
+* 4. Diagram of the self-management algorithm
 ** Introduction
 Refer to the diagram
 [[https://github.com/basho/machi/blob/master/doc/chain-self-management-sketch.Diagram1.pdf][chain-self-management-sketch.Diagram1.pdf]],
@@ -252,7 +257,7 @@ use of quorum majority for UPI members is out of scope of this
 document.  Also out of scope is the use of "witness servers" to
 augment the quorum majority UPI scheme.)
 
-* 4. The Network Partition Simulator
+* 5. The Network Partition Simulator
 ** Overview
 The function machi_chain_manager1_test:convergence_demo_test()
 executes the following in a simulated network environment within a
