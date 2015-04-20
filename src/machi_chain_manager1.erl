@@ -139,10 +139,7 @@ init({MyName, MembersDict, MgrOpts}) ->
               {flapping_i, Opt(flapping, [])},
               {up_nodes, Opt(up_nodes, not_init_yet)}],
     ActiveP = Opt(active_mode, true),
-    Down_list = All_list -- [MyName],
-    UPI_list = [MyName],
-    NoneProj = machi_projection:new(MyName, MembersDict,
-                                    Down_list, UPI_list, [], []),
+    NoneProj = make_none_projection(MyName, All_list, MembersDict),
     Proxies = orddict:fold(
                 fun(K, P, Acc) ->
                         {ok, Pid} = ?FLU_PC:start_link(P),
@@ -220,10 +217,15 @@ code_change(_OldVsn, S, _Extra) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+make_none_projection(MyName, All_list, MembersDict) ->
+    Down_list = All_list,
+    UPI_list = [],
+    machi_projection:new(MyName, MembersDict, UPI_list, Down_list, [], []).
+
 set_active_timer(#ch_mgr{name=MyName, members_dict=MembersDict}=S) ->
     FLU_list = [P#p_srvr.name || {_,P} <- orddict:to_list(MembersDict)],
     USec = calc_sleep_ranked_order(1000, 2000, MyName, FLU_list),
-    {ok, TRef} = timer:send_interval(USec, yo_yo_yo),
+    {ok, TRef} = timer:send_interval(USec, yo_yo_yo_todo),
     S#ch_mgr{timer=TRef}.
 
 do_cl_write_public_proj(Proj, S) ->
@@ -516,6 +518,31 @@ rank_and_sort_projections(Ps, CurrentProj) ->
 %% Caller must ensure all Projs are of the same epoch number.
 %% If the caller gives us projections with different epochs, we assume
 %% that the caller is doing an OK thing.
+%%
+%% TODO: This implementation currently gives higher rank to the last
+%%       member of All_list, which is typically/always/TODO-CLARIFY
+%%       sorted.  That's fine, but there's a source of unnecessary
+%%       churn: during repair, we assume that the head of the chain is
+%%       the coordinator of the repair.  So any time that the head
+%%       makes a repair-related transition, that projection may get
+%%       quickly replaced by an identical projection that merely has
+%%       higher rank because it's authored by a higher-ranked member.
+%%       Worst case, for chain len=4:
+%%          E+0: author=a, upi=[a], repairing=[b,c,d]
+%%          E+1: author=b, upi=[a], repairing=[b,c,d] (**)
+%%          E+2: author=c, upi=[a], repairing=[b,c,d] (**)
+%%          E+3: author=d, upi=[a], repairing=[b,c,d] (**)
+%%          E+4: author=a, upi=[a,b], repairing=[c,d]
+%%          E+5: author=b, upi=[a,b], repairing=[c,d] (**)
+%%          E+6: author=c, upi=[a,b], repairing=[c,d] (**)
+%%          E+7: author=d, upi=[a,b], repairing=[c,d] (**)
+%%          E+... 6 more (**) epochs when c & d finish their respective repairs.
+%%       Ideally, the "(**)" epochs are avoidable churn.
+%%       Perhaps this means that we should change the responsibility
+%%       for repair management to the highest ranking member of the
+%%       UPI_list?
+%%       TODO Hrrrmmmmm ... what about the TODO comment in A40's A40a clause?
+%%       That could perhaps resolve this same problem in a better way?
 
 rank_projections(Projs, CurrentProj) ->
     #projection_v1{all_members=All_list} = CurrentProj,
@@ -530,8 +557,7 @@ rank_projection(#projection_v1{author_server=Author,
                                upi=UPI_list,
                                repairing=Repairing_list}, MemberRank, N) ->
     AuthorRank = orddict:fetch(Author, MemberRank),
-    %% (AuthorRank-AuthorRank) +                   % feels unstable????
-    AuthorRank +                                % feels stable
+    AuthorRank +
         (  N * length(Repairing_list)) +
         (N*N * length(UPI_list)).
 
@@ -580,6 +606,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                          flap_limit=FlapLimit} = S) ->
     ?REACT(a30),
     {P_newprop1, S2} = calc_projection(S, MyName),
+    ?REACT({a30, ?LINE, [{current, machi_projection:make_summary(S#ch_mgr.proj)}]}),
     ?REACT({a30, ?LINE, [{newprop1, machi_projection:make_summary(P_newprop1)}]}),
 
     %% Are we flapping yet?
@@ -587,7 +614,8 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
 
     %% Move the epoch number up ... originally done in C300.
     #projection_v1{epoch_number=Epoch_newprop2}=P_newprop2,
-    #projection_v1{epoch_number=Epoch_latest}=P_latest,
+    #projection_v1{epoch_number=Epoch_latest,
+                   author_server=Author_latest}=P_latest,
     NewEpoch = erlang:max(Epoch_newprop2, Epoch_latest) + 1,
     P_newprop3 = P_newprop2#projection_v1{epoch_number=NewEpoch},
     ?REACT({a30, ?LINE, [{newprop3, machi_projection:make_summary(P_newprop3)}]}),
@@ -595,7 +623,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
     {P_newprop10, S10} =
         case get_flap_count(P_newprop3) of
             {_, P_newprop3_flap_count} when P_newprop3_flap_count >= FlapLimit ->
-                AllHosed = get_all_hosed(S3),
+                AllHosed = get_all_hosed(P_newprop3),
                 {P_i, S_i} = calc_projection(S3, MyName, AllHosed),
                 P_inner = case lists:member(MyName, AllHosed) of
                               false ->
@@ -632,14 +660,17 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                                andalso
                                P_oldinner#projection_v1.down ==
                                P_inner#projection_v1.down ->
-                                    %% HRM, distrust?...
-                                    %% P_oldinner#projection_v1.epoch_number;
-                                    P_oldinner#projection_v1.epoch_number + 1;
+                                    P_oldinner#projection_v1.epoch_number;
                                true ->
                                     P_oldinner#projection_v1.epoch_number + 1
                             end
                     end,
 
+                %% TODO: When we implement the real chain repair function, we
+                %%       need to keep in mind that an inner projection with
+                %%       up nodes > 1, repair is required there!  In the
+                %%       current simulator, repair is not simulated and
+                %%       finished (and then growing the UPI list).  Fix.
                 P_inner2 = P_inner#projection_v1{epoch_number=FinalInnerEpoch},
                 InnerInfo = [{inner_summary, machi_projection:make_summary(P_inner2)},
                              {inner_projection, P_inner2}],
@@ -650,8 +681,106 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                 {P_newprop3, S3}
         end,
 
-    react_to_env_A40(Retries, P_newprop10, P_latest,
-                     LatestUnanimousP, S10).
+    %% Here's a more common reason for moving from inner projection to
+    %% a normal projection: the old proj has an inner but the newprop
+    %% does not.
+    MoveFromInnerToNorm_p =
+        case {inner_projection_exists(P_current),
+              inner_projection_exists(P_newprop10)} of
+            {true, false} -> true;
+            {_, _}        -> false
+        end,
+
+    %% If P_current says that we believe that we're currently flapping,
+    %% and if P_newprop10 says that we're no longer flapping, then we
+    %% really ought to stop flapping, right.
+    %%
+    %% Not quite so simple....
+    %%
+    %% AAAAH, right.  The case I'm dealing with right now is an asymmetric
+    %% partition in a 4 member chain that affects all_hosed=[a,b,c] but
+    %% member D is *NOT* noticing anything different in the current scheme:
+    %% {inner_projection_exists(current), inner_projection_exists(new)}
+    %% is {true, true}.
+    %% Yes, that hypothesis is confirmed by time-honored io:format() tracing.
+    %%
+    %% So, we need something to kick a silly member like 'd' out of its
+    %% rut of am-still-flapping.  So, let's try this:
+    %%   If we see a P_latest from author != MyName, and if P_latest's 
+    %%   author's flap count is now 0 (latest!), but that same member's
+    %%   flap count in P_current is non-zero, then we assume that author
+    %%   has moved out of flapping state and that therefore we ought to do
+    %%   the same.
+
+    %% Remember! P_current is this manager's private in-use projection.
+    %% It is always less than or equal to P_latest's epoch!
+    Current_flap_counts = get_all_flap_counts(P_current),
+    Latest_authors_flap_count_current = proplists:get_value(
+                                         Author_latest, Current_flap_counts),
+    Latest_flap_counts = get_all_flap_counts(P_latest),
+    Latest_authors_flap_count_latest = proplists:get_value(
+                                         Author_latest, Latest_flap_counts),
+    Kicker_p = case {Latest_authors_flap_count_current,
+                     Latest_authors_flap_count_latest} of
+                   {NotUndef, undefined} when NotUndef /= undefined ->
+                       true;
+                   {_, _} ->
+                       false
+               end,
+
+    if MoveFromInnerToNorm_p orelse Kicker_p ->
+            ClauseInfo = [{inner_kicker, Kicker_p},
+                          {move_from_inner, MoveFromInnerToNorm_p}],
+            ?REACT({a30, ?LINE, ClauseInfo}),
+            %% %% 2015-04-14: YEAH, this appears to work!
+            %% %% 1. Create a "safe" projection that is upi=[],repairing=[]
+            %% %% 2. Declare it to be best & latest by pure fiat.
+            %% %%    (The C100 transition will double-check that it's safe.)
+            %% %% 3. Jump to C100.  Then, for the next iteration,
+            %% %%    our P_current state to a smallest-possible-score
+            %% %%    state ... and let the chain reassemble itself from
+            %% %%    length zero.
+            %% #projection_v1{epoch_number=Epoch_newprop10, all_members=All_list,
+            %%                members_dict=MembersDict} = P_newprop10,
+            %% P_noneprop0 = make_none_projection(MyName, All_list, MembersDict),
+            %% P_noneprop1 = P_noneprop0#projection_v1{epoch_number=Epoch_newprop10},
+            %% %% Just to be clear, we clobber any flapping info by setting dbg.
+            %% P_noneprop = P_noneprop1#projection_v1{dbg=ClauseInfo},
+            %% react_to_env_C100(P_noneprop, P_latest, S);
+
+            %% 2015-04-14: Let's experiment with using the current inner
+            %% projection (or, if there really is no inner, just P_current).
+            %% This is safe because it's already P_current and by assumption,
+            %% anything that made it through the logical maze to get here
+            %% is safe.  So re-using it with a higher epoch number doesn't
+            %% make any significant change.
+            %%
+            %% Yeah, it appears to work, also, nice!  This can help save some
+            %% repair operations (compared to the other safe thing to do
+            %% here, which uses make_none_projection() to build & repair the
+            %% entire chain from scratch).  Note that this isn't a guarantee
+            %% that repair steps will be minimized: for a 4-member cluster
+            %% that has an asymmetric partition which organizes 3 clusters of
+            %% inner-upi=[a], inner-upi=[b], and inner-upi[c,d], there is no
+            %% guarantee (yet?) that the [c,d] chain will be the UPI basis
+            %% for repairs when the partition is healed: the quickest author
+            %% after the healing will make that choice for everyone.
+            %% TODO: Perhaps that quickest author should consult all of the
+            %% other private stores, check their inner, and if there is a
+            %% higher rank there, then goto C200 for a wait-and-see cycle?
+
+            P_inner2A = inner_projection_or_self(P_current),
+            P_inner2B =
+                P_inner2A#projection_v1{epoch_number=
+                                        P_newprop10#projection_v1.epoch_number,
+                                        dbg=ClauseInfo},
+            react_to_env_C100(P_inner2B, P_latest, S);
+
+       true ->
+            ?REACT({a30, ?LINE, []}),
+            react_to_env_A40(Retries, P_newprop10, P_latest,
+                             LatestUnanimousP, S10)
+    end.
 
 react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                  #ch_mgr{name=MyName, proj=P_current}=S) ->
@@ -710,7 +839,7 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
 
         %% A40a (see flowchart)
         Rank_newprop > Rank_latest ->
-            ?REACT({b10, ?LINE,
+            ?REACT({a40, ?LINE,
                     [{rank_latest, Rank_latest},
                      {rank_newprop, Rank_newprop},
                      {latest_author, P_latest#projection_v1.author_server}]}),
@@ -774,11 +903,6 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
 
 react_to_env_A50(P_latest, FinalProps, S) ->
     ?REACT(a50),
-
-    _HH = get(react),
-%    io:format(user, "HEE50s ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse([X || X <- _HH, is_atom(X)])]),
-    %% io:format(user, "HEE50 ~w ~w ~p\n", [S#ch_mgr.name, self(), lists:reverse(_HH)]),
-
     ?REACT({a50, ?LINE, [{latest_epoch, P_latest#projection_v1.epoch_number},
                          {final_props, FinalProps}]}),
     {{no_change, FinalProps, P_latest#projection_v1.epoch_number}, S}.
@@ -789,14 +913,44 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
     ?REACT(b10),
 
     {_P_newprop_flap_time, P_newprop_flap_count} = get_flap_count(P_newprop),
-    _LatestAllFlapCounts = get_all_flap_counts_counts(P_latest),
-    %% Transitive flap counts are buggy: the current method to observe
-    %% them is **buggy**.
-    %% P_latest_trans_flap_count = my_find_minmost(LatestAllFlapCounts),
+    UnanimousLatestInnerNotRelevant_p =
+        case inner_projection_exists(P_latest) of
+            true when P_latest#projection_v1.author_server /= MyName ->
+                #projection_v1{down=Down_inner} = inner_projection_or_self(
+                                                    P_latest),
+                case lists:member(MyName, Down_inner) of
+                    true ->
+                        %% Some foreign author's inner projection thinks that
+                        %% I'm down.  Silly!  We ought to ignore this one.
+                        ?REACT({b10, ?LINE, [{down_inner, Down_inner}]}),
+                        true;
+                    false ->
+                        ?REACT({b10, ?LINE, [{down_inner, Down_inner}]}),
+                        false
+                end;
+            _Else_u ->
+                false
+        end,
 
     if
+        LatestUnanimousP
+        andalso
+        UnanimousLatestInnerNotRelevant_p ->
+            ?REACT({b10, ?LINE, []}),
+            put(b10_hack, false),
+
+            %% Do not go to C100, because we want to ignore this latest
+            %% proposal.  Write ours instead via C300.
+            react_to_env_C300(P_newprop, P_latest, S);
+
         LatestUnanimousP ->
-            ?REACT({b10, ?LINE, [{latest_unanimous_p, LatestUnanimousP}]}),
+            ?REACT({b10, ?LINE,
+                    [{latest_unanimous_p, LatestUnanimousP},
+                     {latest_epoch,P_latest#projection_v1.epoch_number},
+                     {latest_author,P_latest#projection_v1.author_server},
+                     {newprop_epoch,P_newprop#projection_v1.epoch_number},
+                     {newprop_author,P_newprop#projection_v1.author_server}
+                    ]}),
             put(b10_hack, false),
 
             react_to_env_C100(P_newprop, P_latest, S);
@@ -805,25 +959,11 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
             %% I am flapping ... what else do I do?
             ?REACT({b10, ?LINE, [i_am_flapping,
                                  {newprop_flap_count, P_newprop_flap_count},
-                                 %% {latest_trans_flap_count, P_latest_trans_flap_count},
                                  {flap_limit, FlapLimit}]}),
             _B10Hack = get(b10_hack),
-            %% if _B10Hack == false andalso P_newprop_flap_count - FlapLimit - 3 =< 0 -> io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_flap_count]), put(b10_hack, true); true -> ok end,
             io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_flap_count]),
 
-%io:format(user, "FLAP: ~w flapz ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse([X || X <- get(react), is_atom(X)])]),
-
             if
-                %% So, if we noticed a flap count by some FLU X with a
-                %% count below FlapLimit, then X crashes so that X's
-                %% flap count remains below FlapLimit, then we could get
-                %% stuck forever?  Hrm, except that 'crashes' ought to be
-                %% detected by our own failure detector and get us out of
-                %% this current flapping situation, right? TODO
-                %%
-                %% 2015-04-10: TODO Flap count detection, as it has
-                %% been attempted before now, is buggy.
-                %%
                 %% MEANWHILE, we have learned some things about this
                 %% algorithm in the past few months.  With the introduction
                 %% of the "inner projection" concept, we know that the inner
@@ -839,7 +979,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                 %% doesn't give an accurate sense of global flapping state.
                 %% FlapLimit is enough to be able to tell us to slow down.
 
-                true -> %% P_latest_trans_flap_count >= FlapLimit ->
+                true ->
                     %% We already know that I'm flapping.  We need to
                     %% signal to the rest of the world that I'm writing
                     %% and flapping and churning, so we cannot always
@@ -857,7 +997,6 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                                            end,
                             FinalProps = [{my_flap_limit, FlapLimit},
                                           {throttle_seconds, ThrottleTime}],
-io:format(user, "<--x=~w-.--~w-~w-~w->", [X, MyName, P_newprop_flap_count,FlapLimit]),
                             react_to_env_A50(P_latest, FinalProps, S2);
                        true ->
                             %% It is our moral imperative to write so that
@@ -865,7 +1004,6 @@ io:format(user, "<--x=~w-.--~w-~w-~w->", [X, MyName, P_newprop_flap_count,FlapLi
                             %% everyone notices then eventually falls into
                             %% consensus.
                             ?REACT({b10, ?LINE, [flap_continue]}),
-io:format(user, "<--x=~w-oooo-~w-~w-~w->", [X, MyName, P_newprop_flap_count,FlapLimit]),
                             react_to_env_C300(P_newprop, P_latest, S2)
                     end
             end;
@@ -887,13 +1025,16 @@ io:format(user, "<--x=~w-oooo-~w-~w-~w->", [X, MyName, P_newprop_flap_count,Flap
                      {latest_author, P_latest#projection_v1.author_server}]}),
             put(b10_hack, false),
 
-            %% Give the author of P_latest an opportunite to write a
+            %% TODO: Is a UnanimousLatestInnerNotRelevant_p test needed in this clause???
+
+            %% Give the author of P_latest an opportunity to write a
             %% new projection in a new epoch to resolve this mixed
             %% opinion.
             react_to_env_C200(Retries, P_latest, S);
 
         true ->
             ?REACT({b10, ?LINE}),
+            ?REACT({b10, ?LINE, [{retries,Retries},{rank_latest, Rank_latest},                     {rank_newprop, Rank_newprop},                     {latest_author, P_latest#projection_v1.author_server}]}), % TODO debug delete me!
             put(b10_hack, false),
 
             %% P_newprop is best, so let's write it.
@@ -903,21 +1044,6 @@ io:format(user, "<--x=~w-oooo-~w-~w-~w->", [X, MyName, P_newprop_flap_count,Flap
 react_to_env_C100(P_newprop, P_latest,
                   #ch_mgr{name=MyName, proj=P_current}=S) ->
     ?REACT(c100),
-
-    %% TODO 2015-04-10
-    %% OK, well, we need to be checking sanity on inner projections here,
-    %% but how to do it is still a bit of a mystery.
-    %%
-    %% If the *Y bindings are identical to incoming args, then we aren't
-    %% checking at all.  That's bad, but we don't go into Infinite Loops of
-    %% ReallyReallyBad.
-
-    P_newpropY = P_newprop,
-    P_latestY = P_latest,
-    P_currentY = P_current,
-    %% P_newpropY = inner_projection_or_self(P_newprop),
-    %% P_latestY = inner_projection_or_self(P_latest),
-    %% P_currentY = inner_projection_or_self(P_current),
 
     I_am_UPI_in_newprop_p = lists:member(MyName, P_newprop#projection_v1.upi),
     I_am_Repairing_in_latest_p = lists:member(MyName,
@@ -931,13 +1057,6 @@ react_to_env_C100(P_newprop, P_latest,
 
     Current_sane_p = projection_transition_is_sane(P_current, P_latest,
                                                    MyName),
-    Inner_sane_p =
-        if P_currentY == P_current, P_latestY == P_latest ->
-                true;
-           true ->
-                projection_transition_is_sane(P_currentY, P_latestY, MyName)
-        end,
-
     case {ShortCircuit_p, Current_sane_p} of
         _ when P_current#projection_v1.epoch_number == 0 ->
             %% Epoch == 0 is reserved for first-time, just booting conditions.
@@ -949,43 +1068,24 @@ react_to_env_C100(P_newprop, P_latest,
             %% am/should be repairing.  We ignore our proposal and try
             %% to go with the latest.
             ?REACT({c100, ?LINE, [repairing_short_circuit]}),
-            if Inner_sane_p == false -> io:format(user, "QQQ line ~p false\n", [?LINE]), timer:sleep(500); true -> ok end,
             react_to_env_C110(P_latest, S);
-        {_, true} when Inner_sane_p ->
+        {_, true} ->
             ?REACT({c100, ?LINE, [sane]}),
-            if Inner_sane_p == false -> io:format(user, "QQQ line ~p false\n", [?LINE]), timer:sleep(500); true -> ok end,
             react_to_env_C110(P_latest, S);
         {_, _AnyOtherReturnValue} ->
-            %% P_latest is not sane or else P_latestY is not sane.
+            %% P_latest is not sane.
             %% By process of elimination, P_newprop is best,
             %% so let's write it.
-io:format(user, "\nUrp: ~p ~p ~p ~p\n", [MyName, ShortCircuit_p, _AnyOtherReturnValue, Inner_sane_p]),
-io:format(user, "c100 P_newprop : ~w\n", [machi_projection:make_summary(P_newprop)]),
-io:format(user, "c100 P_newpropY: ~w\n", [machi_projection:make_summary(P_newpropY)]),
-io:format(user, "c100 P_latest : ~w\n", [machi_projection:make_summary(P_latest)]),
-io:format(user, "c100 P_latestY: ~w\n", [machi_projection:make_summary(P_latestY)]),
             ?REACT({c100, ?LINE, [not_sane]}),
             react_to_env_C300(P_newprop, P_latest, S)
     end.
 
 react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     ?REACT(c110),
-    %% TOOD: Should we carry along any extra info that that would be useful
-    %%       in the dbg2 list?
     Extra_todo = [],
-    RunEnv = S#ch_mgr.runenv,
-    Islands = proplists:get_value(network_islands, RunEnv),
-    P_latest2 = machi_projection:update_dbg2(
-                  P_latest,
-                  [%% {network_islands, Islands},
-                   %% {hooray, {v2, date(), time()}}
-                   Islands--Islands
-                   |Extra_todo]),
+    P_latest2 = machi_projection:update_dbg2(P_latest, Extra_todo),
 
     MyNamePid = proxy_pid(MyName, S),
-    %% TODO: We need to fetch the inner projection, if it exists, and
-    %%       write it to the private store.  Put the outer projection
-    %%       into dbg2 for forensics and perhaps re-start use?
     ok = ?FLU_PC:write_projection(MyNamePid, private, P_latest2, ?TO),
     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
         true ->
@@ -994,16 +1094,15 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
             {HH,MM,SS} = time(),
             case inner_projection_exists(P_latest2) of
                 false ->
-                    ok;
+                    io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses plain: ~w\n",
+                              [HH,MM,SS,MSec, S#ch_mgr.name,
+                               machi_projection:make_summary(P_latest2)]);
                 true ->
                     P_inner = inner_projection_or_self(P_latest2),
-                    io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses INNER: ~w\n",
+                    io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w\n",
                               [HH,MM,SS,MSec, S#ch_mgr.name,
                                machi_projection:make_summary(P_inner)])
-            end,
-            io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses: ~w\n",
-                      [HH,MM,SS,MSec, S#ch_mgr.name,
-                       machi_projection:make_summary(P_latest2)]);
+            end;
         _ ->
             ok
     end,
@@ -1023,10 +1122,8 @@ react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H} = S) ->
              _ ->
                  H2
          end,
-
-    HH = get(react),
-    io:format(user, "HEE120s ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse([X || X <- HH, is_atom(X)])]),
-    %% io:format(user, "HEE120 ~w ~w ~p\n", [S#ch_mgr.name, self(), lists:reverse(HH)]),
+    %% HH = [if is_atom(X) -> X; is_tuple(X) -> {element(1,X), element(2,X)} end || X <- get(react), is_atom(X) orelse size(X) == 3],
+    %% io:format(user, "HEE120 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(HH)]),
 
     ?REACT({c120, [{latest, machi_projection:make_summary(P_latest)}]}),
     {{now_using, FinalProps, P_latest#projection_v1.epoch_number},
@@ -1075,7 +1172,7 @@ react_to_env_C310(P_newprop, S) ->
             {write_result, WriteRes}]}),
     react_to_env_A10(S2).
 
-calculate_flaps(P_newprop, _P_current, FlapLimit,
+calculate_flaps(P_newprop, _P_current, _FlapLimit,
                 #ch_mgr{name=MyName, proj_history=H, flap_start=FlapStart,
                         flaps=Flaps, runenv=RunEnv0} = S) ->
     RunEnv1 = replace(RunEnv0, [{flapping_i, []}]),
@@ -1175,34 +1272,26 @@ calculate_flaps(P_newprop, _P_current, FlapLimit,
             AllHosed = []
     end,
 
-    %% If there's at least one count in AllFlapCounts that isn't my
-    %% flap count, and if it's over the flap limit, then consider them
-    %% settled.
-    AllFlapCountsSettled = lists:keydelete(MyName, 1, AllFlapCounts) /= []
-                           andalso
-                           my_find_minmost(AllFlapCounts) >= FlapLimit,
     FlappingI = {flapping_i, [{flap_count, {NewFlapStart, NewFlaps}},
                               {all_hosed, AllHosed},
                               {all_flap_counts, lists:sort(AllFlapCounts)},
-                              {all_flap_counts_settled, AllFlapCountsSettled},
-                              {bad,BadFLUs},
-                              {da_downu, DownUnion}, % debugging aid
-                              {da_hosedtu, HosedTransUnion}, % debugging aid
-                              {da_downreports, [{P#projection_v1.epoch_number, P#projection_v1.author_server, P#projection_v1.down} || P <- [BestP|NotBestPs]]} % debugging aid
-                             ]},
+                              {bad,BadFLUs}]},
     Dbg2 = [FlappingI|P_newprop#projection_v1.dbg],
-    %% SLF TODO: 2015-03-04: I'm growing increasingly suspicious of
+    %% TODO: 2015-03-04: I'm growing increasingly suspicious of
     %% the 'runenv' variable that's threaded through all this code.
-    %% It isn't doing what I'd originally intended.  And I think that
-    %% the flapping information that we've just constructed here is
-    %% going to get lost, and that's a shame.  Fix it.
+    %% It isn't doing what I'd originally intended.  Fix it.
     RunEnv2 = replace(RunEnv1, [FlappingI]),
-    %% NOTE: If we'd increment of flaps here, that doesn't mean that
-    %%       someone's public proj store has been updated.  For example,
+    %% NOTE: Just because we increment flaps here, there's no correlation
+    %%       to successful public proj store writes!  For example,
     %%       if we loop through states C2xx a few times, we would incr
     %%       flaps each time ... but the C2xx path doesn't write a new
-    %%       proposal to everyone's public proj stores, and there's no
-    %%       guarantee that anyone else as written a new public proj either.
+    %%       proposal to everyone's public proj stores.  Similarly,
+    %%       if we go through to C300, we will *try* to write to all public
+    %%       stores, but the C3xx path doesn't care if all of those write
+    %%       attempts *fail*.  Our flap count is a rough heuristic only, and
+    %%       a large local flaps count gives no concrete guarantee that any
+    %%       communication has been successful with any other part of the
+    %%       cluster.
     {machi_projection:update_checksum(P_newprop#projection_v1{dbg=Dbg2}),
      S#ch_mgr{flaps=NewFlaps, flap_start=NewFlapStart, runenv=RunEnv2}}.
 
@@ -1271,7 +1360,7 @@ projection_transition_is_sane(
     true = is_binary(CSum1) andalso is_binary(CSum2),
     {_,_,_} = CreationTime1,
     {_,_,_} = CreationTime2,
-    true = is_atom(AuthorServer1) andalso is_atom(AuthorServer2), % todo will probably change
+    true = is_atom(AuthorServer1) andalso is_atom(AuthorServer2), % todo type may change?
     true = is_list(All_list1) andalso is_list(All_list2),
     true = is_list(Down_list1) andalso is_list(Down_list2),
     true = is_list(UPI_list1) andalso is_list(UPI_list2),
@@ -1298,13 +1387,6 @@ projection_transition_is_sane(
     true = sets:is_disjoint(DownS2, UPIS2),
     true = sets:is_disjoint(DownS2, RepairingS2),
     true = sets:is_disjoint(UPIS2, RepairingS2),
-
-    %% The author must not be down.
-    false = lists:member(AuthorServer1, Down_list1),
-    false = lists:member(AuthorServer2, Down_list2),
-    %% The author must be in either the UPI or repairing list.
-    true = lists:member(AuthorServer1, UPI_list1 ++ Repairing_list1),
-    true = lists:member(AuthorServer2, UPI_list2 ++ Repairing_list2),
 
     %% Additions to the UPI chain may only be at the tail
     UPI_common_prefix = find_common_prefix(UPI_list1, UPI_list2),
@@ -1427,10 +1509,7 @@ projection_transition_is_sane(
                             %% then adopts that projection (and unwedges
                             %% itself, etc etc).
 
-                            %% io:format(user, "QQQ: RetrospectiveP ~p\n", [RetrospectiveP]),
-                            %% io:format(user, "QQQ: UPI_2_suffix ~p\n", [UPI_2_suffix]),
-                            %% io:format(user, "QQQ: UPI_2_suffix_from_UPI1 ~p\n", [UPI_2_suffix_from_UPI1]),
-                            %% io:format(user, "QQQ: UPI_2_suffix_from_Repairing1 ~p\n", [UPI_2_suffix_from_Repairing1]),
+                            exit({todo, revisit, ?MODULE, ?LINE}),
                             io:format(user, "|~p,~p TODO revisit|",
                                       [?MODULE, ?LINE]),
                             ok;
@@ -1440,9 +1519,11 @@ projection_transition_is_sane(
                             %% normal has a UPI that has nothing to do with
                             %% RelativeToServer a.k.a. me.
                             %% from:
-                            %% {epoch,847},{author,c},{upi,[c]},{repair,[]},{down,[a,b,d]},
+                            %% {epoch,847},{author,c},{upi,[c]},{repair,[]},
+                            %%                                   {down,[a,b,d]}
                             %% to:
-                            %% {epoch,848},{author,a},{upi,[a]},{repair,[]},{down,[b,c,d]},
+                            %% {epoch,848},{author,a},{upi,[a]},{repair,[]},
+                            %%                                   {down,[b,c,d]}
                             if UPI_2_suffix == [AuthorServer2] ->
                                     true;
                                not RetrospectiveP ->
@@ -1457,12 +1538,6 @@ projection_transition_is_sane(
          S1 = machi_projection:make_summary(P1),
          S2 = machi_projection:make_summary(P2),
          Trace = erlang:get_stacktrace(),
-         %% %% TODO: this history goop is useful sometimes for debugging but
-         %% %% not for any "real" use.  Get rid of it, for the long term.
-         %% H = (catch [{FLUName, Type, P#projection_v1.epoch_number, machi_projection:make_summary(P)} ||
-         %%         FLUName <- P1#projection_v1.all_members,
-         %%         Type <- [public,private],
-         %%         P <- ?FLU_PC:proj_get_all(orddict:fetch(FLUName, What?), Type)]),
          {err, _Type, _Err, from, S1, to, S2, relative_to, RelativeToServer,
           history, (catch lists:sort([no_history])),
           stack, Trace}
@@ -1501,7 +1576,7 @@ get_raw_flapping_i(#projection_v1{dbg=Dbg}) ->
     proplists:get_value(flapping_i, Dbg, []).
 
 get_flap_count(P) ->
-    proplists:get_value(flap_count, get_raw_flapping_i(P), 0).
+    proplists:get_value(flap_count, get_raw_flapping_i(P), {0,0}).
 
 get_all_flap_counts(P) ->
     proplists:get_value(all_flap_counts, get_raw_flapping_i(P), []).
@@ -1515,11 +1590,7 @@ get_all_flap_counts_counts(P) ->
     end.
 
 get_all_hosed(P) when is_record(P, projection_v1)->
-    proplists:get_value(all_hosed, get_raw_flapping_i(P), []);
-get_all_hosed(S) when is_record(S, ch_mgr) ->
-    proplists:get_value(all_hosed,
-                        proplists:get_value(flapping_i, S#ch_mgr.runenv, []),
-                        []).
+    proplists:get_value(all_hosed, get_raw_flapping_i(P), []).
 
 merge_flap_counts(FlapCounts) ->
     merge_flap_counts(FlapCounts, orddict:new()).
@@ -1529,7 +1600,7 @@ merge_flap_counts([], D) ->
 merge_flap_counts([FlapCount|Rest], D1) ->
     %% We know that FlapCount is list({Actor, {{_epk,FlapStartTime},NumFlaps}}).
     D2 = orddict:from_list(FlapCount),
-     D2 = orddict:from_list(FlapCount),
+    D2 = orddict:from_list(FlapCount),
     %% If the FlapStartTimes are identical, then pick the bigger flap count.
     %% If the FlapStartTimes differ, then pick the larger start time tuple.
     D3 = orddict:merge(fun(_Key, {{_,T1}, NF1}= V1, {{_,T2}, NF2}=V2)
