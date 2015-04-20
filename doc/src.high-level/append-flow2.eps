@@ -105,11 +105,11 @@ newpath 467 -76 moveto 467 -103 lineto stroke
 newpath 552 -76 moveto 552 -103 lineto stroke
 newpath 42 -89 moveto 382 -89 lineto stroke
 newpath 382 -89 moveto 372 -95 lineto stroke
-(write prefix="foo" <<...123...>> epoch=12) dup stringwidth
+(append prefix="foo" <<123 bytes...>> epoch=12) dup stringwidth
 1.000000 1.000000 1.000000 setrgbcolor
-pop dup newpath 104 -87 moveto 0 rlineto 0 11 rlineto neg 0 rlineto closepath fill
+pop dup newpath 85 -87 moveto 0 rlineto 0 11 rlineto neg 0 rlineto closepath fill
 0.000000 0.000000 0.000000 setrgbcolor
-104 -87 moveto show
+85 -87 moveto show
 newpath 42 -103 moveto 42 -130 lineto stroke
 newpath 127 -103 moveto 127 -130 lineto stroke
 newpath 212 -103 moveto 212 -130 lineto stroke
@@ -163,11 +163,11 @@ newpath 467 -184 moveto 467 -211 lineto stroke
 newpath 552 -184 moveto 552 -211 lineto stroke
 newpath 42 -197 moveto 382 -197 lineto stroke
 newpath 382 -197 moveto 372 -203 lineto stroke
-(write prefix="foo" <<...123...>> epoch=13) dup stringwidth
+(append prefix="foo" <<123 bytes...>> epoch=13) dup stringwidth
 1.000000 1.000000 1.000000 setrgbcolor
-pop dup newpath 104 -195 moveto 0 rlineto 0 11 rlineto neg 0 rlineto closepath fill
+pop dup newpath 85 -195 moveto 0 rlineto 0 11 rlineto neg 0 rlineto closepath fill
 0.000000 0.000000 0.000000 setrgbcolor
-104 -195 moveto show
+85 -195 moveto show
 newpath 42 -211 moveto 42 -238 lineto stroke
 newpath 127 -211 moveto 127 -238 lineto stroke
 newpath 212 -211 moveto 212 -238 lineto stroke
@@ -224,17 +224,13 @@ newpath 297 -292 moveto 297 -319 lineto stroke
 newpath 382 -292 moveto 382 -319 lineto stroke
 newpath 467 -292 moveto 467 -319 lineto stroke
 newpath 552 -292 moveto 552 -319 lineto stroke
-(FLU_A writes to local storage @ "foo.seq_a.009" offset=447) dup stringwidth
+newpath 382 -305 85 13 270 90 ellipse stroke
+newpath 382 -311 moveto 392 -317 lineto stroke
+(write "foo.seq_a.009" offset=447 <<123 bytes...>> epoch=13) dup stringwidth
 1.000000 1.000000 1.000000 setrgbcolor
-pop dup newpath 138 -308 moveto 0 rlineto 0 11 rlineto neg 0 rlineto closepath fill
+pop dup newpath 58 -303 moveto 0 rlineto 0 11 rlineto neg 0 rlineto closepath fill
 0.000000 0.000000 0.000000 setrgbcolor
-138 -308 moveto show
-[2] 0 setdash
-newpath 21 -305 moveto 136 -305 lineto stroke
-[] 0 setdash
-[2] 0 setdash
-newpath 459 -305 moveto 574 -305 lineto stroke
-[] 0 setdash
+58 -303 moveto show
 newpath 42 -319 moveto 42 -346 lineto stroke
 newpath 127 -319 moveto 127 -346 lineto stroke
 newpath 212 -319 moveto 212 -346 lineto stroke
@@ -244,11 +240,11 @@ newpath 467 -319 moveto 467 -346 lineto stroke
 newpath 552 -319 moveto 552 -346 lineto stroke
 newpath 382 -332 moveto 467 -332 lineto stroke
 newpath 467 -332 moveto 457 -338 lineto stroke
-(write "foo.seq_a.009" offset=447 <<...123...>> epoch=13) dup stringwidth
+(write "foo.seq_a.009" offset=447 <<123 bytes...>> epoch=13) dup stringwidth
 1.000000 1.000000 1.000000 setrgbcolor
-pop dup newpath 275 -330 moveto 0 rlineto 0 11 rlineto neg 0 rlineto closepath fill
+pop dup newpath 264 -330 moveto 0 rlineto 0 11 rlineto neg 0 rlineto closepath fill
 0.000000 0.000000 0.000000 setrgbcolor
-275 -330 moveto show
+264 -330 moveto show
 newpath 42 -346 moveto 42 -373 lineto stroke
 newpath 127 -346 moveto 127 -373 lineto stroke
 newpath 212 -346 moveto 212 -373 lineto stroke
@@ -258,11 +254,11 @@ newpath 467 -346 moveto 467 -373 lineto stroke
 newpath 552 -346 moveto 552 -373 lineto stroke
 newpath 467 -359 moveto 552 -359 lineto stroke
 newpath 552 -359 moveto 542 -365 lineto stroke
-(write "foo.seq_a.009" offset=447 <<...123...>> epoch=13) dup stringwidth
+(write "foo.seq_a.009" offset=447 <<123 bytes...>> epoch=13) dup stringwidth
 1.000000 1.000000 1.000000 setrgbcolor
-pop dup newpath 295 -357 moveto 0 rlineto 0 11 rlineto neg 0 rlineto closepath fill
+pop dup newpath 273 -357 moveto 0 rlineto 0 11 rlineto neg 0 rlineto closepath fill
 0.000000 0.000000 0.000000 setrgbcolor
-295 -357 moveto show
+273 -357 moveto show
 newpath 42 -373 moveto 42 -400 lineto stroke
 newpath 127 -373 moveto 127 -400 lineto stroke
 newpath 212 -373 moveto 212 -400 lineto stroke
@@ -302,16 +298,16 @@ newpath 297 -427 moveto 297 -454 lineto stroke
 newpath 382 -427 moveto 382 -454 lineto stroke
 newpath 467 -427 moveto 467 -454 lineto stroke
 newpath 552 -427 moveto 552 -454 lineto stroke
-(If, instead, FLU_C has an error...) dup stringwidth
+(If, in an alternate scenario, FLU_C has an error...) dup stringwidth
 1.000000 1.000000 1.000000 setrgbcolor
-pop dup newpath 210 -443 moveto 0 rlineto 0 11 rlineto neg 0 rlineto closepath fill
+pop dup newpath 167 -443 moveto 0 rlineto 0 11 rlineto neg 0 rlineto closepath fill
 0.000000 0.000000 0.000000 setrgbcolor
-210 -443 moveto show
+167 -443 moveto show
 [2] 0 setdash
-newpath 21 -440 moveto 208 -440 lineto stroke
+newpath 21 -440 moveto 165 -440 lineto stroke
 [] 0 setdash
 [2] 0 setdash
-newpath 386 -440 moveto 574 -440 lineto stroke
+newpath 429 -440 moveto 574 -440 lineto stroke
 [] 0 setdash
 newpath 42 -454 moveto 42 -481 lineto stroke
 newpath 127 -454 moveto 127 -481 lineto stroke
@@ -336,14 +332,14 @@ newpath 297 -481 moveto 297 -508 lineto stroke
 newpath 382 -481 moveto 382 -508 lineto stroke
 newpath 467 -481 moveto 467 -508 lineto stroke
 newpath 552 -481 moveto 552 -508 lineto stroke
-(Repair is now the client's responsibility \("slow path"\).) dup stringwidth
+(... then repair becomes the client's responsibility \("slow path"\).) dup stringwidth
 1.000000 1.000000 1.000000 setrgbcolor
-pop dup newpath 158 -497 moveto 0 rlineto 0 11 rlineto neg 0 rlineto closepath fill
+pop dup newpath 133 -497 moveto 0 rlineto 0 11 rlineto neg 0 rlineto closepath fill
 0.000000 0.000000 0.000000 setrgbcolor
-158 -497 moveto show
+133 -497 moveto show
 [2] 0 setdash
-newpath 21 -494 moveto 156 -494 lineto stroke
+newpath 21 -494 moveto 131 -494 lineto stroke
 [] 0 setdash
 [2] 0 setdash
-newpath 439 -494 moveto 574 -494 lineto stroke
+newpath 464 -494 moveto 574 -494 lineto stroke
 [] 0 setdash
