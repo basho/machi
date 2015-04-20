@@ -267,7 +267,7 @@ This traditional definition differs from what is described here as
 consensus that is derived only from data that is visible/known at the current
 time.
 The algorithm will calculate
-an approximate consensus despite not having input from all/majority
+a rough consensus despite not having input from all/majority
 of chain members.  Humming consensus may proceed to make a
 decision based on data from only a single participant, i.e., only the local
 node.
@@ -563,13 +563,14 @@ machine/hardware node.
 
 Output of the monitor should declare the up/down (or
 available/unavailable) status of each server in the projection.  Such
-Boolean status does not eliminate ``fuzzy logic'' or probabilistic
-methods for determining status.  Instead, hard Boolean up/down status
-decisions are required by the projection calculation phase
-(Section~\ref{subsub:projection-calculation}).
+Boolean status does not eliminate fuzzy logic, probabilistic
+methods, or other techniques for determining availability status.
+Instead, hard Boolean up/down status
+decisions are required only by the projection calculation phase
+(Section~\ref{sub:projection-calculation}).
 
-\subsection{Calculating new projection data structures}
-\label{subsub:projection-calculation}
+\subsection{Calculating a new projection data structure}
+\label{sub:projection-calculation}
 
 Each Machi server will have an independent agent/process that is
 responsible for calculating new projections.  A new projection may be
@@ -600,6 +601,7 @@ Section~\ref{sub:proj-store-writing} for the technique for writing
 projections to all participating servers' projection stores.
 
 \subsection{Adoption a new projection}
+\label{sub:proj-adoption}
 
 A projection $P_{new}$ is used by a server only if:
 
@@ -621,22 +623,10 @@ available servers is only one, but ``one'' is the correct minimum
 \section{Humming Consensus}
 \label{sec:humming-consensus}
 
-Additional sources for information humming consensus include:
-
-\begin{itemize}
-\item ``On Consensus and Humming in the IETF'' \cite{rfc-7282}, for
-background on the use of humming by IETF meeting participants during
-IETF meetings.
-
-\item ``On `Humming Consensus', an allegory'' \cite{humming-consensus-allegory},
-for an allegory in homage to the style of Leslie Lamport's original Paxos
-paper.
-\end{itemize}
-
 Humming consensus describes consensus that is derived only from data
 that is visible/known at the current time.  It's OK if a network
 partition is in effect and that not all chain members are available;
-the algorithm will calculate an approximate consensus despite not
+the algorithm will calculate a rough consensus despite not
 having input from all/majority of chain members.  Humming consensus
 may proceed to make a decision based on data from only one
 participant, i.e., only the local node.
@@ -668,7 +658,7 @@ decision during epoch $E$.  When a differing decision is discovered,
 newer \& later time epochs are defined by creating new projections
 with epochs numbered by $E+\delta$ (where $\delta > 0$).
 The distribution of the $E+\delta$ projections will bring all visible
-participants into the new epoch $E+delta$ and then into consensus.
+participants into the new epoch $E+delta$ and then eventually into consensus.
 
 The next portion of this section follows the same pattern as
 Section~\ref{sec:phases-of-projection-change}: network monitoring,
@@ -676,9 +666,21 @@ calculating new projections, writing projections, then perhaps
 adopting the newest projection (which may or may not be the projection
 that we just wrote).
 Beginning with Section~9.5\footnote{TODO correction needed?}, we will
-explore TODO topics.
+explore TODO TOPICS.
 
-\subsubsection{Aside: origin of the analogy to humming a song}
+Additional sources for information humming consensus include:
+
+\begin{itemize}
+\item ``On Consensus and Humming in the IETF'' \cite{rfc-7282}, for
+background on the use of humming by IETF meeting participants during
+IETF meetings.
+
+\item ``On `Humming Consensus', an allegory'' \cite{humming-consensus-allegory},
+for an allegory in homage to the style of Leslie Lamport's original Paxos
+paper.
+\end{itemize}
+
+\subsubsection{Aside: origin of the analogy to composing music}
 
 The ``humming'' part of humming consensus comes from the action taken
 when the environment changes.  If we imagine an egalitarian group of
@@ -697,48 +699,64 @@ new pitch with a new epoch number.\footnote{It's very difficult for
 
 If someone were to transcribe onto a musical score the pitches that
 are hummed in the room over a period of time, we might have something
-that approximates music.  If this musical core uses chord progressions
+that is roughly like music.  If this musical score uses chord progressions
 and rhythms that obey the rules of a musical genre, e.g., Gregorian
 chant, then the final musical score is a valid Gregorian chant.
 
 By analogy, if the rules of the musical score are obeyed, then the
 Chain Replication invariants that are managed by humming consensus are
-obeyed.  Such safe management of Chain Replication is our end goal.
+obeyed.  Such safe management of Chain Replication metadata is our end goal.
 
 \subsection{Network monitoring}
 
-\subsection{Calculating new projection data structures}
+See also: Section~\ref{sub:network-monitoring}.
 
-\subsection{Projection storage: writing}
+\subsection{Calculating a new projection data structure}
 
-\subsection{Adopting a of new projection, perhaps}
+See also: Section~\ref{sub:projection-calculation}.
+
+\subsection{Writing a new projection}
+
+See also: Section~\ref{sub:proj-storage-writing}.
+
+\subsection{Adopting a new projection}
+
+See also: Section~\ref{sub:proj-adoption}.
 
 TODO finish
 
-A new projection is adopted by a Machi server if two requirements are
-met:
+A new projection $P_E$ is adopted by a Machi server at epoch $E$ if
+two requirements are met:
 
-\subsubsection{All available copies of the projection are unanimous/identical}
+\paragraph{\#1: All available copies of $P_E$ are unanimous/identical}
 
-If we query all available servers for their latest projection, assume
+If we query all available servers for their latest projection, then assume
 that $E$ is the largest epoch number found.  If we read public
-projections from all available servers, and if all are equal to some
-projection $P_E$, then projection $P_E$ is the best candidate for
-adoption by the local server.
+projections for epoch $E$ from all available servers, and if all are
+equal to some projection $P_E$, then projection $P_E$ is
+(by definition) the best candidate for adoption by the local server.
 
 If we see a projection $P^2_E$ that has the same epoch $E$ but a
 different checksum value, then we must consider $P^2_E \ne P_E$.
-
-Any TODO FINISH
-
-The projection store's ``best value'' for the largest written epoch
-number at the time of the read is projection used by the server.
-If the read attempt for projection $P_p$
-also yields other non-best values, then the
+If we see multiple different values $P^*_E$ for epoch $E$, then the
 projection calculation subsystem is notified.  This notification
-may/may not trigger a calculation of a new projection $P_{p+1}$ which
-may eventually be stored and so
-resolve $P_p$'s replicas' ambiguity.
+will trigger a calculation of a new projection $P_{E+1}$ which
+may eventually be stored and therefore help
+resolve epoch $E$'s ambiguous and unusable condition.
+
+\paragraph{\#2: The transition from current $\rightarrow$ new projection is
+safe}
+
+The projection $P_E = P_{latest}$ is evaluated by numerous rules and
+invariants, relative to the projection that the server is currently
+using, $P_{current}$.  If such rule or invariant is violated/false,
+then the local server will discard $P_{latest}$.  Instead, it will
+trigger the projection calculation subsystem to create an alternative,
+safe projection $P_{latest+1}$ that will hopefully create a unanimous
+epoch $E+1$.
+
+See Section~\ref{sub:humming-rules-and-invariants} for detail about
+these rules and invariants.
 
 \section{Just in case Humming Consensus doesn't work for us}
 
@@ -1410,6 +1428,9 @@ of different projection proposals.
 
 \subsection{ranking}
 \label{sub:projection-ranking}
+
+\subsection{rules \& invariants}
+\label{sub:humming-rules-and-invariants}
 
 
 \bibliographystyle{abbrvnat}
