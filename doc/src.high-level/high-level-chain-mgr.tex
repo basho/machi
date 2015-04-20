@@ -680,19 +680,18 @@ for an allegory in homage to the style of Leslie Lamport's original Paxos
 paper.
 \end{itemize}
 
-\subsubsection{Aside: origin of the analogy to composing music}
-
+\paragraph{Aside: origin of the analogy to composing music}
 The ``humming'' part of humming consensus comes from the action taken
 when the environment changes.  If we imagine an egalitarian group of
 people, all in the same room humming some pitch together, then we take
 action to change our humming pitch if:
 
 \begin{itemize}
-\item Some member departs the room (because they witness the person
+\item Some member departs the room (because we can witness the person
 walking out the door) or if someone else in the room starts humming a
 new pitch with a new epoch number.\footnote{It's very difficult for
   the human ear to hear the epoch number part of a hummed pitch, but
-  for the sake of the analogy, assume that it can.}
+  for the sake of the analogy, let's assume that it can.}
 \item If a member enters the room and starts humming with the same
   epoch number but a different note.
 \end{itemize}
@@ -711,13 +710,37 @@ obeyed.  Such safe management of Chain Replication metadata is our end goal.
 
 See also: Section~\ref{sub:network-monitoring}.
 
+In today's implementation, there is only a single criterion for
+determining the available/not-available status of a remote server $S$:
+is $S$'s projection store available.  If yes, then we assume that all
+$S$ is available.  If $S$'s projection store is not available for any
+reason, we assume $S$ is entirely unavailable.  This simple single
+criterion appears to be sufficient for humming consensus, according to
+simulations of arbitrary network partitions.
+
 \subsection{Calculating a new projection data structure}
 
 See also: Section~\ref{sub:projection-calculation}.
 
+TODO:
+0. incorporate text from ORG file at all relevant places!!!!!!!!!!
+1. calculating a new projection is straightforward
+2. define flapping?
+3. a simple criterion for flapping/not-flapping is pretty easy
+4. if flapping, then calculate an ``inner'' projection
+5. if flapping $\rightarrow$ not-flapping, then copy inner
+$\rightarrow$ outer projection and reset flapping counter.
+
 \subsection{Writing a new projection}
 
 See also: Section~\ref{sub:proj-storage-writing}.
+
+TODO:
+1. We write a new projection based on flowchart A* and B* states and
+state transtions.
+
+TOOD: include the flowchart into the doc.  We'll probably need to
+insert it landscape?
 
 \subsection{Adopting a new projection}
 
@@ -757,6 +780,10 @@ epoch $E+1$.
 
 See Section~\ref{sub:humming-rules-and-invariants} for detail about
 these rules and invariants.
+
+TODO:
+1. We write a new projection based on flowchart A* and B* and C1* states and
+state transtions.
 
 \section{Just in case Humming Consensus doesn't work for us}
 
