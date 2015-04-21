@@ -304,6 +304,19 @@ node.
 
 See Section~\ref{sec:humming-consensus} for detailed discussion.
 
+\subsection{Concurrent chain managers execute humming consensus independently}
+
+Each Machi file server has its own concurrent chain manager
+process(es) embedded within it.  Each chain manager process will
+execute the humming consensus algorithm using only local state (e.g.,
+the $P_{current}$ projection currently used by the local server) and
+values written and read from everyone's projection stores.
+
+The chain manager's primary communication method with the local Machi
+file API server is the wedge and un-wedge request API.  When humming
+consensus has chosen a projection $P_{new}$ to replace $P_{current}$,
+the value of $P_{new}$ is included in the un-wedge request.
+
 \section{The projection store}
 
 The Machi chain manager relies heavily on a key-value store of
@@ -319,7 +332,7 @@ The integer represents the epoch number of the projection stored with
 this key.  The
 store's value is either the special `unwritten' value\footnote{We use
   $\bot$ to denote the unwritten value.} or else a binary blob that is
-immutable thereafter; the Machi projection data structure is
+immutable thereafter; the projection data structure is
 serialized and stored in this binary blob.
 
 The projection store is vital for the correct implementation of humming
@@ -492,7 +505,7 @@ Humming consensus requires that any projection be identified by both
 the epoch number and the projection checksum, as described in
 Section~\ref{sub:the-projection}.
 
-\section{Managing multiple projection stores}
+\section{Managing multiple projection store replicas}
 \label{sec:managing-multiple-projection-stores}
 
 An independent replica management technique very similar to the style
@@ -513,7 +526,7 @@ Machi's projection store is write-once, and there is no ``undo'' or
 ``delete'' or ``overwrite'' in the projection store API.\footnote{It doesn't
 matter what caused the two different values.  In case of multiple
 values, all participants in humming consensus merely agree that there
-were multiple opinions at that epoch which must be resolved by the
+were multiple suggestions at that epoch which must be resolved by the
 creation and writing of newer projections with later epoch numbers.}
 Machi's projection store read repair can only repair values that are
 unwritten, i.e., storing $\bot$.
@@ -524,28 +537,28 @@ unanimous value $V_{u}$ for the projection at epoch $E$, then $V_{u}$
 is use to repair all projections stores at $E$ that contain $\bot$
 values.  If the value of $K$ is not unanimous, then the ``highest
 ranked value'' $V_{best}$ is used for the repair; see
-Section~\ref{sub:projection-ranking} for a summary of projection
+Section~\ref{sub:projection-ranking} for a description of projection
 ranking.
 
-Read repair may complete successfully regardless of availability of any of the
-participants.  This applies to both phases, reading and writing.
-
-\subsection{Projection storage: writing}
+\subsection{Writing to public projection stores}
 \label{sub:proj-store-writing}
 
-All projection data structures are stored in the write-once Projection
-Store that is run by each server.  (See also \cite{machi-design}.)
-
-Writing the projection follows the two-step sequence below.
+Writing replicas of a projection $P_{new}$ to the cluster's public
+projection stores is similar, in principle, to writing a Chain
+Replication-managed system or Dynamo-like system.  But unlike Chain
+Replication, the order doesn't really matter.
+In fact, the two steps below may be performed in parallel.
+The significant difference with Chain Replication is how we interpret
+the return status of each write operation.
 
 \begin{enumerate}
-\item Write $P_{new}$ to the local projection store.  (As a side
-  effect,
-  this will trigger
+\item Write $P_{new}$ to the local server's public projection store
+  using $P_{new}$'s epoch number $E$ as the key.
+  As a side effect, a successful write will trigger
   ``wedge'' status in the local server, which will then cascade to other
-  projection-related behavior within that server.)
-\item Write $P_{new}$ to the remote projection store of {\tt all\_members}.
-  Some members may be unavailable, but that is OK.
+  projection-related activity by the local chain manager.
+\item Write $P_{new}$ to key $E$ of each remote public projection store of
+  all participants in the chain.
 \end{enumerate}
 
 In cases of {\tt error\_written} status,
@@ -554,36 +567,59 @@ triggered.  The most common reason for {\tt error\_written} status
 is that another actor in the system has
 already calculated another (perhaps different) projection using the
 same projection epoch number and that
-read repair is necessary.  Note that {\tt error\_written} may also
+read repair is necessary.  The {\tt error\_written} may also
 indicate that another server has performed read repair on the exact
 projection $P_{new}$ that the local server is trying to write!
 
-The writing phase may complete successfully regardless of availability
-of any of the participants.
+Some members may be unavailable, but that is OK.  We can ignore any
+timeout/unavailable return status.
 
-\subsection{Reading from the projection store}
+The writing phase may complete successfully regardless of availability
+of the participants.  It may sound counter-intuitive to declare
+success in the face of 100\% failure, and it is, but humming consensus
+can continue to make progress even if some/all of your writes fail.
+If your writes fail, they're likely caused by network partitions or
+because the writing server is too slow.  Later on, humming consensus will
+to read as many public projection stores and make a decision based on
+what it reads.
+
+\subsection{Writing to private projection stores}
+
+Only the local server/owner may write to the private half of a
+projection store.  Also, the private projection store is not replicated.
+
+\subsection{Reading from public projection stores}
 \label{sub:proj-store-reading}
 
-Reading data from the projection store is similar in principle to
-reading from a Chain Replication-managed server system.  However, the
-projection store does not use the strict replica ordering that
-Chain Replication does.  For any projection store key $K_n$, the
-participating servers may have different values for $K_n$.  As a
-write-once store, it is impossible to mutate a replica of $K_n$.  If
-replicas of $K_n$ differ, then other parts of the system (projection
-calculation and storage) are responsible for reconciling the
-differences by writing a later key,
-$K_{n+x}$ when $x>0$, with a new projection.
+A read is simple: for an epoch $E$, send a public projection read API
+request to all participants.  As when writing to the public projection
+stores, we can ignore any timeout/unavailable return
+status.\footnote{The success/failure status of projection reads and
+  writes is {\em not} ignored with respect to the chain manager's
+  internal liveness tracker.  However, the liveness tracker's state is
+  typically only used when calculating new projections.}  If we
+discover any unwritten values $\bot$, the read repair protocol is
+followed.
 
-The reading phase may complete successfully regardless of availability
-of any of the participants.
-The minimum number of replicas is only one: the local projection store
-should always be available, even if no other remote replica projection
-stores are available.
-If all available servers return a single, unanimous value $V_u, V_u
-\ne \bot$, then $V_u$ is the final result.  Any non-unanimous value is
-considered disagreement and is resolved by writes to the projection
-store by the humming consensus algorithm.
+The minimum number of non-error responses is only one.\footnote{The local
+projection store should always be available, even if no other remote
+replica projection stores are available.}  If all available servers
+return a single, unanimous value $V_u, V_u \ne \bot$, then $V_u$ is
+the final result for epoch $E$.
+Any non-unanimous values are considered complete disagreement for the
+epoch.  This disagreement is resolved by humming consensus by later
+writes to the public projection stores during subsequent iterations of
+humming consensus.
+
+We are not concerned with unavailable servers.  Humming consensus
+only uses as many public projections as are available at the present
+moment of time.  If some server $S$ is unavailable at time $t$ and
+becomes available at some later $t+\delta$, and if at $t+\delta$ we
+discover that $S$'s public projection store for key $E$
+contains some disagreeing value $V_{weird}$, then the disagreement
+will be resolved in the exact same manner that would be used as if we
+had found the disagreeing values at the earlier time $t$ (see previous
+paragraph).
 
 \section{Phases of projection change}
 \label{sec:phases-of-projection-change}
@@ -595,6 +631,8 @@ adoption of new projections.  The phases are described in the
 subsections below.  The reader should then be able to recognize each
 of these phases when reading the humming consensus algorithm
 description in Section~\ref{sec:humming-consensus}.
+
+TODO should this section simply (?) be merged with Section~\ref{sec:humming-consensus}?
 
 \subsection{Network monitoring}
 \label{sub:network-monitoring}
@@ -614,22 +652,21 @@ machine/hardware node.
 \end{itemize}
 
 Output of the monitor should declare the up/down (or
-available/unavailable) status of each server in the projection.  Such
+alive/unknown) status of each server in the projection.  Such
 Boolean status does not eliminate fuzzy logic, probabilistic
 methods, or other techniques for determining availability status.
-Instead, hard Boolean up/down status
-decisions are required only by the projection calculation phase
+A hard choice of Boolean up/down status
+is required only by the projection calculation phase
 (Section~\ref{sub:projection-calculation}).
 
 \subsection{Calculating a new projection data structure}
 \label{sub:projection-calculation}
 
-Each Machi server will have an independent agent/process that is
-responsible for calculating new projections.  A new projection may be
+A new projection may be
 required whenever an administrative change is requested or in response
-to network conditions (e.g., network partitions).
+to network conditions (e.g., network partitions, crashed server).
 
-Projection calculation will be a pure computation, based on input of:
+Projection calculation is be a pure computation, based on input of:
 
 \begin{enumerate}
 \item The current projection epoch's data structure
@@ -646,14 +683,21 @@ changes may require retry logic and delay/sleep time intervals.
 \subsection{Writing a new projection}
 \label{sub:proj-storage-writing}
 
-The replicas of Machi projection data that are used by humming consensus
-are not managed by Chain Replication --- if they
-were, we would have a circular dependency!  See
+This phase is very straightforward; see
 Section~\ref{sub:proj-store-writing} for the technique for writing
-projections to all participating servers' projection stores.
+projections to all participating servers' projection stores.  We don't
+really care if the writes succeed or not.  The final phase, adopting a
+new projection, will determine which write operations did/did not
+succeed.
 
 \subsection{Adoption a new projection}
 \label{sub:proj-adoption}
+
+The first step in this phase is to read latest projection from all
+available public projection stores.  If the result is a {\em
+  unanimous} projection $P_{new}$ in epoch $E_{new}$, then we may
+proceed forward.  If the result is not a single unanmous projection,
+then we return to the step in Section~\ref{sub:projection-calculation}.
 
 A projection $P_{new}$ is used by a server only if:
 
@@ -664,11 +708,12 @@ A projection $P_{new}$ is used by a server only if:
   projection, $P_{current} \rightarrow P_{new}$ will not cause data loss,
   e.g., the Update Propagation Invariant and all other safety checks
   required by chain repair in Section~\ref{sec:repair-entire-files}
-  are correct.
+  are correct. For example, any new epoch must be strictly larger than
+  the current epoch, i.e., $E_{new} > E_{current}$.
 \end{itemize}
 
 Both of these steps are performed as part of humming consensus's
-normal operation.  It may be non-intuitive that the minimum number of
+normal operation.  It may be counter-intuitive that the minimum number of
 available servers is only one, but ``one'' is the correct minimum
  number for humming consensus.
 
