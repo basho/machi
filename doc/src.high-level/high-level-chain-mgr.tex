@@ -26,8 +26,9 @@
 \titlebanner{Draft \#0, April 2014}
 \preprintfooter{Draft \#0, April 2014}
 
-\title{Machi Chain Replication: management theory and design}
-\subtitle{Includes ``humming consensus'' overview}
+\title{Chain Replication metadata management in Machi, an immutable
+  file store}
+\subtitle{Introducing the ``humming consensus'' algorithm}
 
 \authorinfo{Basho Japan KK}{}
 
@@ -46,15 +47,27 @@ For an overview of the design of the larger Machi system, please see
 \section{Abstract}
 \label{sec:abstract}
 
-We describe the self-management and self-reliance
-goals of the algorithm: preserve data integrity, advance the current
-state of the art, and supporting multiple consisistency levels.
-
 TODO Fix, after all of the recent changes to this document.
 
-A discussion of ``humming consensus'' follows next.  This type of
-consensus does not require active participation by all or even a
-majority of participants to make decisions.  Machi's chain manager
+Machi is an immutable file store, now in active development by Basho
+Japan KK.  Machi uses Chain Replication to maintain strong consistency
+of file updates to all replica servers in a Machi cluster.  Chain
+Replication is a variation of primary/backup replication where the
+order of updates between the primary server and each of the backup
+servers is strictly ordered into a single ``chain''.  Management of
+Chain Replication's metadata, e.g., ``What is the current order of
+servers in the chain?'', remains an open research problem.  The
+current state of the art for Chain Replication metadata management
+relies on an external oracle (e.g., ZooKeeper) or the Elastic
+Replication algorithm.
+
+This document describes the Machi chain manager, the component
+responsible for managing Chain Replication metadata state.  The chain
+manager uses a new technique, based on a variation of CORFU, called
+``humming consensus''.
+
+Humming consensus does not require active participation by all or even
+a majority of participants to make decisions.  Machi's chain manager
 bases its logic on humming consensus to make decisions about how to
 react to changes in its environment, e.g. server crashes, network
 partitions, and changes by Machi cluster admnistrators.  Once a
@@ -67,31 +80,32 @@ disseminated to all available participants.
 \section{Introduction}
 \label{sec:introduction}
 
-\subsection{What does "self-management" mean?}
+\subsection{What does ``self-management'' mean?}
 \label{sub:self-management}
 
 For the purposes of this document, chain replication self-management
 is the ability for the $N$ nodes in an $N$-length chain replication chain
-to manage the state of the chain without requiring an external party
-to participate.  Chain state includes:
+to manage the chain's metadata without requiring an external party
+to perform these management tasks.  Chain metadata state and state
+management tasks include:
 
 \begin{itemize}
-\item Preserve data integrity of all data stored within the chain.  Data
-   loss is not an option.
+\item Preserving data integrity of all metadata and data stored within
+  the chain.  Data loss is not an option.
 \item Stably preserve knowledge of chain membership (i.e. all nodes in
    the chain, regardless of operational status). A systems
-   administrators is expected to make "permanent" decisions about
+   administrators is expected to make ``permanent'' decisions about
    chain membership.
-\item Use passive and/or active techniques to track operational
+\item Using passive and/or active techniques to track operational
    state/status, e.g., up, down, restarting, full data sync, partial
    data sync, etc.
-\item Choose the run-time replica ordering/state of the chain, based on
+\item Choosing the run-time replica ordering/state of the chain, based on
    current member status and past operational history.  All chain
    state transitions must be done safely and without data loss or
    corruption.
 \item As a new node is added to the chain administratively or old node is
-   restarted, add the node to the chain safely and perform any data
-   synchronization/"repair" required to bring the node's data into
+   restarted, adding the node to the chain safely and perform any data
+   synchronization/repair required to bring the node's data into
    full synchronization with the other nodes.
 \end{itemize}
 
@@ -102,20 +116,63 @@ management technique for Machi.  Even when operating in an eventually
 consistent mode, Machi must not lose data without cause outside of all
 design, e.g., all particpants crash permanently.
 
-\subsection{Goal: better than state-of-the-art Chain Replication management}
+\subsection{Goal: Contribute to Chain Replication metadata management research}
 
-We hope/believe that this new self-management algorithem can improve
-the current state-of-the-art by eliminating all external management
-entities.  Current state-of-the-art for management of chain
-replication chains is discussed below, to provide historical context.
+We believe that this new self-management algorithm, humming consensus,
+contributes a novel approach to Chain Replication metadata management.
+Typical practice in the IT industry appears to favor using an external
+oracle, e.g., using ZooKeeper as a trusted coordinator.  The ``monitor
+and mangage your neighbor'' technique proposed in elastic replication
+(Section \ref{ssec:elastic-replication}) appears to be the current
+state of the art in the distributed systems research community.
 
-\subsubsection{``Leveraging Sharding in the Design of Scalable Replication Protocols'' by Abu-Libdeh, van Renesse, and Vigfusson}
+See Section~\ref{sec:cr-management-review} for a brief review.
+
+\subsection{Goal: Support both eventually consistent \& strongly consistent modes of operation}
+
+Machi's first use cases are all for use as a file store in an eventually
+consistent environment.
+Later, we wish the option of supporting strong consistency
+applications such as CORFU-style logging while reusing all (or most)
+of Machi's infrastructure.
+
+In eventually consistent mode, humming consensus
+allows a Machi cluster to fragment into
+arbitrary islands of network partition, all the way down to 100\% of
+members running in complete network isolation from each other.
+Furthermore, it provides enough agreement to allow
+formerly-partitioned members to coordinate the reintegration and
+reconciliation of their data when partitions are healed.
+
+\subsection{Anti-goal: Minimize churn}
+
+Humming consensus's goal is to manage Chain Replication metadata
+safely.  If participants have differing notions of time, e.g., running
+on extremely fast or extremely slow hardware, then humming consensus
+may "churn" rapidly in different metadata states in such a way that
+the chain's data would be effectively unavailable.  
+
+In practice, however, any series of network partition changes that
+case humming consensus to churn will cause other management techniques
+(such as an external "oracle") similar problems.
+{\bf [Proof by handwaving assertion.]}
+(See also: Section~\ref{sub:time-model})
+
+\section{Review of current Chain Replication metadata management methods}
+\label{sec:cr-management-review}
+
+We briefly survey the state of the art of research and industry
+practice of chain replication metadata management options.
+
+\subsection{``Leveraging Sharding in the Design of Scalable Replication Protocols'' by Abu-Libdeh, van Renesse, and Vigfusson}
 \label{ssec:elastic-replication}
 Multiple chains are arranged in a ring (called a "band" in the paper).
 The responsibility for managing the chain at position N is delegated
 to chain N-1.  As long as at least one chain is running, that is
 sufficient to start/bootstrap the next chain, and so on until all
-chains are running.  The paper then estimates mean-time-to-failure
+chains are running.  This technique is called ``Elastic Replication''.
+
+The paper then estimates mean-time-to-failure
 (MTTF) and suggests a "band of bands" topology to handle very large
 clusters while maintaining an MTTF that is as good or better than
 other management techniques.
@@ -123,13 +180,17 @@ other management techniques.
 {\bf NOTE:} If the chain self-management method proposed for Machi does not
 succeed, this paper's technique is our best fallback recommendation.
 
-\subsubsection{An external management oracle, implemented by ZooKeeper}
+\subsection{An external management oracle, implemented by ZooKeeper}
 \label{ssec:an-oracle}
-This is not a recommendation for Machi: we wish to avoid using ZooKeeper.
-However, many other open source software products use
-ZooKeeper for exactly this kind of data replica management problem.
+This is not a recommendation for Machi: we wish to avoid using
+ZooKeeper and any other ``large'' external service dependency.  See
+the ``Assumptions'' section of \cite{machi-design} for Machi's overall
+design assumptions and limitations.
 
-\subsubsection{An external management oracle, implemented by Riak Ensemble}
+However, many other open source software products use ZooKeeper for
+exactly this kind of critical metadata replica management problem.
+
+\subsection{An external management oracle, implemented by Riak Ensemble}
 
 This is a much more palatable choice than option~\ref{ssec:an-oracle}
 above.  We also
@@ -139,41 +200,8 @@ choosing ZooKeeper, the choice feels quite clear: Riak Ensemble will
 win, unless there is some critical feature missing from Riak
 Ensemble.  If such an unforseen missing feature is discovered, it
 would probably be preferable to add the feature to Riak Ensemble
-rather than to use ZooKeeper (and document it and provide product
-support for it and so on...).
-
-\subsection{Goal: Support both eventually consistent \& strongly consistent modes of operation}
-
-Machi's first use case is for Riak CS, as an eventually consistent
-store for CS's "block" storage.  Today, Riak KV is used for "block"
-storage.  Riak KV is an AP-style key-value store; using Machi in an
-AP-style mode would match CS's current behavior from points of view of
-both code/execution and human administrator exectations.
-
-Later, we wish the option of using CP support to replace other data
-store services that Riak KV provides today.  (Scope and timing of such
-replacement TBD.)
-
-We believe this algorithm allows a Machi cluster to fragment into
-arbitrary islands of network partition, all the way down to 100\% of
-members running in complete network isolation from each other.
-Furthermore, it provides enough agreement to allow
-formerly-partitioned members to coordinate the reintegration \&
-reconciliation of their data when partitions are healed.
-
-\subsection{Anti-goal: minimize churn}
-
-This algorithm's focus is data safety and not availability.  If
-participants have differing notions of time, e.g., running on
-extremely fast or extremely slow hardware, then this algorithm will
-"churn" in different states where the chain's data would be
-effectively unavailable.
-
-In practice, however, any series of network partition changes that
-case this algorithm to churn will cause other management techniques
-(such as an external "oracle") similar problems.
-{\bf [Proof by handwaving assertion.]}
-See also: Section~\ref{sub:time-model}
+rather than to use ZooKeeper (and for Basho to document ZK, package
+ZK, provide commercial ZK support, etc.).
 
 \section{Assumptions}
 \label{sec:assumptions}
@@ -187,7 +215,9 @@ running in an "eventually consistent" manner.  We wish to be able to
 make progress, i.e., remain available in the CAP sense, even if we are
 partitioned down to a single isolated node.  VR, Paxos, and Raft
 alone are not sufficient to coordinate service availability at such
-small scale.
+small scale.  The humming consensus algorithm can manage
+both strongly consistency systems (i.e., the typical use for Chain
+Replication) as well as eventually consistent data systems.
 
 \subsection{The CORFU protocol is correct}
 
@@ -202,7 +232,7 @@ CORFU, then we expect that Machi's implementation will be flawed.
 The communication model is asynchronous point-to-point messaging.
 The network is unreliable: messages may be arbitrarily dropped and/or
 reordered.  Network partitions may occur at any time.
-Network partitions may be asymmetric, e.g., a message can be sent
+Network partitions may be asymmetric, e.g., a message can be sent successfully
 from $A \rightarrow B$, but messages from $B \rightarrow A$ can be
 lost, dropped, and/or arbitrarily delayed.
 
@@ -258,8 +288,8 @@ operation mode.
 \subsection{Use of ``humming consensus''}
 
 CS literature uses the word "consensus" in the context of the problem
-description at
-{\tt http://en.wikipedia.org/wiki/ Consensus\_(computer\_science)\#Problem\_description}.
+description at \cite{wikipedia-consensus}
+.
 This traditional definition differs from what is described here as
 ``humming consensus''.
 
@@ -278,42 +308,64 @@ See Section~\ref{sec:humming-consensus} for detailed discussion.
 
 The Machi chain manager relies heavily on a key-value store of
 write-once registers called the ``projection store''.
-Each participating chain node has its own projection store.
-The store's key is a positive integer;
-the integer represents the epoch number of the projection.  The
+Each Machi node maintains its own projection store.
+The store's keyspace is divided into two halves (described below),
+each with different rules for who can write keys to that half of the
+store.
+
+The store's key is a 2-tuple of a positive integer and the half of
+the partition, the ``public'' half or the ``private'' half.
+The integer represents the epoch number of the projection stored with
+this key.  The
 store's value is either the special `unwritten' value\footnote{We use
-  $\bot$ to denote the unwritten value.} or else an
-application-specific binary blob that is immutable thereafter.
+  $\bot$ to denote the unwritten value.} or else a binary blob that is
+immutable thereafter; the Machi projection data structure is
+serialized and stored in this binary blob.
 
 The projection store is vital for the correct implementation of humming
-consensus (Section~\ref{sec:humming-consensus}).
-
-All parts store described below may be read by any cluster member.
+consensus (Section~\ref{sec:humming-consensus}).  The write-once
+register primitive allows us to analyze the store's behavior
+using the same logical tools and techniques as the CORFU log.
 
 \subsection{The publicly-writable half of the projection store}
 
 The publicly-writable projection store is used to share information
-during the first half of the self-management algorithm.  Any chain
-member may write a projection to this store.
+during the first half of humming consensus algorithm.  Projections
+in the public half of the store form a log of
+suggestions\footnote{I hesitate to use the word ``propose'' or ``proposal''
+  anywhere in this document \ldots until I've done a more formal
+  analysis of the protocol.  Those words have too many connotations in
+  the context of consensus protocols such as Paxos and Raft.}
+by humming consensus participants for how they wish to change the
+chain's metadata state.
+
+Any chain member may write to the public half of the store.
+Any chain member may read from the public half of the store.
 
 \subsection{The privately-writable half of the projection store}
 
-The privately-writable projection store is used to store the humming consensus
-result that has been chosen by the local node.  Only
-the local server may write values into this store.
+The privately-writable projection store is used to store the
+Chain Replication metadata state (as chosen by humming consensus)
+that is in use now (or has been used in the past) by the local Machi server.
+
+Only the local server may write values into the private half of store.
+Any chain member may read from the private half of the store.
 
 The private projection store serves multiple purposes, including:
 
 \begin{itemize}
-\item remove/clear the local server from ``wedge state''
-\item act as the store of record for chain state transitions
-\item communicate to remote nodes the past states and current operational
-  state of the local node
+\item Remove/clear the local server from ``wedge state''.
+\item Act as a publicly-readable indicator of what projection that the
+  local server is currently using.  (This special projection will be
+  called $P_{current}$ throughout this document.)
+\item Act as the local server's log/history of
+  its sequence of $P_{current}$ projection changes.
 \end{itemize}
 
 The private half of the projection store is not replicated.
-Projections that are stored in the private projection store are
-meaningful only to the local projection store and are, furthermore,
+
+Projections in the private projection store are
+meaningful only to the local Machi server and, furthermore, are
 merely ``soft state''.  Data loss in the private projection store
 cannot result in loss of ``hard state'' information.  Therefore,
 replication of the private projection store is not required.  The
@@ -680,6 +732,8 @@ for an allegory in homage to the style of Leslie Lamport's original Paxos
 paper.
 \end{itemize}
 
+
+
 \paragraph{Aside: origin of the analogy to composing music}
 The ``humming'' part of humming consensus comes from the action taken
 when the environment changes.  If we imagine an egalitarian group of
@@ -712,15 +766,32 @@ See also: Section~\ref{sub:network-monitoring}.
 
 In today's implementation, there is only a single criterion for
 determining the available/not-available status of a remote server $S$:
-is $S$'s projection store available.  If yes, then we assume that all
+is $S$'s projection store available?  This question is answered by
+attemping to use the projection store API on server $S$.  
+If successful, then we assume that all
 $S$ is available.  If $S$'s projection store is not available for any
-reason, we assume $S$ is entirely unavailable.  This simple single
+reason (including timeout), we assume $S$ is entirely unavailable.
+This simple single
 criterion appears to be sufficient for humming consensus, according to
 simulations of arbitrary network partitions.
+
+%% {\bf NOTE:} The projection store API is accessed via TCP.  The network
+%% partition simulator, mentioned above and described at
+%% \cite{machi-chain-management-sketch-org}, simulates message drops at
+%% the ISO layer 6/7, not IP packets at ISO layer 3.
 
 \subsection{Calculating a new projection data structure}
 
 See also: Section~\ref{sub:projection-calculation}.
+
+
+
+Ideally, the chain manager's calculation of a new projection should to
+be deterministic and free of side-effects: given the same current
+projection $P_{current}$ and the same set of peer up/down statuses,
+the same $P_{new}$ projection would always be calculated.  Indeed, at
+the lowest levels, such a pure function is possible and desirable.
+However, 
 
 TODO:
 0. incorporate text from ORG file at all relevant places!!!!!!!!!!
@@ -1464,18 +1535,6 @@ of different projection proposals.
 \begin{thebibliography}{}
 \softraggedright
 
-\bibitem{riak-core}
-Klophaus, Rusty.
-"Riak Core."
-ACM SIGPLAN Commercial Users of Functional Programming (CUFP'10), 2010.
-{\tt http://dl.acm.org/citation.cfm?id=1900176} and
-{\tt https://github.com/basho/riak\_core}
-
-\bibitem{rfc-7282}
-RFC 7282: On Consensus and Humming in the IETF.
-Internet Engineering Task Force.
-{\tt https://tools.ietf.org/html/rfc7282}
-
 \bibitem{elastic-chain-replication}
 Abu-Libdeh, Hussam et al.
 Leveraging Sharding in the Design of Scalable Replication Protocols.
@@ -1494,6 +1553,11 @@ Balakrishnan, Mahesh et al.
 CORFU: A Distributed Shared Log
 ACM Transactions on Computer Systems, Vol. 31, No. 4, Article 10, December 2013.
 {\tt http://www.snookles.com/scottmp/corfu/ corfu.a10-balakrishnan.pdf}
+
+\bibitem{machi-chain-management-sketch-org}
+Basho Japan KK.
+Machi Chain Self-Management Sketch
+{\tt https://github.com/basho/machi/tree/ master/doc/chain-self-management-sketch.org}
 
 \bibitem{machi-design}
 Basho Japan KK.
@@ -1516,6 +1580,18 @@ Proceedings of the 9th ACM SIGPLAN Workshop on Erlang (Erlang'10), 2010.
 Fritchie, Scott Lystig.
 On “Humming Consensus”, an allegory.
 {\tt http://www.snookles.com/slf-blog/2015/03/ 01/on-humming-consensus-an-allegory/}
+
+\bibitem{rfc-7282}
+Internet Engineering Task Force.
+RFC 7282: On Consensus and Humming in the IETF.
+{\tt https://tools.ietf.org/html/rfc7282}
+
+\bibitem{riak-core}
+Klophaus, Rusty.
+"Riak Core."
+ACM SIGPLAN Commercial Users of Functional Programming (CUFP'10), 2010.
+{\tt http://dl.acm.org/citation.cfm?id=1900176} and
+{\tt https://github.com/basho/riak\_core}
 
 \bibitem{the-log-what}
 Kreps, Jay.
@@ -1561,6 +1637,11 @@ Chain Replication for Supporting High Throughput and Availability.
 Proceedings of the 6th Conference on Symposium on Operating Systems
 Design \& Implementation (OSDI'04) - Volume 6, 2004.
 {\tt http://www.cs.cornell.edu/home/rvr/papers/ osdi04.pdf}
+
+\bibitem{wikipedia-consensus}
+Wikipedia.
+Consensus (``computer science'').
+{\tt http://en.wikipedia.org/wiki/Consensus\_ (computer\_science)\#Problem\_description}
 
 \end{thebibliography}
 
