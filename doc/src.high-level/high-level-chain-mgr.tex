@@ -552,7 +552,7 @@ unanimous value $V_{u}$ for the projection at epoch $E$, then $V_{u}$
 is use to repair all projections stores at $E$ that contain $\bot$
 values.  If the value of $K$ is not unanimous, then the ``highest
 ranked value'' $V_{best}$ is used for the repair; see
-Section~\ref{sub:projection-ranking} for a description of projection
+Section~\ref{sub:ranking-projections} for a description of projection
 ranking.
 
 \subsection{Writing to public projection stores}
@@ -796,10 +796,8 @@ is used by the flowchart and throughout this section.
 \begin{description}
 \item[Author] The name of the server that created the projection.
 
-\item[Rank] Assigns a numeric score to a projection.  Rank is based on the
-  epoch number (higher wins), chain length (larger wins), number \&
-  state of any repairing members of the chain (larger wins), and node
-  name of the author server (as a tie-breaking criteria).
+\item[Rank] Assigns a numeric score to a projection, see
+  Section~\ref{sub:ranking-projections}.
 
 \item[E] The epoch number of a projection.
 
@@ -978,7 +976,7 @@ knows that an environment change has happened and wishes to trigger a
 response prior to the next timer firing.
 
 It's recommended that the timer interval be staggered according to the
-participant ranking rules in Section~\ref{sub:projection-ranking};
+participant ranking rules in Section~\ref{sub:ranking-projections};
 higher-ranked servers use shorter timer intervals.  Timer staggering
 is not required, but the total amount of churn (as measured by
 suggested projections that are ignored or immediately replaced by a
@@ -1096,8 +1094,28 @@ trigger the projection calculation subsystem to create an alternative,
 safe projection $P_{latest+1}$ that will hopefully create a unanimous
 epoch $E+1$.
 
-See Section~\ref{sub:humming-rules-and-invariants} for detail about
-these rules and invariants.
+The transition from $P_{current} \rightarrow P_{latest}$ is checked
+for safety and sanity.  The conditions used for the check include:
+
+\begin{enumerate}
+\item The Erlang data types of all record members are correct.
+\item UPI, down, and repairing lists contain no duplicates and are in fact
+   mutually disjoint.
+\item The author node is not down (as far as we can tell).
+\item Any server $N$ that was added to $P_{latest}$'s UPI list must
+  appear in the tail the UPI list, and $N$ must have been in
+  $P_{current}$'s repairing list.
+\item No re-ordering of the UPI list members: any server $S$ that is
+  in $P_{latest}$'s UPI list that was not present in $P_{current}$'s
+  UPI list must in the same position as it appeared in $P_{current}$'s
+  UPI list.  The same re-reordering restriction applies to all
+  servers in $P_{latest}$'s repairing list relative to
+  $P_{current}$'s repairing list.
+\end{enumerate}
+
+The safety check may be performed pair-wise once or pair-wise across
+the entire history sequence of a server/FLU's private projection
+store.
 
 \subsection{Additional discussion of flapping state}
 \label{sub:flapping-state}
@@ -1246,10 +1264,13 @@ where ``flapping'' will continue on every humming consensus iteration
 until all asymmetric partition disappears.  Such proof is an area of
 future work.
 
-\subsection{ranking}
-\label{sub:projection-ranking}
+\subsection{Ranking projections}
+\label{sub:ranking-projections}
 
-TODO
+A projection's rank is based on the epoch number (higher always wins),
+chain length (larger wins), number \& state of any repairing members
+of the chain (larger wins), and node name of the author server (as a
+tie-breaking criteria).
 
 \section{``Split brain'' management in CP Mode}
 \label{sec:split-brain-management}
@@ -1907,12 +1928,6 @@ in its really-terrible early drafts and have helped improve it
 immensely: Justin Sheehy, Kota Uenishi, Shunichi Shinohara, Andrew
 Stone, Jon Meredith, Chris Meiklejohn, Mark Allen, and Zeeshan
 Lakhani.
-
-\section{TODO: orphaned text \& missing stuff}
-
-\subsection{rules \& invariants}
-\label{sub:humming-rules-and-invariants}
-
 
 \bibliographystyle{abbrvnat}
 \begin{thebibliography}{}
