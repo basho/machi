@@ -814,7 +814,7 @@ is used by the flowchart and throughout this section.
   In Hibari's implementation of Chain Replication
   \cite{cr-theory-and-practice}, the chain members between the
   ``head'' and ``official tail'' (inclusive) are what Machi calls the
-  UPI server list. 
+  UPI server list.  See also Section~\ref{sub:upi}.
 
 \item[Repairing] The ordered list of nodes that are in repair mode,
   i.e., synchronizing their data with the UPI members of the chain.
@@ -829,7 +829,7 @@ is used by the flowchart and throughout this section.
   node.  It is also the projection with largest
   epoch number in the local node's private projection store.
 
-\item[$\mathbf{P_{newprop}}$] A new projection proposal, as
+\item[$\mathbf{P_{newprop}}$] A new projection suggestion, as
   calculated by the local server
   (Section~\ref{sub:humming-projection-calculation}).
 
@@ -861,7 +861,7 @@ right:
 \item[Column B] Do I act?
 \item[Column C] How do I act?
   \begin{description}
-  \item[C1xx] Save latest proposal to local private store, unwedge,
+  \item[C1xx] Save latest suggested projection to local private store, unwedge,
     then stop.
   \item[C2xx] Ping author of latest to try again, then wait, then iterate.
   \item[C3xx] The new projection appears best: write
@@ -933,7 +933,8 @@ detector such as the $\phi$ accrual failure detector
 \cite{phi-accrual-failure-detector} can be used to help mange such
 situations.
 
-\paragraph{Flapping due to asymmetric network partitions} TODO revise
+\paragraph{Flapping due to asymmetric network partitions} TODO needs
+some polish
 
 The simulator's behavior during stable periods where at least one node
 is the victim of an asymmetric network partition is \ldots weird,
@@ -986,20 +987,87 @@ new and nearly-identical projection) is lower with staggered timer.
 \subsection{Writing a new projection}
 \label{sub:humming-proj-storage-writing}
 
-The actions described in this section are executed in the bottom part of
-Column~A, Column~B, and the bottom of Column~C of
-Figure~\ref{fig:flowchart}.
 See also: Section~\ref{sub:proj-storage-writing}.
+
+To focus very specifically about writing a projection,
+Figure~\ref{fig:flowchart} shows that writing a private projection is
+done by state $C110$ and that writing a public projection is done by
+states $C300$ and $C310$.
+
+Broadly speaking, there are a number of decisions made in all three
+columns of Figure~\ref{fig:flowchart} to decide if and when any type
+of projection should be written at all.  Sometimes, the best action is
+to do nothing.
+
+\subsubsection{Column A: Any reason to change?}
+
+The main tasks of the flowchart states in Column~A is to calculate a
+new projection $P_{new}$ and perhaps also the inner projection
+$P_{new2}$ if we're in flapping mode.  Then we try to figure out which
+projection has the greatest merit: our current projection
+$P_{current}$, the new projection $P_{new}$, or the latest epoch
+$P_{latest}$.  If $P_{current}$ is best, then there's nothing more to
+do.
+
+\subsubsection{Column B: Do I act?}
+
+The main decisions that states in Column B need to make are:
+
+\begin{itemize}
+
+\item Is the $P_{latest}$ projection written unanimously (as far as we
+  call tell right now)?  If yes, then we out to seriously consider
+  using it for our new internal state; go to state $C100$.
+
+\item Is some other server's $P_{latest}$ projection better than my
+  $P_{new}$?  If so,
+  then we wait for a while.  The waiting loop is broken by a local
+  retry counter.  If the counter is small enough, we wait (via state
+  $C200$).  While we wait, the author of the better projection will
+  hopefully have an opportunity to re-write it in a newer epoch
+  unanimously.  If the counter is too big, then we break out and go to
+  $C300$.
+
+\item Otherwise we go to state $C300$, where we try to write our
+  $P_{new}$ to all public projection stores because, as far as we can
+  discern, our projection is best and everyone else ought to know it.
+
+\end{itemize}
+
+It's notable that if $P_{new}$ is truly the best projection available
+at the moment, it must always be written unanimously to everyone's
+public projection stores and then processed through another
+monitor-calculate loop through the flowchart before it can be adopted
+via state $C120$.
+
+\subsubsection{Column C: How do I act?}
+
+This column contains three variations of how to act:
+
+\begin{description}
+
+\item[C1xx] Try to adopt the $P_{latest}$ suggestion.  If the transition
+  between $P_{current}$ to $P_{latest}$ is completely safe, we'll use
+  it by storing it in our local private projection store and then
+  adopt it as $P_{current}$.  If it isn't safe, then jump to $C300$.
+
+\item[C2xx] Do nothing but sleep a while.  Then we loop back to state
+  $A20$ and step through the flowchart loop again.  Optionally, we
+  might want to poke the author of $P_{latest}$ to try again to write
+  its proposal unanimously.
+
+\item[C3xx] We try to replicate our $P_{new}$ suggestion to all local
+  projection stores, because it seems best.
+
+\end{description}
 
 \subsection{Adopting a new projection}
 \label{sub:humming-proj-adoption}
 
 See also: Section~\ref{sub:proj-adoption}.
 
-TODO finish
-
 A new projection $P_E$ is adopted by a Machi server at epoch $E$ if
-two requirements are met:
+the following two requirements are met:
 
 \paragraph{\#1: All available copies of $P_E$ are unanimous/identical}
 
@@ -1160,7 +1228,7 @@ One of the intriguing features of humming consensus's reaction to
 asymmetric partition: flapping behavior continues for as long as
 an any asymmetric partition exists.
 
-\subsubsection{Leaving flapping state}
+\subsubsection{Leaving flapping state and discarding inner projectino}
 
 There are two events that can trigger leaving flapping state.
 
@@ -1182,7 +1250,9 @@ There are two events that can trigger leaving flapping state.
 
 When either event happens, server $S$ will exit flapping state.  All
 new projections authored by $S$ will have all flapping diagnostic data
-removed.  This includes stopping use of the inner projection.
+removed.  This includes stopping use of the inner projection: the UPI
+list of the inner projection is copied to the outer projection's UPI
+list, to avoid a drastic change in UPI membership.
 
 \subsubsection{Stability in symmetric partition cases}
 
@@ -1729,7 +1799,7 @@ This property may also be referred to by its acronym, ``UPI''.
 
 \subsection{Chain Replication and strong consistency}
 
-The three basic rules of Chain Replication and its strong
+The basic rules of Chain Replication and its strong
 consistency guarantee:
 
 \begin{enumerate}
@@ -1831,9 +1901,7 @@ then no other chain member can have a prior/older value because their
 respective mutations histories cannot be shorter than the tail
 member's history.
 
-\section{TODO: orphaned text}
-
-\subsection{Additional sources for information humming consensus}
+\section{Additional sources for information about humming consensus}
 
 \begin{itemize}
 \item ``On Consensus and Humming in the IETF'' \cite{rfc-7282}, for
@@ -1844,6 +1912,16 @@ IETF meetings.
 for an allegory in homage to the style of Leslie Lamport's original Paxos
 paper.
 \end{itemize}
+
+\section{Acknowledgements}
+
+We wish to thank everyone who has read and/or reviewed this document
+in its really-terrible early drafts and have helped improve it
+immensely: Justin Sheehy, Kota Uenishi, Shunichi Shinohara, Andrew
+Stone, Jon Meredith, Chris Meiklejohn, Mark Allen, and Zeeshan
+Lakhani.
+
+\section{TODO: orphaned text}
 
 \subsection{Aside: origin of the analogy to composing music (TODO keep?)}
 The ``humming'' part of humming consensus comes from the action taken
@@ -1870,27 +1948,6 @@ chant, then the final musical score is a valid Gregorian chant.
 By analogy, if the rules of the musical score are obeyed, then the
 Chain Replication invariants that are managed by humming consensus are
 obeyed.  Such safe management of Chain Replication metadata is our end goal.
-
-\subsection{1}
-
-For any key $K$, different projection stores $S_a$ and $S_b$ may store
-nothing (i.e., {\tt error\_unwritten} when queried) or store different
-values, $P_a \ne P_b$, despite having the same projection epoch
-number.  The following ranking rules are used to
-determine the ``best value'' of a projection, where highest rank of
-{\em any single projection} is considered the ``best value'':
-
-\begin{enumerate}
-\item An unwritten value is ranked at a value of $-1$.
-\item A value whose {\tt author\_server} is at the $I^{th}$ position
-  in the {\tt all\_members} list has a rank of $I$.
-\item A value whose {\tt dbg\_annotations} and/or other fields have
-  additional information may increase/decrease its rank, e.g.,
-  increase the rank by $10.25$.
-\end{enumerate}
-
-Rank rules \#2 and \#3 are intended to avoid worst-case ``thrashing''
-of different projection proposals.
 
 \subsection{ranking}
 \label{sub:projection-ranking}
