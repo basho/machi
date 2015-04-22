@@ -43,100 +43,27 @@ Much of the text previously appearing in this document has moved to the
 [[high-level-chain-manager.pdf][Machi chain manager high level design]] document.
 
 * 4. Diagram of the self-management algorithm
-** Introduction
-Refer to the diagram
-[[https://github.com/basho/machi/blob/master/doc/chain-self-management-sketch.Diagram1.pdf][chain-self-management-sketch.Diagram1.pdf]],
-a flowchart of the
-algorithm.  The code is structured as a state machine where function
-executing for the flowchart's state is named by the approximate
-location of the state within the flowchart.  The flowchart has three
-columns:
 
-1. Column A: Any reason to change?
-2. Column B: Do I act?
-3. Column C: How do I act?
+** WARNING: This section is now deprecated
 
-States in each column are numbered in increasing order, top-to-bottom.
-
-** Flowchart notation
-- Author: a function that returns the author of a projection, i.e.,
-  the node name of the server that proposed the projection.
-
-- Rank: assigns a numeric score to a projection.  Rank is based on the
-  epoch number (higher wins), chain length (larger wins), number &
-  state of any repairing members of the chain (larger wins), and node
-  name of the author server (as a tie-breaking criteria).
-
-- E: the epoch number of a projection.
-
-- UPI: "Update Propagation Invariant".  The UPI part of the projection
-  is the ordered list of chain members where the UPI is preserved,
-  i.e., all UPI list members have their data fully synchronized
-  (except for updates in-process at the current instant in time).
-
-- Repairing: the ordered list of nodes that are in "repair mode",
-  i.e., synchronizing their data with the UPI members of the chain.
-
-- Down: the list of chain members believed to be down, from the
-  perspective of the author.  This list may be constructed from
-  information from the failure detector and/or by status of recent
-  attempts to read/write to other nodes' public projection store(s).
-
-- P_current: local node's projection that is actively used.  By
-  definition, P_current is the latest projection (i.e. with largest
-  epoch #) in the local node's private projection store.
-
-- P_newprop: the new projection proposal that is calculated locally,
-  based on local failure detector info & other data (e.g.,
-  success/failure status when reading from/writing to remote nodes'
-  projection stores).
-
-- P_latest: this is the highest-ranked projection with the largest
-  single epoch # that has been read from all available public
-  projection stores, including the local node's public store.
-
-- Unanimous: The P_latest projections are unanimous if they are
-  effectively identical.  Minor differences such as creation time may
-  be ignored, but elements such as the UPI list must not be ignored.
-  NOTE: "unanimous" has nothing to do with the number of projections
-  compared, "unanimous" is *not* the same as a "quorum majority".
-
-- P_current -> P_latest transition safe?: A predicate function to
-  check the sanity & safety of the transition from the local node's
-  P_current to the P_newprop, which must be unanimous at state C100.
-
-- Stop state: one iteration of the self-management algorithm has
-  finished on the local node.  The local node may execute a new
-  iteration at any time.
-
-** Column A: Any reason to change?
-*** A10: Set retry counter to 0
-*** A20: Create a new proposed projection based on the current projection
-*** A30: Read copies of the latest/largest epoch # from all nodes
-*** A40: Decide if the local proposal P_newprop is "better" than P_latest
-** Column B: Do I act?
-*** B10: 1. Is the latest proposal unanimous for the largest epoch #?
-*** B10: 2. Is the retry counter too big?
-*** B10: 3. Is another node's proposal "ranked" equal or higher to mine?
-** Column C: How to act?
-*** C1xx: Save latest proposal to local private store, unwedge, stop.
-*** C2xx: Ping author of latest to try again, then wait, then repeat alg.
-*** C3xx: My new proposal appears best: write @ all public stores, repeat alg
+The definitive text for this section has moved to the [[high-level-chain-manager.pdf][Machi chain
+manager high level design]] document.
 
 ** Flowchart notes
+
 *** Algorithm execution rates / sleep intervals between executions
 
 Due to the ranking algorithm's preference for author node names that
-are small (lexicographically), nodes with smaller node names should
+are large (lexicographically), nodes with larger node names should
 execute the algorithm more frequently than other nodes.  The reason
-for this is to try to avoid churn: a proposal by a "big" node may
-propose a UPI list of L at epoch 10, and a few moments later a "small"
+for this is to try to avoid churn: a proposal by a "small" node may
+propose a UPI list of L at epoch 10, and a few moments later a "big"
 node may propose the same UPI list L at epoch 11.  In this case, there
 would be two chain state transitions: the epoch 11 projection would be
-ranked higher than epoch 10's projeciton.  If the "small" node
-executed more frequently than the "big" node, then it's more likely
-that epoch 10 would be written by the "small" node, which would then
-cause the "big" node to stop at state A40 and avoid any
+ranked higher than epoch 10's projection.  If the "big" node
+executed more frequently than the "small" node, then it's more likely
+that epoch 10 would be written by the "big" node, which would then
+cause the "small" node to stop at state A40 and avoid any
 externally-visible action.
 
 *** Transition safety checking
@@ -303,68 +230,9 @@ self-management algorithm and verify its correctness.
 
 ** Behavior in asymmetric network partitions
 
-The simulator's behavior during stable periods where at least one node
-is the victim of an asymmetric network partition is ... weird,
-wonderful, and something I don't completely understand yet.  This is
-another place where we need more eyes reviewing and trying to poke
-holes in the algorithm.
+Text has moved to the [[high-level-chain-manager.pdf][Machi chain manager high level design]] document.
 
-In cases where any node is a victim of an asymmetric network
-partition, the algorithm oscillates in a very predictable way: each
-node X makes the same P_newprop projection at epoch E that X made
-during a previous recent epoch E-delta (where delta is small, usually
-much less than 10).  However, at least one node makes a proposal that
-makes rough consensus impossible.  When any epoch E is not
-acceptable (because some node disagrees about something, e.g.,
-which nodes are down),
-the result is more new rounds of proposals.
-
-Because any node X's proposal isn't any different than X's last
-proposal, the system spirals into an infinite loop of
-never-fully-agreed-upon proposals.  This is ... really cool, I think.
-
-From the sole perspective of any single participant node, the pattern
-of this infinite loop is easy to detect.
-
-#+BEGIN_QUOTE
-Were my last 2*L proposals were exactly the same?
-(where L is the maximum possible chain length (i.e. if all chain
- members are fully operational))
-#+END_QUOTE
-
-When detected, the local
-node moves to a slightly different mode of operation: it starts
-suspecting that a "proposal flapping" series of events is happening.
-(The name "flap" is taken from IP network routing, where a "flapping
-route" is an oscillating state of churn within the routing fabric
-where one or more routes change, usually in a rapid & very disruptive
-manner.)
-
-If flapping is suspected, then the count of number of flap cycles is
-counted.  If the local node sees all participants (including itself)
-flapping with the same relative proposed projection for 2L times in a
-row (where L is the maximum length of the chain),
-then the local node has firm evidence that there is an asymmetric
-network partition somewhere in the system.  The pattern of proposals
-is analyzed, and the local node makes a decision:
-
-1. The local node is directly affected by the network partition.  The
-   result: stop making new projection proposals until the failure
-   detector belives that a new status change has taken place.
-
-2. The local node is not directly affected by the network partition.
-   The result: continue participating in the system by continuing new
-   self-management algorithm iterations.
-
-After the asymmetric partition victims have "taken themselves out of
-the game" temporarily, then the remaining participants rapidly
-converge to rough consensus and then a visibly unanimous proposal.
-For as long as the network remains partitioned but stable, any new
-iteration of the self-management algorithm stops without
-externally-visible effects.  (I.e., it stops at the bottom of the
-flowchart's Column A.)
-
-*** Prototype notes
+** Prototype notes
 
 Mid-March 2015
 
