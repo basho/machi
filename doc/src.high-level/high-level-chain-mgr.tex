@@ -1099,24 +1099,6 @@ epoch $E+1$.
 See Section~\ref{sub:humming-rules-and-invariants} for detail about
 these rules and invariants.
 
-TODO:
-1. We write a new projection based on flowchart A* and B* and C1* states and
-state transtions.
-
-TODO: orphaned text?
-
-(writing) Some members may be unavailable, but that is OK.  We can ignore any
-timeout/unavailable return status.
-
-The writing phase may complete successfully regardless of availability
-of the participants.  It may sound counter-intuitive to declare
-success in the face of 100\% failure, and it is, but humming consensus
-can continue to make progress even if some/all of your writes fail.
-If your writes fail, they're likely caused by network partitions or
-because the writing server is too slow.  Later on, humming consensus will
-to read as many public projection stores and make a decision based on
-what it reads.
-
 \subsection{Additional discussion of flapping state}
 \label{sub:flapping-state}
 All $P_{new}$ projections
@@ -1263,6 +1245,11 @@ partition cases.  This is in contract to asymmetric partition cases,
 where ``flapping'' will continue on every humming consensus iteration
 until all asymmetric partition disappears.  Such proof is an area of
 future work.
+
+\subsection{ranking}
+\label{sub:projection-ranking}
+
+TODO
 
 \section{``Split brain'' management in CP Mode}
 \label{sec:split-brain-management}
@@ -1921,36 +1908,7 @@ immensely: Justin Sheehy, Kota Uenishi, Shunichi Shinohara, Andrew
 Stone, Jon Meredith, Chris Meiklejohn, Mark Allen, and Zeeshan
 Lakhani.
 
-\section{TODO: orphaned text}
-
-\subsection{Aside: origin of the analogy to composing music (TODO keep?)}
-The ``humming'' part of humming consensus comes from the action taken
-when the environment changes.  If we imagine an egalitarian group of
-people, all in the same room humming some pitch together, then we take
-action to change our humming pitch if:
-
-\begin{itemize}
-\item Some member departs the room (we hear that the volume drops) or
-  if someone else in the room starts humming a
-  new pitch with a new epoch number.\footnote{It's very difficult for
-  the human ear to hear the epoch number part of a hummed pitch, but
-  for the sake of the analogy, let's assume that it can.}
-\item If a member enters the room (we hear that the volume rises) and
-  perhaps hums a different pitch.
-\end{itemize}
-
-If someone were to transcribe onto a musical score the pitches that
-are hummed in the room over a period of time, we might have something
-that is roughly like music.  If this musical score uses chord progressions
-and rhythms that obey the rules of a musical genre, e.g., Gregorian
-chant, then the final musical score is a valid Gregorian chant.
-
-By analogy, if the rules of the musical score are obeyed, then the
-Chain Replication invariants that are managed by humming consensus are
-obeyed.  Such safe management of Chain Replication metadata is our end goal.
-
-\subsection{ranking}
-\label{sub:projection-ranking}
+\section{TODO: orphaned text \& missing stuff}
 
 \subsection{rules \& invariants}
 \label{sub:humming-rules-and-invariants}
