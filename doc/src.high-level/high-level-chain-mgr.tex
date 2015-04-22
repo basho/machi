@@ -1121,12 +1121,14 @@ We continue the example started in the previous subsection\ldots.
 Eventually, in a gossip-like manner, all other participants will
 eventually find that their hosed list is equal to $[a,b]$.  Any other
 server, for example server $c$, will then calculate another
-projection, $P^{inner}_{new}$, using the assumption that both $a$ and $b$
+projection, $P_{new2}$, using the assumption that both $a$ and $b$
 are down.
 
 \begin{itemize}
 \item If operating in the default CP mode, both $a$ and $b$ are down
   and therefore not eligible to participate in Chain Replication.
+  %% The chain may continue service if a $c$, $d$, $e$ and/or witness
+  %% servers can try to form a correct UPI list for the chain.
   This may cause an availability problem for the chain: we may not
   have a quorum of participants (real or witness-only) to form a
   correct UPI chain.
@@ -1134,22 +1136,36 @@ are down.
   chains of length one, using UPI lists of $[a]$ and $[b]$, respectively. 
 \end{itemize}
 
-This re-calculation, $P^{inner}_{new}$, of the new projection is called an
+This re-calculation, $P_{new2}$, of the new projection is called an
 ``inner projection''.  This inner projection definition is nested
 inside of its parent projection, using the same flapping disagnostic
 data used for other flapping status tracking.
 
 When humming consensus has determined that a projection state change
-is necessary and is also safe LEFT OFF HERE, then the outer projection is written to
-the local private projection store.  However, the server's subsequent
-behavior with respect to Chain Replication will be relative to the
-{\em inner projection only}.  With respect to future iterations of
+is necessary and is also safe, then the outer projection is written to
+the local private projection store.
+With respect to future iterations of
 humming consensus, regardless of flapping state, the outer projection
 is always used.
+However, the server's subsequent
+behavior with respect to Chain Replication will be relative to the
+{\em inner projection only}.  The inner projection is used to trigger
+wedge/un-wedge behavior as well as being the projection that is
+advertised to Machi clients.
 
-TODO Inner projection epoch number difference vs. outer epoch
+The epoch of the inner projection, $E^{inner}$ is always less than or
+equal to the epoch of the outer projection, $E$.  The $E^{inner}$
+epoch typically only changes when new servers are added to the hosed
+list.
 
-TODO Outer projection churn, inner projection stability
+To attempt a rough analogy, the outer projection is the carrier wave
+that is used to transmit the information of the inner projection.
+
+\subsubsection{Outer projection churn, inner projection stability}
+
+One of the intriguing features of humming consensus's reaction to
+asymmetric partition: flapping behavior continues for as long as
+an any asymmetric partition exists.
 
 \subsubsection{Leaving flapping state}
 
@@ -1175,34 +1191,15 @@ When either event happens, server $S$ will exit flapping state.  All
 new projections authored by $S$ will have all flapping diagnostic data
 removed.  This includes stopping use of the inner projection.
 
-\section{Possible problems with Humming Consensus}
+\subsubsection{Stability in symmetric partition cases}
 
-There are some unanswered questions about Machi's proposed chain
-management technique.  The problems that we guess are likely/possible
-include:
-
-\begin{itemize}
-
-\item Thrashing or oscillating between a pair (or more) of
-  projections.  It's hoped that the ``best projection'' ranking system
-  will be sufficient to prevent endless thrashing of projections, but
-  it isn't yet clear that it will be.
-
-\item Partial (and/or one-way) network splits which cause partially
-  connected graphs of inter-node connectivity.  Groups of nodes that
-  are completely isolated aren't a problem.  However, partially
-  connected groups of nodes is an unknown.  Intuition says that
-  communication (via the projection store) with ``bridge nodes'' in a
-  partially-connected network ought to settle eventually on a
-  projection with high rank, e.g., the projection on an island
-  subcluster of nodes with the largest author node name.  Some corner
-  case(s) may exist where this intuition is not correct.
-
-\item CP Mode management via the method proposed in
-  Section~\ref{sec:split-brain-management} may not be sufficient in
-  all cases.
-
-\end{itemize}
+Although humming consensus hasn't been formally proven to handle all
+asymmetric and symmetric partition cases, the current implementation
+appears to converge rapidly to a single chain state in all symmetric
+partition cases.  This is in contract to asymmetric partition cases,
+where ``flapping'' will continue on every humming consensus iteration
+until all asymmetric partition disappears.  Such proof is an area of
+future work.
 
 \section{``Split brain'' management in CP Mode}
 \label{sec:split-brain-management}
@@ -1365,6 +1362,25 @@ a quorum of servers (including witness servers) have restarted to
 determine the last operational state of the cluster.  This operational
 history is preserved and distributed amongst the participants' private
 projection stores.
+
+\section{Possible problems with Humming Consensus}
+
+There are some unanswered questions about Machi's proposed chain
+management technique.  The problems that we guess are likely/possible
+include:
+
+\begin{itemize}
+
+\item Coping with rare flapping conditions.
+  It's hoped that the ``best projection'' ranking system
+  will be sufficient to prevent endless flapping of projections, but
+  it isn't yet clear that it will be.
+
+\item CP Mode management via the method proposed in
+  Section~\ref{sec:split-brain-management} may not be sufficient in
+  all cases.
+
+\end{itemize}
 
 \section{Repair of entire files}
 \label{sec:repair-entire-files}
