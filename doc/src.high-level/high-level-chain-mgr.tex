@@ -268,6 +268,21 @@ Such extra churn is regrettable and will cause periods of delay as the
 humming consensus algorithm (decribed below) makes decisions.  However, the
 churn cannot {\bf (we assert/believe)} cause data loss.
 
+\subsection{Data consistency: strong unless otherwise noted}
+
+Most discussion in this document assumes a desire to preserve strong
+consistency in all data managed by Machi's chain replication.  We
+use the short-hand notation ``CP mode'' to describe this default mode
+of operation, where ``C'' and ``P'' refer to the CAP Theorem
+\cite{cap-theorem}.
+
+However, there are interesting use cases where Machi is useful in a
+more relaxed, eventual consistency environment.  We may use the
+short-hand ``AP mode'' when describing features that preserve only
+eventual consistency.  Discussion of AP mode features in this document
+will always be explictly noted --- discussion of strongly consistent CP
+mode is always the default.
+
 \subsection{Use of the ``wedge state''}
 
 A participant in Chain Replication will enter "wedge state", as
@@ -621,7 +636,7 @@ will be resolved in the exact same manner that would be used as if we
 had found the disagreeing values at the earlier time $t$ (see previous
 paragraph).
 
-\section{Phases of projection change}
+\section{Phases of projection change, a prelude to Humming Consensus}
 \label{sec:phases-of-projection-change}
 
 Machi's use of projections is in four discrete phases and are
@@ -666,7 +681,7 @@ A new projection may be
 required whenever an administrative change is requested or in response
 to network conditions (e.g., network partitions, crashed server).
 
-Projection calculation is be a pure computation, based on input of:
+Projection calculation is a pure computation, based on input of:
 
 \begin{enumerate}
 \item The current projection epoch's data structure
@@ -683,45 +698,58 @@ changes may require retry logic and delay/sleep time intervals.
 \subsection{Writing a new projection}
 \label{sub:proj-storage-writing}
 
-This phase is very straightforward; see
+Let's ignore humming consensus for a moment and consider the general
+case for Chain Replication and strong consistency.  Any manager of
+chain state metadata must maintain a history of the current chain
+state and some history of prior states.  Strong consistency can be
+violated if this history is forgotten.
+
+In Machi's case, this phase is very straightforward; see
 Section~\ref{sub:proj-store-writing} for the technique for writing
-projections to all participating servers' projection stores.  We don't
-really care if the writes succeed or not.  The final phase, adopting a
+projections to all participating servers' projection stores.
+Humming Consensus does not care
+if the writes succeed or not: its final phase, adopting a
 new projection, will determine which write operations did/did not
 succeed.
 
 \subsection{Adoption a new projection}
 \label{sub:proj-adoption}
 
-The first step in this phase is to read latest projection from all
-available public projection stores.  If the result is a {\em
-  unanimous} projection $P_{new}$ in epoch $E_{new}$, then we may
-proceed forward.  If the result is not a single unanmous projection,
-then we return to the step in Section~\ref{sub:projection-calculation}.
+It may be helpful to consider the projections written to the cluster's
+public projection stores as ``suggestions'' for what the cluster's new
+projection ought to be.  (We avoid using the word ``proposal'' here,
+to avoid direct parallels with protocols such as Raft and Paxos.)
 
-A projection $P_{new}$ is used by a server only if:
+In general, a projection $P_{new}$ at epoch $E_{new}$ is adopted by a
+server only if
+the change in state from the local server's current projection to new
+projection, $P_{current} \rightarrow P_{new}$ will not cause data loss,
+e.g., the Update Propagation Invariant and all other safety checks
+required by chain repair in Section~\ref{sec:repair-entire-files}
+are correct. For example, any new epoch must be strictly larger than
+the current epoch, i.e., $E_{new} > E_{current}$.
 
-\begin{itemize}
-\item The server can determine that the projection has been replicated
-  unanimously across all currently available servers.
-\item The change in state from the local server's current projection to new
-  projection, $P_{current} \rightarrow P_{new}$ will not cause data loss,
-  e.g., the Update Propagation Invariant and all other safety checks
-  required by chain repair in Section~\ref{sec:repair-entire-files}
-  are correct. For example, any new epoch must be strictly larger than
-  the current epoch, i.e., $E_{new} > E_{current}$.
-\end{itemize}
+Returning to Machi's case, first, we read latest projection from all
+available public projection stores.  If the result is not a single
+unanmous projection, then we return to the step in
+Section~\ref{sub:projection-calculation}.  If the result is a {\em
+  unanimous} projection $P_{new}$ in epoch $E_{new}$, and if $P_{new}$
+does not violate chain safety checks, then the local node may adopt
+$P_{new}$ to replace its local $P_{current}$ projection.
 
-Both of these steps are performed as part of humming consensus's
-normal operation.  It may be counter-intuitive that the minimum number of
-available servers is only one, but ``one'' is the correct minimum
- number for humming consensus.
+Not all safe projection transitions are useful, however.  For example,
+it's trivally safe to suggest projection $P_{zero}$, where the chain
+length is zero.  In an eventual consistency environment, projection
+$P_{one}$ where the chain length is exactly one is also trivially
+safe.\footnote{Although, if the total number of participants is more
+  than one, eventual consistency would demand that $P_{self}$ cannot
+  be used forever.}
 
 \section{Humming Consensus}
 \label{sec:humming-consensus}
 
 Humming consensus describes consensus that is derived only from data
-that is visible/known at the current time.  It's OK if a network
+that is visible/available at the current time.  It's OK if a network
 partition is in effect and that not all chain members are available;
 the algorithm will calculate a rough consensus despite not
 having input from all/majority of chain members.  Humming consensus
@@ -777,8 +805,6 @@ for an allegory in homage to the style of Leslie Lamport's original Paxos
 paper.
 \end{itemize}
 
-
-
 \paragraph{Aside: origin of the analogy to composing music}
 The ``humming'' part of humming consensus comes from the action taken
 when the environment changes.  If we imagine an egalitarian group of
@@ -786,13 +812,13 @@ people, all in the same room humming some pitch together, then we take
 action to change our humming pitch if:
 
 \begin{itemize}
-\item Some member departs the room (because we can witness the person
-walking out the door) or if someone else in the room starts humming a
-new pitch with a new epoch number.\footnote{It's very difficult for
+\item Some member departs the room (we hear that the volume drops) or
+  if someone else in the room starts humming a
+  new pitch with a new epoch number.\footnote{It's very difficult for
   the human ear to hear the epoch number part of a hummed pitch, but
   for the sake of the analogy, let's assume that it can.}
-\item If a member enters the room and starts humming with the same
-  epoch number but a different note.
+\item If a member enters the room (we hear that the volume rises) and
+  perhaps hums a different pitch.
 \end{itemize}
 
 If someone were to transcribe onto a musical score the pitches that
@@ -1625,6 +1651,12 @@ Proceedings of the 9th ACM SIGPLAN Workshop on Erlang (Erlang'10), 2010.
 Fritchie, Scott Lystig.
 On “Humming Consensus”, an allegory.
 {\tt http://www.snookles.com/slf-blog/2015/03/ 01/on-humming-consensus-an-allegory/}
+
+\bibitem{cap-theorem}
+Seth Gilbert and Nancy Lynch.
+Brewer’s conjecture and the feasibility of consistent, available, partition-tolerant web services.
+SigAct News, June 2002.
+{\tt http://webpages.cs.luc.edu/~pld/353/ gilbert\_lynch\_brewer\_proof.pdf}
 
 \bibitem{rfc-7282}
 Internet Engineering Task Force.
