@@ -66,26 +66,6 @@ that epoch 10 would be written by the "big" node, which would then
 cause the "small" node to stop at state A40 and avoid any
 externally-visible action.
 
-*** Transition safety checking
-
-In state C100, the transition from P_current -> P_latest is checked
-for safety and sanity.  The conditions used for the check include:
-
-1. The Erlang data types of all record members are correct.
-2. UPI, down, & repairing lists contain no duplicates and are in fact
-   mutually disjoint.
-3. The author node is not down (as far as we can tell).
-4. Any additions in P_latest in the UPI list must appear in the tail
-   of the UPI list and were formerly in P_current's repairing list.
-5. No re-ordering of the UPI list members: P_latest's UPI list prefix
-   must be exactly equal to P_current's UPI prefix, and any P_latest's
-   UPI list suffix must in the same order as they appeared in
-   P_current's repairing list.
-
-The safety check may be performed pair-wise once or pair-wise across
-the entire history sequence of a server/FLU's private projection
-store.
-
 *** A simple example race between two participants noting a 3rd's failure
 
 Assume a chain of three nodes, A, B, and C.  In a projection at epoch
@@ -232,9 +212,19 @@ self-management algorithm and verify its correctness.
 
 Text has moved to the [[high-level-chain-manager.pdf][Machi chain manager high level design]] document.
 
-** Prototype notes
+* Prototype notes
 
-Mid-March 2015
+** Mid-April 2015
+
+I've finished moving the chain manager plus the inner/nested
+projection code into the top-level 'src' dir of this repo.  The idea
+is working very well under simulation, more than well enough to gamble
+on for initial use.
+
+Stronger validation work will continue through 2015, ideally using a
+tool like TLA+.
+
+** Mid-March 2015
 
 I've come to realize that the property that causes the nice property
 of "Were my last 2L proposals identical?" also requires that the
