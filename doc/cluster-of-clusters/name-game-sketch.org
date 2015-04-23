@@ -258,7 +258,7 @@ What if the CoC client uses a similar scheme?
 2. Coc calculates rs_hash(p.s.z.A,Map) = T
 3. CoC client requests @ cluster T: read(p.s.z,...) -> hooray!
 
-** The details: calculating 'a', the adjustment factor
+** The details: calculating 'A', the adjustment factor
 
 *** The good way: file write
 
