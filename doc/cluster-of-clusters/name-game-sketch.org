@@ -237,7 +237,96 @@ is called the "Name Game" for a reason.
 
 What if the CoC client uses a similar scheme?
 
-** 
+** The details: legend
+
+- T   = the target CoC member/Cluster ID
+- p   = file prefix, chosen by the CoC client (This is exactly the Machi client-chosen file prefix).
+- s.z = the Machi file server opaque file name suffix (Which we happen to know is a combination of sequencer ID plus file serial number.)
+- A   = adjustment factor, the subject of this proposal
+
+** The details: CoC file write
+
+1. CoC client chooses p, T (file prefix, target cluster)
+2. CoC client knows the CoC Map
+3. CoC client requests @ cluster T: append(p,...) -> {ok, p.s.z, ByteOffset}
+4. CoC client calculates a such that rs_hash(p.s.z.A,Map) = T
+5. CoC stores/uses the file name p.s.z.A.
+
+** The details: CoC file read
+
+1. CoC client has p.s.z.A and parses the parts of the name.
+2. Coc calculates rs_hash(p.s.z.A,Map) = T
+3. CoC client requests @ cluster T: read(p.s.z,...) -> hooray!
+
+** The details: calculating 'a', the adjustment factor
+
+*** The good way: file write
+
+1. During the file writing stage, at step #4, we know that we asked
+   cluster T for an append() operation using file prefix p, and that
+   the file name that Machi cluster T gave us a longer name, p.s.z.
+2. We calculate sha(p.s.z) = H.
+3. We know Map, the current CoC mapping.
+4. We look inside of Map, and we find all of the unit interval ranges
+   that map to our desired target cluster T.  Let's call this list
+   MapList = [Range1=(start,end],Range2=(start,end],...].
+5. In our example, T=Cluster2.  The example Map contains a single unit
+   interval range for Cluster2, [(0.33,0.58]].
+6. Find the entry in MapList, (Start,End], where the starting range
+   interval Start is larger than T, i.e., Start > T.
+7. For step #6, we "wrap around" to the beginning of the list, if no
+   such starting point can be found.
+8. This is a Basho joint, of course there's a ring in it somewhere!
+9. Pick a random number M somewhere in the interval, i.e., Start <= M
+   and M <= End.
+10. Let A = M - H.
+11. Encode a in a file name-friendly manner, e.g., convert it to
+    hexadecimal ASCII digits (while taking care of A's signed nature)
+    to create file name p.s.z.A.
+
+*** The good way: file read
+
+0. We use a variation of rs_hash(), called rs_hash_after_sha().
+
+#+BEGIN_SRC erlang
+%% type specs, Erlang style
+-spec rs_hash(string(), rs_hash:map()) -> rs_hash:cluster_id().
+-spec rs_hash_after_sha(float(), rs_hash:map()) -> rs_hash:cluster_id().
+#+END_SRC
+
+1. We start with a file name, p.s.z.A.  Parse it.
+2. Calculate SHA(p.s.z) = H and map H onto the unit interval.
+3. Decode A, then calculate M = A - H.  M is a float() type that is
+   now also somewhere in the unit interval.
+4. Calculate rs_hash_after_sha(M,Map) = T.
+5. Send request @ cluster T: read(p.s.z,...) -> hooray!
+
+*** The bad way: file write
+
+1. Once we know p.s.z, we iterate in a loop:
+
+#+BEGIN_SRC pseudoBorne
+a = 0
+while true; do
+    tmp = sprintf("%s.%d", p_s_a, a)
+    if rs_map(tmp, Map) = T; then
+        A = sprintf("%d", a)
+        return A
+    fi
+    a = a + 1
+done
+#+END_SRC
+
+A very hasty measurement of SHA on a single 40 byte ASCII value
+required about 13 microseconds/call.  If we had a cluster of 500
+machines, 84 disks per machine, one Machi file server per disk, and 8
+chains per Machi file server, and if each chain appeared in Map only
+once using equal weighting (i.e., all assigned the same fraction of
+the unit interval), then it would probably require roughly 4.4 seconds
+on average to find a SHA collision that fell inside T's portion of the
+unit interval.
+
+In comparison, the O(1) algorithm above looks much nicer.
 
 * Acknowledgements
 
