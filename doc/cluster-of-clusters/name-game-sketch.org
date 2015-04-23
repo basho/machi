@@ -1,0 +1,115 @@
+-*- mode: org; -*-
+#+TITLE: Machi cluster-of-clusters "name game" sketch
+#+AUTHOR: Scott
+#+STARTUP: lognotedone hidestars indent showall inlineimages
+#+SEQ_TODO: TODO WORKING WAITING DONE
+
+* "Name Games" with random-slicing style consistent hashing
+
+Our goal: to distribute lots of files very evenly across a cluster of
+Machi clusters (hereafter called a "cluster of clusters" or "CoC").
+
+* Assumptions
+
+** Basic familiarity with Machi high level design and Machi's "projection"
+
+The [[https://github.com/basho/machi/blob/master/doc/high-level-machi.pdf][Machi high level design document]] contains all of the basic
+background assumed by the rest of this document.
+
+** Familiarity with the Machi cluster-of-clusters/CoC concept
+
+This isn't yet well-defined (April 2015).  However, it's clear from
+the [[https://github.com/basho/machi/blob/master/doc/high-level-machi.pdf][Machi high level design document]] that Machi alone does not support
+any kind of file partitioning/distribution/sharding across multiple
+machines.  There must be another layer above a Machi cluster to
+provide such partitioning services.
+
+The name "cluster of clusters" orignated within Basho to avoid
+conflicting use of the word "cluster".  A Machi cluster is usually
+synonymous with a single Chain Replication chain and a single set of
+machines (e.g. 2-5 machines).  However, in the not-so-far future, we
+expect much more complicated patterns of Chain Replication to be used
+in real-world deployments.
+
+"Cluster of clusters" is clunky and long, but we haven't found a good
+substitute yet.  If you have a good suggestion, please contact us!
+^_^
+
+Using the [[https://github.com/basho/machi/tree/master/prototype/demo-day-hack][cluster-of-clusters quick-and-dirty prototype]] as an
+architecture sketch, let's now assume that we have N independent Machi
+clusters.  We wish to provide partitioned/distributed file storage
+across all N clusters.  We call the entire collection of N Machi
+clusters a "cluster of clusters", or abbreviated "CoC".
+
+** Analogy: "neighborhood : city :: Machi :: cluster-of-clusters"
+
+Analogy: The word "machi" in Japanese means small town or
+neighborhood.  As the Tokyo Metropolitan Area is built from many
+machis and smaller cities, therefore a big, partitioned file store can
+be built out of many small Machi clusters.
+
+** The reader is familiar with the random slicing technique
+
+I'd done something very-very-nearly-identical for the Hibari database
+6 years ago.  But the Hibari technique was based on stuff I did at
+Sendmail, Inc, so it felt old news to me.  {shrug}
+
+The Hibari documentation has a brief photo illustration of how random
+slicing works, see [[http://hibari.github.io/hibari-doc/hibari-sysadmin-guide.en.html#chain-migration][Hibari Sysadmin Guide, chain migration]]
+
+For a comprehensive description, please see these two papers:
+
+#BEGIN_QUOTE
+Reliable and Randomized Data Distribution Strategies for Large Scale Storage Systems
+Alberto Miranda et al.
+http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.226.5609
+                                                  (short version, HIPC'11)
+
+Random Slicing: Efficient and Scalable Data Placement for Large-Scale
+    Storage Systems 
+Alberto Miranda et al.
+DOI: http://dx.doi.org/10.1145/2632230 (long version, ACM Transactions
+                              on Storage, Vol. 10, No. 3, Article 9, 2014)
+#END_QUOTE
+
+** We use random slicing to map CoC file names -> Machi cluster ID/name
+
+We will use a single random slicing map.  This map (called "Map" in
+the descriptions below), together with the random slicing hash
+function (called "rs_hash()" below), will be used to map:
+
+#+BEGIN_QUOTE
+    CoC client-visible file name -> Machi cluster ID/name/thingie
+#+END_QUOTE
+
+** Machi cluster ID/name management: TBD, but, really, should be simple
+
+The mapping from:
+
+#+BEGIN_QUOTE
+    Machi CoC member ID/name/thingie -> ???
+#+END_QUOTE
+
+... remains To Be Determined.  But, really, this is going to be pretty
+simple.  The ID/name/thingie will probably be a human-friendly,
+printable ASCII string, and the "???" will probably be a single Machi
+cluster projection data structure.
+
+The Machi projection is enough information to contact any member of
+that cluster and, if necessary, request the most up-to-date projection
+information required to use that cluster.
+
+It's likely that the projection given by this map will be out-of-date,
+so the client must be ready to use the standard Machi procedure to
+request the cluster's current projection, in any case.
+
+* Goo
+
+[[./migration-3to4.png]]
+
+* Acknowledgements
+
+The source for the "migration-3to4.png" image is from the [[http://hibari.github.io/hibari-doc/images/migration-3to4.png][HibariDB
+documentation]].
+
+
