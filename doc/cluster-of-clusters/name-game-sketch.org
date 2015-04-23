@@ -4,12 +4,12 @@
 #+STARTUP: lognotedone hidestars indent showall inlineimages
 #+SEQ_TODO: TODO WORKING WAITING DONE
 
-* "Name Games" with random-slicing style consistent hashing
+* 1. "Name Games" with random-slicing style consistent hashing
 
 Our goal: to distribute lots of files very evenly across a cluster of
 Machi clusters (hereafter called a "cluster of clusters" or "CoC").
 
-* Assumptions
+* 2. Assumptions
 
 ** Basic familiarity with Machi high level design and Machi's "projection"
 
@@ -41,6 +41,15 @@ clusters.  We wish to provide partitioned/distributed file storage
 across all N clusters.  We call the entire collection of N Machi
 clusters a "cluster of clusters", or abbreviated "CoC".
 
+** Continue CoC prototype's assumption: a Machi cluster is unaware of CoC
+
+Let's continue with an assumption that an individual Machi cluster
+inside of the cluster-of-clusters is completely unaware of the
+cluster-of-clusters layer.
+
+We may need to break this assumption sometime in the future?  It isn't
+quite clear yet, sorry.
+
 ** Analogy: "neighborhood : city :: Machi :: cluster-of-clusters"
 
 Analogy: The word "machi" in Japanese means small town or
@@ -59,7 +68,7 @@ slicing works, see [[http://hibari.github.io/hibari-doc/hibari-sysadmin-guide.en
 
 For a comprehensive description, please see these two papers:
 
-#BEGIN_QUOTE
+#+BEGIN_QUOTE
 Reliable and Randomized Data Distribution Strategies for Large Scale Storage Systems
 Alberto Miranda et al.
 http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.226.5609
@@ -70,7 +79,7 @@ Random Slicing: Efficient and Scalable Data Placement for Large-Scale
 Alberto Miranda et al.
 DOI: http://dx.doi.org/10.1145/2632230 (long version, ACM Transactions
                               on Storage, Vol. 10, No. 3, Article 9, 2014)
-#END_QUOTE
+#+END_QUOTE
 
 ** We use random slicing to map CoC file names -> Machi cluster ID/name
 
@@ -103,13 +112,135 @@ It's likely that the projection given by this map will be out-of-date,
 so the client must be ready to use the standard Machi procedure to
 request the cluster's current projection, in any case.
 
-* Goo
+* 3. A simple illustration
 
-[[./migration-3to4.png]]
+I'm borrowing an illustration from the HibariDB documentation here,
+but it fits my purposes quite well.  (And I originally created that
+image, and the use license is OK.)
+
+#+CAPTION: Illustration of 'Map', using four Machi clusters
+
+[[./migration-4.png]]
+
+Assume that we have a random slicing map called Map.  This particular
+Map maps the unit interval onto 4 Machi clusters:
+
+| Hash range  | Cluster ID |
+|-------------+------------|
+| 0.00 - 0.25 | Cluster1   |
+| 0.25 - 0.33 | Cluster4   |
+| 0.33 - 0.58 | Cluster2   |
+| 0.58 - 0.66 | Cluster4   |
+| 0.66 - 0.91 | Cluster3   |
+| 0.91 - 1.00 | Cluster4   |
+
+Then, if we had CoC file name "foo", the hash SHA("foo") maps to about
+0.05 on the unit interval.  So, according to Map, the value of
+rs_hash("foo",Map) = Cluster1.  Similarly, SHA("hello") is about
+0.67 on the unit interval, so rs_hash("hello",Map) = Cluster3.
+
+* 4. An additional assumption: clients will want some control over file placement
+
+We will continue to use the 4-cluster diagram from the previous
+section.
+
+When a client wishes to append data to a Machi file, the Machi server
+chooses the file name & byte offset for storing that data.  This
+feature is why Machi's eventual consistency operating mode is so
+nifty: it allows us to merge together files safely at any time because
+any two client append operations will always write to different files
+& different offsets.
+
+** Our new assumption: client control over initial file placement
+
+The CoC management scheme may decide that files need to migrate to
+other clusters.  The reason could be for storage load or I/O load
+balancing reasons.  It could be because a cluster is being
+decomissioned by its owners.  There are many legitimate reasons why a
+file that is initially created on cluster ID X has been moved to
+cluster ID Y.
+
+However, there are legitimate reasons for why the client would want
+control over the choice of Machi cluster when the data is first
+written.  The single biggest reason is load balancing.  Assuming that
+the client (or the CoC management layer acting on behalf of the CoC
+client) knows the current utilization across the participating Machi
+clusters, then it may be very helpful to send new append() requests to
+under-utilized clusters.
+
+** Cool!  Except for a couple of problems...
+
+However, this Machi file naming feature is not so helpful in a
+cluster-of-clusters context.  If the client wants to store some data
+on Cluster2 and therefore sends an append("foo",CoolData) request to
+the head of Cluster2 (which the client magically knows how to
+contact), then the result will look something like
+{ok,"foo.s923.z47",ByteOffset}.
+
+So, "foo.s923.z47" is the file name that any Machi CoC client must use
+in order to retrieve the CoolData bytes.
+
+*** Problem #1: We want CoC files to move around automatically
+
+If the CoC client stores two pieces of information, the file name
+"foo.s923.z47" and the Cluster ID Cluster2, then what happens when the
+cluster-of-clusters system decides to rebalance files across all
+machines?  The CoC manager may decide to move our file to Cluster66.
+
+How will a future CoC client wishes to retrieve CoolData when Cluster2
+no longer stores the required file?
+
+**** When migrating the file, we could put a "pointer" on Cluster2 that points to the new location, Cluster66.
+
+This scheme is a bit brittle, even if all of the pointers are always
+created 100% correctly.  Also, if Cluster2 is ever unavailable, then
+we cannot fetch our CoolData, even though the file moved away from
+Cluster2 several years ago.
+
+The scheme would also introduce extra round-trips to the servers
+whenever we try to read a file where we do not know the most
+up-to-date cluster ID for.
+
+**** We could store "foo.s923.z47"'s location in an LDAP database!
+
+Or we could store it in Riak.  Or in another, external database.  We'd
+rather not create such an external dependency, however.
+
+*** Problem #2: "foo.s923.z47" doesn't always map via random slicing to Cluster2
+
+... if we ignore the problem of "CoC files may be redistributed in the
+future", then we still have a problem.
+
+In fact, the value of ps_hash("foo.s923.z47",Map) is Cluster1.
+
+The whole reason using random slicing is to make a very quick,
+easy-to-distribute mapping of file names to cluster IDs.  It would be
+very nice, very helpful if the scheme would actually *work for us*.
+
+
+* 5. Proposal: Break the opacity of Machi file names, slightly
+
+Assuming that Machi keeps the scheme of creating file names (in
+response to append() and sequencer_new_range() calls) based on a
+predictable client-supplied prefix and an opaque suffix, e.g.,
+
+append("foo",CoolData) -> {ok,"foo.s923.z47",ByteOffset}.
+
+... then we propose that all CoC and Machi parties be aware of this
+naming scheme, i.e. that Machi assigns file names based on:
+
+ClientSuppliedPrefix ++ "." ++ SomeOpaqueFileNameSuffix
+
+The Machi system doesn't care about the file name -- a Machi server
+will treat the entire file name as an opaque thing.  But this document
+is called the "Name Game" for a reason.
+
+What if the CoC client uses a similar scheme?
+
+** 
 
 * Acknowledgements
 
-The source for the "migration-3to4.png" image is from the [[http://hibari.github.io/hibari-doc/images/migration-3to4.png][HibariDB
-documentation]].
-
+The source for the "migration-4.png" and "migration-3to4.png" images
+come from the [[http://hibari.github.io/hibari-doc/images/migration-3to4.png][HibariDB documentation]].
 
