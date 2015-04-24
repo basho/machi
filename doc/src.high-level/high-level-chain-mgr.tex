@@ -23,11 +23,12 @@
 \copyrightdata{978-1-nnnn-nnnn-n/yy/mm} 
 \doi{nnnnnnn.nnnnnnn}
 
-\titlebanner{Draft \#0, April 2014}
-\preprintfooter{Draft \#0, April 2014}
+\titlebanner{Draft \#0.5, April 2014}
+\preprintfooter{Draft \#0.5, April 2014}
 
-\title{Machi Chain Replication: management theory and design}
-\subtitle{Includes ``humming consensus'' overview}
+\title{Chain Replication metadata management in Machi, an immutable
+  file store}
+\subtitle{Introducing the ``humming consensus'' algorithm}
 
 \authorinfo{Basho Japan KK}{}
 
@@ -46,15 +47,27 @@ For an overview of the design of the larger Machi system, please see
 \section{Abstract}
 \label{sec:abstract}
 
-We describe the self-management and self-reliance
-goals of the algorithm: preserve data integrity, advance the current
-state of the art, and supporting multiple consisistency levels.
-
 TODO Fix, after all of the recent changes to this document.
 
-A discussion of ``humming consensus'' follows next.  This type of
-consensus does not require active participation by all or even a
-majority of participants to make decisions.  Machi's chain manager
+Machi is an immutable file store, now in active development by Basho
+Japan KK.  Machi uses Chain Replication to maintain strong consistency
+of file updates to all replica servers in a Machi cluster.  Chain
+Replication is a variation of primary/backup replication where the
+order of updates between the primary server and each of the backup
+servers is strictly ordered into a single ``chain''.  Management of
+Chain Replication's metadata, e.g., ``What is the current order of
+servers in the chain?'', remains an open research problem.  The
+current state of the art for Chain Replication metadata management
+relies on an external oracle (e.g., ZooKeeper) or the Elastic
+Replication algorithm.
+
+This document describes the Machi chain manager, the component
+responsible for managing Chain Replication metadata state.  The chain
+manager uses a new technique, based on a variation of CORFU, called
+``humming consensus''.
+
+Humming consensus does not require active participation by all or even
+a majority of participants to make decisions.  Machi's chain manager
 bases its logic on humming consensus to make decisions about how to
 react to changes in its environment, e.g. server crashes, network
 partitions, and changes by Machi cluster admnistrators.  Once a
@@ -67,31 +80,32 @@ disseminated to all available participants.
 \section{Introduction}
 \label{sec:introduction}
 
-\subsection{What does "self-management" mean?}
+\subsection{What does ``self-management'' mean?}
 \label{sub:self-management}
 
 For the purposes of this document, chain replication self-management
 is the ability for the $N$ nodes in an $N$-length chain replication chain
-to manage the state of the chain without requiring an external party
-to participate.  Chain state includes:
+to manage the chain's metadata without requiring an external party
+to perform these management tasks.  Chain metadata state and state
+management tasks include:
 
 \begin{itemize}
-\item Preserve data integrity of all data stored within the chain.  Data
-   loss is not an option.
+\item Preserving data integrity of all metadata and data stored within
+  the chain.  Data loss is not an option.
 \item Stably preserve knowledge of chain membership (i.e. all nodes in
    the chain, regardless of operational status). A systems
-   administrators is expected to make "permanent" decisions about
+   administrators is expected to make ``permanent'' decisions about
    chain membership.
-\item Use passive and/or active techniques to track operational
+\item Using passive and/or active techniques to track operational
    state/status, e.g., up, down, restarting, full data sync, partial
    data sync, etc.
-\item Choose the run-time replica ordering/state of the chain, based on
+\item Choosing the run-time replica ordering/state of the chain, based on
    current member status and past operational history.  All chain
    state transitions must be done safely and without data loss or
    corruption.
 \item As a new node is added to the chain administratively or old node is
-   restarted, add the node to the chain safely and perform any data
-   synchronization/"repair" required to bring the node's data into
+   restarted, adding the node to the chain safely and perform any data
+   synchronization/repair required to bring the node's data into
    full synchronization with the other nodes.
 \end{itemize}
 
@@ -102,20 +116,63 @@ management technique for Machi.  Even when operating in an eventually
 consistent mode, Machi must not lose data without cause outside of all
 design, e.g., all particpants crash permanently.
 
-\subsection{Goal: better than state-of-the-art Chain Replication management}
+\subsection{Goal: Contribute to Chain Replication metadata management research}
 
-We hope/believe that this new self-management algorithem can improve
-the current state-of-the-art by eliminating all external management
-entities.  Current state-of-the-art for management of chain
-replication chains is discussed below, to provide historical context.
+We believe that this new self-management algorithm, humming consensus,
+contributes a novel approach to Chain Replication metadata management.
+Typical practice in the IT industry appears to favor using an external
+oracle, e.g., using ZooKeeper as a trusted coordinator.  The ``monitor
+and mangage your neighbor'' technique proposed in elastic replication
+(Section \ref{ssec:elastic-replication}) appears to be the current
+state of the art in the distributed systems research community.
 
-\subsubsection{``Leveraging Sharding in the Design of Scalable Replication Protocols'' by Abu-Libdeh, van Renesse, and Vigfusson}
+See Section~\ref{sec:cr-management-review} for a brief review.
+
+\subsection{Goal: Support both eventually consistent \& strongly consistent modes of operation}
+
+Machi's first use cases are all for use as a file store in an eventually
+consistent environment.
+Later, we wish the option of supporting strong consistency
+applications such as CORFU-style logging while reusing all (or most)
+of Machi's infrastructure.
+
+In eventually consistent mode, humming consensus
+allows a Machi cluster to fragment into
+arbitrary islands of network partition, all the way down to 100\% of
+members running in complete network isolation from each other.
+Furthermore, it provides enough agreement to allow
+formerly-partitioned members to coordinate the reintegration and
+reconciliation of their data when partitions are healed.
+
+\subsection{Anti-goal: Minimize churn}
+
+Humming consensus's goal is to manage Chain Replication metadata
+safely.  If participants have differing notions of time, e.g., running
+on extremely fast or extremely slow hardware, then humming consensus
+may "churn" rapidly in different metadata states in such a way that
+the chain's data would be effectively unavailable.  
+
+In practice, however, any series of network partition changes that
+case humming consensus to churn will cause other management techniques
+(such as an external "oracle") similar problems.
+{\bf [Proof by handwaving assertion.]}
+(See also: Section~\ref{sub:time-model})
+
+\section{Review of current Chain Replication metadata management methods}
+\label{sec:cr-management-review}
+
+We briefly survey the state of the art of research and industry
+practice of chain replication metadata management options.
+
+\subsection{``Leveraging Sharding in the Design of Scalable Replication Protocols'' by Abu-Libdeh, van Renesse, and Vigfusson}
 \label{ssec:elastic-replication}
 Multiple chains are arranged in a ring (called a "band" in the paper).
 The responsibility for managing the chain at position N is delegated
 to chain N-1.  As long as at least one chain is running, that is
 sufficient to start/bootstrap the next chain, and so on until all
-chains are running.  The paper then estimates mean-time-to-failure
+chains are running.  This technique is called ``Elastic Replication''.
+
+The paper then estimates mean-time-to-failure
 (MTTF) and suggests a "band of bands" topology to handle very large
 clusters while maintaining an MTTF that is as good or better than
 other management techniques.
@@ -123,13 +180,17 @@ other management techniques.
 {\bf NOTE:} If the chain self-management method proposed for Machi does not
 succeed, this paper's technique is our best fallback recommendation.
 
-\subsubsection{An external management oracle, implemented by ZooKeeper}
+\subsection{An external management oracle, implemented by ZooKeeper}
 \label{ssec:an-oracle}
-This is not a recommendation for Machi: we wish to avoid using ZooKeeper.
-However, many other open source software products use
-ZooKeeper for exactly this kind of data replica management problem.
+This is not a recommendation for Machi: we wish to avoid using
+ZooKeeper and any other ``large'' external service dependency.  See
+the ``Assumptions'' section of \cite{machi-design} for Machi's overall
+design assumptions and limitations.
 
-\subsubsection{An external management oracle, implemented by Riak Ensemble}
+However, many other open source software products use ZooKeeper for
+exactly this kind of critical metadata replica management problem.
+
+\subsection{An external management oracle, implemented by Riak Ensemble}
 
 This is a much more palatable choice than option~\ref{ssec:an-oracle}
 above.  We also
@@ -139,41 +200,8 @@ choosing ZooKeeper, the choice feels quite clear: Riak Ensemble will
 win, unless there is some critical feature missing from Riak
 Ensemble.  If such an unforseen missing feature is discovered, it
 would probably be preferable to add the feature to Riak Ensemble
-rather than to use ZooKeeper (and document it and provide product
-support for it and so on...).
-
-\subsection{Goal: Support both eventually consistent \& strongly consistent modes of operation}
-
-Machi's first use case is for Riak CS, as an eventually consistent
-store for CS's "block" storage.  Today, Riak KV is used for "block"
-storage.  Riak KV is an AP-style key-value store; using Machi in an
-AP-style mode would match CS's current behavior from points of view of
-both code/execution and human administrator exectations.
-
-Later, we wish the option of using CP support to replace other data
-store services that Riak KV provides today.  (Scope and timing of such
-replacement TBD.)
-
-We believe this algorithm allows a Machi cluster to fragment into
-arbitrary islands of network partition, all the way down to 100\% of
-members running in complete network isolation from each other.
-Furthermore, it provides enough agreement to allow
-formerly-partitioned members to coordinate the reintegration \&
-reconciliation of their data when partitions are healed.
-
-\subsection{Anti-goal: minimize churn}
-
-This algorithm's focus is data safety and not availability.  If
-participants have differing notions of time, e.g., running on
-extremely fast or extremely slow hardware, then this algorithm will
-"churn" in different states where the chain's data would be
-effectively unavailable.
-
-In practice, however, any series of network partition changes that
-case this algorithm to churn will cause other management techniques
-(such as an external "oracle") similar problems.
-{\bf [Proof by handwaving assertion.]}
-See also: Section~\ref{sub:time-model}
+rather than to use ZooKeeper (and for Basho to document ZK, package
+ZK, provide commercial ZK support, etc.).
 
 \section{Assumptions}
 \label{sec:assumptions}
@@ -187,7 +215,9 @@ running in an "eventually consistent" manner.  We wish to be able to
 make progress, i.e., remain available in the CAP sense, even if we are
 partitioned down to a single isolated node.  VR, Paxos, and Raft
 alone are not sufficient to coordinate service availability at such
-small scale.
+small scale.  The humming consensus algorithm can manage
+both strongly consistency systems (i.e., the typical use for Chain
+Replication) as well as eventually consistent data systems.
 
 \subsection{The CORFU protocol is correct}
 
@@ -202,7 +232,7 @@ CORFU, then we expect that Machi's implementation will be flawed.
 The communication model is asynchronous point-to-point messaging.
 The network is unreliable: messages may be arbitrarily dropped and/or
 reordered.  Network partitions may occur at any time.
-Network partitions may be asymmetric, e.g., a message can be sent
+Network partitions may be asymmetric, e.g., a message can be sent successfully
 from $A \rightarrow B$, but messages from $B \rightarrow A$ can be
 lost, dropped, and/or arbitrarily delayed.
 
@@ -238,6 +268,21 @@ Such extra churn is regrettable and will cause periods of delay as the
 humming consensus algorithm (decribed below) makes decisions.  However, the
 churn cannot {\bf (we assert/believe)} cause data loss.
 
+\subsection{Data consistency: strong unless otherwise noted}
+
+Most discussion in this document assumes a desire to preserve strong
+consistency in all data managed by Machi's chain replication.  We
+use the short-hand notation ``CP mode'' to describe this default mode
+of operation, where ``C'' and ``P'' refer to the CAP Theorem
+\cite{cap-theorem}.
+
+However, there are interesting use cases where Machi is useful in a
+more relaxed, eventual consistency environment.  We may use the
+short-hand ``AP mode'' when describing features that preserve only
+eventual consistency.  Discussion of AP mode features in this document
+will always be explictly noted --- discussion of strongly consistent CP
+mode is always the default.
+
 \subsection{Use of the ``wedge state''}
 
 A participant in Chain Replication will enter "wedge state", as
@@ -258,8 +303,8 @@ operation mode.
 \subsection{Use of ``humming consensus''}
 
 CS literature uses the word "consensus" in the context of the problem
-description at
-{\tt http://en.wikipedia.org/wiki/ Consensus\_(computer\_science)\#Problem\_description}.
+description at \cite{wikipedia-consensus}
+.
 This traditional definition differs from what is described here as
 ``humming consensus''.
 
@@ -274,46 +319,81 @@ node.
 
 See Section~\ref{sec:humming-consensus} for detailed discussion.
 
+\subsection{Concurrent chain managers execute humming consensus independently}
+
+Each Machi file server has its own concurrent chain manager
+process(es) embedded within it.  Each chain manager process will
+execute the humming consensus algorithm using only local state (e.g.,
+the $P_{current}$ projection currently used by the local server) and
+values written and read from everyone's projection stores.
+
+The chain manager's primary communication method with the local Machi
+file API server is the wedge and un-wedge request API.  When humming
+consensus has chosen a projection $P_{new}$ to replace $P_{current}$,
+the value of $P_{new}$ is included in the un-wedge request.
+
 \section{The projection store}
 
 The Machi chain manager relies heavily on a key-value store of
 write-once registers called the ``projection store''.
-Each participating chain node has its own projection store.
-The store's key is a positive integer;
-the integer represents the epoch number of the projection.  The
+Each Machi node maintains its own projection store.
+The store's keyspace is divided into two halves (described below),
+each with different rules for who can write keys to that half of the
+store.
+
+The store's key is a 2-tuple of a positive integer and the half of
+the partition, the ``public'' half or the ``private'' half.
+The integer represents the epoch number of the projection stored with
+this key.  The
 store's value is either the special `unwritten' value\footnote{We use
-  $\bot$ to denote the unwritten value.} or else an
-application-specific binary blob that is immutable thereafter.
+  $\bot$ to denote the unwritten value.} or else a binary blob that is
+immutable thereafter; the projection data structure is
+serialized and stored in this binary blob.
 
 The projection store is vital for the correct implementation of humming
-consensus (Section~\ref{sec:humming-consensus}).
-
-All parts store described below may be read by any cluster member.
+consensus (Section~\ref{sec:humming-consensus}).  The write-once
+register primitive allows us to analyze the store's behavior
+using the same logical tools and techniques as the CORFU log.
 
 \subsection{The publicly-writable half of the projection store}
 
 The publicly-writable projection store is used to share information
-during the first half of the self-management algorithm.  Any chain
-member may write a projection to this store.
+during the first half of humming consensus algorithm.  Projections
+in the public half of the store form a log of
+suggestions\footnote{I hesitate to use the word ``propose'' or ``proposal''
+  anywhere in this document \ldots until I've done a more formal
+  analysis of the protocol.  Those words have too many connotations in
+  the context of consensus protocols such as Paxos and Raft.}
+by humming consensus participants for how they wish to change the
+chain's metadata state.
+
+Any chain member may write to the public half of the store.
+Any chain member may read from the public half of the store.
 
 \subsection{The privately-writable half of the projection store}
 
-The privately-writable projection store is used to store the humming consensus
-result that has been chosen by the local node.  Only
-the local server may write values into this store.
+The privately-writable projection store is used to store the
+Chain Replication metadata state (as chosen by humming consensus)
+that is in use now (or has been used in the past) by the local Machi server.
+
+Only the local server may write values into the private half of store.
+Any chain member may read from the private half of the store.
 
 The private projection store serves multiple purposes, including:
 
 \begin{itemize}
-\item remove/clear the local server from ``wedge state''
-\item act as the store of record for chain state transitions
-\item communicate to remote nodes the past states and current operational
-  state of the local node
+\item Remove/clear the local server from ``wedge state''.
+\item Act as a publicly-readable indicator of what projection that the
+  local server is currently using.  This special projection will be
+  called $P_{current}$ throughout this document.
+\item Act as the local server's log/history of
+  its sequence of $P_{current}$ projection changes.
 \end{itemize}
 
 The private half of the projection store is not replicated.
-Projections that are stored in the private projection store are
-meaningful only to the local projection store and are, furthermore,
+
+Projections in the private projection store are
+meaningful only to the local Machi server and, furthermore, are
 merely ``soft state''.  Data loss in the private projection store
 cannot result in loss of ``hard state'' information.  Therefore,
 replication of the private projection store is not required.  The
@@ -440,7 +520,7 @@ Humming consensus requires that any projection be identified by both
 the epoch number and the projection checksum, as described in
 Section~\ref{sub:the-projection}.
 
-\section{Managing multiple projection stores}
+\section{Managing multiple projection store replicas}
 \label{sec:managing-multiple-projection-stores}
 
 An independent replica management technique very similar to the style
@@ -461,7 +541,7 @@ Machi's projection store is write-once, and there is no ``undo'' or
 ``delete'' or ``overwrite'' in the projection store API.\footnote{It doesn't
 matter what caused the two different values.  In case of multiple
 values, all participants in humming consensus merely agree that there
-were multiple opinions at that epoch which must be resolved by the
+were multiple suggestions at that epoch which must be resolved by the
 creation and writing of newer projections with later epoch numbers.}
 Machi's projection store read repair can only repair values that are
 unwritten, i.e., storing $\bot$.
@@ -472,28 +552,28 @@ unanimous value $V_{u}$ for the projection at epoch $E$, then $V_{u}$
 is use to repair all projections stores at $E$ that contain $\bot$
 values.  If the value of $K$ is not unanimous, then the ``highest
 ranked value'' $V_{best}$ is used for the repair; see
-Section~\ref{sub:projection-ranking} for a summary of projection
+Section~\ref{sub:ranking-projections} for a description of projection
 ranking.
 
-Read repair may complete successfully regardless of availability of any of the
-participants.  This applies to both phases, reading and writing.
-
-\subsection{Projection storage: writing}
+\subsection{Writing to public projection stores}
 \label{sub:proj-store-writing}
 
-All projection data structures are stored in the write-once Projection
-Store that is run by each server.  (See also \cite{machi-design}.)
-
-Writing the projection follows the two-step sequence below.
+Writing replicas of a projection $P_{new}$ to the cluster's public
+projection stores is similar, in principle, to writing a Chain
+Replication-managed system or Dynamo-like system.  But unlike Chain
+Replication, the order doesn't really matter.
+In fact, the two steps below may be performed in parallel.
+The significant difference with Chain Replication is how we interpret
+the return status of each write operation.
 
 \begin{enumerate}
-\item Write $P_{new}$ to the local projection store.  (As a side
-  effect,
-  this will trigger
+\item Write $P_{new}$ to the local server's public projection store
+  using $P_{new}$'s epoch number $E$ as the key.
+  As a side effect, a successful write will trigger
   ``wedge'' status in the local server, which will then cascade to other
-  projection-related behavior within that server.)
-\item Write $P_{new}$ to the remote projection store of {\tt all\_members}.
-  Some members may be unavailable, but that is OK.
+  projection-related activity by the local chain manager.
+\item Write $P_{new}$ to key $E$ of each remote public projection store of
+  all participants in the chain.
 \end{enumerate}
 
 In cases of {\tt error\_written} status,
@@ -502,38 +582,49 @@ triggered.  The most common reason for {\tt error\_written} status
 is that another actor in the system has
 already calculated another (perhaps different) projection using the
 same projection epoch number and that
-read repair is necessary.  Note that {\tt error\_written} may also
+read repair is necessary.  The {\tt error\_written} may also
 indicate that another server has performed read repair on the exact
 projection $P_{new}$ that the local server is trying to write!
 
-The writing phase may complete successfully regardless of availability
-of any of the participants.
+\subsection{Writing to private projection stores}
 
-\subsection{Reading from the projection store}
+Only the local server/owner may write to the private half of a
+projection store.  Also, the private projection store is not replicated.
+
+\subsection{Reading from public projection stores}
 \label{sub:proj-store-reading}
 
-Reading data from the projection store is similar in principle to
-reading from a Chain Replication-managed server system.  However, the
-projection store does not use the strict replica ordering that
-Chain Replication does.  For any projection store key $K_n$, the
-participating servers may have different values for $K_n$.  As a
-write-once store, it is impossible to mutate a replica of $K_n$.  If
-replicas of $K_n$ differ, then other parts of the system (projection
-calculation and storage) are responsible for reconciling the
-differences by writing a later key,
-$K_{n+x}$ when $x>0$, with a new projection.
+A read is simple: for an epoch $E$, send a public projection read API
+request to all participants.  As when writing to the public projection
+stores, we can ignore any timeout/unavailable return
+status.\footnote{The success/failure status of projection reads and
+  writes is {\em not} ignored with respect to the chain manager's
+  internal liveness tracker.  However, the liveness tracker's state is
+  typically only used when calculating new projections.}  If we
+discover any unwritten values $\bot$, the read repair protocol is
+followed.
 
-The reading phase may complete successfully regardless of availability
-of any of the participants.
-The minimum number of replicas is only one: the local projection store
-should always be available, even if no other remote replica projection
-stores are available.
-If all available servers return a single, unanimous value $V_u, V_u
-\ne \bot$, then $V_u$ is the final result.  Any non-unanimous value is
-considered disagreement and is resolved by writes to the projection
-store by the humming consensus algorithm.
+The minimum number of non-error responses is only one.\footnote{The local
+projection store should always be available, even if no other remote
+replica projection stores are available.}  If all available servers
+return a single, unanimous value $V_u, V_u \ne \bot$, then $V_u$ is
+the final result for epoch $E$.
+Any non-unanimous values are considered complete disagreement for the
+epoch.  This disagreement is resolved by humming consensus by later
+writes to the public projection stores during subsequent iterations of
+humming consensus.
 
-\section{Phases of projection change}
+We are not concerned with unavailable servers.  Humming consensus
+only uses as many public projections as are available at the present
+moment of time.  If some server $S$ is unavailable at time $t$ and
+becomes available at some later $t+\delta$, and if at $t+\delta$ we
+discover that $S$'s public projection store for key $E$
+contains some disagreeing value $V_{weird}$, then the disagreement
+will be resolved in the exact same manner that would be used as if we
+had found the disagreeing values at the earlier time $t$ (see previous
+paragraph).
+
+\section{Phases of projection change, a prelude to Humming Consensus}
 \label{sec:phases-of-projection-change}
 
 Machi's use of projections is in four discrete phases and are
@@ -543,6 +634,8 @@ adoption of new projections.  The phases are described in the
 subsections below.  The reader should then be able to recognize each
 of these phases when reading the humming consensus algorithm
 description in Section~\ref{sec:humming-consensus}.
+
+TODO should this section simply (?) be merged with Section~\ref{sec:humming-consensus}?
 
 \subsection{Network monitoring}
 \label{sub:network-monitoring}
@@ -562,22 +655,21 @@ machine/hardware node.
 \end{itemize}
 
 Output of the monitor should declare the up/down (or
-available/unavailable) status of each server in the projection.  Such
+alive/unknown) status of each server in the projection.  Such
 Boolean status does not eliminate fuzzy logic, probabilistic
 methods, or other techniques for determining availability status.
-Instead, hard Boolean up/down status
-decisions are required only by the projection calculation phase
+A hard choice of boolean up/down status
+is required only by the projection calculation phase
 (Section~\ref{sub:projection-calculation}).
 
 \subsection{Calculating a new projection data structure}
 \label{sub:projection-calculation}
 
-Each Machi server will have an independent agent/process that is
-responsible for calculating new projections.  A new projection may be
+A new projection may be
 required whenever an administrative change is requested or in response
-to network conditions (e.g., network partitions).
+to network conditions (e.g., network partitions, crashed server).
 
-Projection calculation will be a pure computation, based on input of:
+Projection calculation is a pure computation, based on input of:
 
 \begin{enumerate}
 \item The current projection epoch's data structure
@@ -594,37 +686,58 @@ changes may require retry logic and delay/sleep time intervals.
 \subsection{Writing a new projection}
 \label{sub:proj-storage-writing}
 
-The replicas of Machi projection data that are used by humming consensus
-are not managed by Chain Replication --- if they
-were, we would have a circular dependency!  See
+Let's ignore humming consensus for a moment and consider the general
+case for Chain Replication and strong consistency.  Any manager of
+chain state metadata must maintain a history of the current chain
+state and some history of prior states.  Strong consistency can be
+violated if this history is forgotten.
+
+In Machi's case, the writing a new projection phase is very
+straightforward; see
 Section~\ref{sub:proj-store-writing} for the technique for writing
 projections to all participating servers' projection stores.
+Humming Consensus does not care
+if the writes succeed or not: its final phase, adopting a
+new projection, will determine which write operations usable.
 
 \subsection{Adoption a new projection}
 \label{sub:proj-adoption}
 
-A projection $P_{new}$ is used by a server only if:
+It may be helpful to consider the projections written to the cluster's
+public projection stores as ``suggestions'' for what the cluster's new
+projection ought to be.  (We avoid using the word ``proposal'' here,
+to avoid direct parallels with protocols such as Raft and Paxos.)
 
-\begin{itemize}
-\item The server can determine that the projection has been replicated
-  unanimously across all currently available servers.
-\item The change in state from the local server's current projection to new
-  projection, $P_{current} \rightarrow P_{new}$ will not cause data loss,
-  e.g., the Update Propagation Invariant and all other safety checks
-  required by chain repair in Section~\ref{sec:repair-entire-files}
-  are correct.
-\end{itemize}
+In general, a projection $P_{new}$ at epoch $E_{new}$ is adopted by a
+server only if
+the change in state from the local server's current projection to new
+projection, $P_{current} \rightarrow P_{new}$ will not cause data loss,
+e.g., the Update Propagation Invariant and all other safety checks
+required by chain repair in Section~\ref{sec:repair-entire-files}
+are correct. For example, any new epoch must be strictly larger than
+the current epoch, i.e., $E_{new} > E_{current}$.
 
-Both of these steps are performed as part of humming consensus's
-normal operation.  It may be non-intuitive that the minimum number of
-available servers is only one, but ``one'' is the correct minimum
- number for humming consensus.
+Returning to Machi's case, first, we read latest projection from all
+available public projection stores.  If the result is not a single
+unanmous projection, then we return to the step in
+Section~\ref{sub:projection-calculation}.  If the result is a {\em
+  unanimous} projection $P_{new}$ in epoch $E_{new}$, and if $P_{new}$
+does not violate chain safety checks, then the local node may adopt
+$P_{new}$ to replace its local $P_{current}$ projection.
+
+Not all safe projection transitions are useful, however.  For example,
+it's trivally safe to suggest projection $P_{zero}$, where the chain
+length is zero.  In an eventual consistency environment, projection
+$P_{one}$ where the chain length is exactly one is also trivially
+safe.\footnote{Although, if the total number of participants is more
+  than one, eventual consistency would demand that $P_{self}$ cannot
+  be used forever.}
 
 \section{Humming Consensus}
 \label{sec:humming-consensus}
 
 Humming consensus describes consensus that is derived only from data
-that is visible/known at the current time.  It's OK if a network
+that is visible/available at the current time.  It's OK if a network
 partition is in effect and that not all chain members are available;
 the algorithm will calculate a rough consensus despite not
 having input from all/majority of chain members.  Humming consensus
@@ -652,104 +765,307 @@ proposal to handle ``split brain'' scenarios while in CP mode.
 
 \end{itemize}
 
-If a decision is made during epoch $E$, humming consensus will
-eventually discover if other participants have made a different
-decision during epoch $E$.  When a differing decision is discovered,
-newer \& later time epochs are defined by creating new projections
-with epochs numbered by $E+\delta$ (where $\delta > 0$).
-The distribution of the $E+\delta$ projections will bring all visible
-participants into the new epoch $E+delta$ and then eventually into consensus.
+If a projection suggestion is made during epoch $E$, humming consensus
+will eventually discover if other participants have made a different
+suggestion during epoch $E$.  When a conflicting suggestion is
+discovered, newer \& later time epochs are defined to try to resolve
+the conflict.
+%% The creation of newer $E+\delta$ projections will bring all available
+%% participants into the new epoch $E+delta$ and then eventually into consensus.
 
 The next portion of this section follows the same pattern as
 Section~\ref{sec:phases-of-projection-change}: network monitoring,
 calculating new projections, writing projections, then perhaps
 adopting the newest projection (which may or may not be the projection
 that we just wrote).
-Beginning with Section~9.5\footnote{TODO correction needed?}, we will
-explore TODO TOPICS.
+Beginning with Section~\ref{sub:flapping-state}, we provide
+additional detail to the rough outline of humming consensus.
 
-Additional sources for information humming consensus include:
+\begin{figure*}[htp]
+\resizebox{\textwidth}{!}{
+	\includegraphics[width=\textwidth]{chain-self-management-sketch.Diagram1.eps}
+	}
+\caption{Humming consensus flow chart}
+\label{fig:flowchart}
+\end{figure*}
 
-\begin{itemize}
-\item ``On Consensus and Humming in the IETF'' \cite{rfc-7282}, for
-background on the use of humming by IETF meeting participants during
-IETF meetings.
+This section will refer heavily to Figure~\ref{fig:flowchart}, a
+flowchart of the humming consensus algorithm.  The following notation
+is used by the flowchart and throughout this section.
 
-\item ``On `Humming Consensus', an allegory'' \cite{humming-consensus-allegory},
-for an allegory in homage to the style of Leslie Lamport's original Paxos
-paper.
-\end{itemize}
+\begin{description}
+\item[Author] The name of the server that created the projection.
 
-\paragraph{Aside: origin of the analogy to composing music}
-The ``humming'' part of humming consensus comes from the action taken
-when the environment changes.  If we imagine an egalitarian group of
-people, all in the same room humming some pitch together, then we take
-action to change our humming pitch if:
+\item[Rank] Assigns a numeric score to a projection, see
+  Section~\ref{sub:ranking-projections}.
 
-\begin{itemize}
-\item Some member departs the room (because we can witness the person
-walking out the door) or if someone else in the room starts humming a
-new pitch with a new epoch number.\footnote{It's very difficult for
-  the human ear to hear the epoch number part of a hummed pitch, but
-  for the sake of the analogy, let's assume that it can.}
-\item If a member enters the room and starts humming with the same
-  epoch number but a different note.
-\end{itemize}
+\item[E] The epoch number of a projection.
 
-If someone were to transcribe onto a musical score the pitches that
-are hummed in the room over a period of time, we might have something
-that is roughly like music.  If this musical score uses chord progressions
-and rhythms that obey the rules of a musical genre, e.g., Gregorian
-chant, then the final musical score is a valid Gregorian chant.
+\item[UPI] "Update Propagation Invariant".  The UPI part of the projection
+  is the ordered list of chain members where the UPI is preserved,
+  i.e., all UPI list members have their data fully synchronized
+  (except for updates in-process at the current instant in time).
+  The UPI list is what Chain Replication usually considers ``the
+  chain'', i.e., for strongly consistent read operations, all clients
+  send their read operations to the tail/last member of the UPI server
+  list.
+  In Hibari's implementation of Chain Replication
+  \cite{cr-theory-and-practice}, the chain members between the
+  ``head'' and ``official tail'' (inclusive) are what Machi calls the
+  UPI server list.  See also Section~\ref{sub:upi}.
 
-By analogy, if the rules of the musical score are obeyed, then the
-Chain Replication invariants that are managed by humming consensus are
-obeyed.  Such safe management of Chain Replication metadata is our end goal.
+\item[Repairing] The ordered list of nodes that are in repair mode,
+  i.e., synchronizing their data with the UPI members of the chain.
+  In Hibari's implementation of Chain Replication, any chain members
+  that follow the ``official tail'' are what Machi calls the repairing
+  server list.
+
+\item[Down] The list of chain members believed to be down, from the
+  perspective of the author.
+
+\item[$\mathbf{P_{current}}$] The current projection in active use by the local
+  node.  It is also the projection with largest
+  epoch number in the local node's private projection store.
+
+\item[$\mathbf{P_{newprop}}$] A new projection suggestion, as
+  calculated by the local server
+  (Section~\ref{sub:humming-projection-calculation}).
+
+\item[$\mathbf{P_{latest}}$] The highest-ranked projection with the largest
+  single epoch number that has been read from all available public
+  projection stores, including the local node's public store.
+
+\item[Unanimous] The $P_{latest}$ projections are unanimous if they are
+  effectively identical.  Minor differences such as creation time may
+  be ignored, but elements such as the UPI list must not be ignored.
+
+\item[$\mathbf{P_{current} \rightarrow P_{latest}}$ transition safe?]
+  A predicate function to
+  check the sanity \& safety of the transition from the local server's
+  $P_{current}$ to the $P_{latest}$ projection.
+
+\item[Stop state] One iteration of the self-management algorithm has
+  finished on the local server.
+\end{description}
+
+The Erlang source code that implements the Machi chain manager is
+structured as a state machine where the function executing for the
+flowchart's state is named by the approximate location of the state
+within the flowchart.  The flowchart has three columns, from left to
+right: 
+
+\begin{description}
+\item[Column A] Any reason to change?
+\item[Column B] Do I act?
+\item[Column C] How do I act?
+  \begin{description}
+  \item[C1xx] Save latest suggested projection to local private store, unwedge,
+    then stop.
+  \item[C2xx] Ping author of latest to try again, then wait, then iterate.
+  \item[C3xx] The new projection appears best: write
+    $P_{newprop}=P_{new}$ to all public projection stores, then iterate.
+  \end{description}
+\end{description}
+
+Most flowchart states in a column are numbered in increasing order,
+top-to-bottom.  These numbers appear in blue in
+Figure~\ref{fig:flowchart}.  Some state numbers, such as $A40$,
+describe multiple flowchart states; the Erlang code for that function,
+e.g. {\tt react\_to\_\-env\_A40()}, implements the logic for all such
+flowchart states.
 
 \subsection{Network monitoring}
+\label{sub:humming-network-monitoring}
 
-See also: Section~\ref{sub:network-monitoring}.
+The actions described in this section are executed in the top part of
+Column~A of Figure~\ref{fig:flowchart}.
+See also, Section~\ref{sub:network-monitoring}.
 
 In today's implementation, there is only a single criterion for
-determining the available/not-available status of a remote server $S$:
-is $S$'s projection store available.  If yes, then we assume that all
+determining the alive/perhaps-not-alive status of a remote server $S$:
+is $S$'s projection store available now?  This question is answered by
+attemping to use the projection store API on server $S$.  
+If successful, then we assume that all
 $S$ is available.  If $S$'s projection store is not available for any
-reason, we assume $S$ is entirely unavailable.  This simple single
+reason (including timeout), we assume $S$ is entirely unavailable.
+This simple single
 criterion appears to be sufficient for humming consensus, according to
 simulations of arbitrary network partitions.
 
+%% {\bf NOTE:} The projection store API is accessed via TCP.  The network
+%% partition simulator, mentioned above and described at
+%% \cite{machi-chain-management-sketch-org}, simulates message drops at
+%% the ISO layer 6/7, not IP packets at ISO layer 3.
+
 \subsection{Calculating a new projection data structure}
+\label{sub:humming-projection-calculation}
 
-See also: Section~\ref{sub:projection-calculation}.
+The actions described in this section are executed in the top part of
+Column~A of Figure~\ref{fig:flowchart}.
+See also, Section~\ref{sub:projection-calculation}.
 
-TODO:
-0. incorporate text from ORG file at all relevant places!!!!!!!!!!
-1. calculating a new projection is straightforward
-2. define flapping?
-3. a simple criterion for flapping/not-flapping is pretty easy
-4. if flapping, then calculate an ``inner'' projection
-5. if flapping $\rightarrow$ not-flapping, then copy inner
-$\rightarrow$ outer projection and reset flapping counter.
+Execution starts at ``Start'' state of Column~A of
+Figure~\ref{fig:flowchart}.  Rule $A20$'s uses recent success \&
+failures in accessing other public projection stores to select a hard
+boolean up/down status for each participating server.
+
+\subsubsection{Calculating flapping state}
+
+Also at this stage, the chain manager calculates its local
+``flapping'' state.  The name ``flapping'' is borrowed from IP network
+engineer jargon ``route flapping'':
+
+\begin{quotation}
+``Route flapping is caused by pathological conditions
+(hardware errors, software errors, configuration errors, intermittent
+errors in communications links, unreliable connections, etc.) within
+the network which cause certain reachability information to be
+repeatedly advertised and withdrawn.''  \cite{wikipedia-route-flapping}
+\end{quotation}
+
+\paragraph{Flapping due to constantly changing network partitions and/or server crashes and restarts}
+
+Currently, Machi does not attempt to dampen, smooth, or ignore recent
+history of constantly flapping peer servers.  If necessary, a failure
+detector such as the $\phi$ accrual failure detector
+\cite{phi-accrual-failure-detector} can be used to help mange such
+situations.
+
+\paragraph{Flapping due to asymmetric network partitions} TODO needs
+some polish
+
+The simulator's behavior during stable periods where at least one node
+is the victim of an asymmetric network partition is \ldots weird,
+wonderful, and something I don't completely understand yet.  This is
+another place where we need more eyes reviewing and trying to poke
+holes in the algorithm.
+
+In cases where any node is a victim of an asymmetric network
+partition, the algorithm oscillates in a very predictable way: each
+server $S$ makes the same $P_{new}$ projection at epoch $E$ that $S$ made
+during a previous recent epoch $E-\delta$ (where $\delta$ is small, usually
+much less than 10).  However, at least one node makes a suggestion that
+makes rough consensus impossible.  When any epoch $E$ is not
+acceptable (because some node disagrees about something, e.g.,
+which nodes are down),
+the result is more new rounds of suggestions.
+
+Because any server $S$'s suggestion isn't any different than $S$'s last
+suggestion, the system spirals into an infinite loop of
+never-agreed-upon suggestions.  This is \ldots really cool, I think.
+
+From the perspective of $S$'s chain manager, the pattern of this
+infinite loop is easy to detect: $S$ inspects the pattern of the last
+$L$ projections that it has suggested, e.g., the last 10.
+Tiny details such as the epoch number and creation timestamp will
+differ, but the major details such as UPI list and repairing list are
+the same.
+
+If the major details of the last $L$ projections authored and
+suggested by $S$ are the same, then $S$ unilaterally decides that it
+is ``flapping'' and enters flapping state.  See
+Section~\ref{sub:flapping-state} for additional details.
+
+\subsubsection{When to calculate a new projection}
+
+The Chain Manager schedules a periodic timer to act as a reminder to
+calculate a new projection.  The timer interval is typically
+0.5--2.0 seconds, if the cluster has been stable.  A client may call an
+external API call to trigger a new projection, e.g., if that client
+knows that an environment change has happened and wishes to trigger a
+response prior to the next timer firing.
+
+It's recommended that the timer interval be staggered according to the
+participant ranking rules in Section~\ref{sub:ranking-projections};
+higher-ranked servers use shorter timer intervals.  Timer staggering
+is not required, but the total amount of churn (as measured by
+suggested projections that are ignored or immediately replaced by a
+new and nearly-identical projection) is lower with staggered timer.
 
 \subsection{Writing a new projection}
+\label{sub:humming-proj-storage-writing}
 
 See also: Section~\ref{sub:proj-storage-writing}.
 
-TODO:
-1. We write a new projection based on flowchart A* and B* states and
-state transtions.
+To focus very specifically about writing a projection,
+Figure~\ref{fig:flowchart} shows that writing a private projection is
+done by state $C110$ and that writing a public projection is done by
+states $C300$ and $C310$.
 
-TOOD: include the flowchart into the doc.  We'll probably need to
-insert it landscape?
+Broadly speaking, there are a number of decisions made in all three
+columns of Figure~\ref{fig:flowchart} to decide if and when any type
+of projection should be written at all.  Sometimes, the best action is
+to do nothing.
+
+\subsubsection{Column A: Any reason to change?}
+
+The main tasks of the flowchart states in Column~A is to calculate a
+new projection $P_{new}$ and perhaps also the inner projection
+$P_{new2}$ if we're in flapping mode.  Then we try to figure out which
+projection has the greatest merit: our current projection
+$P_{current}$, the new projection $P_{new}$, or the latest epoch
+$P_{latest}$.  If $P_{current}$ is best, then there's nothing more to
+do.
+
+\subsubsection{Column B: Do I act?}
+
+The main decisions that states in Column B need to make are:
+
+\begin{itemize}
+
+\item Is the $P_{latest}$ projection written unanimously (as far as we
+  call tell right now)?  If yes, then we out to seriously consider
+  using it for our new internal state; go to state $C100$.
+
+\item Is some other server's $P_{latest}$ projection better than my
+  $P_{new}$?  If so,
+  then we wait for a while.  The waiting loop is broken by a local
+  retry counter.  If the counter is small enough, we wait (via state
+  $C200$).  While we wait, the author of the better projection will
+  hopefully have an opportunity to re-write it in a newer epoch
+  unanimously.  If the counter is too big, then we break out and go to
+  $C300$.
+
+\item Otherwise we go to state $C300$, where we try to write our
+  $P_{new}$ to all public projection stores because, as far as we can
+  discern, our projection is best and everyone else ought to know it.
+
+\end{itemize}
+
+It's notable that if $P_{new}$ is truly the best projection available
+at the moment, it must always be written unanimously to everyone's
+public projection stores and then processed through another
+monitor-calculate loop through the flowchart before it can be adopted
+via state $C120$.
+
+\subsubsection{Column C: How do I act?}
+
+This column contains three variations of how to act:
+
+\begin{description}
+
+\item[C1xx] Try to adopt the $P_{latest}$ suggestion.  If the transition
+  between $P_{current}$ to $P_{latest}$ is completely safe, we'll use
+  it by storing it in our local private projection store and then
+  adopt it as $P_{current}$.  If it isn't safe, then jump to $C300$.
+
+\item[C2xx] Do nothing but sleep a while.  Then we loop back to state
+  $A20$ and step through the flowchart loop again.  Optionally, we
+  might want to poke the author of $P_{latest}$ to try again to write
+  its proposal unanimously.
+
+\item[C3xx] We try to replicate our $P_{new}$ suggestion to all local
+  projection stores, because it seems best.
+
+\end{description}
 
 \subsection{Adopting a new projection}
+\label{sub:humming-proj-adoption}
 
 See also: Section~\ref{sub:proj-adoption}.
 
-TODO finish
-
 A new projection $P_E$ is adopted by a Machi server at epoch $E$ if
-two requirements are met:
+the following two requirements are met:
 
 \paragraph{\#1: All available copies of $P_E$ are unanimous/identical}
 
@@ -778,73 +1094,183 @@ trigger the projection calculation subsystem to create an alternative,
 safe projection $P_{latest+1}$ that will hopefully create a unanimous
 epoch $E+1$.
 
-See Section~\ref{sub:humming-rules-and-invariants} for detail about
-these rules and invariants.
+The transition from $P_{current} \rightarrow P_{latest}$ is checked
+for safety and sanity.  The conditions used for the check include:
 
-TODO:
-1. We write a new projection based on flowchart A* and B* and C1* states and
-state transtions.
+\begin{enumerate}
+\item The Erlang data types of all record members are correct.
+\item UPI, down, and repairing lists contain no duplicates and are in fact
+   mutually disjoint.
+\item The author node is not down (as far as we can tell).
+\item Any server $N$ that was added to $P_{latest}$'s UPI list must
+  appear in the tail the UPI list, and $N$ must have been in
+  $P_{current}$'s repairing list.
+\item No re-ordering of the UPI list members: any server $S$ that is
+  in $P_{latest}$'s UPI list that was not present in $P_{current}$'s
+  UPI list must in the same position as it appeared in $P_{current}$'s
+  UPI list.  The same re-reordering restriction applies to all
+  servers in $P_{latest}$'s repairing list relative to
+  $P_{current}$'s repairing list.
+\end{enumerate}
 
-\section{Just in case Humming Consensus doesn't work for us}
+The safety check may be performed pair-wise once or pair-wise across
+the entire history sequence of a server/FLU's private projection
+store.
 
-There are some unanswered questions about Machi's proposed chain
-management technique.  The problems that we guess are likely/possible
-include:
+\subsection{Additional discussion of flapping state}
+\label{sub:flapping-state}
+All $P_{new}$ projections
+calculated while in flapping state have additional diagnostic
+information added, including:
+
+\begin{itemize}
+\item Flag: server $S$ is in flapping state
+\item Epoch number \& wall clock timestamp when $S$ entered flapping state
+\item The collection of all other known participants who are also
+  flapping (with respective starting epoch numbers).
+\item A list of nodes that are suspected of being partitioned, called the
+  ``hosed list''.  The hosed list is a union of all other hosed list
+  members that are ever witnessed, directly or indirectly, by a server
+  while in flapping state.
+\end{itemize}
+
+\subsubsection{Flapping diagnostic data accumulates}
+
+While in flapping state, this diagnostic data is gathered from
+all available participants and merged together in a CRDT-like manner.
+Once added to the diagnostic data list, a datum remains until
+$S$ drops out of flapping state.  When flapping state stops, all
+accumulated diagnostic data is discarded.
+
+This accumulation of diagnostic data in the projection data
+structure acts in part as a substitute for a gossip protocol.
+However, since all participants are already communicating with each
+other via read \& writes to each others' projection stores, this
+data can propagate in a gossip-like manner via projections.  If
+this is insufficient, then a more gossip'y protocol can be used to
+distribute flapping diagnostic data.
+
+\subsubsection{Flapping example}
+\label{ssec:flapping-example}
+
+Any server listed in the ``hosed list'' is suspected of having some
+kind of network communication problem with some other server.  For
+example, let's examine a scenario involving a Machi cluster of servers
+$a$, $b$, $c$, $d$, and $e$.  Assume there exists an asymmetric network
+partition such that messages from $a \rightarrow b$ are dropped, but
+messages from $b \rightarrow a$ are delivered.\footnote{If this
+  partition were happening at or before the level of a reliable
+  delivery protocol like TCP, then communication in {\em both}
+  directions would be affected.  However, in this model, we are
+  assuming that the ``messages'' lost in partitions are projection API
+  call operations and their responses.}
+
+Once a participant $S$ enters flapping state, it starts gathering the
+flapping starting epochs and hosed lists from all of the other
+projection stores that are available.  The sum of this info is added
+to all projections calculated by $S$.
+For example, projections authored by $a$ will say that $a$ believes
+that $b$ is down. 
+Likewise, projections authored by $b$ will say that $b$ believes
+that $a$ is down. 
+
+\subsubsection{The inner projection}
+\label{ssec:inner-projection}
+
+We continue the example started in the previous subsection\ldots.
+
+Eventually, in a gossip-like manner, all other participants will
+eventually find that their hosed list is equal to $[a,b]$.  Any other
+server, for example server $c$, will then calculate another
+projection, $P_{new2}$, using the assumption that both $a$ and $b$
+are down.
+
+\begin{itemize}
+\item If operating in the default CP mode, both $a$ and $b$ are down
+  and therefore not eligible to participate in Chain Replication.
+  %% The chain may continue service if a $c$, $d$, $e$ and/or witness
+  %% servers can try to form a correct UPI list for the chain.
+  This may cause an availability problem for the chain: we may not
+  have a quorum of participants (real or witness-only) to form a
+  correct UPI chain.
+\item If operating in AP mode, $a$ and $b$ can still form two separate
+  chains of length one, using UPI lists of $[a]$ and $[b]$, respectively. 
+\end{itemize}
+
+This re-calculation, $P_{new2}$, of the new projection is called an
+``inner projection''.  This inner projection definition is nested
+inside of its parent projection, using the same flapping disagnostic
+data used for other flapping status tracking.
+
+When humming consensus has determined that a projection state change
+is necessary and is also safe, then the outer projection is written to
+the local private projection store.
+With respect to future iterations of
+humming consensus, regardless of flapping state, the outer projection
+is always used.
+However, the server's subsequent
+behavior with respect to Chain Replication will be relative to the
+{\em inner projection only}.  The inner projection is used to trigger
+wedge/un-wedge behavior as well as being the projection that is
+advertised to Machi clients.
+
+The epoch of the inner projection, $E^{inner}$ is always less than or
+equal to the epoch of the outer projection, $E$.  The $E^{inner}$
+epoch typically only changes when new servers are added to the hosed
+list.
+
+To attempt a rough analogy, the outer projection is the carrier wave
+that is used to transmit the information of the inner projection.
+
+\subsubsection{Outer projection churn, inner projection stability}
+
+One of the intriguing features of humming consensus's reaction to
+asymmetric partition: flapping behavior continues for as long as
+an any asymmetric partition exists.
+
+\subsubsection{Leaving flapping state and discarding inner projectino}
+
+There are two events that can trigger leaving flapping state.
 
 \begin{itemize}
 
-\item Thrashing or oscillating between a pair (or more) of
-  projections.  It's hoped that the ``best projection'' ranking system
-  will be sufficient to prevent endless thrashing of projections, but
-  it isn't yet clear that it will be.
+\item A server $S$ in flapping state notices that its long history of
+  repeatedly suggesting the same $P_{new}=X$ projection will be broken:
+  $S$ instead calculates some differing projection $P_{new} = Y$ instead.
+  This change in projection history happens whenever the network
+  partition changes in a significant way.
 
-\item Partial (and/or one-way) network splits which cause partially
-  connected graphs of inter-node connectivity.  Groups of nodes that
-  are completely isolated aren't a problem.  However, partially
-  connected groups of nodes is an unknown.  Intuition says that
-  communication (via the projection store) with ``bridge nodes'' in a
-  partially-connected network ought to settle eventually on a
-  projection with high rank, e.g., the projection on an island
-  subcluster of nodes with the largest author node name.  Some corner
-  case(s) may exist where this intuition is not correct.
-
-\item CP Mode management via the method proposed in
-  Section~\ref{sec:split-brain-management} may not be sufficient in
-  all cases.
+\item Server $S$ reads a public projection, $P_{noflap}$, that is
+  authored by another server $S'$, and that $P_{noflap}$ no longer
+  contains the flapping start epoch for $S'$ that is present in the
+  history that $S$ has maintained of all projection history while in
+  flapping state.
 
 \end{itemize}
 
-\subsection{Alternative: Elastic Replication}
+When either event happens, server $S$ will exit flapping state.  All
+new projections authored by $S$ will have all flapping diagnostic data
+removed.  This includes stopping use of the inner projection: the UPI
+list of the inner projection is copied to the outer projection's UPI
+list, to avoid a drastic change in UPI membership.
 
-Using Elastic Replication (Section~\ref{ssec:elastic-replication}) is
-our preferred alternative, if Humming Consensus is not usable.
+\subsubsection{Stability in symmetric partition cases}
 
-Elastic chain replication is a technique described in
-\cite{elastic-chain-replication}.  It describes using multiple chains
-to monitor each other, as arranged in a ring where a chain at position
-$x$ is responsible for chain configuration and management of the chain
-at position $x+1$.
+Although humming consensus hasn't been formally proven to handle all
+asymmetric and symmetric partition cases, the current implementation
+appears to converge rapidly to a single chain state in all symmetric
+partition cases.  This is in contract to asymmetric partition cases,
+where ``flapping'' will continue on every humming consensus iteration
+until all asymmetric partition disappears.  Such proof is an area of
+future work.
 
-\subsection{Alternative: Hibari's ``Admin Server''
-  and Elastic Chain Replication}
+\subsection{Ranking projections}
+\label{sub:ranking-projections}
 
-See Section 7 of \cite{cr-theory-and-practice} for details of Hibari's
-chain management agent, the ``Admin Server''.  In brief:
-
-\begin{itemize}
-\item The Admin Server is intentionally a single point of failure in
-  the same way that the instance of Stanchion in a Riak CS cluster
-  is an intentional single
-  point of failure.  In both cases, strict
-  serialization of state changes is more important than 100\%
-  availability.
-
-\item For higher availability, the Hibari Admin Server is usually
-  configured in an active/standby manner.  Status monitoring and
-  application failover logic is provided by the built-in capabilities
-  of the Erlang/OTP application controller.
-
-\end{itemize}
+A projection's rank is based on the epoch number (higher always wins),
+chain length (larger wins), number \& state of any repairing members
+of the chain (larger wins), and node name of the author server (as a
+tie-breaking criteria).
 
 \section{``Split brain'' management in CP Mode}
 \label{sec:split-brain-management}
@@ -973,6 +1399,59 @@ servers: {\tt \{check\_epoch, m\_epoch()\}}.
 Any client write operation sends the {\tt
   check\_\-epoch} API command to witness servers and sends the usual {\tt
   write\_\-req} command to full servers.
+
+\subsection{Restarting after entire chain crashes}
+
+TODO This is $1^{st}$ draft of this section.
+
+There's a corner case that requires additional safety checks to
+preserve strong consistency: restarting after the entire chain crashes.
+
+The default restart behavior for the chain manager is to start the
+local server $S$ with $P_{current} = P_{zero}$, i.e., $S$
+believes that the current chain length is zero.  Then $S$'s chain
+manager will attempt to join the chain by waiting for another active
+chain member $S'$ to notice that $S$ is now available.  Then $S'$'s
+chain manager will automatically suggest a projection where $S$ is
+added to the repairing list.  If there is no other active server $S'$,
+then $S$ will suggest projection $P_{one}$, a chain of length one
+where $S$ is the sole UPI member of the chain.
+
+The default restart strategy cannot work correctly if: a). all members
+of the chain crash simultaneously (e.g., power failure), and b). the UPI
+chain was not at maximum length (i.e., no chain members are under
+repair or down).  For example, assume that the cluster consists of
+servers $S_a$ and $S_b$, and the UPI chain is $P_{one} = [S_a]$ when a power
+failure terminates the entire data center.  Assume that when power is
+restored, server $S_b$ restarts first.  $S_b$'s chain manager must not
+suggest $P_{one} = [S_b]$ --- we do not know how much stale data $S_b$
+might have, but clients must not access $S_b$ at thsi time.
+
+The correct course of action in this crash scenario is to wait until
+$S_a$ returns to service.  In general, however, we have to wait until
+a quorum of servers (including witness servers) have restarted to
+determine the last operational state of the cluster.  This operational
+history is preserved and distributed amongst the participants' private
+projection stores.
+
+\section{Possible problems with Humming Consensus}
+
+There are some unanswered questions about Machi's proposed chain
+management technique.  The problems that we guess are likely/possible
+include:
+
+\begin{itemize}
+
+\item Coping with rare flapping conditions.
+  It's hoped that the ``best projection'' ranking system
+  will be sufficient to prevent endless flapping of projections, but
+  it isn't yet clear that it will be.
+
+\item CP Mode management via the method proposed in
+  Section~\ref{sec:split-brain-management} may not be sufficient in
+  all cases.
+
+\end{itemize}
 
 \section{Repair of entire files}
 \label{sec:repair-entire-files}
@@ -1328,7 +1807,7 @@ This property may also be referred to by its acronym, ``UPI''.
 
 \subsection{Chain Replication and strong consistency}
 
-The three basic rules of Chain Replication and its strong
+The basic rules of Chain Replication and its strong
 consistency guarantee:
 
 \begin{enumerate}
@@ -1430,51 +1909,29 @@ then no other chain member can have a prior/older value because their
 respective mutations histories cannot be shorter than the tail
 member's history.
 
-\section{TODO: orphaned text}
+\section{Additional sources for information about humming consensus}
 
-\subsection{1}
+\begin{itemize}
+\item ``On Consensus and Humming in the IETF'' \cite{rfc-7282}, for
+background on the use of humming by IETF meeting participants during
+IETF meetings.
 
-For any key $K$, different projection stores $S_a$ and $S_b$ may store
-nothing (i.e., {\tt error\_unwritten} when queried) or store different
-values, $P_a \ne P_b$, despite having the same projection epoch
-number.  The following ranking rules are used to
-determine the ``best value'' of a projection, where highest rank of
-{\em any single projection} is considered the ``best value'':
+\item ``On `Humming Consensus', an allegory'' \cite{humming-consensus-allegory},
+for an allegory in homage to the style of Leslie Lamport's original Paxos
+paper.
+\end{itemize}
 
-\begin{enumerate}
-\item An unwritten value is ranked at a value of $-1$.
-\item A value whose {\tt author\_server} is at the $I^{th}$ position
-  in the {\tt all\_members} list has a rank of $I$.
-\item A value whose {\tt dbg\_annotations} and/or other fields have
-  additional information may increase/decrease its rank, e.g.,
-  increase the rank by $10.25$.
-\end{enumerate}
+\section{Acknowledgements}
 
-Rank rules \#2 and \#3 are intended to avoid worst-case ``thrashing''
-of different projection proposals.
-
-\subsection{ranking}
-\label{sub:projection-ranking}
-
-\subsection{rules \& invariants}
-\label{sub:humming-rules-and-invariants}
-
+We wish to thank everyone who has read and/or reviewed this document
+in its really-terrible early drafts and have helped improve it
+immensely: Justin Sheehy, Kota Uenishi, Shunichi Shinohara, Andrew
+Stone, Jon Meredith, Chris Meiklejohn, John Daily, Mark Allen, and Zeeshan
+Lakhani.
 
 \bibliographystyle{abbrvnat}
 \begin{thebibliography}{}
 \softraggedright
-
-\bibitem{riak-core}
-Klophaus, Rusty.
-"Riak Core."
-ACM SIGPLAN Commercial Users of Functional Programming (CUFP'10), 2010.
-{\tt http://dl.acm.org/citation.cfm?id=1900176} and
-{\tt https://github.com/basho/riak\_core}
-
-\bibitem{rfc-7282}
-RFC 7282: On Consensus and Humming in the IETF.
-Internet Engineering Task Force.
-{\tt https://tools.ietf.org/html/rfc7282}
 
 \bibitem{elastic-chain-replication}
 Abu-Libdeh, Hussam et al.
@@ -1494,6 +1951,11 @@ Balakrishnan, Mahesh et al.
 CORFU: A Distributed Shared Log
 ACM Transactions on Computer Systems, Vol. 31, No. 4, Article 10, December 2013.
 {\tt http://www.snookles.com/scottmp/corfu/ corfu.a10-balakrishnan.pdf}
+
+\bibitem{machi-chain-management-sketch-org}
+Basho Japan KK.
+Machi Chain Self-Management Sketch
+{\tt https://github.com/basho/machi/tree/ master/doc/chain-self-management-sketch.org}
 
 \bibitem{machi-design}
 Basho Japan KK.
@@ -1516,6 +1978,30 @@ Proceedings of the 9th ACM SIGPLAN Workshop on Erlang (Erlang'10), 2010.
 Fritchie, Scott Lystig.
 On “Humming Consensus”, an allegory.
 {\tt http://www.snookles.com/slf-blog/2015/03/ 01/on-humming-consensus-an-allegory/}
+
+\bibitem{cap-theorem}
+Seth Gilbert and Nancy Lynch.
+Brewer’s conjecture and the feasibility of consistent, available, partition-tolerant web services.
+SigAct News, June 2002.
+{\tt http://webpages.cs.luc.edu/~pld/353/ gilbert\_lynch\_brewer\_proof.pdf}
+
+\bibitem{phi-accrual-failure-detector}
+Naohiro Hayashibara et al.
+The φ accrual failure detector.
+Proceedings of the 23rd IEEE International Symposium on. IEEE, 2004.
+{\tt https://dspace.jaist.ac.jp/dspace/bitstream/ 10119/4784/1/IS-RR-2004-010.pdf}
+
+\bibitem{rfc-7282}
+Internet Engineering Task Force.
+RFC 7282: On Consensus and Humming in the IETF.
+{\tt https://tools.ietf.org/html/rfc7282}
+
+\bibitem{riak-core}
+Klophaus, Rusty.
+"Riak Core."
+ACM SIGPLAN Commercial Users of Functional Programming (CUFP'10), 2010.
+{\tt http://dl.acm.org/citation.cfm?id=1900176} and
+{\tt https://github.com/basho/riak\_core}
 
 \bibitem{the-log-what}
 Kreps, Jay.
@@ -1561,6 +2047,16 @@ Chain Replication for Supporting High Throughput and Availability.
 Proceedings of the 6th Conference on Symposium on Operating Systems
 Design \& Implementation (OSDI'04) - Volume 6, 2004.
 {\tt http://www.cs.cornell.edu/home/rvr/papers/ osdi04.pdf}
+
+\bibitem{wikipedia-consensus}
+Wikipedia.
+Consensus (``computer science'').
+{\tt http://en.wikipedia.org/wiki/Consensus\_ (computer\_science)\#Problem\_description}
+
+\bibitem{wikipedia-route-flapping}
+Wikipedia.
+Route flapping.
+{\tt http://en.wikipedia.org/wiki/Route\_flapping}
 
 \end{thebibliography}
 

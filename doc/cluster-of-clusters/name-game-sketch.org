@@ -1,0 +1,456 @@
+-*- mode: org; -*-
+#+TITLE: Machi cluster-of-clusters "name game" sketch
+#+AUTHOR: Scott
+#+STARTUP: lognotedone hidestars indent showall inlineimages
+#+SEQ_TODO: TODO WORKING WAITING DONE
+
+* 1. "Name Games" with random-slicing style consistent hashing
+
+Our goal: to distribute lots of files very evenly across a cluster of
+Machi clusters (hereafter called a "cluster of clusters" or "CoC").
+
+* 2. Assumptions
+
+** Basic familiarity with Machi high level design and Machi's "projection"
+
+The [[https://github.com/basho/machi/blob/master/doc/high-level-machi.pdf][Machi high level design document]] contains all of the basic
+background assumed by the rest of this document.
+
+** Familiarity with the Machi cluster-of-clusters/CoC concept
+
+This isn't yet well-defined (April 2015).  However, it's clear from
+the [[https://github.com/basho/machi/blob/master/doc/high-level-machi.pdf][Machi high level design document]] that Machi alone does not support
+any kind of file partitioning/distribution/sharding across multiple
+machines.  There must be another layer above a Machi cluster to
+provide such partitioning services.
+
+The name "cluster of clusters" orignated within Basho to avoid
+conflicting use of the word "cluster".  A Machi cluster is usually
+synonymous with a single Chain Replication chain and a single set of
+machines (e.g. 2-5 machines).  However, in the not-so-far future, we
+expect much more complicated patterns of Chain Replication to be used
+in real-world deployments.
+
+"Cluster of clusters" is clunky and long, but we haven't found a good
+substitute yet.  If you have a good suggestion, please contact us!
+^_^
+
+Using the [[https://github.com/basho/machi/tree/master/prototype/demo-day-hack][cluster-of-clusters quick-and-dirty prototype]] as an
+architecture sketch, let's now assume that we have N independent Machi
+clusters.  We wish to provide partitioned/distributed file storage
+across all N clusters.  We call the entire collection of N Machi
+clusters a "cluster of clusters", or abbreviated "CoC".
+
+** Continue CoC prototype's assumption: a Machi cluster is unaware of CoC
+
+Let's continue with an assumption that an individual Machi cluster
+inside of the cluster-of-clusters is completely unaware of the
+cluster-of-clusters layer.
+
+We may need to break this assumption sometime in the future?  It isn't
+quite clear yet, sorry.
+
+** Analogy: "neighborhood : city :: Machi :: cluster-of-clusters"
+
+Analogy: The word "machi" in Japanese means small town or
+neighborhood.  As the Tokyo Metropolitan Area is built from many
+machis and smaller cities, therefore a big, partitioned file store can
+be built out of many small Machi clusters.
+
+** The reader is familiar with the random slicing technique
+
+I'd done something very-very-nearly-identical for the Hibari database
+6 years ago.  But the Hibari technique was based on stuff I did at
+Sendmail, Inc, so it felt old news to me.  {shrug}
+
+The Hibari documentation has a brief photo illustration of how random
+slicing works, see [[http://hibari.github.io/hibari-doc/hibari-sysadmin-guide.en.html#chain-migration][Hibari Sysadmin Guide, chain migration]]
+
+For a comprehensive description, please see these two papers:
+
+#+BEGIN_QUOTE
+Reliable and Randomized Data Distribution Strategies for Large Scale Storage Systems
+Alberto Miranda et al.
+http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.226.5609
+                                                  (short version, HIPC'11)
+
+Random Slicing: Efficient and Scalable Data Placement for Large-Scale
+    Storage Systems 
+Alberto Miranda et al.
+DOI: http://dx.doi.org/10.1145/2632230 (long version, ACM Transactions
+                              on Storage, Vol. 10, No. 3, Article 9, 2014)
+#+END_QUOTE
+
+** We use random slicing to map CoC file names -> Machi cluster ID/name
+
+We will use a single random slicing map.  This map (called "Map" in
+the descriptions below), together with the random slicing hash
+function (called "rs_hash()" below), will be used to map:
+
+#+BEGIN_QUOTE
+    CoC client-visible file name -> Machi cluster ID/name/thingie
+#+END_QUOTE
+
+** Machi cluster ID/name management: TBD, but, really, should be simple
+
+The mapping from:
+
+#+BEGIN_QUOTE
+    Machi CoC member ID/name/thingie -> ???
+#+END_QUOTE
+
+... remains To Be Determined.  But, really, this is going to be pretty
+simple.  The ID/name/thingie will probably be a human-friendly,
+printable ASCII string, and the "???" will probably be a single Machi
+cluster projection data structure.
+
+The Machi projection is enough information to contact any member of
+that cluster and, if necessary, request the most up-to-date projection
+information required to use that cluster.
+
+It's likely that the projection given by this map will be out-of-date,
+so the client must be ready to use the standard Machi procedure to
+request the cluster's current projection, in any case.
+
+* 3. A simple illustration
+
+I'm borrowing an illustration from the HibariDB documentation here,
+but it fits my purposes quite well.  (And I originally created that
+image, and the use license is OK.)
+
+#+CAPTION: Illustration of 'Map', using four Machi clusters
+
+[[./migration-4.png]]
+
+Assume that we have a random slicing map called Map.  This particular
+Map maps the unit interval onto 4 Machi clusters:
+
+| Hash range  | Cluster ID |
+|-------------+------------|
+| 0.00 - 0.25 | Cluster1   |
+| 0.25 - 0.33 | Cluster4   |
+| 0.33 - 0.58 | Cluster2   |
+| 0.58 - 0.66 | Cluster4   |
+| 0.66 - 0.91 | Cluster3   |
+| 0.91 - 1.00 | Cluster4   |
+
+Then, if we had CoC file name "foo", the hash SHA("foo") maps to about
+0.05 on the unit interval.  So, according to Map, the value of
+rs_hash("foo",Map) = Cluster1.  Similarly, SHA("hello") is about
+0.67 on the unit interval, so rs_hash("hello",Map) = Cluster3.
+
+* 4. An additional assumption: clients will want some control over file placement
+
+We will continue to use the 4-cluster diagram from the previous
+section.
+
+When a client wishes to append data to a Machi file, the Machi server
+chooses the file name & byte offset for storing that data.  This
+feature is why Machi's eventual consistency operating mode is so
+nifty: it allows us to merge together files safely at any time because
+any two client append operations will always write to different files
+& different offsets.
+
+** Our new assumption: client control over initial file placement
+
+The CoC management scheme may decide that files need to migrate to
+other clusters.  The reason could be for storage load or I/O load
+balancing reasons.  It could be because a cluster is being
+decomissioned by its owners.  There are many legitimate reasons why a
+file that is initially created on cluster ID X has been moved to
+cluster ID Y.
+
+However, there are legitimate reasons for why the client would want
+control over the choice of Machi cluster when the data is first
+written.  The single biggest reason is load balancing.  Assuming that
+the client (or the CoC management layer acting on behalf of the CoC
+client) knows the current utilization across the participating Machi
+clusters, then it may be very helpful to send new append() requests to
+under-utilized clusters.
+
+** Cool!  Except for a couple of problems...
+
+However, this Machi file naming feature is not so helpful in a
+cluster-of-clusters context.  If the client wants to store some data
+on Cluster2 and therefore sends an append("foo",CoolData) request to
+the head of Cluster2 (which the client magically knows how to
+contact), then the result will look something like
+{ok,"foo.s923.z47",ByteOffset}.
+
+So, "foo.s923.z47" is the file name that any Machi CoC client must use
+in order to retrieve the CoolData bytes.
+
+*** Problem #1: We want CoC files to move around automatically
+
+If the CoC client stores two pieces of information, the file name
+"foo.s923.z47" and the Cluster ID Cluster2, then what happens when the
+cluster-of-clusters system decides to rebalance files across all
+machines?  The CoC manager may decide to move our file to Cluster66.
+
+How will a future CoC client wishes to retrieve CoolData when Cluster2
+no longer stores the required file?
+
+**** When migrating the file, we could put a "pointer" on Cluster2 that points to the new location, Cluster66.
+
+This scheme is a bit brittle, even if all of the pointers are always
+created 100% correctly.  Also, if Cluster2 is ever unavailable, then
+we cannot fetch our CoolData, even though the file moved away from
+Cluster2 several years ago.
+
+The scheme would also introduce extra round-trips to the servers
+whenever we try to read a file where we do not know the most
+up-to-date cluster ID for.
+
+**** We could store "foo.s923.z47"'s location in an LDAP database!
+
+Or we could store it in Riak.  Or in another, external database.  We'd
+rather not create such an external dependency, however.
+
+*** Problem #2: "foo.s923.z47" doesn't always map via random slicing to Cluster2
+
+... if we ignore the problem of "CoC files may be redistributed in the
+future", then we still have a problem.
+
+In fact, the value of ps_hash("foo.s923.z47",Map) is Cluster1.
+
+The whole reason using random slicing is to make a very quick,
+easy-to-distribute mapping of file names to cluster IDs.  It would be
+very nice, very helpful if the scheme would actually *work for us*.
+
+
+* 5. Proposal: Break the opacity of Machi file names, slightly
+
+Assuming that Machi keeps the scheme of creating file names (in
+response to append() and sequencer_new_range() calls) based on a
+predictable client-supplied prefix and an opaque suffix, e.g.,
+
+append("foo",CoolData) -> {ok,"foo.s923.z47",ByteOffset}.
+
+... then we propose that all CoC and Machi parties be aware of this
+naming scheme, i.e. that Machi assigns file names based on:
+
+ClientSuppliedPrefix ++ "." ++ SomeOpaqueFileNameSuffix
+
+The Machi system doesn't care about the file name -- a Machi server
+will treat the entire file name as an opaque thing.  But this document
+is called the "Name Game" for a reason.
+
+What if the CoC client uses a similar scheme?
+
+** The details: legend
+
+- T   = the target CoC member/Cluster ID
+- p   = file prefix, chosen by the CoC client (This is exactly the Machi client-chosen file prefix).
+- s.z = the Machi file server opaque file name suffix (Which we happen to know is a combination of sequencer ID plus file serial number.)
+- A   = adjustment factor, the subject of this proposal
+
+** The details: CoC file write
+
+1. CoC client chooses p, T (file prefix, target cluster)
+2. CoC client knows the CoC Map
+3. CoC client requests @ cluster T: append(p,...) -> {ok, p.s.z, ByteOffset}
+4. CoC client calculates a such that rs_hash(p.s.z.A,Map) = T
+5. CoC stores/uses the file name p.s.z.A.
+
+** The details: CoC file read
+
+1. CoC client has p.s.z.A and parses the parts of the name.
+2. Coc calculates rs_hash(p.s.z.A,Map) = T
+3. CoC client requests @ cluster T: read(p.s.z,...) -> hooray!
+
+** The details: calculating 'A', the adjustment factor
+
+*** The good way: file write
+
+NOTE: This algorithm will bias/weight its placement badly.  TODO it's
+easily fixable but just not written yet.
+
+1. During the file writing stage, at step #4, we know that we asked
+   cluster T for an append() operation using file prefix p, and that
+   the file name that Machi cluster T gave us a longer name, p.s.z.
+2. We calculate sha(p.s.z) = H.
+3. We know Map, the current CoC mapping.
+4. We look inside of Map, and we find all of the unit interval ranges
+   that map to our desired target cluster T.  Let's call this list
+   MapList = [Range1=(start,end],Range2=(start,end],...].
+5. In our example, T=Cluster2.  The example Map contains a single unit
+   interval range for Cluster2, [(0.33,0.58]].
+6. Find the entry in MapList, (Start,End], where the starting range
+   interval Start is larger than T, i.e., Start > T.
+7. For step #6, we "wrap around" to the beginning of the list, if no
+   such starting point can be found.
+8. This is a Basho joint, of course there's a ring in it somewhere!
+9. Pick a random number M somewhere in the interval, i.e., Start <= M
+   and M <= End.
+10. Let A = M - H.
+11. Encode a in a file name-friendly manner, e.g., convert it to
+    hexadecimal ASCII digits (while taking care of A's signed nature)
+    to create file name p.s.z.A.
+
+*** The good way: file read
+
+0. We use a variation of rs_hash(), called rs_hash_after_sha().
+
+#+BEGIN_SRC erlang
+%% type specs, Erlang style
+-spec rs_hash(string(), rs_hash:map()) -> rs_hash:cluster_id().
+-spec rs_hash_after_sha(float(), rs_hash:map()) -> rs_hash:cluster_id().
+#+END_SRC
+
+1. We start with a file name, p.s.z.A.  Parse it.
+2. Calculate SHA(p.s.z) = H and map H onto the unit interval.
+3. Decode A, then calculate M = A - H.  M is a float() type that is
+   now also somewhere in the unit interval.
+4. Calculate rs_hash_after_sha(M,Map) = T.
+5. Send request @ cluster T: read(p.s.z,...) -> hooray!
+
+*** The bad way: file write
+
+1. Once we know p.s.z, we iterate in a loop:
+
+#+BEGIN_SRC pseudoBorne
+a = 0
+while true; do
+    tmp = sprintf("%s.%d", p_s_a, a)
+    if rs_map(tmp, Map) = T; then
+        A = sprintf("%d", a)
+        return A
+    fi
+    a = a + 1
+done
+#+END_SRC
+
+A very hasty measurement of SHA on a single 40 byte ASCII value
+required about 13 microseconds/call.  If we had a cluster of 500
+machines, 84 disks per machine, one Machi file server per disk, and 8
+chains per Machi file server, and if each chain appeared in Map only
+once using equal weighting (i.e., all assigned the same fraction of
+the unit interval), then it would probably require roughly 4.4 seconds
+on average to find a SHA collision that fell inside T's portion of the
+unit interval.
+
+In comparison, the O(1) algorithm above looks much nicer.
+
+* 6. File migration (aka rebalancing/reparitioning/redistribution)
+
+** What is "file migration"?
+
+As discussed in section 5, the client can have good reason for wanting
+to have some control of the initial location of the file within the
+cluster.  However, the cluster manager has an ongoing interest in
+balancing resources throughout the lifetime of the file.  Disks will
+get full, full, hardware will change, read workload will fluctuate,
+etc etc.
+
+This document uses the word "migration" to describe moving data from
+one subcluster to another.  In other systems, this process is
+described with words such as rebalancing, repartitioning, and
+resharding.  For Riak Core applications, the mechanisms are "handoff"
+and "ring resizing". See the [[http://hadoop.apache.org/docs/current/hadoop-project-dist/hadoop-hdfs/HdfsUserGuide.html#Balancer][Hadoop file balancer]] for another example.
+
+A simple variation of the Random Slicing hash algorithm can easily
+accomodate Machi's need to migrate files without interfering with
+availability.  Machi's migration task is much simpler due to the
+immutable nature of Machi file data.
+
+** Change to Random Slicing
+
+The map used by the Random Slicing hash algorithm needs a few simple
+changes to make file migration straightforward.
+
+- Add a "generation number", a strictly increasing number (similar to
+  a Machi cluster's "epoch number") that reflects the history of
+  changes made to the Random Slicing map
+- Use a list of Random Slicing maps instead of a single map, one map
+  per possibility that files may not have been migrated yet out of
+  that map.
+
+As an example:
+
+#+CAPTION: Illustration of 'Map', using four Machi clusters
+
+[[./migration-3to4.png]]
+
+And the new Random Slicing map might look like this:
+
+| Generation number | 7          |
+|-------------------+------------|
+| SubMap            | 1          |
+|-------------------+------------|
+| Hash range        | Cluster ID |
+|-------------------+------------|
+| 0.00 - 0.33       | Cluster1   |
+| 0.33 - 0.66       | Cluster2   |
+| 0.66 - 1.00       | Cluster3   |
+|-------------------+------------|
+| SubMap            | 2          |
+|-------------------+------------|
+| Hash range        | Cluster ID |
+|-------------------+------------|
+| 0.00 - 0.25       | Cluster1   |
+| 0.25 - 0.33       | Cluster4   |
+| 0.33 - 0.58       | Cluster2   |
+| 0.58 - 0.66       | Cluster4   |
+| 0.66 - 0.91       | Cluster3   |
+| 0.91 - 1.00       | Cluster4   |
+
+When a new Random Slicing map contains a single submap, then its use
+is identical to the original Random Slicing algorithm.  If the map
+contains multiple submaps, then the access rules change a bit:
+
+- Write operations always go to the latest/largest submap
+- Read operations attempt to read from all unique submaps
+  - Skip searching submaps that refer to the same cluster ID.
+    - In this example, unit interval value 0.10 is mapped to Cluster1
+      by both submaps.
+  - Read from latest/largest submap to oldest/smallest
+  - If not found in any submap, search a second time (to handle races
+    with file copying between submaps)
+  - If the requested data is found, optionally copy it directly to the
+    latest submap (as a variation of read repair which really simply
+    accelerates the migration process and can reduce the number of
+    operations required to query servers in multiple submaps).
+
+The cluster-of-clusters manager is responsible for:
+
+- Managing the various generations of the CoC Random Slicing maps,
+  including distributing them to CoC clients.
+- Managing the processes that are responsible for copying "cold" data,
+  i.e., files data that is not regularly accessed, to its new submap
+  location.
+- When migration of a file to its new cluster is confirmed successful,
+  delete it from the old cluster.
+
+In example map #7, the CoC manager will copy files with unit interval
+assignments in (0.25,0.33], (0.58,0.66], and (0.91,1.00] from their
+old locations in cluster IDs Cluster1/2/3 to their new cluster,
+Cluster4.  When the CoC manager is satisfied that all such files have
+been copied to Cluster4, then the CoC manager can create and
+distribute a new map, such as:
+
+| Generation number | 8          |
+|-------------------+------------|
+| SubMap            | 1          |
+|-------------------+------------|
+| Hash range        | Cluster ID |
+|-------------------+------------|
+| 0.00 - 0.25       | Cluster1   |
+| 0.25 - 0.33       | Cluster4   |
+| 0.33 - 0.58       | Cluster2   |
+| 0.58 - 0.66       | Cluster4   |
+| 0.66 - 0.91       | Cluster3   |
+| 0.91 - 1.00       | Cluster4   |
+
+One limitation of HibariDB that I haven't fixed is not being able to
+perform more than one migration at a time.  The trade-off is that such
+migration is difficult enough across two submaps; three or more
+submaps becomes even more complicated.  Fortunately for Hibari, its
+file data is immutable and therefore can easily manage many migrations
+in parallel, i.e., its submap list may be several maps long, each one
+for an in-progress file migration.
+
+* Acknowledgements
+
+The source for the "migration-4.png" and "migration-3to4.png" images
+come from the [[http://hibari.github.io/hibari-doc/images/migration-3to4.png][HibariDB documentation]].
+

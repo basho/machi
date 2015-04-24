@@ -109,8 +109,8 @@ limited by the server's underlying OS and file system; a
 practical estimate is 2Tbytes or less but may be larger.
 
 Machi files are write-once, read-many data structures; the label
-``append-only'' is mostly correct.  However, to be 100\% truthful
-truth, the bytes a Machi file can be written temporally in any order.
+``append-only'' is mostly correct.  However, to be 100\% truthful,
+the bytes a Machi file can be written temporally in any order.
 
 Machi files are always named by the server; Machi clients have no
 direct control of the name assigned by a Machi server.  Machi servers
@@ -308,13 +308,14 @@ A Machi cluster of $F+1$ servers can sustain the failure of up
 to $F$ servers without data loss.
 
 A simple explanation of Chain Replication is that it is a variation of
-single-primary/multiple-secondary replication with the following
+primary/backup replication with the following
 restrictions:
 
 \begin{enumerate}
 \item All writes are strictly performed by servers that are arranged
   in a single order, known as the ``chain order'', beginning at the
-  chain's head and ending at the chain's tail.
+  chain's head (analogous to the primary server in primary/backup
+  replication) and ending at the chain's tail.
 \item All strongly consistent reads are performed only by the tail of
   the chain, i.e., the last server in the chain order.
 \item Inconsistent reads may be performed by any single server in the
@@ -1472,7 +1473,7 @@ Manageability, availability and performance in Porcupine: a highly scalable, clu
 
 \bibitem{cr-craq}
 Jeff Terrace and Michael J.~Freedman
-Object Storage on CRAQ.
+Object Storage on CRAQ: High-throughput chain replication for read-mostly workloads
 In Usenix ATC 2009.
 {\tt https://www.usenix.org/legacy/event/usenix09/ tech/full\_papers/terrace/terrace.pdf}
 
