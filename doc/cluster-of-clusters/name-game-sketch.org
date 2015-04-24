@@ -262,6 +262,9 @@ What if the CoC client uses a similar scheme?
 
 *** The good way: file write
 
+NOTE: This algorithm will bias/weight its placement badly.  TODO it's
+easily fixable but just not written yet.
+
 1. During the file writing stage, at step #4, we know that we asked
    cluster T for an append() operation using file prefix p, and that
    the file name that Machi cluster T gave us a longer name, p.s.z.
@@ -327,6 +330,121 @@ on average to find a SHA collision that fell inside T's portion of the
 unit interval.
 
 In comparison, the O(1) algorithm above looks much nicer.
+
+* 6. File migration (aka rebalancing/reparitioning/redistribution)
+
+** What is "file migration"?
+
+As discussed in section 5, the client can have good reason for wanting
+to have some control of the initial location of the file within the
+cluster.  However, the cluster manager has an ongoing interest in
+balancing resources throughout the lifetime of the file.  Disks will
+get full, full, hardware will change, read workload will fluctuate,
+etc etc.
+
+This document uses the word "migration" to describe moving data from
+one subcluster to another.  In other systems, this process is
+described with words such as rebalancing, repartitioning, and
+resharding.  For Riak Core applications, the mechanisms are "handoff"
+and "ring resizing". See the [[http://hadoop.apache.org/docs/current/hadoop-project-dist/hadoop-hdfs/HdfsUserGuide.html#Balancer][Hadoop file balancer]] for another example.
+
+A simple variation of the Random Slicing hash algorithm can easily
+accomodate Machi's need to migrate files without interfering with
+availability.  Machi's migration task is much simpler due to the
+immutable nature of Machi file data.
+
+** Change to Random Slicing
+
+The map used by the Random Slicing hash algorithm needs a few simple
+changes to make file migration straightforward.
+
+- Add a "generation number", a strictly increasing number (similar to
+  a Machi cluster's "epoch number") that reflects the history of
+  changes made to the Random Slicing map
+- Use a list of Random Slicing maps instead of a single map, one map
+  per possibility that files may not have been migrated yet out of
+  that map.
+
+As an example:
+
+#+CAPTION: Illustration of 'Map', using four Machi clusters
+
+[[./migration-3to4.png]]
+
+And the new Random Slicing map might look like this:
+
+| Generation number | 7          |
+|-------------------+------------|
+| SubMap            | 1          |
+|-------------------+------------|
+| Hash range        | Cluster ID |
+|-------------------+------------|
+| 0.00 - 0.33       | Cluster1   |
+| 0.33 - 0.66       | Cluster2   |
+| 0.66 - 1.00       | Cluster3   |
+|-------------------+------------|
+| SubMap            | 2          |
+|-------------------+------------|
+| Hash range        | Cluster ID |
+|-------------------+------------|
+| 0.00 - 0.25       | Cluster1   |
+| 0.25 - 0.33       | Cluster4   |
+| 0.33 - 0.58       | Cluster2   |
+| 0.58 - 0.66       | Cluster4   |
+| 0.66 - 0.91       | Cluster3   |
+| 0.91 - 1.00       | Cluster4   |
+
+When a new Random Slicing map contains a single submap, then its use
+is identical to the original Random Slicing algorithm.  If the map
+contains multiple submaps, then the access rules change a bit:
+
+- Write operations always go to the latest/largest submap
+- Read operations attempt to read from all unique submaps
+  - Skip searching submaps that refer to the same cluster ID.
+    - In this example, unit interval value 0.10 is mapped to Cluster1
+      by both submaps.
+  - Read from latest/largest submap to oldest/smallest
+  - If not found in any submap, search a second time (to handle races
+    with file copying between submaps)
+  - If the requested data is found, optionally copy it directly to the
+    latest submap (as a variation of read repair which really simply
+    accelerates the migration process and can reduce the number of
+    operations required to query servers in multiple submaps).
+
+The cluster-of-clusters manager is responsible for:
+
+- Managing the various generations of the CoC Random Slicing maps,
+  including distributing them to CoC clients.
+- Managing the processes that are responsible for copying "cold" data,
+  i.e., files data that is not regularly accessed.
+
+In example map #7, the CoC manager will copy files with unit interval
+assignments in (0.25,0.33], (0.58,0.66], and (0.91,1.00] from their
+old locations in cluster IDs Cluster1/2/3 to their new cluster,
+Cluster4.  When the CoC manager is satisfied that all such files have
+been copied to Cluster4, then the CoC manager can create and
+distribute a new map, such as:
+
+| Generation number | 8          |
+|-------------------+------------|
+| SubMap            | 1          |
+|-------------------+------------|
+| Hash range        | Cluster ID |
+|-------------------+------------|
+| 0.00 - 0.25       | Cluster1   |
+| 0.25 - 0.33       | Cluster4   |
+| 0.33 - 0.58       | Cluster2   |
+| 0.58 - 0.66       | Cluster4   |
+| 0.66 - 0.91       | Cluster3   |
+| 0.91 - 1.00       | Cluster4   |
+
+One limitation of HibariDB that I haven't fixed is not being able to
+perform more than one migration at a time.  The trade-off is that such
+migration is difficult enough across two submaps; three or more
+submaps becomes even more complicated.  Fortunately for Hibari, its
+file data is immutable and therefore can easily manage many migrations
+in parallel, i.e., its submap list may be several maps long, each one
+for an in-progress file migration.
 
 * Acknowledgements
 
