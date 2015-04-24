@@ -416,7 +416,10 @@ The cluster-of-clusters manager is responsible for:
 - Managing the various generations of the CoC Random Slicing maps,
   including distributing them to CoC clients.
 - Managing the processes that are responsible for copying "cold" data,
-  i.e., files data that is not regularly accessed.
+  i.e., files data that is not regularly accessed, to its new submap
+  location.
+- When migration of a file to its new cluster is confirmed successful,
+  delete it from the old cluster.
 
 In example map #7, the CoC manager will copy files with unit interval
 assignments in (0.25,0.33], (0.58,0.66], and (0.91,1.00] from their
