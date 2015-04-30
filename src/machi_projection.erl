@@ -51,7 +51,7 @@ new(EpochNum, MyName, MemberDict, Down_list, UPI_list, Repairing_list, Dbg) ->
 %% or it may be simply `list(p_srvr())', in which case we'll convert it
 %% to a `p_srvr_dict()'.
 
-new(EpochNum, MyName, MembersDict0, Down_list, UPI_list, Repairing_list,
+new(EpochNum, MyName, [_|_] = MembersDict0, Down_list, UPI_list, Repairing_list,
     Dbg, Dbg2)
   when is_integer(EpochNum), EpochNum >= 0,
        is_atom(MyName) orelse is_binary(MyName),
@@ -83,6 +83,21 @@ new(EpochNum, MyName, MembersDict0, Down_list, UPI_list, Repairing_list,
                        down=Down_list,
                        upi=UPI_list,
                        repairing=Repairing_list,
+                       dbg=Dbg
+                      },
+    update_dbg2(update_checksum(P), Dbg2);
+new(EpochNum, MyName, [] = _MembersDict0, _Down_list, _UPI_list,_Repairing_list,
+    Dbg, Dbg2)
+  when is_integer(EpochNum), EpochNum >= 0,
+       is_atom(MyName) orelse is_binary(MyName) ->
+    P = #projection_v1{epoch_number=EpochNum,
+                       creation_time=now(),
+                       author_server=MyName,
+                       all_members=[],
+                       members_dict=[],
+                       down=[],
+                       upi=[],
+                       repairing=[],
                        dbg=Dbg
                       },
     update_dbg2(update_checksum(P), Dbg2).

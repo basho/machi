@@ -7,7 +7,7 @@
     {env, [
            {flu_list,
             [
-             {flu_a, 32900, "./data.flu_a"}
+             %%%%%% {flu_a, 32900, "./data.flu_a"}
             ]}
     ]}
 ]}.

@@ -95,7 +95,8 @@ start_link(MyName, MembersDict) ->
     start_link(MyName, MembersDict, []).
 
 start_link(MyName, MembersDict, MgrOpts) ->
-    gen_server:start_link(?MODULE, {MyName, MembersDict, MgrOpts}, []).
+    gen_server:start_link({local, make_regname(MyName)}, ?MODULE,
+                          {MyName, MembersDict, MgrOpts}, []).
 
 stop(Pid) ->
     gen_server:call(Pid, {stop}, infinity).
@@ -206,7 +207,10 @@ handle_cast(_Cast, S) ->
     {noreply, S}.
 
 handle_info(Msg, S) ->
-    exit({bummer, Msg}),
+    case get(todo_bummer) of undefined -> io:format("TODO: got ~p\n", [Msg]);
+                             _         -> ok
+    end,
+    put(todo_bummer, true),
     {noreply, S}.
 
 terminate(_Reason, _S) ->
@@ -1562,7 +1566,9 @@ calc_sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list) ->
     Index = length(Front) + 1,
     NumNodes = length(FLU_list),
     SleepIndex = NumNodes - Index,
-    SleepChunk = MaxSleep div NumNodes,
+    SleepChunk = if NumNodes == 0 -> 0;
+                    true          -> MaxSleep div NumNodes
+                 end,
     MinSleep + (SleepChunk * SleepIndex).
 
 my_find_minmost([]) ->
@@ -1647,6 +1653,11 @@ inner_projection_or_self(P) ->
         P_inner ->
             P_inner
     end.
+
+make_regname(A) when is_atom(A) ->
+    list_to_atom(atom_to_list(A) ++ "_chmgr");
+make_regname(B) when is_binary(B) ->
+    list_to_atom(binary_to_list(B) ++ "_chmgr").
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

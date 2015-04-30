@@ -69,7 +69,7 @@
 -export([start_link/1, stop/1]).
 
 -record(state, {
-          reg_name        :: atom(),
+          flu_name        :: atom(),
           proj_store      :: pid(),
           append_pid      :: pid(),
           tcp_port        :: non_neg_integer(),
@@ -95,15 +95,22 @@ stop(Pid) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-main2(RegName, TcpPort, DataDir, Rest) ->
-    S0 = #state{reg_name=RegName,
+main2(FluName, TcpPort, DataDir, Rest) ->
+    S0 = #state{flu_name=FluName,
                 tcp_port=TcpPort,
                 data_dir=DataDir,
                 props=Rest},
     AppendPid = start_append_server(S0),
-    ProjRegName = make_projection_server_regname(RegName),
-    {ok, ProjectionPid} =
-        machi_projection_store:start_link(ProjRegName, DataDir, AppendPid),
+    {_ProjRegName, ProjectionPid} =
+        case proplists:get_value(projection_store_registered_name, Rest) of
+            undefined ->
+                RN = make_projection_server_regname(FluName),
+                {ok, PP} =
+                    machi_projection_store:start_link(RN, DataDir, AppendPid),
+                {RN, PP};
+            RN ->
+                {RN, whereis(RN)}
+        end,
     S1 = S0#state{append_pid=AppendPid,
                   proj_store=ProjectionPid},
     S2 = case proplists:get_value(dbg, Rest) of
@@ -123,7 +130,7 @@ main2(RegName, TcpPort, DataDir, Rest) ->
     Projection_e = machi_util:make_projection_filename(DataDir, "unused"),
     ok = filelib:ensure_dir(Projection_e),
 
-    put(flu_reg_name, RegName),
+    put(flu_flu_name, FluName),
     put(flu_append_pid, AppendPid),
     put(flu_projection_pid, ProjectionPid),
     put(flu_listen_pid, ListenPid),
@@ -134,44 +141,48 @@ main2(RegName, TcpPort, DataDir, Rest) ->
     ok.
 
 start_listen_server(S) ->
-    spawn_link(fun() -> run_listen_server(S) end).
+    proc_lib:spawn_link(fun() -> run_listen_server(S) end).
 
 start_append_server(S) ->
-    spawn_link(fun() -> run_append_server(S) end).
+    FluPid = self(),
+    proc_lib:spawn_link(fun() -> run_append_server(FluPid, S) end).
 
 %% start_projection_server(S) ->
 %%     spawn_link(fun() -> run_projection_server(S) end).
 
-run_listen_server(#state{tcp_port=TcpPort}=S) ->
+run_listen_server(#state{flu_name=FluName, tcp_port=TcpPort}=S) ->
+    register(make_listener_regname(FluName), self()),
     SockOpts = [{reuseaddr, true},
                 {mode, binary}, {active, false}, {packet, line}],
     {ok, LSock} = gen_tcp:listen(TcpPort, SockOpts),
     listen_server_loop(LSock, S).
 
-run_append_server(#state{reg_name=Name}=S) ->
+run_append_server(FluPid, #state{flu_name=Name}=S) ->
     register(Name, self()),
-    append_server_loop(S).
+    append_server_loop(FluPid, S).
 
 listen_server_loop(LSock, S) ->
     {ok, Sock} = gen_tcp:accept(LSock),
     spawn_link(fun() -> net_server_loop(Sock, S) end),
     listen_server_loop(LSock, S).
 
-append_server_loop(#state{data_dir=DataDir}=S) ->
+append_server_loop(FluPid, #state{data_dir=DataDir}=S) ->
+    AppendServerPid = self(),
     receive
         {seq_append, From, Prefix, Chunk, CSum} ->
             spawn(fun() -> append_server_dispatch(From, Prefix, Chunk, CSum,
-                                                  DataDir) end),
-            append_server_loop(S);
+                                                  DataDir, AppendServerPid) end),
+                                                  %% DataDir, FluPid) end),
+            append_server_loop(FluPid, S);
         {wedge_state_change, Boolean} ->
-            append_server_loop(S#state{wedge=Boolean})
+            append_server_loop(FluPid, S#state{wedge=Boolean})
     end.
 
 -define(EpochIDSpace, (4+20)).
 
-net_server_loop(Sock, #state{reg_name=RegName, data_dir=DataDir}=S) ->
+net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
     ok = inet:setopts(Sock, [{packet, line}]),
-    case gen_tcp:recv(Sock, 0, 60*1000) of
+    case gen_tcp:recv(Sock, 0, 600*1000) of
         {ok, Line} ->
             %% machi_util:verb("Got: ~p\n", [Line]),
             PrefixLenLF = byte_size(Line) - 2 - ?EpochIDSpace - 8 - 1,
@@ -185,7 +196,7 @@ net_server_loop(Sock, #state{reg_name=RegName, data_dir=DataDir}=S) ->
                   _EpochIDRaw:(?EpochIDSpace)/binary,
                   LenHex:8/binary,
                   Prefix:PrefixLenLF/binary, "\n">> ->
-                    do_net_server_append(RegName, Sock, LenHex, Prefix);
+                    do_net_server_append(FluName, Sock, LenHex, Prefix);
                 <<"R ",
                   _EpochIDRaw:(?EpochIDSpace)/binary,
                   OffsetHex:16/binary, LenHex:8/binary,
@@ -233,16 +244,16 @@ net_server_loop(Sock, #state{reg_name=RegName, data_dir=DataDir}=S) ->
             exit(normal)
     end.
 
-append_server_dispatch(From, Prefix, Chunk, CSum, DataDir) ->
-    Pid = write_server_get_pid(Prefix, DataDir),
+append_server_dispatch(From, Prefix, Chunk, CSum, DataDir, LinkPid) ->
+    Pid = write_server_get_pid(Prefix, DataDir, LinkPid),
     Pid ! {seq_append, From, Prefix, Chunk, CSum},
     exit(normal).
 
-do_net_server_append(RegName, Sock, LenHex, Prefix) ->
+do_net_server_append(FluName, Sock, LenHex, Prefix) ->
     %% TODO: robustify against other invalid path characters such as NUL
     case sanitize_file_string(Prefix) of
         ok ->
-            do_net_server_append2(RegName, Sock, LenHex, Prefix);
+            do_net_server_append2(FluName, Sock, LenHex, Prefix);
         _ ->
             ok = gen_tcp:send(Sock, <<"ERROR BAD-ARG">>)
     end.
@@ -255,13 +266,13 @@ sanitize_file_string(Str) ->
             error
     end.
 
-do_net_server_append2(RegName, Sock, LenHex, Prefix) ->
+do_net_server_append2(FluName, Sock, LenHex, Prefix) ->
     <<Len:32/big>> = machi_util:hexstr_to_bin(LenHex),
     ok = inet:setopts(Sock, [{packet, raw}]),
     {ok, Chunk} = gen_tcp:recv(Sock, Len, 60*1000),
     CSum = machi_util:checksum_chunk(Chunk),
     try
-        RegName ! {seq_append, self(), Prefix, Chunk, CSum}
+        FluName ! {seq_append, self(), Prefix, Chunk, CSum}
     catch error:badarg ->
             error_logger:error_msg("Message send to ~p gave badarg, make certain server is running with correct registered name\n", [?MODULE])
     end,
@@ -503,22 +514,30 @@ do_net_server_truncate_hackityhack2(Sock, File, DataDir) ->
             ok = gen_tcp:send(Sock, "ERROR\n")
     end.
 
-write_server_get_pid(Prefix, DataDir) ->
+write_server_get_pid(Prefix, DataDir, LinkPid) ->
     case write_server_find_pid(Prefix) of
         undefined ->
-            start_seq_append_server(Prefix, DataDir),
+            start_seq_append_server(Prefix, DataDir, LinkPid),
             timer:sleep(1),
-            write_server_get_pid(Prefix, DataDir);
+            write_server_get_pid(Prefix, DataDir, LinkPid);
         Pid ->
             Pid
     end.
 
 write_server_find_pid(Prefix) ->
-    RegName = machi_util:make_regname(Prefix),
-    whereis(RegName).
+    FluName = machi_util:make_regname(Prefix),
+    whereis(FluName).
 
-start_seq_append_server(Prefix, DataDir) ->
-    spawn_link(fun() -> run_seq_append_server(Prefix, DataDir) end).
+start_seq_append_server(Prefix, DataDir, AppendServerPid) ->
+    proc_lib:spawn_link(fun() ->
+                                %% The following is only necessary to
+                                %% make nice process relationships in
+                                %% 'appmon' and related tools.
+                                put('$ancestors', [AppendServerPid]),
+                                put('$initial_call', {x,y,3}),
+                                link(AppendServerPid),
+                                run_seq_append_server(Prefix, DataDir)
+                        end).
 
 run_seq_append_server(Prefix, DataDir) ->
     true = register(machi_util:make_regname(Prefix), self()),
@@ -586,8 +605,9 @@ seq_append_server_loop(DataDir, Prefix, File, {FHd,FHc}=FH_, FileNum, Offset) ->
     after 30*1000 ->
             ok = file:close(FHd),
             ok = file:close(FHc),
-            machi_util:info_msg("stop: ~p server at file ~w offset ~w\n",
-                                [Prefix, FileNum, Offset]),
+            machi_util:info_msg("stop: ~p server ~p at file ~w offset ~w\n",
+                                [Prefix, self(), FileNum, Offset]),
+            machi_util:info_msg("links by ~p = ~p\n", [self(), process_info(self(), links)]),
             exit(normal)
     end.
 
@@ -633,5 +653,8 @@ handle_projection_command({list_all_projections, ProjType},
 handle_projection_command(Else, _S) ->
     {error, unknown_cmd, Else}.
 
+make_listener_regname(BaseName) ->
+    list_to_atom(atom_to_list(BaseName) ++ "_listener").
+
 make_projection_server_regname(BaseName) ->
-    list_to_atom(atom_to_list(BaseName) ++ "_projection").
+    list_to_atom(atom_to_list(BaseName) ++ "_pstore2").
