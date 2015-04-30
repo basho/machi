@@ -131,10 +131,31 @@ test_react_to_env(Pid) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+get_my_private_projection_members_dict(MgrOpts) ->
+    EmptyDict = orddict:new(),
+    case proplists:get_value(projection_store_registered_name, MgrOpts) of
+        undefined ->
+            EmptyDict;
+        Store ->
+            case machi_projection_store:read_latest_projection(Store, private) of
+                {error, not_written} ->
+                    EmptyDict;
+                {ok, P} ->
+                    P#projection_v1.members_dict
+            end
+    end.
+
 init({MyName, MembersDict, MgrOpts}) ->
-    All_list = [P#p_srvr.name || {_, P} <- orddict:to_list(MembersDict)],
+    Dx = case MembersDict of
+             [] ->
+                 get_my_private_projection_members_dict(MgrOpts);
+             _ ->
+                 MembersDict
+         end,
+    All_list = [P#p_srvr.name || {_, P} <- orddict:to_list(Dx)],
     Opt = fun(Key, Default) -> proplists:get_value(Key, MgrOpts, Default) end,
     RunEnv = [{seed, Opt(seed, now())},
+              {use_partition_simulator, Opt(use_partition_simulator, true)},
               {network_partitions, Opt(network_partitions, [])},
               {network_islands, Opt(network_islands, [])},
               {flapping_i, Opt(flapping, [])},
@@ -277,16 +298,21 @@ cl_write_public_proj_remote(FLUs, Partitions, _Epoch, Proj, S) ->
     {{remote_write_results, Rs}, S}.
 
 do_cl_read_latest_public_projection(ReadRepairP,
-                                    #ch_mgr{proj=Proj1} = S) ->
+                                    #ch_mgr{name=MyName, proj=Proj1} = S) ->
     _Epoch1 = Proj1#projection_v1.epoch_number,
     case cl_read_latest_projection(public, S) of
         {needs_repair, FLUsRs, Extra, S3} ->
             if not ReadRepairP ->
-                    {not_unanimous, todoxyz, [{results, FLUsRs}|Extra], S3};
+                    {not_unanimous, todoxyz, [{unanimous_flus, []},
+                                              {results, FLUsRs}|Extra], S3};
                true ->
                     {_Status, S4} = do_read_repair(FLUsRs, Extra, S3),
                     do_cl_read_latest_public_projection(ReadRepairP, S4)
             end;
+        {error_unwritten, FLUsRs, Extra, S3} ->
+            NoneProj = make_none_projection(MyName, [], orddict:new()),
+            {not_unanimous, NoneProj, [{unanimous_flus, []},
+                                       {results, FLUsRs}|Extra], S3};
         {UnanimousTag, Proj2, Extra, S3}=_Else ->
             {UnanimousTag, Proj2, Extra, S3}
     end.
@@ -319,7 +345,7 @@ cl_read_latest_projection(ProjectionType, AllHosed, S) ->
     rank_and_sort_projections_with_extra(All_queried_list, FLUsRs, S2).
 
 rank_and_sort_projections_with_extra(All_queried_list, FLUsRs,
-                                     #ch_mgr{proj=CurrentProj}=S) ->
+                                     #ch_mgr{name=MyName,proj=CurrentProj}=S) ->
     UnwrittenRs = [x || {_, error_unwritten} <- FLUsRs],
     Ps = [Proj || {_FLU, Proj} <- FLUsRs, is_record(Proj, projection_v1)],
     BadAnswerFLUs = [FLU || {FLU, Answer} <- FLUsRs,
@@ -328,7 +354,17 @@ rank_and_sort_projections_with_extra(All_queried_list, FLUsRs,
     if All_queried_list == []
        orelse
        length(UnwrittenRs) == length(FLUsRs) ->
-            {error_unwritten, FLUsRs, [todo_fix_caller_perhaps], S};
+            NoneProj = make_none_projection(MyName, [], orddict:new()),
+            Extra2 = [{all_members_replied, true},
+                      {all_queried_list, All_queried_list},
+                      {flus_rs, FLUsRs},
+                      {unanimous_flus,[]},
+                      {not_unanimous_flus, []},
+                      {bad_answer_flus, BadAnswerFLUs},
+                      {not_unanimous_answers, []},
+                      {trans_all_hosed, []},
+                      {trans_all_flap_counts, []}],
+            {not_unanimous, NoneProj, Extra2, S};
        UnwrittenRs /= [] ->
             {needs_repair, FLUsRs, [flarfus], S};
        true ->
@@ -493,7 +529,13 @@ calc_up_nodes(#ch_mgr{name=MyName, proj=Proj, runenv=RunEnv1}=S) ->
     {UpNodes, Partitions, S#ch_mgr{runenv=RunEnv2}}.
 
 calc_up_nodes(MyName, AllMembers, RunEnv1) ->
-    {Partitions2, Islands2} = machi_partition_simulator:get(AllMembers),
+    {Partitions2, Islands2} =
+        case proplists:get_value(use_partition_simulator, RunEnv1) of
+            true ->
+                machi_partition_simulator:get(AllMembers);
+            false ->
+                {[], [AllMembers]}
+        end,
     catch ?REACT({partitions,Partitions2}),
     catch ?REACT({islands,Islands2}),
     UpNodes = lists:sort(
@@ -581,6 +623,9 @@ react_to_env_A20(Retries, S) ->
     %% The UnanimousTag isn't quite sufficient for our needs.  We need
     %% to determine if *all* of the UPI+Repairing FLUs are members of
     %% the unanimous server replies.
+io:format(user, "\nReact ~P\n", [lists:reverse(get(react)), 10]),
+io:format(user, "\nReadExtra ~p\n", [ReadExtra]),
+io:format(user, "\nP_latest ~p\n", [P_latest]),
     UnanimousFLUs = lists:sort(proplists:get_value(unanimous_flus, ReadExtra)),
     UPI_Repairing_FLUs = lists:sort(P_latest#projection_v1.upi ++
                                     P_latest#projection_v1.repairing),
@@ -614,6 +659,9 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
     ?REACT({a30, ?LINE, [{newprop1, machi_projection:make_summary(P_newprop1)}]}),
 
     %% Are we flapping yet?
+io:format(user, "React 2 ~P\n", [lists:reverse(get(react)), 109999]),
+io:format(user, "NewProp1 ~p\n", [P_newprop1]),
+io:format(user, "Current ~p\n", [P_current]),
     {P_newprop2, S3} = calculate_flaps(P_newprop1, P_current, FlapLimit, S2),
 
     %% Move the epoch number up ... originally done in C300.
@@ -1186,9 +1234,13 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
                                             P#projection_v1.repairing,
                                             P#projection_v1.down} || P <- Ps]),
 
+QQQ = 
     {_WhateverUnanimous, BestP, Props, _S} =
         cl_read_latest_projection(private, S),
-    NotBestPs = proplists:get_value(not_unanimous_answers, Props),
+    NotBestPs = proplists:get_value(not_unanimous_answers, Props, []),
+io:format(user, "QQQ ~p\n", [QQQ]),
+io:format(user, "BestP ~p\n", [BestP]),
+io:format(user, "NotBestPs ~p\n", [NotBestPs]),
     DownUnion = lists:usort(
                   lists:flatten(
                     [P#projection_v1.down ||
@@ -1628,6 +1680,8 @@ merge_flap_counts([FlapCount|Rest], D1) ->
                        end, D1, D2),
     merge_flap_counts(Rest, D3).
 
+%% proxy_pid(Name, #ch_mgr{proxies_dict=[]}) ->
+%%     throw(empty_proxies_dict);
 proxy_pid(Name, #ch_mgr{proxies_dict=ProxiesDict}) ->
     orddict:fetch(Name, ProxiesDict).
 
@@ -1672,6 +1726,7 @@ perhaps_call_t(S, Partitions, FLU, DoIt) ->
 perhaps_call(#ch_mgr{name=MyName}=S, Partitions, FLU, DoIt) ->
     ProxyPid = proxy_pid(FLU, S),
     RemoteFLU_p = FLU /= MyName,
+    try
     case RemoteFLU_p andalso lists:member({MyName, FLU}, Partitions) of
         false ->
             Res = DoIt(ProxyPid),
@@ -1685,6 +1740,9 @@ perhaps_call(#ch_mgr{name=MyName}=S, Partitions, FLU, DoIt) ->
         _ ->
             (catch put(react, [{timeout1,me,MyName,to,FLU,RemoteFLU_p,Partitions}|get(react)])),
             exit(timeout)
+    end
+    catch throw:empty_proxies_dict ->
+            asdflkjweoiasd
     end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

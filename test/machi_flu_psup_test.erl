@@ -43,7 +43,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 smoke_test() ->
-    {ok, PidA} = machi_flu_sup:start_link(),
+    {ok, SupPid} = machi_flu_sup:start_link(),
     try
         {ok, _} = machi_flu_psup:start_flu_package(a, 5555, "./data.a",
                                                    [{active_mode,false}]),
@@ -51,9 +51,16 @@ smoke_test() ->
                                                    [{active_mode,false}]),
         {ok, _} = machi_flu_psup:start_flu_package(c, 5557, "./data.c",
                                                    [{active_mode,false}]),
+        
+        [begin
+        QQ = machi_chain_manager1:test_react_to_env(a_chmgr),
+        io:format(user, "QQ ~p\n", [QQ])
+        end || _ <- [1,2,3]],
         ok
     after
-        [ok = machi_flu_psup:stop_flu_package(X) || X <- [a,b,c]]
+        [ok = machi_flu_psup:stop_flu_package(X) || X <- [a,b,c]],
+        unlink(SupPid),
+        exit(SupPid, stop_please)
     end.
 
 -endif. % TEST
