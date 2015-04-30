@@ -26,7 +26,7 @@
 -behaviour(supervisor).
 
 %% External API
--export([start_flu_package/4]).
+-export([start_flu_package/4, stop_flu_package/1]).
 %% Internal API
 -export([start_link/4]).
 
@@ -39,6 +39,13 @@ start_flu_package(FluName, TcpPort, DataDir, Props) ->
             permanent, 5000, supervisor, []},
     {ok, _SupPid} = supervisor:start_child(machi_flu_sup, Spec).
 
+stop_flu_package(FluName) ->
+    case supervisor:terminate_child(machi_flu_sup, FluName) of
+        ok ->
+            ok = supervisor:delete_child(machi_flu_sup, FluName);
+        Else ->
+            Else
+    end.
 
 start_link(FluName, TcpPort, DataDir, Props) ->
     supervisor:start_link({local, make_p_regname(FluName)}, ?MODULE,
@@ -57,7 +64,7 @@ init([FluName, TcpPort, DataDir, Props0]) ->
                permanent, 5000, worker, []},
     MgrSpec = {make_mgr_supname(FluName),
                {machi_chain_manager1, start_link,
-                [FluName, []]},
+                [FluName, [], Props0]},
                permanent, 5000, worker, []},
     Props = [{projection_store_registered_name, ProjRegName}|Props0],
     FluSpec = {FluName,

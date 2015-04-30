@@ -33,6 +33,10 @@ func, and pattern match Erlang style in that func.
 *** TODO Attempt to remove cruft items in flapping_i?
 
 ** TODO Finish OTP'izing the Chain Manager with FLU & proj store processes
+** TODO Add gproc and get rid of registered name rendezvous
+*** TODO Fixes the atom table leak
+*** TODO Fixes the problem of having active sequencer for the same prefix
+         on two FLUS in the same VM
 ** TODO Change all protocol ops to enforce the epoch ID
 ** TODO Add projection wedging logic to each FLU.
 

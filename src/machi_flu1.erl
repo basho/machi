@@ -607,7 +607,6 @@ seq_append_server_loop(DataDir, Prefix, File, {FHd,FHc}=FH_, FileNum, Offset) ->
             ok = file:close(FHc),
             machi_util:info_msg("stop: ~p server ~p at file ~w offset ~w\n",
                                 [Prefix, self(), FileNum, Offset]),
-            machi_util:info_msg("links by ~p = ~p\n", [self(), process_info(self(), links)]),
             exit(normal)
     end.
 
