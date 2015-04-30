@@ -37,13 +37,27 @@
 %%
 %% The FLU is named after the CORFU server "FLU" or "FLash Unit" server.
 %%
-%% TODO There is one major missing feature in this FLU implementation:
+%% TODO There is a major missing feature in this FLU implementation:
 %% there is no "write-once" enforcement for any position in a Machi
 %% file.  At the moment, we rely on correct behavior of the client
 %% &amp; the sequencer to avoid overwriting data.  In the Real World,
 %% however, all Machi file data is supposed to be exactly write-once
 %% to avoid problems with bugs, wire protocol corruption, malicious
 %% clients, etc.
+%%
+%% TODO The per-file metadata tuple store is missing from this implementation.
+%%
+%% TODO Section 4.1 ("The FLU") of the Machi design doc suggests that
+%% the FLU keep track of the epoch number of the last file write (and
+%% perhaps last metadata write), as an optimization for inter-FLU data
+%% replication/chain repair.
+%%
+%% TODO Section 4.2 ("The Sequencer") says that the sequencer must
+%% change its file assignments to new & unique names whenever we move
+%% to wedge state.  This is not yet implemented.  In the current
+%% Erlang process scheme (which will probably be changing soon), a
+%% simple implementation would stop all existing processes that are
+%% running run_seq_append_server().
 
 -module(machi_flu1).
 
