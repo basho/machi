@@ -37,6 +37,7 @@ func, and pattern match Erlang style in that func.
 *** TODO Fixes the atom table leak
 *** TODO Fixes the problem of having active sequencer for the same prefix
          on two FLUS in the same VM
+** TODO Eliminate the timeout exception for the client: just {error,timeout} ret
 ** TODO Change all protocol ops to enforce the epoch ID
 ** TODO Add projection wedging logic to each FLU.
 

@@ -250,7 +250,7 @@ do_req(Req, S) ->
                     end
             end;
         false ->
-            {{error, not_connected}, S2}
+            {{error, partition}, S2}
     end.
 
 make_req_fun({append_chunk, EpochID, Prefix, Chunk}, #state{sock=Sock}) ->

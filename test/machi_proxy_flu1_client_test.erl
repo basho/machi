@@ -49,7 +49,7 @@ api_smoke_test() ->
             {error,_} = ?MUT:append_chunk(Prox1,
                                 FakeEpoch, <<"prefix">>, <<"data">>,
                                 infinity),
-            {error,not_connected} = ?MUT:append_chunk(Prox1,
+            {error,partition} = ?MUT:append_chunk(Prox1,
                                 FakeEpoch, <<"prefix">>, <<"data">>,
                                 infinity),
             %% Start the FLU again, we should be able to do stuff immediately

@@ -65,7 +65,8 @@
 -define(REACT(T), put(react, [T|get(react)])).
 
 %% API
--export([start_link/2, start_link/3, stop/1, ping/1]).
+-export([start_link/2, start_link/3, stop/1, ping/1,
+         set_chain_members/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
@@ -103,6 +104,9 @@ stop(Pid) ->
 
 ping(Pid) ->
     gen_server:call(Pid, {ping}, infinity).
+
+set_chain_members(Pid, MembersDict) ->
+    gen_server:call(Pid, {set_chain_members, MembersDict}, infinity).
 
 -ifdef(TEST).
 
@@ -150,6 +154,7 @@ test_react_to_env(Pid) ->
 %% local projection store.
 
 init({MyName, InitMembersDict, MgrOpts}) ->
+    init_remember_partition_hack(),
     ZeroAll_list = [P#p_srvr.name || {_,P} <- orddict:to_list(InitMembersDict)],
     ZeroProj = make_none_projection(MyName, ZeroAll_list, InitMembersDict),
     ok = store_zeroth_projection_maybe(ZeroProj, MgrOpts),
@@ -163,35 +168,30 @@ init({MyName, InitMembersDict, MgrOpts}) ->
               {network_islands, Opt(network_islands, [])},
               {flapping_i, Opt(flapping, [])},
               {up_nodes, Opt(up_nodes, not_init_yet)}],
-    ActiveP = Opt(active_mode, true),
-    NoneProj = make_none_projection(MyName, All_list, MembersDict),
-    Proxies = orddict:fold(
-                fun(K, P, Acc) ->
-                        {ok, Pid} = ?FLU_PC:start_link(P),
-                        [{K, Pid}|Acc]
-                end, [], MembersDict),
+    ActiveP = Opt(active_mode, false),
     S = #ch_mgr{name=MyName,
                 %% TODO 2015-03-04: revisit, should this constant be bigger?
                 %% Yes, this should be bigger, but it's a hack.  There is
                 %% no guarantee that all parties will advance to a minimum
                 %% flap awareness in the amount of time that this mgr will.
                 flap_limit=length(All_list) + 50,
-                proj=NoneProj,
                 timer='undefined',
                 proj_history=queue:new(),
                 runenv=RunEnv,
-                opts=MgrOpts,
-                members_dict=MembersDict,
-                proxies_dict=orddict:from_list(Proxies)},
-    S2 = if ActiveP == false ->
-                 S;
+                opts=MgrOpts},
+    {_, S2} = do_set_chain_members(MembersDict, S),
+    S3 = if ActiveP == false ->
+                 S2;
             ActiveP == true ->
-                 set_active_timer(S)
+                 set_active_timer(S2)
          end,
-    {ok, S2}.
+    {ok, S3}.
 
 handle_call({ping}, _From, S) ->
     {reply, pong, S};
+handle_call({set_chain_members, MembersDict}, _From, S) ->
+    {Reply, S2} = do_set_chain_members(MembersDict, S),
+    {reply, Reply, S2};
 handle_call({stop}, _From, S) ->
     {stop, normal, ok, S};
 handle_call({test_calc_projection, KeepRunenvP}, _From,
@@ -311,7 +311,7 @@ cl_write_public_proj_local(Epoch, Proj, SkipLocalWriteErrorP,
         Else when SkipLocalWriteErrorP ->
             {XX, SS} = Continue(),
             {{local_write_result, Else, XX}, SS};
-        Else when Else == error_written; Else == timeout; Else == t_timeout ->
+        Else ->
             {Else, S2}
     end.
 
@@ -350,13 +350,16 @@ read_latest_projection_call_only(ProjectionType, AllHosed,
 
     {_UpNodes, Partitions, S2} = calc_up_nodes(S),
     DoIt = fun(Pid) ->
-                   case ?FLU_PC:read_latest_projection(Pid, ProjectionType, ?TO) of
+                   case (?FLU_PC:read_latest_projection(Pid, ProjectionType, ?TO)) of
                        {ok, P} -> P;
                        Else    -> Else
                    end
            end,
+%% io:format(user, "All_queried_list ~p\n", [All_queried_list]),
     Rs = [perhaps_call_t(S, Partitions, FLU, fun(Pid) -> DoIt(Pid) end) ||
              FLU <- All_queried_list],
+    %% Rs = [perhaps_call_t(S, Partitions, FLU, fun(Pid) -> DoIt(Pid) end) ||
+    %%          FLU <- All_queried_list],
     FLUsRs = lists:zip(All_queried_list, Rs),
     {All_queried_list, FLUsRs, S2}.
 
@@ -555,15 +558,17 @@ calc_up_nodes(#ch_mgr{name=MyName, proj=Proj, runenv=RunEnv1}=S) ->
     {UpNodes, Partitions, S#ch_mgr{runenv=RunEnv2}}.
 
 calc_up_nodes(MyName, AllMembers, RunEnv1) ->
-    {Partitions2, Islands2} =
-        case proplists:get_value(use_partition_simulator, RunEnv1) of
-            true ->
-                machi_partition_simulator:get(AllMembers);
-            false ->
-                {[], [AllMembers]}
-        end,
-    catch ?REACT({partitions,Partitions2}),
-    catch ?REACT({islands,Islands2}),
+    case proplists:get_value(use_partition_simulator, RunEnv1) of
+        true ->
+            calc_up_nodes_sim(MyName, AllMembers, RunEnv1);
+        false ->
+            {AllMembers -- get(remember_partition_hack), [], RunEnv1}
+    end.
+
+calc_up_nodes_sim(MyName, AllMembers, RunEnv1) ->
+    {Partitions2, Islands2} = machi_partition_simulator:get(AllMembers),
+    catch ?REACT({calc_up_nodes,?LINE,[{partitions,Partitions2},
+                                       {islands,Islands2}]}),
     UpNodes = lists:sort(
                 [Node || Node <- AllMembers,
                          not lists:member({MyName, Node}, Partitions2),
@@ -633,6 +638,23 @@ rank_projection(#projection_v1{author_server=Author,
         (  N * length(Repairing_list)) +
         (N*N * length(UPI_list)).
 
+do_set_chain_members(MembersDict,
+                     #ch_mgr{name=MyName, proxies_dict=OldProxiesDict}=S) ->
+    catch orddict:fold(
+            fun(_K, Pid, _Acc) ->
+                    _ = (catch ?FLU_PC:quit(Pid))
+            end, [], OldProxiesDict),
+    All_list = [P#p_srvr.name || {_, P} <- orddict:to_list(MembersDict)],
+    NoneProj = make_none_projection(MyName, All_list, MembersDict),
+    Proxies = orddict:fold(
+                fun(K, P, Acc) ->
+                        {ok, Pid} = ?FLU_PC:start_link(P),
+                        [{K, Pid}|Acc]
+                end, [], MembersDict),
+    {ok, S#ch_mgr{proj=NoneProj,
+                  members_dict=MembersDict,
+                  proxies_dict=orddict:from_list(Proxies)}}.
+
 do_react_to_env(#ch_mgr{proj=#projection_v1{members_dict=[]}}=S) ->
     {empty_members_dict, S};
 do_react_to_env(S) ->
@@ -645,15 +667,15 @@ react_to_env_A10(S) ->
 
 react_to_env_A20(Retries, S) ->
     ?REACT(a20),
+    init_remember_partition_hack(),
     {UnanimousTag, P_latest, ReadExtra, S2} =
         do_cl_read_latest_public_projection(true, S),
 
     %% The UnanimousTag isn't quite sufficient for our needs.  We need
     %% to determine if *all* of the UPI+Repairing FLUs are members of
-    %% the unanimous server replies.
-io:format(user, "\nReact ~P\n", [lists:reverse(get(react)), 10]),
-io:format(user, "\nReadExtra ~p\n", [ReadExtra]),
-io:format(user, "\nP_latest ~p\n", [P_latest]),
+    %% the unanimous server replies.  All Repairing FLUs should be up
+    %% now (because if they aren't then they cannot be repairing), so 
+    %% all Repairing FLUs have no non-race excuse not to be in UnanimousFLUs.
     UnanimousFLUs = lists:sort(proplists:get_value(unanimous_flus, ReadExtra)),
     UPI_Repairing_FLUs = lists:sort(P_latest#projection_v1.upi ++
                                     P_latest#projection_v1.repairing),
@@ -687,9 +709,6 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
     ?REACT({a30, ?LINE, [{newprop1, machi_projection:make_summary(P_newprop1)}]}),
 
     %% Are we flapping yet?
-io:format(user, "React 2 ~P\n", [lists:reverse(get(react)), 109999]),
-io:format(user, "NewProp1 ~p\n", [P_newprop1]),
-io:format(user, "Current ~p\n", [P_current]),
     {P_newprop2, S3} = calculate_flaps(P_newprop1, P_current, FlapLimit, S2),
 
     %% Move the epoch number up ... originally done in C300.
@@ -1166,7 +1185,10 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     P_latest2 = machi_projection:update_dbg2(P_latest, Extra_todo),
 
     MyNamePid = proxy_pid(MyName, S),
-    ok = ?FLU_PC:write_projection(MyNamePid, private, P_latest2, ?TO),
+    %% This is the local projection store.  Use a larger timeout, so
+    %% that things locally are pretty horrible if we're killed by a
+    %% timeout exception.
+    ok = ?FLU_PC:write_projection(MyNamePid, private, P_latest2, ?TO*30),
     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
         true ->
             {_,_,C} = os:timestamp(),
@@ -1262,7 +1284,7 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
                                             P#projection_v1.repairing,
                                             P#projection_v1.down} || P <- Ps]),
 
-QQQ = 
+    _QQQ = 
     {_WhateverUnanimous, BestP, Props, _S} =
         cl_read_latest_projection(private, S),
     NotBestPs = proplists:get_value(not_unanimous_answers, Props, []),
@@ -1708,8 +1730,6 @@ merge_flap_counts([FlapCount|Rest], D1) ->
                        end, D1, D2),
     merge_flap_counts(Rest, D3).
 
-%% proxy_pid(Name, #ch_mgr{proxies_dict=[]}) ->
-%%     throw(empty_proxies_dict);
 proxy_pid(Name, #ch_mgr{proxies_dict=ProxiesDict}) ->
     orddict:fetch(Name, ProxiesDict).
 
@@ -1748,16 +1768,23 @@ perhaps_call_t(S, Partitions, FLU, DoIt) ->
         perhaps_call(S, Partitions, FLU, DoIt)
     catch
         exit:timeout ->
-            t_timeout
+            {error, partition};
+        exit:{timeout,_} ->
+            {error, partition}
     end.
 
 perhaps_call(#ch_mgr{name=MyName}=S, Partitions, FLU, DoIt) ->
     ProxyPid = proxy_pid(FLU, S),
     RemoteFLU_p = FLU /= MyName,
-    try
+    erase(bad_sock),
     case RemoteFLU_p andalso lists:member({MyName, FLU}, Partitions) of
         false ->
             Res = DoIt(ProxyPid),
+            if Res == {error, partition} ->
+                    remember_partition_hack(FLU);
+               true ->
+                    ok
+            end,
             case RemoteFLU_p andalso lists:member({FLU, MyName}, Partitions) of
                 false ->
                     Res;
@@ -1768,10 +1795,12 @@ perhaps_call(#ch_mgr{name=MyName}=S, Partitions, FLU, DoIt) ->
         _ ->
             (catch put(react, [{timeout1,me,MyName,to,FLU,RemoteFLU_p,Partitions}|get(react)])),
             exit(timeout)
-    end
-    catch throw:empty_proxies_dict ->
-            asdflkjweoiasd
     end.
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+init_remember_partition_hack() ->
+    put(remember_partition_hack, []).
 
+remember_partition_hack(FLU) ->
+    put(remember_partition_hack, [FLU|get(remember_partition_hack)]).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
