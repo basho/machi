@@ -131,28 +131,31 @@ test_react_to_env(Pid) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-get_my_private_projection_members_dict(MgrOpts) ->
-    EmptyDict = orddict:new(),
-    case proplists:get_value(projection_store_registered_name, MgrOpts) of
-        undefined ->
-            EmptyDict;
-        Store ->
-            case machi_projection_store:read_latest_projection(Store, private) of
-                {error, not_written} ->
-                    EmptyDict;
-                {ok, P} ->
-                    P#projection_v1.members_dict
-            end
-    end.
+%% Bootstrapping is a hassle ... when when isn't it?
+%%
+%% If InitMembersDict == [], then we don't know anything about the chain
+%% that we'll be participating in.  We'll have to wait for directions from
+%% our sysadmin later.
+%%
+%% If InitMembersDict /= [], then we do know what chain we're
+%% participating in.  It's probably test code, since that's about the
+%% only time that we know so much at init() time.
+%%
+%% In either case, we'll try to create & store an epoch 0 projection
+%% and store it to both projections stores.  This is tricky if
+%% InitMembersDict == [] because InitMembersDict usually contains the
+%% #p_svrv records that we need to *write* to the projection store,
+%% even our own private store!  For test code, we get the store
+%% manager's pid in MgrOpts and use direct gen_server calls to the
+%% local projection store.
 
-init({MyName, MembersDict, MgrOpts}) ->
-    Dx = case MembersDict of
-             [] ->
-                 get_my_private_projection_members_dict(MgrOpts);
-             _ ->
-                 MembersDict
-         end,
-    All_list = [P#p_srvr.name || {_, P} <- orddict:to_list(Dx)],
+init({MyName, InitMembersDict, MgrOpts}) ->
+    ZeroAll_list = [P#p_srvr.name || {_,P} <- orddict:to_list(InitMembersDict)],
+    ZeroProj = make_none_projection(MyName, ZeroAll_list, InitMembersDict),
+    ok = store_zeroth_projection_maybe(ZeroProj, MgrOpts),
+
+    MembersDict = get_my_private_projection_members_dict(MgrOpts, InitMembersDict),
+    All_list = [P#p_srvr.name || {_, P} <- orddict:to_list(MembersDict)],
     Opt = fun(Key, Default) -> proplists:get_value(Key, MgrOpts, Default) end,
     RunEnv = [{seed, Opt(seed, now())},
               {use_partition_simulator, Opt(use_partition_simulator, true)},
@@ -246,6 +249,29 @@ make_none_projection(MyName, All_list, MembersDict) ->
     Down_list = All_list,
     UPI_list = [],
     machi_projection:new(MyName, MembersDict, UPI_list, Down_list, [], []).
+
+get_my_private_projection_members_dict(MgrOpts, DefaultDict) ->
+    case proplists:get_value(projection_store_registered_name, MgrOpts) of
+        undefined ->
+            DefaultDict;
+        Store ->
+            {ok, P} = machi_projection_store:read_latest_projection(Store,
+                                                                    private),
+            P#projection_v1.members_dict
+    end.
+
+%% Write the epoch 0 projection store, to assist bootstrapping.  If the
+%% 0th epoch is already written, there's no problem.
+
+store_zeroth_projection_maybe(ZeroProj, MgrOpts) ->
+    case proplists:get_value(projection_store_registered_name, MgrOpts) of
+        undefined ->
+            ok;
+        Store ->
+            _ = machi_projection_store:write(Store, public, ZeroProj),
+            _ = machi_projection_store:write(Store, private, ZeroProj),
+            ok
+    end.
 
 set_active_timer(#ch_mgr{name=MyName, members_dict=MembersDict}=S) ->
     FLU_list = [P#p_srvr.name || {_,P} <- orddict:to_list(MembersDict)],
@@ -607,6 +633,8 @@ rank_projection(#projection_v1{author_server=Author,
         (  N * length(Repairing_list)) +
         (N*N * length(UPI_list)).
 
+do_react_to_env(#ch_mgr{proj=#projection_v1{members_dict=[]}}=S) ->
+    {empty_members_dict, S};
 do_react_to_env(S) ->
     put(react, []),
     react_to_env_A10(S).
@@ -1238,9 +1266,9 @@ QQQ =
     {_WhateverUnanimous, BestP, Props, _S} =
         cl_read_latest_projection(private, S),
     NotBestPs = proplists:get_value(not_unanimous_answers, Props, []),
-io:format(user, "QQQ ~p\n", [QQQ]),
-io:format(user, "BestP ~p\n", [BestP]),
-io:format(user, "NotBestPs ~p\n", [NotBestPs]),
+%% io:format(user, "QQQ ~p\n", [QQQ]),
+%% io:format(user, "BestP ~p\n", [BestP]),
+%% io:format(user, "NotBestPs ~p\n", [NotBestPs]),
     DownUnion = lists:usort(
                   lists:flatten(
                     [P#projection_v1.down ||
