@@ -18,24 +18,6 @@
 %%
 %% -------------------------------------------------------------------
 
-%% @doc The Machi write-once projection store service.
-%%
-%% This API is gen_server-style message passing, intended for use
-%% within a single Erlang node to glue together the projection store
-%% server with the node-local process that implements Machi's TCP
-%% client access protocol (on the "server side" of the TCP connection).
-%%
-%% All Machi client access to the projection store SHOULD NOT use this
-%% module's API.
-%%
-%% The projection store is implemented by an Erlang/OTP `gen_server'
-%% process that is associated with each FLU.  Conceptually, the
-%% projection store is an array of write-once registers.  For each
-%% projection store register, the key is a 2-tuple of an epoch number
-%% (`non_neg_integer()' type) and a projection type (`public' or
-%% `private' type); the value is a projection data structure
-%% (`projection_v1()' type).
-
 -module(machi_flu_psup_test).
 
 -ifdef(TEST).
