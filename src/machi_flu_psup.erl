@@ -28,7 +28,8 @@
 %% External API
 -export([start_flu_package/4, stop_flu_package/1]).
 %% Internal API
--export([start_link/4]).
+-export([start_link/4,
+         make_p_regname/1, make_mgr_supname/1, make_proj_supname/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -78,7 +79,7 @@ make_p_regname(FluName) when is_atom(FluName) ->
     list_to_atom("flusup_" ++ atom_to_list(FluName)).
 
 make_mgr_supname(MgrName) when is_atom(MgrName) ->
-    list_to_atom(atom_to_list(MgrName) ++ "_s").
+    machi_chain_manager1:make_chmgr_regname(MgrName).
 
 make_proj_supname(ProjName) when is_atom(ProjName) ->
     list_to_atom(atom_to_list(ProjName) ++ "_pstore").

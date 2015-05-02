@@ -67,6 +67,7 @@
 -include("machi_projection.hrl").
 
 -export([start_link/1, stop/1]).
+-export([make_listener_regname/1, make_projection_server_regname/1]).
 
 -record(state, {
           flu_name        :: atom(),
@@ -654,6 +655,13 @@ handle_projection_command(Else, _S) ->
 
 make_listener_regname(BaseName) ->
     list_to_atom(atom_to_list(BaseName) ++ "_listener").
+
+%% This is the name of the projection store that is spawned by the
+%% *flu*, for use primarily in testing scenarios.  In normal use, we
+%% ought to be using the OTP style of managing processes, via
+%% supervisors, namely via machi_flu_psup.erl, which uses a
+%% *different* naming convention for the projection store name that it
+%% registers.
 
 make_projection_server_regname(BaseName) ->
     list_to_atom(atom_to_list(BaseName) ++ "_pstore2").

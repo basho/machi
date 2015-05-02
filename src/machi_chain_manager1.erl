@@ -66,18 +66,17 @@
 
 %% API
 -export([start_link/2, start_link/3, stop/1, ping/1,
-         set_chain_members/2]).
+         set_chain_members/2, set_active/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--export([projection_transitions_are_sane/2]).
+-export([make_chmgr_regname/1, projection_transitions_are_sane/2]).
 
 -ifdef(TEST).
 
 -export([test_calc_projection/2,
          test_write_public_projection/2,
          test_read_latest_public_projection/2,
-         test_set_active/2,
          test_react_to_env/1,
          get_all_hosed/1]).
 
@@ -96,7 +95,7 @@ start_link(MyName, MembersDict) ->
     start_link(MyName, MembersDict, []).
 
 start_link(MyName, MembersDict, MgrOpts) ->
-    gen_server:start_link({local, make_regname(MyName)}, ?MODULE,
+    gen_server:start_link({local, make_chmgr_regname(MyName)}, ?MODULE,
                           {MyName, MembersDict, MgrOpts}, []).
 
 stop(Pid) ->
@@ -107,6 +106,9 @@ ping(Pid) ->
 
 set_chain_members(Pid, MembersDict) ->
     gen_server:call(Pid, {set_chain_members, MembersDict}, infinity).
+
+set_active(Pid, Boolean) when Boolean == true; Boolean == false ->
+    gen_server:call(Pid, {set_active, Boolean}, infinity).
 
 -ifdef(TEST).
 
@@ -124,9 +126,6 @@ test_calc_projection(Pid, KeepRunenvP) ->
 test_read_latest_public_projection(Pid, ReadRepairP) ->
     gen_server:call(Pid, {test_read_latest_public_projection, ReadRepairP},
                     infinity).
-
-test_set_active(Pid, Boolean) when Boolean == true; Boolean == false ->
-    gen_server:call(Pid, {test_set_active, Boolean}, infinity).
 
 test_react_to_env(Pid) ->
     gen_server:call(Pid, {test_react_to_env}, infinity).
@@ -192,6 +191,17 @@ handle_call({ping}, _From, S) ->
 handle_call({set_chain_members, MembersDict}, _From, S) ->
     {Reply, S2} = do_set_chain_members(MembersDict, S),
     {reply, Reply, S2};
+handle_call({set_active, Boolean}, _From, #ch_mgr{timer=TRef}=S) ->
+    case {Boolean, TRef} of
+        {true, undefined} ->
+            S2 = set_active_timer(S),
+            {reply, ok, S2};
+        {false, _} ->
+            (catch timer:cancel(TRef)),
+            {reply, ok, S#ch_mgr{timer=undefined}};
+        _ ->
+            {reply, error, S}
+    end;
 handle_call({stop}, _From, S) ->
     {stop, normal, ok, S};
 handle_call({test_calc_projection, KeepRunenvP}, _From,
@@ -209,17 +219,6 @@ handle_call({test_read_latest_public_projection, ReadRepairP}, _From, S) ->
         do_cl_read_latest_public_projection(ReadRepairP, S),
     Res = {Perhaps, Val, ExtraInfo},
     {reply, Res, S2};
-handle_call({test_set_active, Boolean}, _From, #ch_mgr{timer=TRef}=S) ->
-    case {Boolean, TRef} of
-        {true, undefined} ->
-            S2 = set_active_timer(S),
-            {reply, ok, S2};
-        {false, _} ->
-            (catch timer:cancel(TRef)),
-            {reply, ok, S#ch_mgr{timer=undefined}};
-        _ ->
-            {reply, error, S}
-    end;
 handle_call({test_react_to_env}, _From, S) ->
     {TODOtodo, S2} =  do_react_to_env(S),
     {reply, TODOtodo, S2};
@@ -324,7 +323,7 @@ cl_write_public_proj_remote(FLUs, Partitions, _Epoch, Proj, S) ->
     {{remote_write_results, Rs}, S}.
 
 do_cl_read_latest_public_projection(ReadRepairP,
-                                    #ch_mgr{name=MyName, proj=Proj1} = S) ->
+                                    #ch_mgr{proj=Proj1} = S) ->
     _Epoch1 = Proj1#projection_v1.epoch_number,
     case cl_read_latest_projection(public, S) of
         {needs_repair, FLUsRs, Extra, S3} ->
@@ -335,12 +334,8 @@ do_cl_read_latest_public_projection(ReadRepairP,
                     {_Status, S4} = do_read_repair(FLUsRs, Extra, S3),
                     do_cl_read_latest_public_projection(ReadRepairP, S4)
             end;
-        {error_unwritten, FLUsRs, Extra, S3} ->
-            NoneProj = make_none_projection(MyName, [], orddict:new()),
-            {not_unanimous, NoneProj, [{unanimous_flus, []},
-                                       {results, FLUsRs}|Extra], S3};
-        {UnanimousTag, Proj2, Extra, S3}=_Else ->
-            {UnanimousTag, Proj2, Extra, S3}
+        {_UnanimousTag, _Proj2, _Extra, _S3}=Else ->
+            Else
     end.
 
 read_latest_projection_call_only(ProjectionType, AllHosed,
@@ -1569,6 +1564,8 @@ projection_transition_is_sane(
             if UPI_2_suffix == UPI_2_concat ->
                     ok;
                true ->
+                    %% 'make dialyzer' will believe that this can never succeed.
+                    %% 'make dialyzer-test' will not complain, however.
                     if RetrospectiveP ->
                             %% We are in retrospective mode.  But there are
                             %% some transitions that are difficult to find
@@ -1673,13 +1670,6 @@ calc_sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list) ->
                  end,
     MinSleep + (SleepChunk * SleepIndex).
 
-my_find_minmost([]) ->
-    0;
-my_find_minmost([{_,_}|_] = TransFlapCounts0) ->
-    lists:min([FlapCount || {_T, {_FlTime, FlapCount}} <- TransFlapCounts0]);
-my_find_minmost(TransFlapCounts0) ->
-    lists:min(TransFlapCounts0).
-
 get_raw_flapping_i(#projection_v1{dbg=Dbg}) ->
     proplists:get_value(flapping_i, Dbg, []).
 
@@ -1688,14 +1678,6 @@ get_flap_count(P) ->
 
 get_all_flap_counts(P) ->
     proplists:get_value(all_flap_counts, get_raw_flapping_i(P), []).
-
-get_all_flap_counts_counts(P) ->
-    case get_all_flap_counts(P) of
-        [] ->
-            [];
-        [{_,{_,_}}|_] = Cs ->
-            [Count || {_FLU, {_Time, Count}} <- Cs]
-    end.
 
 get_all_hosed(P) when is_record(P, projection_v1)->
     proplists:get_value(all_hosed, get_raw_flapping_i(P), []).
@@ -1756,9 +1738,9 @@ inner_projection_or_self(P) ->
             P_inner
     end.
 
-make_regname(A) when is_atom(A) ->
+make_chmgr_regname(A) when is_atom(A) ->
     list_to_atom(atom_to_list(A) ++ "_chmgr");
-make_regname(B) when is_binary(B) ->
+make_chmgr_regname(B) when is_binary(B) ->
     list_to_atom(binary_to_list(B) ++ "_chmgr").
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
