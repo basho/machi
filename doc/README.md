@@ -8,14 +8,16 @@ Erlang documentation, please use this link:
 
 ### chain-self-management-sketch.org
 
-__chain-self-management-sketch.org__ is a mostly-deprecated draft of
+[chain-self-management-sketch.org](chain-self-management-sketch.org)
+is a mostly-deprecated draft of
 an introduction to the
 self-management algorithm proposed for Machi.  Most material has been
-moved to the __high-level-chain-mgr.pdf__ document.
+moved to the [high-level-chain-mgr.pdf](high-level-chain-mgr.pdf) document.
 
 ### high-level-machi.pdf
 
-__high-level-machi.pdf__ is an overview of the high level design for
+[high-level-machi.pdf](high-level-machi.pdf)
+is an overview of the high level design for
 Machi.  Its abstract:
 
 > Our goal is a robust & reliable, distributed, highly available large
@@ -32,7 +34,8 @@ Machi.  Its abstract:
 
 ### high-level-chain-mgr.pdf
 
-__high-level-chain-mgr.pdf__ is an overview of the techniques used by
+[high-level-chain-mgr.pdf](high-level-chain-mgr.pdf)
+is an overview of the techniques used by
 Machi to manage Chain Replication metadata state.  It also provides an
 introduction to the Humming Consensus algorithm.  Its abstract:
 
