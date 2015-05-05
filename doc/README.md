@@ -8,10 +8,10 @@ Erlang documentation, please use this link:
 
 ### chain-self-management-sketch.org
 
-__chain-self-management-sketch.org__ is an introduction to the
-self-management algorithm proposed for Machi.  This algorithm is
-(hoped to be) sufficient for managing the Chain Replication state of a
-Machi cluster.
+__chain-self-management-sketch.org__ is a mostly-deprecated draft of
+an introduction to the
+self-management algorithm proposed for Machi.  Most material has been
+moved to the __high-level-chain-mgr.pdf__ document.
 
 ### high-level-machi.pdf
 
@@ -30,3 +30,35 @@ Machi.  Its abstract:
 > consistency features --- strong consistency design will be discussed
 > in a separate document.
 
+### high-level-chain-mgr.pdf
+
+__high-level-chain-mgr.pdf__ is an overview of the techniques used by
+Machi to manage Chain Replication metadata state.  It also provides an
+introduction to the Humming Consensus algorithm.  Its abstract:
+
+> Machi is an immutable file store, now in active development by Basho
+> Japan KK.  Machi uses Chain Replication to maintain strong consistency
+> of file updates to all replica servers in a Machi cluster.  Chain
+> Replication is a variation of primary/backup replication where the
+> order of updates between the primary server and each of the backup
+> servers is strictly ordered into a single ``chain''.  Management of
+> Chain Replication's metadata, e.g., ``What is the current order of
+> servers in the chain?'', remains an open research problem.  The
+> current state of the art for Chain Replication metadata management
+> relies on an external oracle (e.g., ZooKeeper) or the Elastic
+> Replication algorithm.
+> 
+> This document describes the Machi chain manager, the component
+> responsible for managing Chain Replication metadata state.  The chain
+> manager uses a new technique, based on a variation of CORFU, called
+> ``humming consensus''.
+> Humming consensus does not require active participation by all or even
+> a majority of participants to make decisions.  Machi's chain manager
+> bases its logic on humming consensus to make decisions about how to
+> react to changes in its environment, e.g. server crashes, network
+> partitions, and changes by Machi cluster admnistrators.  Once a
+> decision is made during a virtual time epoch, humming consensus will
+> eventually discover if other participants have made a different
+> decision during that epoch.  When a differing decision is discovered,
+> new time epochs are proposed in which a new consensus is reached and
+> disseminated to all available participants.
