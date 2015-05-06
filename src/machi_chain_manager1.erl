@@ -158,7 +158,8 @@ init({MyName, InitMembersDict, MgrOpts}) ->
     ZeroProj = make_none_projection(MyName, ZeroAll_list, InitMembersDict),
     ok = store_zeroth_projection_maybe(ZeroProj, MgrOpts),
 
-    MembersDict = get_my_private_projection_members_dict(MgrOpts, InitMembersDict),
+    {MembersDict, Proj} =
+        get_my_private_proj_boot_info(MgrOpts, InitMembersDict, ZeroProj),
     All_list = [P#p_srvr.name || {_, P} <- orddict:to_list(MembersDict)],
     Opt = fun(Key, Default) -> proplists:get_value(Key, MgrOpts, Default) end,
     RunEnv = [{seed, Opt(seed, now())},
@@ -167,8 +168,9 @@ init({MyName, InitMembersDict, MgrOpts}) ->
               {network_islands, Opt(network_islands, [])},
               {flapping_i, Opt(flapping, [])},
               {up_nodes, Opt(up_nodes, not_init_yet)}],
-    ActiveP = Opt(active_mode, false),
+    ActiveP = Opt(active_mode, true),
     S = #ch_mgr{name=MyName,
+                proj=Proj,
                 %% TODO 2015-03-04: revisit, should this constant be bigger?
                 %% Yes, this should be bigger, but it's a hack.  There is
                 %% no guarantee that all parties will advance to a minimum
@@ -229,6 +231,15 @@ handle_cast(_Cast, S) ->
     ?D({cast_whaaaaaaaaaaa, _Cast}),
     {noreply, S}.
 
+handle_info(yo_yo_tick, S) ->
+    {{_Delta, Props, _Epoch}, S2} = do_react_to_env(S),
+    case proplists:get_value(throttle_seconds, Props) of
+        N when is_integer(N), N > 0 ->
+            timer:sleep(N * 1000);
+        _ ->
+            ok
+    end,
+    {noreply, S2};
 handle_info(Msg, S) ->
     case get(todo_bummer) of undefined -> io:format("TODO: got ~p\n", [Msg]);
                              _         -> ok
@@ -249,14 +260,14 @@ make_none_projection(MyName, All_list, MembersDict) ->
     UPI_list = [],
     machi_projection:new(MyName, MembersDict, UPI_list, Down_list, [], []).
 
-get_my_private_projection_members_dict(MgrOpts, DefaultDict) ->
+get_my_private_proj_boot_info(MgrOpts, DefaultDict, DefaultProj) ->
     case proplists:get_value(projection_store_registered_name, MgrOpts) of
         undefined ->
-            DefaultDict;
+            {DefaultDict, DefaultProj};
         Store ->
             {ok, P} = machi_projection_store:read_latest_projection(Store,
                                                                     private),
-            P#projection_v1.members_dict
+            {P#projection_v1.members_dict, P}
     end.
 
 %% Write the epoch 0 projection store, to assist bootstrapping.  If the
@@ -275,7 +286,8 @@ store_zeroth_projection_maybe(ZeroProj, MgrOpts) ->
 set_active_timer(#ch_mgr{name=MyName, members_dict=MembersDict}=S) ->
     FLU_list = [P#p_srvr.name || {_,P} <- orddict:to_list(MembersDict)],
     USec = calc_sleep_ranked_order(1000, 2000, MyName, FLU_list),
-    {ok, TRef} = timer:send_interval(USec, yo_yo_yo_todo),
+io:format(user, "USec ~p for ~p (FLU_list ~p)\n", [USec, MyName, FLU_list]),
+    {ok, TRef} = timer:send_interval(USec, yo_yo_tick),
     S#ch_mgr{timer=TRef}.
 
 do_cl_write_public_proj(Proj, S) ->
@@ -640,18 +652,17 @@ do_set_chain_members(MembersDict,
                     _ = (catch ?FLU_PC:quit(Pid))
             end, [], OldProxiesDict),
     All_list = [P#p_srvr.name || {_, P} <- orddict:to_list(MembersDict)],
-    NoneProj = make_none_projection(MyName, All_list, MembersDict),
     Proxies = orddict:fold(
                 fun(K, P, Acc) ->
                         {ok, Pid} = ?FLU_PC:start_link(P),
                         [{K, Pid}|Acc]
                 end, [], MembersDict),
-    {ok, S#ch_mgr{proj=NoneProj,
-                  members_dict=MembersDict,
+    {ok, S#ch_mgr{members_dict=MembersDict,
                   proxies_dict=orddict:from_list(Proxies)}}.
 
-do_react_to_env(#ch_mgr{proj=#projection_v1{members_dict=[]}}=S) ->
-    {empty_members_dict, S};
+do_react_to_env(#ch_mgr{proj=#projection_v1{epoch_number=Epoch,
+                                            members_dict=[]}}=S) ->
+    {{empty_members_dict, [], Epoch}, S};
 do_react_to_env(S) ->
     put(react, []),
     react_to_env_A10(S).
@@ -1183,7 +1194,11 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     %% This is the local projection store.  Use a larger timeout, so
     %% that things locally are pretty horrible if we're killed by a
     %% timeout exception.
-    ok = ?FLU_PC:write_projection(MyNamePid, private, P_latest2, ?TO*30),
+    %% ok = ?FLU_PC:write_projection(MyNamePid, private, P_latest2, ?TO*30),
+    Goo = P_latest2#projection_v1.epoch_number,
+    io:format(user, "HEE110 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(get(react))]),
+
+    {ok,Goo} = {?FLU_PC:write_projection(MyNamePid, private, P_latest2, ?TO*30),Goo},
     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
         true ->
             {_,_,C} = os:timestamp(),
@@ -1661,14 +1676,13 @@ sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list) ->
     USec.
 
 calc_sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list) ->
-    Front = lists:takewhile(fun(X) -> X /=FLU end, FLU_list),
-    Index = length(Front) + 1,
+    Front = lists:takewhile(fun(X) -> X /= FLU end, lists:sort(FLU_list)),
+    Index = length(Front),
     NumNodes = length(FLU_list),
-    SleepIndex = NumNodes - Index,
     SleepChunk = if NumNodes == 0 -> 0;
-                    true          -> MaxSleep div NumNodes
+                    true          -> (MaxSleep - MinSleep) div NumNodes
                  end,
-    MinSleep + (SleepChunk * SleepIndex).
+    MinSleep + (SleepChunk * Index).
 
 get_raw_flapping_i(#projection_v1{dbg=Dbg}) ->
     proplists:get_value(flapping_i, Dbg, []).
