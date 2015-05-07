@@ -23,6 +23,8 @@
 
 -ifdef(TEST).
 
+-include_lib("eunit/include/eunit.hrl").
+
 -include("machi.hrl").
 -include("machi_projection.hrl").
 

@@ -310,7 +310,7 @@ convergence_demo_testfun(NumFLUs) ->
       io:format(user, "We should see convergence to 1 correct chain.\n", []),
       machi_partition_simulator:no_partitions(),
       [DoIt(50, 10, 100) || _ <- [1]],
-      io:format(user, "Sweet, finishing early\n", []), exit(yoyoyo_testing_hack),
+      io:format(user, "Sweet, finishing early\n", []), exit(yoyoyo_testing_hack_finishing_early),
       %% WARNING: In asymmetric partitions, private_projections_are_stable()
       %%          will never be true; code beyond this point on the -exp3
       %%          branch is bit-rotted, sorry!

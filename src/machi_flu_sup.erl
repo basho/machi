@@ -40,15 +40,12 @@ init([]) ->
     RestartStrategy = one_for_one,
     MaxRestarts = 1000,
     MaxSecondsBetweenRestarts = 3600,
-
     SupFlags = {RestartStrategy, MaxRestarts, MaxSecondsBetweenRestarts},
 
-    Restart = permanent,
-    Shutdown = 5000,
-    Type = worker,
+    Ps = application:get_env(machi, initial_flus, []),
+    FLU_specs = [machi_flu_psup:make_package_spec(FluName, TcpPort,
+                                                  DataDir, Props) ||
+                    {FluName, TcpPort, DataDir, Props} <- Ps],
 
-    {ok, FluList} = application:get_env(machi, flu_list),
-    FluSpecs = [{FluName, {machi_flu, start_link, [FluArgs]},
-                 Restart, Shutdown, Type, []} ||
-                   {FluName, _Port, _Dir}=FluArgs <- FluList],
-    {ok, {SupFlags, FluSpecs}}.
+    {ok, {SupFlags, FLU_specs}}.
+

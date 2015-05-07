@@ -36,7 +36,6 @@
 %% `private' type); the value is a projection data structure
 %% (`projection_v1()' type).
 
-
 -module(machi_projection_store).
 
 -include("machi_projection.hrl").

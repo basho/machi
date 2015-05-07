@@ -49,7 +49,7 @@ api_smoke_test() ->
             {error,_} = ?MUT:append_chunk(Prox1,
                                 FakeEpoch, <<"prefix">>, <<"data">>,
                                 infinity),
-            {error,not_connected} = ?MUT:append_chunk(Prox1,
+            {error,partition} = ?MUT:append_chunk(Prox1,
                                 FakeEpoch, <<"prefix">>, <<"data">>,
                                 infinity),
             %% Start the FLU again, we should be able to do stuff immediately
@@ -65,7 +65,7 @@ api_smoke_test() ->
             %% Alright, now for the rest of the API, whee
             BadFile = <<"no-such-file">>,
             {error, no_such_file} = ?MUT:checksum_list(Prox1, FakeEpoch, BadFile),
-            {ok, [_]} = ?MUT:list_files(Prox1, FakeEpoch),
+            {ok, [_|_]} = ?MUT:list_files(Prox1, FakeEpoch),
             {ok, FakeEpoch} = ?MUT:get_latest_epoch(Prox1, public),
             {error, not_written} = ?MUT:read_latest_projection(Prox1, public),
             {error, not_written} = ?MUT:read_projection(Prox1, public, 44),

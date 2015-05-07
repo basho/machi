@@ -239,6 +239,17 @@ info_msg(Fmt, Args) ->
                                                  _     -> error_logger:info_msg(Fmt, Args)
     end.
 
+wait_for_death(Pid, 0) ->
+    exit({not_dead_yet, Pid});
+wait_for_death(Pid, Iters) when is_pid(Pid) ->
+    case erlang:is_process_alive(Pid) of
+        false ->
+            ok;
+        true  ->
+            timer:sleep(1),
+            wait_for_death(Pid, Iters-1)
+    end.
+
 %%%%%%%%%%%%%%%%%
 
 %% @doc Create a TCP connection to a remote Machi server.
