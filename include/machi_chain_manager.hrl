@@ -30,6 +30,7 @@
           proj            :: projection(),
           %%
           timer           :: 'undefined' | timer:tref(),
+          ignore_timer    :: boolean(),
           proj_history    :: queue:queue(),
           flaps=0         :: integer(),
           flap_start = ?NOT_FLAPPING
