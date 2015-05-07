@@ -104,6 +104,14 @@ stop(Pid) ->
 ping(Pid) ->
     gen_server:call(Pid, {ping}, infinity).
 
+%% @doc Set chain members list.
+%%
+%% NOTE: This implementation is a bit brittle, in that an author with
+%% higher rank may try to re-suggest the old membership list if it
+%% races with an author of lower rank.  For now, we suggest calling
+%% set_chain_members() first on the author of highest rank and finish
+%% with lowest rank, i.e. name z* first, name a* last.
+
 set_chain_members(Pid, MembersDict) ->
     gen_server:call(Pid, {set_chain_members, MembersDict}, infinity).
 

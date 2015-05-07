@@ -26,7 +26,7 @@
 -behaviour(supervisor).
 
 %% External API
--export([start_flu_package/4, stop_flu_package/1]).
+-export([make_package_spec/4, start_flu_package/4, stop_flu_package/1]).
 %% Internal API
 -export([start_link/4,
          make_p_regname/1, make_mgr_supname/1, make_proj_supname/1]).
@@ -34,10 +34,13 @@
 %% Supervisor callbacks
 -export([init/1]).
 
+make_package_spec(FluName, TcpPort, DataDir, Props) ->
+    {FluName, {machi_flu_psup, start_link,
+               [FluName, TcpPort, DataDir, Props]},
+     permanent, 5000, supervisor, []}.
+
 start_flu_package(FluName, TcpPort, DataDir, Props) ->
-    Spec = {FluName, {machi_flu_psup, start_link,
-                      [FluName, TcpPort, DataDir, Props]},
-            permanent, 5000, supervisor, []},
+    Spec = make_package_spec(FluName, TcpPort, DataDir, Props),
     {ok, _SupPid} = supervisor:start_child(machi_flu_sup, Spec).
 
 stop_flu_package(FluName) ->

@@ -41,5 +41,11 @@ init([]) ->
     MaxRestarts = 1000,
     MaxSecondsBetweenRestarts = 3600,
     SupFlags = {RestartStrategy, MaxRestarts, MaxSecondsBetweenRestarts},
-    {ok, {SupFlags, []}}.
+
+    Ps = application:get_env(machi, initial_flus, []),
+    FLU_specs = [machi_flu_psup:make_package_spec(FluName, TcpPort,
+                                                  DataDir, Props) ||
+                    {FluName, TcpPort, DataDir, Props} <- Ps],
+
+    {ok, {SupFlags, FLU_specs}}.
 
