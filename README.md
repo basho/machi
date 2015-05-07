@@ -25,13 +25,13 @@ doc](./doc/high-level-machi.pdf) for further references.)
 
 The two major design documents for Machi are now ready or nearly ready
 for internal Basho and external party review.  Please see the
-[doc](./doc) directory's [README](./doc/README.md) for details
+[doc](./doc) directory's [README](./doc) for details
 
 * Machi high level design
 * Machi chain self-management design
 
 The work of implementing first draft of Machi is now underway.  The
-code from the [prototypes/demo-day](prototypes/demo-day/) directory is
+code from the [prototype/demo-day-hack](prototype/demo-day-hack/) directory is
 being used as the initial scaffolding.
 
 * The chain manager is nearly ready for "AP mode" use in eventual
@@ -43,7 +43,7 @@ being used as the initial scaffolding.
 * The Machi client/server protocol is still the hand-crafted,
   artisanal, bogus protocol that I hacked together for a "demo day"
   back in January and appears in the
-  [prototypes/demo-day](prototypes/demo-day/) code.
+  [prototype/demo-day-hack](prototype/demo-day-hack/) code.
     * Today: the only client language supported is Erlang.
     * Plan: replace the current protocol to something based on Protocol Buffers
     * Plan: add a protocol handler that is HTTP-like but probably not
@@ -116,8 +116,6 @@ to get started.
 * Open pull-requests for the appropriate projects.
 * Contributors will review your pull request, suggest changes, and merge it when it’s ready and/or offer feedback.
 * To report a bug or issue, please open a new issue against this repository.
-
-You can [read the full guidelines for bug reporting and code contributions](http://docs.basho.com/riak/latest/community/bugs/) on the Riak Docs. And **thank you!** Your contribution is incredible important to us.
 
 -The Machi team at Basho, 
 [Scott Lystig Fritchie](mailto:scott@basho.com), technical lead, and
