@@ -25,6 +25,22 @@ func, and pattern match Erlang style in that func.
 
 *** DONE Do it.
 
+** DONE Finish OTP'izing the Chain Manager with FLU & proj store processes
+** DONE Eliminate the timeout exception for the client: just {error,timeout} ret
+** DONE Move prototype/chain-manager code to "top" of source tree
+*** DONE Preserve current test code (leave as-is? tiny changes?)
+*** DONE Make chain manager code flexible enough to run "real world" or "sim"
+** TODO Implement real data repair, orchestrated by the chain manager
+** TODO Change all protocol ops to enforce the epoch ID
+** TODO Add projection wedging logic to each FLU.
+
+- Add no-wedging state to make testing easier?
+    
+** TODO Move the FLU server to gen_server behavior?
+** TODO Add gproc and get rid of registered name rendezvous
+*** TODO Fixes the atom table leak
+*** TODO Fixes the problem of having active sequencer for the same prefix
+         on two FLUS in the same VM
 ** TODO Fix all known bugs with Chain Manager
 
 *** DONE Fix known bugs
@@ -32,19 +48,3 @@ func, and pattern match Erlang style in that func.
 *** TODO Re-add verification step of stable epochs, including inner projections!
 *** TODO Attempt to remove cruft items in flapping_i?
 
-** TODO Finish OTP'izing the Chain Manager with FLU & proj store processes
-** TODO Add gproc and get rid of registered name rendezvous
-*** TODO Fixes the atom table leak
-*** TODO Fixes the problem of having active sequencer for the same prefix
-         on two FLUS in the same VM
-** TODO Eliminate the timeout exception for the client: just {error,timeout} ret
-** TODO Change all protocol ops to enforce the epoch ID
-** TODO Add projection wedging logic to each FLU.
-
-- Add no-wedging state to make testing easier?
-    
-** TODO Move prototype/chain-manager code to "top" of source tree
-*** TODO Preserve current test code (leave as-is? tiny changes?)
-*** TODO Make chain manager code flexible enough to run "real world" or "sim"
-** TODO Move the FLU server to gen_server behavior?
-** TODO Implement real data repair, orchestrated by the chain manager

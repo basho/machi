@@ -1333,13 +1333,9 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
                                             P#projection_v1.repairing,
                                             P#projection_v1.down} || P <- Ps]),
 
-    _QQQ = 
     {_WhateverUnanimous, BestP, Props, _S} =
         cl_read_latest_projection(private, S),
     NotBestPs = proplists:get_value(not_unanimous_answers, Props, []),
-%% io:format(user, "QQQ ~p\n", [QQQ]),
-%% io:format(user, "BestP ~p\n", [BestP]),
-%% io:format(user, "NotBestPs ~p\n", [NotBestPs]),
     DownUnion = lists:usort(
                   lists:flatten(
                     [P#projection_v1.down ||
@@ -1414,9 +1410,9 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
             %%
             %% So b's working on epoch 451 at the same time that d's latest
             %% public projection is only epoch 441.  But there's enough
-            %% lag so that b can "see" that a's bad=[c] (due to t_timeout!)
-            %% and c's bad=[a].  So voila, b magically knows about both
-            %% problem FLUs.  Weird/cool.
+            %% lag so that b can "see" that a's bad=[c] (due to
+            %% {error,partition}!) and c's bad=[a].  So voila, b
+            %% magically knows about both problem FLUs.  Weird/cool.
 
             AllFlapCounts = TempAllFlapCounts,
             AllHosed = lists:usort(DownUnion ++ HosedTransUnion ++ BadFLUs);
