@@ -66,6 +66,7 @@ api_smoke_test() ->
             BadFile = <<"no-such-file">>,
             {error, no_such_file} = ?MUT:checksum_list(Prox1, FakeEpoch, BadFile),
             {ok, [_|_]} = ?MUT:list_files(Prox1, FakeEpoch),
+            {ok, {true, {0,<<0:(20*8)/big>>}}} = ?MUT:wedge_status(Prox1),
             {ok, FakeEpoch} = ?MUT:get_latest_epoch(Prox1, public),
             {error, not_written} = ?MUT:read_latest_projection(Prox1, public),
             {error, not_written} = ?MUT:read_projection(Prox1, public, 44),

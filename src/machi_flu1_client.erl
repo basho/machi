@@ -174,7 +174,6 @@ wedge_status(Host, TcpPort) when is_integer(TcpPort) ->
         catch gen_tcp:close(Sock)
     end.
 
-
 %% @doc Get the latest epoch number + checksum from the FLU's projection store.
 
 -spec get_latest_epoch(port(), projection_type()) ->
