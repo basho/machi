@@ -61,47 +61,94 @@ smoke_test2() ->
         ok
     end.
 
-smoke2_test_() ->
-    {timeout, 5*60, fun() -> smoke2_test2() end}.
+partial_stop_restart_test_() ->
+    {timeout, 5*60, fun() -> partial_stop_restart2() end}.
 
-smoke2_test2() ->
+partial_stop_restart2() ->
     Ps = [{a,#p_srvr{name=a, address="localhost", port=5555, props="./data.a"}},
           {b,#p_srvr{name=b, address="localhost", port=5556, props="./data.b"}},
           {c,#p_srvr{name=c, address="localhost", port=5557, props="./data.c"}}
          ],
+    ChMgrs = [machi_flu_psup:make_mgr_supname(P#p_srvr.name) || {_,P} <-Ps],
+    PStores = [machi_flu_psup:make_proj_supname(P#p_srvr.name) || {_,P} <-Ps],
+    Dict = orddict:from_list(Ps),
     [os:cmd("rm -rf " ++ P#p_srvr.props) || {_,P} <- Ps],
     {ok, SupPid} = machi_flu_sup:start_link(),
+    Start = fun({_,P}) ->
+                    #p_srvr{name=Name, port=Port, props=Dir} = P,
+                    {ok, _} = machi_flu_psup:start_flu_package(
+                                Name, Port, Dir, [{active_mode,false}])
+            end,
+    WedgeStatus = fun({_,#p_srvr{address=Addr, port=TcpPort}}) ->
+                          machi_flu1_client:wedge_status(Addr, TcpPort)
+                  end,
+    Append = fun({_,#p_srvr{address=Addr, port=TcpPort}}) ->
+                     machi_flu1_client:append_chunk(Addr, TcpPort,
+                                                    ?DUMMY_PV1_EPOCH,
+                                                    <<"prefix">>, <<"data">>)
+                  end,
     try
-        [begin
-             #p_srvr{name=Name, port=Port, props=Dir} = P,
-             {ok, _} = machi_flu_psup:start_flu_package(Name, Port, Dir,
-                                                        [{active_mode,false}])
-         end || {_,P} <- Ps],
+        [Start(P) || P <- Ps],
+        [{ok, {true, _}} = WedgeStatus(P) || P <- Ps], % all are wedged
+        [{error,wedged} = Append(P) || P <- Ps], % all are wedged
 
-        ChMgrs = [machi_flu_psup:make_mgr_supname(P#p_srvr.name) || {_,P} <-Ps],
-        PStores = [machi_flu_psup:make_proj_supname(P#p_srvr.name) || {_,P} <-Ps],
-        Dict = orddict:from_list(Ps),
         [machi_chain_manager1:set_chain_members(ChMgr, Dict) ||
             ChMgr <- ChMgrs ],
+        [{ok, {false, _}} = WedgeStatus(P) || P <- Ps], % *not* wedged
+        [{ok,_} = Append(P) || P <- Ps],                % *not* wedged
 
-        {now_using,_,_} = machi_chain_manager1:test_react_to_env(hd(ChMgrs)),
+        {_,_,_} = machi_chain_manager1:test_react_to_env(hd(ChMgrs)),
         [begin
              _QQa = machi_chain_manager1:test_react_to_env(ChMgr)
          end || _ <- lists:seq(1,25), ChMgr <- ChMgrs],
 
-        %% All chain maanagers & projection stores should be using the
+        %% All chain managers & projection stores should be using the
         %% same projection which is max projection in each store.
-         {no_change,_,Epoch_z} = machi_chain_manager1:test_react_to_env(
-                                   hd(ChMgrs)),
-        [{no_change,_,Epoch_z} = machi_chain_manager1:test_react_to_env(
+        {no_change,_,Epoch_m} = machi_chain_manager1:test_react_to_env(
+                                  hd(ChMgrs)),
+        [{no_change,_,Epoch_m} = machi_chain_manager1:test_react_to_env(
                                    ChMgr )|| ChMgr <- ChMgrs],
-        {ok, Proj_z} = machi_projection_store:read_latest_projection(
+        {ok, Proj_m} = machi_projection_store:read_latest_projection(
                          hd(PStores), public),
         [begin
-             {ok, Proj_z} = machi_projection_store:read_latest_projection(
+             {ok, Proj_m} = machi_projection_store:read_latest_projection(
                               PStore, ProjType)
          end || ProjType <- [public, private], PStore <- PStores ],
-        Epoch_z = Proj_z#projection_v1.epoch_number,
+        Epoch_m = Proj_m#projection_v1.epoch_number,
+        %% Confirm that all FLUs are *not* wedged, with correct proj & epoch
+        Proj_mCSum = Proj_m#projection_v1.epoch_csum,
+        [{ok, {false, {Epoch_m, Proj_mCSum}}} = WedgeStatus(P) || % *not* wedged
+             P <- Ps], 
+        [{ok,_} = Append(P) || P <- Ps],                % *not* wedged
+
+        %% Stop all but 'a'.
+        [ok = machi_flu_psup:stop_flu_package(Name) || {Name,_} <- tl(Ps)],
+
+        %% Stop and restart a.
+        {FluName_a, _} = hd(Ps),
+        ok = machi_flu_psup:stop_flu_package(FluName_a),
+        {ok, _} = Start(hd(Ps)),
+        %% Remember: 'a' is not in active mode.
+        {ok, Proj_m} = machi_projection_store:read_latest_projection(
+                         hd(PStores), private),
+        %% Confirm that 'a' is wedged
+        {error, wedged} = Append(hd(Ps)),
+        {_, #p_srvr{address=Addr_a, port=TcpPort_a}} = hd(Ps),
+        {error, wedged} = machi_flu1_client:read_chunk(
+                            Addr_a, TcpPort_a, ?DUMMY_PV1_EPOCH,
+                            <<>>, 99999999, 1),
+        {error, wedged} = machi_flu1_client:checksum_list(
+                            Addr_a, TcpPort_a, ?DUMMY_PV1_EPOCH, <<>>),
+        {error, wedged} = machi_flu1_client:list_files(
+                            Addr_a, TcpPort_a, ?DUMMY_PV1_EPOCH),
+
+        %% Iterate through humming consensus once
+        {now_using,_,Epoch_n} = machi_chain_manager1:test_react_to_env(
+                                  hd(ChMgrs)),
+        true = (Epoch_n > Epoch_m),
+        %% Confirm that 'a' is *not* wedged
+        {ok, _} = Append(hd(Ps)),
+
         ok
     after
         exit(SupPid, normal),

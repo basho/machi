@@ -66,7 +66,8 @@
 -include("machi.hrl").
 -include("machi_projection.hrl").
 
--export([start_link/1, stop/1]).
+-export([start_link/1, stop/1,
+         update_wedge_state/3]).
 -export([make_listener_regname/1, make_projection_server_regname/1]).
 
 -record(state, {
@@ -75,8 +76,9 @@
           append_pid      :: pid(),
           tcp_port        :: non_neg_integer(),
           data_dir        :: string(),
-          wedge = true    :: 'disabled' | boolean(),
-          my_epoch_id     :: 'undefined',
+          wedged = true   :: boolean(),
+          etstab          :: ets:tid(),
+          epoch_id        :: 'undefined' | pv1_epoch(),
           dbg_props = []  :: list(), % proplist
           props = []      :: list()  % proplist
          }).
@@ -94,14 +96,36 @@ stop(Pid) ->
             error
     end.
 
+update_wedge_state(PidSpec, Boolean, EpochId)
+  when (Boolean == true orelse Boolean == false), is_tuple(EpochId) ->
+    PidSpec ! {wedge_state_change, Boolean, EpochId}.
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+ets_table_name(FluName) when is_atom(FluName) ->
+    list_to_atom(atom_to_list(FluName) ++ "_epoch").
+%% ets_table_name(FluName) when is_binary(FluName) ->
+%%     list_to_atom(binary_to_list(FluName) ++ "_epoch").
+
 main2(FluName, TcpPort, DataDir, Rest) ->
+    {Props, DbgProps} =  case proplists:get_value(dbg, Rest) of
+                             undefined ->
+                                 {Rest, []};
+                             DPs ->
+                                 {lists:keydelete(dbg, 1, Rest), DPs}
+                         end,
     S0 = #state{flu_name=FluName,
                 tcp_port=TcpPort,
                 data_dir=DataDir,
-                props=Rest},
-    AppendPid = start_append_server(S0),
+                wedged=proplists:get_value(initial_wedged, DbgProps, true),
+                etstab=ets_table_name(FluName),
+                epoch_id=undefined,
+                dbg_props=DbgProps,
+                props=Props},
+    AppendPid = start_append_server(S0, self()),
+    receive
+        append_server_ack -> ok
+    end,
     {_ProjRegName, ProjectionPid} =
         case proplists:get_value(projection_store_registered_name, Rest) of
             undefined ->
@@ -114,15 +138,7 @@ main2(FluName, TcpPort, DataDir, Rest) ->
         end,
     S1 = S0#state{append_pid=AppendPid,
                   proj_store=ProjectionPid},
-    S2 = case proplists:get_value(dbg, Rest) of
-             undefined ->
-                 S1;
-             DbgProps ->
-                 S1#state{wedge=disabled,
-                          dbg_props=DbgProps,
-                          props=lists:keydelete(dbg, 1, Rest)}
-         end,
-    ListenPid = start_listen_server(S2),
+    ListenPid = start_listen_server(S1),
 
     Config_e = machi_util:make_config_filename(DataDir, "unused"),
     ok = filelib:ensure_dir(Config_e),
@@ -144,9 +160,9 @@ main2(FluName, TcpPort, DataDir, Rest) ->
 start_listen_server(S) ->
     proc_lib:spawn_link(fun() -> run_listen_server(S) end).
 
-start_append_server(S) ->
+start_append_server(S, AckPid) ->
     FluPid = self(),
-    proc_lib:spawn_link(fun() -> run_append_server(FluPid, S) end).
+    proc_lib:spawn_link(fun() -> run_append_server(FluPid, AckPid, S) end).
 
 %% start_projection_server(S) ->
 %%     spawn_link(fun() -> run_projection_server(S) end).
@@ -158,25 +174,43 @@ run_listen_server(#state{flu_name=FluName, tcp_port=TcpPort}=S) ->
     {ok, LSock} = gen_tcp:listen(TcpPort, SockOpts),
     listen_server_loop(LSock, S).
 
-run_append_server(FluPid, #state{flu_name=Name}=S) ->
+run_append_server(FluPid, AckPid, #state{flu_name=Name,dbg_props=DbgProps}=S) ->
+    %% Reminder: Name is the "main" name of the FLU, i.e., no suffix
     register(Name, self()),
-    append_server_loop(FluPid, S).
+    TID = ets:new(ets_table_name(Name),
+                  [set, protected, named_table, {read_concurrency, true}]),
+    InitialWedged = proplists:get_value(initial_wedged, DbgProps, true),
+    ets:insert(TID, {epoch, {InitialWedged, {-65, <<"bogus epoch, yo">>}}}),
+    AckPid ! append_server_ack,
+    append_server_loop(FluPid, S#state{etstab=TID}).
 
 listen_server_loop(LSock, S) ->
     {ok, Sock} = gen_tcp:accept(LSock),
     spawn_link(fun() -> net_server_loop(Sock, S) end),
     listen_server_loop(LSock, S).
 
-append_server_loop(FluPid, #state{data_dir=DataDir}=S) ->
+append_server_loop(FluPid, #state{data_dir=DataDir,wedged=Wedged_p}=S) ->
     AppendServerPid = self(),
     receive
+        {seq_append, From, _Prefix, _Chunk, _CSum} when Wedged_p ->
+            From ! wedged,
+            append_server_loop(FluPid, S);
         {seq_append, From, Prefix, Chunk, CSum} ->
             spawn(fun() -> append_server_dispatch(From, Prefix, Chunk, CSum,
                                                   DataDir, AppendServerPid) end),
                                                   %% DataDir, FluPid) end),
             append_server_loop(FluPid, S);
-        {wedge_state_change, Boolean} ->
-            append_server_loop(FluPid, S#state{wedge=Boolean})
+        {wedge_state_change, Boolean, EpochId} ->
+            true = ets:insert(S#state.etstab, {epoch, {Boolean, EpochId}}),
+            append_server_loop(FluPid, S#state{wedged=Boolean,
+                                               epoch_id=EpochId});
+        {wedge_status, FromPid} ->
+            #state{wedged=Wedged_p, epoch_id=EpochId} = S,
+            FromPid ! {wedge_status_reply, Wedged_p, EpochId},
+            append_server_loop(FluPid, S);
+        Else ->
+            io:format(user, "append_server_loop: WHA? ~p\n", [Else]),
+            append_server_loop(FluPid, S)
     end.
 
 -define(EpochIDSpace, (4+20)).
@@ -199,16 +233,17 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                   Prefix:PrefixLenLF/binary, "\n">> ->
                     do_net_server_append(FluName, Sock, LenHex, Prefix);
                 <<"R ",
-                  _EpochIDRaw:(?EpochIDSpace)/binary,
+                  EpochIDRaw:(?EpochIDSpace)/binary,
                   OffsetHex:16/binary, LenHex:8/binary,
                   File:FileLenLF/binary, "\n">> ->
-                    do_net_server_read(Sock, OffsetHex, LenHex, File, DataDir);
+                    do_net_server_read(Sock, OffsetHex, LenHex, File, DataDir,
+                                       EpochIDRaw, S);
                 <<"L ", _EpochIDRaw:(?EpochIDSpace)/binary, "\n">> ->
-                    do_net_server_listing(Sock, DataDir);
+                    do_net_server_listing(Sock, DataDir, S);
                 <<"C ",
                   _EpochIDRaw:(?EpochIDSpace)/binary,
                   File:CSumFileLenLF/binary, "\n">> ->
-                    do_net_server_checksum_listing(Sock, File, DataDir);
+                    do_net_server_checksum_listing(Sock, File, DataDir, S);
                 <<"QUIT\n">> ->
                     catch gen_tcp:close(Sock),
                     exit(normal);
@@ -220,7 +255,8 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                   _EpochIDRaw:(?EpochIDSpace)/binary,
                   OffsetHex:16/binary, LenHex:8/binary,
                   File:WriteFileLenLF/binary, "\n">> ->
-                    do_net_server_write(Sock, OffsetHex, LenHex, File, DataDir);
+                    do_net_server_write(Sock, OffsetHex, LenHex, File, DataDir,
+                                        <<"fixme1">>, false, <<"fixme2">>);
                 %% For data migration only.
                 <<"DEL-migration ",
                   _EpochIDRaw:(?EpochIDSpace)/binary,
@@ -233,6 +269,8 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                     do_net_server_truncate_hackityhack(Sock, File, DataDir);
                 <<"PROJ ", LenHex:8/binary, "\n">> ->
                     do_projection_command(Sock, LenHex, S);
+                <<"WEDGE-STATUS\n">> ->
+                    do_wedge_status(FluName, Sock);
                 _ ->
                     machi_util:verb("Else Got: ~p\n", [Line]),
                     gen_tcp:send(Sock, "ERROR SYNTAX\n"),
@@ -281,12 +319,37 @@ do_net_server_append2(FluName, Sock, LenHex, Prefix) ->
         {assignment, Offset, File} ->
             OffsetHex = machi_util:bin_to_hexstr(<<Offset:64/big>>),
             Out = io_lib:format("OK ~s ~s\n", [OffsetHex, File]),
-            ok = gen_tcp:send(Sock, Out)
+            ok = gen_tcp:send(Sock, Out);
+        wedged ->
+            ok = gen_tcp:send(Sock, <<"ERROR WEDGED\n">>)
     after 10*1000 ->
             ok = gen_tcp:send(Sock, "TIMEOUT\n")
     end.
 
-do_net_server_read(Sock, OffsetHex, LenHex, FileBin, DataDir) ->
+do_wedge_status(FluName, Sock) ->
+    FluName ! {wedge_status, self()},
+    Reply = receive
+                {wedge_status_reply, Bool, EpochId} ->
+                    BoolHex = if Bool == false -> <<"00">>;
+                                 Bool == true  -> <<"01">>
+                              end,
+                    case EpochId of
+                        undefined ->
+                            EpochHex = machi_util:int_to_hexstr(0, 32),
+                            CSumHex = machi_util:bin_to_hexstr(<<0:(20*8)/big>>);
+                        {Epoch, EpochCSum} ->
+                            EpochHex = machi_util:int_to_hexstr(Epoch, 32),
+                            CSumHex = machi_util:bin_to_hexstr(EpochCSum)
+                    end,
+                    [<<"OK ">>, BoolHex, 32, EpochHex, 32, CSumHex, 10]
+            after 30*1000 ->
+                    <<"give_it_up\n">>
+            end,
+    ok = gen_tcp:send(Sock, Reply).
+
+do_net_server_read(Sock, OffsetHex, LenHex, FileBin, DataDir,
+                   EpochIDRaw, S) ->
+    {Wedged_p, CurrentEpochId} = ets:lookup_element(S#state.etstab, epoch, 2),
     DoItFun = fun(FH, Offset, Len) ->
                       case file:pread(FH, Offset, Len) of
                           {ok, Bytes} when byte_size(Bytes) == Len ->
@@ -304,20 +367,26 @@ do_net_server_read(Sock, OffsetHex, LenHex, FileBin, DataDir) ->
                       end
               end,
     do_net_server_readwrite_common(Sock, OffsetHex, LenHex, FileBin, DataDir,
-                                   [read, binary, raw], DoItFun).
+                                   [read, binary, raw], DoItFun,
+                                   EpochIDRaw, Wedged_p, CurrentEpochId).
 
 do_net_server_readwrite_common(Sock, OffsetHex, LenHex, FileBin, DataDir,
-                               FileOpts, DoItFun) ->
-    case sanitize_file_string(FileBin) of
-        ok ->
+                               FileOpts, DoItFun,
+                               EpochIDRaw, Wedged_p, CurrentEpochId) ->
+    case {Wedged_p, sanitize_file_string(FileBin)} of
+        {false, ok} ->
             do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin,
-                                            DataDir, FileOpts, DoItFun);
-        _ ->
+                                            DataDir, FileOpts, DoItFun,
+                                            EpochIDRaw, Wedged_p, CurrentEpochId);
+        {true, _} ->
+            ok = gen_tcp:send(Sock, <<"ERROR WEDGED\n">>);
+        {_, __} ->
             ok = gen_tcp:send(Sock, <<"ERROR BAD-ARG\n">>)
     end.
 
 do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin, DataDir,
-                                FileOpts, DoItFun) ->
+                                FileOpts, DoItFun,
+                                EpochIDRaw, Wedged_p, CurrentEpochId) ->
     <<Offset:64/big>> = machi_util:hexstr_to_bin(OffsetHex),
     <<Len:32/big>> = machi_util:hexstr_to_bin(LenHex),
     {_, Path} = machi_util:make_data_filename(DataDir, FileBin),
@@ -332,24 +401,29 @@ do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin, DataDir,
         {error, enoent} when OptsHasWrite ->
             do_net_server_readwrite_common(
               Sock, OffsetHex, LenHex, FileBin, DataDir,
-              FileOpts, DoItFun);
+              FileOpts, DoItFun,
+              EpochIDRaw, Wedged_p, CurrentEpochId);
         _Else ->
             %%%%%% keep?? machi_util:verb("Else ~p ~p ~p ~p\n", [Offset, Len, Path, _Else]),
             ok = gen_tcp:send(Sock, <<"ERROR BAD-IO\n">>)
     end.
 
 
-do_net_server_write(Sock, OffsetHex, LenHex, FileBin, DataDir) ->
+do_net_server_write(Sock, OffsetHex, LenHex, FileBin, DataDir,
+                    EpochIDRaw, Wedged_p, CurrentEpochId) ->
     CSumPath = machi_util:make_checksum_filename(DataDir, FileBin),
     case file:open(CSumPath, [append, raw, binary, delayed_write]) of
         {ok, FHc} ->
-            do_net_server_write2(Sock, OffsetHex, LenHex, FileBin, DataDir, FHc);
+            do_net_server_write2(Sock, OffsetHex, LenHex, FileBin, DataDir, FHc,
+                                 EpochIDRaw, Wedged_p, CurrentEpochId);
         {error, enoent} ->
             ok = filelib:ensure_dir(CSumPath),
-            do_net_server_write(Sock, OffsetHex, LenHex, FileBin, DataDir)
+            do_net_server_write(Sock, OffsetHex, LenHex, FileBin, DataDir,
+                                EpochIDRaw, Wedged_p, CurrentEpochId)
     end.
 
-do_net_server_write2(Sock, OffsetHex, LenHex, FileBin, DataDir, FHc) ->
+do_net_server_write2(Sock, OffsetHex, LenHex, FileBin, DataDir, FHc,
+                     EpochIDRaw, Wedged_p, CurrentEpochId) ->
     DoItFun = fun(FHd, Offset, Len) ->
                       ok = inet:setopts(Sock, [{packet, raw}]),
                       {ok, Chunk} = gen_tcp:recv(Sock, Len),
@@ -368,7 +442,8 @@ do_net_server_write2(Sock, OffsetHex, LenHex, FileBin, DataDir, FHc) ->
                       end
               end,
     do_net_server_readwrite_common(Sock, OffsetHex, LenHex, FileBin, DataDir,
-                                   [write, read, binary, raw], DoItFun).
+                                   [write, read, binary, raw], DoItFun,
+                                   EpochIDRaw, Wedged_p, CurrentEpochId).
 
 perhaps_do_net_server_ec_read(Sock, FH) ->
     case file:pread(FH, 0, ?MINIMUM_OFFSET) of
@@ -394,7 +469,15 @@ decode_and_reply_net_server_ec_read_version_a(Sock, Rest) ->
     <<Body:BodyLen/binary, _/binary>> = Rest2,
     ok = gen_tcp:send(Sock, ["ERASURE ", BodyLenHex, " ", Hdr, Body]).
 
-do_net_server_listing(Sock, DataDir) ->
+do_net_server_listing(Sock, DataDir, S) ->
+    {Wedged_p, _CurrentEpochId} = ets:lookup_element(S#state.etstab, epoch, 2),
+    if Wedged_p ->
+            ok = gen_tcp:send(Sock, <<"ERROR WEDGED\n">>);
+       true ->
+            do_net_server_listing2(Sock, DataDir)
+    end.
+
+do_net_server_listing2(Sock, DataDir) ->
     {_, WildPath} = machi_util:make_data_filename(DataDir, ""),
     Files = filelib:wildcard("*", WildPath),
     Out = ["OK\n",
@@ -409,9 +492,12 @@ do_net_server_listing(Sock, DataDir) ->
           ],
     ok = gen_tcp:send(Sock, Out).
 
-do_net_server_checksum_listing(Sock, File, DataDir) ->
-    case sanitize_file_string(File) of
-        ok ->
+do_net_server_checksum_listing(Sock, File, DataDir, S) ->
+    {Wedged_p, _CurrentEpochId} = ets:lookup_element(S#state.etstab, epoch, 2),
+    case {Wedged_p, sanitize_file_string(File)} of
+        {true, _} ->
+            ok = gen_tcp:send(Sock, <<"ERROR WEDGED\n">>);
+        {false, ok} ->
             do_net_server_checksum_listing2(Sock, File, DataDir);
         _ ->
             ok = gen_tcp:send(Sock, <<"ERROR BAD-ARG\n">>)

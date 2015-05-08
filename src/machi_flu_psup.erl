@@ -66,7 +66,7 @@ init([FluName, TcpPort, DataDir, Props0]) ->
              {use_partition_simulator,false}|Props0],
     ProjSpec = {ProjRegName,
                {machi_projection_store, start_link,
-                [ProjRegName, DataDir, zarfus_todo]},
+                [ProjRegName, DataDir, FluName]},
                permanent, 5000, worker, []},
     MgrSpec = {make_mgr_supname(FluName),
                {machi_chain_manager1, start_link,

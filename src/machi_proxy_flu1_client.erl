@@ -54,6 +54,7 @@
          read_chunk/5, read_chunk/6,
          checksum_list/3, checksum_list/4,
          list_files/2, list_files/3,
+         wedge_status/1, wedge_status/2,
 
          %% %% Projection API
          get_latest_epoch/2, get_latest_epoch/3,
@@ -129,6 +130,17 @@ list_files(PidSpec, EpochID) ->
 
 list_files(PidSpec, EpochID, Timeout) ->
     gen_server:call(PidSpec, {req, {list_files, EpochID}},
+                    Timeout).
+
+%% @doc Fetch the wedge status from the remote FLU.
+
+wedge_status(PidSpec) ->
+    wedge_status(PidSpec, infinity).
+
+%% @doc Fetch the wedge status from the remote FLU.
+
+wedge_status(PidSpec, Timeout) ->
+    gen_server:call(PidSpec, {req, {wedge_status}},
                     Timeout).
 
 %% @doc Get the latest epoch number + checksum from the FLU's projection store.
@@ -261,6 +273,8 @@ make_req_fun({checksum_list, EpochID, File}, #state{sock=Sock}) ->
     fun() -> ?FLU_C:checksum_list(Sock, EpochID, File) end;
 make_req_fun({list_files, EpochID}, #state{sock=Sock}) ->
     fun() -> ?FLU_C:list_files(Sock, EpochID) end;
+make_req_fun({wedge_status}, #state{sock=Sock}) ->
+    fun() -> ?FLU_C:wedge_status(Sock) end;
 make_req_fun({get_latest_epoch, ProjType}, #state{sock=Sock}) ->
     fun() -> ?FLU_C:get_latest_epoch(Sock, ProjType) end;
 make_req_fun({read_latest_projection, ProjType}, #state{sock=Sock}) ->

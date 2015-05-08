@@ -55,7 +55,8 @@ flu_smoke_test() ->
     Prefix = <<"prefix!">>,
     BadPrefix = BadFile = "no/good",
 
-    FLU1 = setup_test_flu(smoke_flu, TcpPort, DataDir),
+    W_props = [{initial_wedged, false}],
+    FLU1 = setup_test_flu(smoke_flu, TcpPort, DataDir, W_props),
     try
         {error, no_such_file} = ?FLU_C:checksum_list(Host, TcpPort,
                                                      ?DUMMY_PV1_EPOCH,
@@ -64,6 +65,7 @@ flu_smoke_test() ->
                                                 ?DUMMY_PV1_EPOCH, BadFile),
 
         {ok, []} = ?FLU_C:list_files(Host, TcpPort, ?DUMMY_PV1_EPOCH),
+        {ok, {false, _}} = ?FLU_C:wedge_status(Host, TcpPort),
 
         Chunk1 = <<"yo!">>,
         {ok, {Off1,Len1,File1}} = ?FLU_C:append_chunk(Host, TcpPort,

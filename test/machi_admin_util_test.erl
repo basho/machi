@@ -35,7 +35,9 @@ verify_file_checksums_test() ->
     Host = "localhost",
     TcpPort = 32958,
     DataDir = "./data",
-    FLU1 = machi_flu1_test:setup_test_flu(verify1_flu, TcpPort, DataDir),
+    W_props = [{initial_wedged, false}],
+    FLU1 = machi_flu1_test:setup_test_flu(verify1_flu, TcpPort, DataDir,
+                                          W_props),
     Sock1 = machi_util:connect(Host, TcpPort),
     try
         Prefix = <<"verify_prefix">>,

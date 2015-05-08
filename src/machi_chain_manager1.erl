@@ -70,7 +70,8 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--export([make_chmgr_regname/1, projection_transitions_are_sane/2]).
+-export([make_chmgr_regname/1, projection_transitions_are_sane/2,
+         inner_projection_exists/1, inner_projection_or_self/1]).
 
 -ifdef(TEST).
 
@@ -171,7 +172,7 @@ init({MyName, InitMembersDict, MgrOpts}) ->
     All_list = [P#p_srvr.name || {_, P} <- orddict:to_list(MembersDict)],
     Opt = fun(Key, Default) -> proplists:get_value(Key, MgrOpts, Default) end,
     RunEnv = [{seed, Opt(seed, now())},
-              {use_partition_simulator, Opt(use_partition_simulator, true)},
+              {use_partition_simulator, Opt(use_partition_simulator, false)},
               {network_partitions, Opt(network_partitions, [])},
               {network_islands, Opt(network_islands, [])},
               {flapping_i, Opt(flapping, [])},
@@ -523,14 +524,19 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
     Down = AllMembers -- Up,
 
     NewUPI_list = [X || X <- OldUPI_list, lists:member(X, Up)],
+    LastInNewUPI = case NewUPI_list of
+                       []    -> does_not_exist_because_upi_is_empty;
+                       [_|_] -> lists:last(NewUPI_list)
+                   end,
     Repairing_list2 = [X || X <- OldRepairing_list, lists:member(X, Up)],
+    Simulator_p = proplists:get_value(use_partition_simulator, RunEnv2, false),
     {NewUPI_list3, Repairing_list3, RunEnv3} =
         case {NewUp, Repairing_list2} of
             {[], []} ->
                 D_foo=[],
                 {NewUPI_list, [], RunEnv2};
-            {[], [H|T]} when RelativeToServer == hd(NewUPI_list) ->
-                %% The author is head of the UPI list.  Let's see if
+            {[], [H|T]} when RelativeToServer == LastInNewUPI ->
+                %% The author is tail of the UPI list.  Let's see if
                 %% *everyone* in the UPI+repairing lists are using our
                 %% projection.  This is to simulate a requirement that repair
                 %% a real repair process cannot take place until the chain is
@@ -540,12 +546,12 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                 SameEpoch_p = check_latest_private_projections_same_epoch(
                                 tl(NewUPI_list) ++ Repairing_list2,
                                 S#ch_mgr.proj, Partitions, S),
-                if not SameEpoch_p ->
-                        D_foo=[],
-                        {NewUPI_list, OldRepairing_list, RunEnv2};
-                   true ->
+                if Simulator_p andalso SameEpoch_p ->
                         D_foo=[{repair_airquote_done, {we_agree, (S#ch_mgr.proj)#projection_v1.epoch_number}}],
-                        {NewUPI_list ++ [H], T, RunEnv2}
+                        {NewUPI_list ++ [H], T, RunEnv2};
+                   true ->
+                        D_foo=[],
+                        {NewUPI_list, OldRepairing_list, RunEnv2}
                 end;
             {_, _} ->
                 D_foo=[],

@@ -33,7 +33,9 @@ api_smoke_test() ->
     Host = "localhost",
     TcpPort = 57124,
     DataDir = "./data.api_smoke_flu",
-    FLU1 = machi_flu1_test:setup_test_flu(RegName, TcpPort, DataDir),
+    W_props = [{initial_wedged, false}],
+    FLU1 = machi_flu1_test:setup_test_flu(RegName, TcpPort, DataDir,
+                                          W_props),
     erase(flu_pid),
 
     try
@@ -54,18 +56,19 @@ api_smoke_test() ->
                                 infinity),
             %% Start the FLU again, we should be able to do stuff immediately
             FLU1b = machi_flu1_test:setup_test_flu(RegName, TcpPort, DataDir,
-                                                   [save_data_dir]),
+                                                   [save_data_dir|W_props]),
             put(flu_pid, FLU1b),
             MyChunk = <<"my chunk data">>,
             {ok, {MyOff,MySize,MyFile}} =
                 ?MUT:append_chunk(Prox1, FakeEpoch, <<"prefix">>, MyChunk,
-                             infinity),
+                                  infinity),
             {ok, MyChunk} = ?MUT:read_chunk(Prox1, FakeEpoch, MyFile, MyOff, MySize),
 
             %% Alright, now for the rest of the API, whee
             BadFile = <<"no-such-file">>,
             {error, no_such_file} = ?MUT:checksum_list(Prox1, FakeEpoch, BadFile),
             {ok, [_|_]} = ?MUT:list_files(Prox1, FakeEpoch),
+            {ok, {false, _}} = ?MUT:wedge_status(Prox1),
             {ok, FakeEpoch} = ?MUT:get_latest_epoch(Prox1, public),
             {error, not_written} = ?MUT:read_latest_projection(Prox1, public),
             {error, not_written} = ?MUT:read_projection(Prox1, public, 44),
