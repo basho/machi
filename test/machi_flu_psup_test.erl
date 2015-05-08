@@ -74,18 +74,21 @@ partial_stop_restart2() ->
     Dict = orddict:from_list(Ps),
     [os:cmd("rm -rf " ++ P#p_srvr.props) || {_,P} <- Ps],
     {ok, SupPid} = machi_flu_sup:start_link(),
+    Start = fun({_,P}) ->
+                    #p_srvr{name=Name, port=Port, props=Dir} = P,
+                    {ok, _} = machi_flu_psup:start_flu_package(
+                                Name, Port, Dir, [{active_mode,false}])
+            end,
+    WedgeStatus = fun({_,#p_srvr{address=Addr, port=TcpPort}}) ->
+                          machi_flu1_client:wedge_status(Addr, TcpPort)
+                  end,
     try
-        Start = fun({_,P}) ->
-                        #p_srvr{name=Name, port=Port, props=Dir} = P,
-                        {ok, _} = machi_flu_psup:start_flu_package(
-                                    Name, Port, Dir, [{active_mode,false}])
-                end,
         [Start(P) || P <- Ps],
-        %% TODO: Confirm that all FLUs are wedged
+        [{ok, {true, _}} = WedgeStatus(P) || P <- Ps], % all are wedged
 
         [machi_chain_manager1:set_chain_members(ChMgr, Dict) ||
             ChMgr <- ChMgrs ],
-        %% TODO: Confirm that all FLUs are wedged
+        [{ok, {true, _}} = WedgeStatus(P) || P <- Ps], % all are wedged
 
         {_,_,_} = machi_chain_manager1:test_react_to_env(hd(ChMgrs)),
         [begin
@@ -106,6 +109,7 @@ partial_stop_restart2() ->
          end || ProjType <- [public, private], PStore <- PStores ],
         Epoch_m = Proj_m#projection_v1.epoch_number,
         %% TODO: Confirm that all FLUs are *not* wedged
+        [{ok, {false, _}} = WedgeStatus(P) || P <- Ps], % all are wedged
 
         %% Stop all but 'a'.
         [ok = machi_flu_psup:stop_flu_package(Name) || {Name,_} <- tl(Ps)],
