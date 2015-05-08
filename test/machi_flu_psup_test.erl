@@ -133,6 +133,15 @@ partial_stop_restart2() ->
                          hd(PStores), private),
         %% Confirm that 'a' is wedged
         {error, wedged} = Append(hd(Ps)),
+        {_, #p_srvr{address=Addr_a, port=TcpPort_a}} = hd(Ps),
+        {error, wedged} = machi_flu1_client:read_chunk(
+                            Addr_a, TcpPort_a, ?DUMMY_PV1_EPOCH,
+                            <<>>, 99999999, 1),
+        {error, wedged} = machi_flu1_client:checksum_list(
+                            Addr_a, TcpPort_a, ?DUMMY_PV1_EPOCH, <<>>),
+        {error, wedged} = machi_flu1_client:list_files(
+                            Addr_a, TcpPort_a, ?DUMMY_PV1_EPOCH),
+
         %% Iterate through humming consensus once
         {now_using,_,Epoch_n} = machi_chain_manager1:test_react_to_env(
                                   hd(ChMgrs)),
