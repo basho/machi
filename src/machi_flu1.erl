@@ -66,7 +66,8 @@
 -include("machi.hrl").
 -include("machi_projection.hrl").
 
--export([start_link/1, stop/1]).
+-export([start_link/1, stop/1,
+         update_wedge_state/3]).
 -export([make_listener_regname/1, make_projection_server_regname/1]).
 
 -record(state, {
@@ -75,7 +76,7 @@
           append_pid      :: pid(),
           tcp_port        :: non_neg_integer(),
           data_dir        :: string(),
-          wedge = true    :: boolean(),
+          wedged = true   :: boolean(),
           epoch_id        :: 'undefined' | machi_projection:pv_epoch(),
           dbg_props = []  :: list(), % proplist
           props = []      :: list()  % proplist
@@ -94,13 +95,17 @@ stop(Pid) ->
             error
     end.
 
+update_wedge_state(PidSpec, Boolean, EpochId)
+  when (Boolean == true orelse Boolean == false), is_tuple(EpochId) ->
+    PidSpec ! {wedge_state_change, Boolean, EpochId}.
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 main2(FluName, TcpPort, DataDir, Rest) ->
     S0 = #state{flu_name=FluName,
                 tcp_port=TcpPort,
                 data_dir=DataDir,
-                wedge=true,
+                wedged=true,
                 epoch_id=undefined,
                 props=Rest},
     AppendPid = start_append_server(S0),
@@ -160,6 +165,7 @@ run_listen_server(#state{flu_name=FluName, tcp_port=TcpPort}=S) ->
     listen_server_loop(LSock, S).
 
 run_append_server(FluPid, #state{flu_name=Name}=S) ->
+    %% Reminder: Name is the "main" name of the FLU, i.e., no suffix
     register(Name, self()),
     append_server_loop(FluPid, S).
 
@@ -176,12 +182,12 @@ append_server_loop(FluPid, #state{data_dir=DataDir}=S) ->
                                                   DataDir, AppendServerPid) end),
                                                   %% DataDir, FluPid) end),
             append_server_loop(FluPid, S);
-        {wedge_state_change, Boolean} ->
-            %% append_server_loop(FluPid, S#state{wedge=Boolean})
-            append_server_loop(FluPid, S);
+        {wedge_state_change, Boolean, EpochId} ->
+            append_server_loop(FluPid, S#state{wedged=Boolean,
+                                               epoch_id=EpochId});
         {wedge_status, FromPid} ->
-            #state{wedge=Wedge_p, epoch_id=EpochId} = S,
-            FromPid ! {wedge_status_reply, Wedge_p, EpochId},
+            #state{wedged=Wedged_p, epoch_id=EpochId} = S,
+            FromPid ! {wedge_status_reply, Wedged_p, EpochId},
             append_server_loop(FluPid, S);
         Else ->
             io:format(user, "append_server_loop: WHA? ~p\n", [Else]),

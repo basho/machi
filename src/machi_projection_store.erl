@@ -60,7 +60,6 @@
 -record(state, {
           public_dir = ""        :: string(),
           private_dir = ""       :: string(),
-          wedged = true          :: boolean(),
           wedge_notify_pid       :: pid() | atom(),
           max_public_epoch =  ?NO_EPOCH :: {-1 | non_neg_integer(), binary()},
           max_private_epoch = ?NO_EPOCH :: {-1 | non_neg_integer(), binary()}
@@ -170,17 +169,16 @@ init([DataDir, NotifyWedgeStateChanges]) ->
 
     {ok, #state{public_dir=PublicDir,
                 private_dir=PrivateDir,
-                wedged=true,
                 wedge_notify_pid=NotifyWedgeStateChanges,
                 max_public_epoch=MaxPublicEpoch,
                 max_private_epoch=MaxPrivateEpoch}}.
 
 handle_call({{get_latest_epoch, ProjType}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
-    EpochT = if ProjType == public  -> S#state.max_public_epoch;
-                ProjType == private -> S#state.max_private_epoch
+    EpochId = if ProjType == public  -> S#state.max_public_epoch;
+                 ProjType == private -> S#state.max_private_epoch
              end,
-    {reply, {{ok, EpochT}, LC2}, S};
+    {reply, {{ok, EpochId}, LC2}, S};
 handle_call({{read_latest_projection, ProjType}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
     {EpochNum, _CSum} = if ProjType == public  -> S#state.max_public_epoch;
@@ -258,21 +256,68 @@ do_proj_write(ProjType, #projection_v1{epoch_number=Epoch}=Proj, S) ->
             ok = file:write(FH, term_to_binary(Proj)),
             ok = file:sync(FH),
             ok = file:close(FH),
-            EpochT = {Epoch, Proj#projection_v1.epoch_csum},
+            EffectiveProj = machi_chain_manager1:inner_projection_or_self(Proj),
+            EffectiveEpoch = EffectiveProj#projection_v1.epoch_number,
+            EpochId = {EffectiveEpoch, EffectiveProj#projection_v1.epoch_csum},
+            %% 
             NewS = if ProjType == public,
                       Epoch > element(1, S#state.max_public_epoch) ->
-                           %io:format(user, "TODO: tell ~p we are wedged by epoch ~p\n", [S#state.wedge_notify_pid, Epoch]),
-                           S#state{max_public_epoch=EpochT, wedged=true};
+                           if Epoch == EffectiveEpoch ->
+                                   %% This is a regular projection, i.e.,
+                                   %% does not have an inner proj.
+                                   update_wedge_state(
+                                     S#state.wedge_notify_pid, true, EpochId);
+                              Epoch /= EffectiveEpoch ->
+                                   %% This projection has an inner proj.
+                                   %% The outer proj is flapping, so we do
+                                   %% not bother wedging.
+                                   ok
+                           end,
+                           S#state{max_public_epoch=EpochId};
                       ProjType == private,
                       Epoch > element(1, S#state.max_private_epoch) ->
-                           %io:format(user, "TODO: tell ~p we are unwedged by epoch ~p\n", [S#state.wedge_notify_pid, Epoch]),
-                           S#state{max_private_epoch=EpochT, wedged=false};
+                           update_wedge_state(
+                                 S#state.wedge_notify_pid, false, EpochId),
+                           S#state{max_private_epoch=EpochId};
                       true ->
                            S
                    end,
             {ok, NewS};
         {error, Else} ->
             {{error, Else}, S}
+    end.
+
+update_wedge_state(PidSpec, Boolean, {0,_}=EpochId) ->
+    %% Epoch #0 is a special case: no projection has been written yet.
+    %% However, given the way that machi_flu_psup starts the
+    %% processes, we are roughly 100% certain that the FLU for PidSpec
+    %% is not yet running.
+    catch machi_flu1:update_wedge_state(PidSpec, Boolean, EpochId);
+update_wedge_state(PidSpec, Boolean, EpochId) ->
+    %% We have a race problem with the startup order by machi_flu_psup:
+    %% the order is projection store (me!), projection manager, FLU.
+    %% PidSpec is the FLU.  It's almost certainly a registered name.
+    %% Wait for it to exist before sending a message to it.  Racing with
+    %% supervisor startup/shutdown/restart is ok.
+    ok = wait_for_liveness(PidSpec, 10*1000),
+    machi_flu1:update_wedge_state(PidSpec, Boolean, EpochId).
+
+wait_for_liveness(Pid, _WaitTime) when is_pid(Pid) ->
+    ok;
+wait_for_liveness(PidSpec, WaitTime) ->
+    wait_for_liveness(PidSpec, os:timestamp(), WaitTime).
+
+wait_for_liveness(PidSpec, StartTime, WaitTime) ->
+    case whereis(PidSpec) of
+        undefined ->
+            case timer:now_diff(os:timestamp(), StartTime) div 1000 of
+                X when X < WaitTime ->
+                    io:format(user, "\nYOO ~p ~p\n", [PidSpec, lists:sort(registered())]),
+                    timer:sleep(1),
+                    wait_for_liveness(PidSpec, StartTime, WaitTime)
+            end;
+        _SomePid ->
+            ok
     end.
 
 pick_path(public, S) ->

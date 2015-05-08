@@ -88,7 +88,7 @@ partial_stop_restart2() ->
 
         [machi_chain_manager1:set_chain_members(ChMgr, Dict) ||
             ChMgr <- ChMgrs ],
-        [{ok, {true, _}} = WedgeStatus(P) || P <- Ps], % all are wedged
+        [{ok, {false, _}} = WedgeStatus(P) || P <- Ps], % *not* wedged
 
         {_,_,_} = machi_chain_manager1:test_react_to_env(hd(ChMgrs)),
         [begin
@@ -108,8 +108,10 @@ partial_stop_restart2() ->
                               PStore, ProjType)
          end || ProjType <- [public, private], PStore <- PStores ],
         Epoch_m = Proj_m#projection_v1.epoch_number,
-        %% TODO: Confirm that all FLUs are *not* wedged
-        [{ok, {false, _}} = WedgeStatus(P) || P <- Ps], % all are wedged
+        %% Confirm that all FLUs are *not* wedged, with correct proj & epoch
+        Proj_mCSum = Proj_m#projection_v1.epoch_csum,
+        [{ok, {false, {Epoch_m, Proj_mCSum}}} = WedgeStatus(P) || % *not* wedged
+             P <- Ps], 
 
         %% Stop all but 'a'.
         [ok = machi_flu_psup:stop_flu_package(Name) || {Name,_} <- tl(Ps)],

@@ -70,7 +70,8 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--export([make_chmgr_regname/1, projection_transitions_are_sane/2]).
+-export([make_chmgr_regname/1, projection_transitions_are_sane/2,
+         inner_projection_exists/1, inner_projection_or_self/1]).
 
 -ifdef(TEST).
 
