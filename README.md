@@ -18,7 +18,7 @@ well as better-known open source software such as Kafka's file
 replication.  (See the bibliography of the [Machi high level design
 doc](./doc/high-level-machi.pdf) for further references.)
 
-(*) Capable of operating in ``AP mode'' or ``CP mode'' relative to the
+(*) Capable of operating in "AP mode" or "CP mode" relative to the
   CAP Theorem.
 
 ## Status: early May 2015: work is underway
