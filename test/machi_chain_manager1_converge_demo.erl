@@ -167,7 +167,8 @@ convergence_demo_testfun(NumFLUs) ->
                  {Name, PPid}
              end || {#p_srvr{name=Name}=P, _Dir} <- PsDirs],
     MembersDict = machi_projection:make_members_dict(Ps),
-    MgrOpts = [private_write_verbose, {active_mode,false}],
+    MgrOpts = [private_write_verbose, {active_mode,false},
+              {use_partition_simulator, true}],
     MgrNamez =
         [begin
              {ok, MPid} = ?MGR:start_link(P#p_srvr.name, MembersDict, MgrOpts),

@@ -171,7 +171,7 @@ init({MyName, InitMembersDict, MgrOpts}) ->
     All_list = [P#p_srvr.name || {_, P} <- orddict:to_list(MembersDict)],
     Opt = fun(Key, Default) -> proplists:get_value(Key, MgrOpts, Default) end,
     RunEnv = [{seed, Opt(seed, now())},
-              {use_partition_simulator, Opt(use_partition_simulator, true)},
+              {use_partition_simulator, Opt(use_partition_simulator, false)},
               {network_partitions, Opt(network_partitions, [])},
               {network_islands, Opt(network_islands, [])},
               {flapping_i, Opt(flapping, [])},
