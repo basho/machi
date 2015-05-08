@@ -108,13 +108,20 @@ ets_table_name(FluName) when is_binary(FluName) ->
     list_to_atom(binary_to_list(FluName) ++ "_epoch").
 
 main2(FluName, TcpPort, DataDir, Rest) ->
+    {Props, DbgProps} =  case proplists:get_value(dbg, Rest) of
+                             undefined ->
+                                 {Rest, []};
+                             DPs ->
+                                 {lists:keydelete(dbg, 1, Rest), DPs}
+                         end,
     S0 = #state{flu_name=FluName,
                 tcp_port=TcpPort,
                 data_dir=DataDir,
-                wedged=true,
+                wedged=proplists:get_value(initial_wedged, DbgProps, true),
                 etstab=ets_table_name(FluName),
                 epoch_id=undefined,
-                props=Rest},
+                dbg_props=DbgProps,
+                props=Props},
     AppendPid = start_append_server(S0, self()),
     receive
         append_server_ack -> ok
@@ -131,14 +138,7 @@ main2(FluName, TcpPort, DataDir, Rest) ->
         end,
     S1 = S0#state{append_pid=AppendPid,
                   proj_store=ProjectionPid},
-    S2 = case proplists:get_value(dbg, Rest) of
-             undefined ->
-                 S1;
-             DbgProps ->
-                 S1#state{dbg_props=DbgProps,
-                          props=lists:keydelete(dbg, 1, Rest)}
-         end,
-    ListenPid = start_listen_server(S2),
+    ListenPid = start_listen_server(S1),
 
     Config_e = machi_util:make_config_filename(DataDir, "unused"),
     ok = filelib:ensure_dir(Config_e),
@@ -174,12 +174,13 @@ run_listen_server(#state{flu_name=FluName, tcp_port=TcpPort}=S) ->
     {ok, LSock} = gen_tcp:listen(TcpPort, SockOpts),
     listen_server_loop(LSock, S).
 
-run_append_server(FluPid, AckPid, #state{flu_name=Name}=S) ->
+run_append_server(FluPid, AckPid, #state{flu_name=Name,dbg_props=DbgProps}=S) ->
     %% Reminder: Name is the "main" name of the FLU, i.e., no suffix
     register(Name, self()),
     TID = ets:new(ets_table_name(Name),
                   [set, protected, named_table, {read_concurrency, true}]),
-    ets:insert(TID, {epoch, {true, {-1, <<>>}}}),
+    InitialWedged = proplists:get_value(initial_wedged, DbgProps, true),
+    ets:insert(TID, {epoch, {InitialWedged, {-65, <<"bogus epoch, yo">>}}}),
     AckPid ! append_server_ack,
     append_server_loop(FluPid, S#state{etstab=TID}).
 
@@ -236,8 +237,6 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                   OffsetHex:16/binary, LenHex:8/binary,
                   File:FileLenLF/binary, "\n">> ->
                     {Wedged_p, CurrentEpochId} = ets:lookup_element(S#state.etstab, epoch, 2),
-                    io:format(user, "TT wedged ~p, CurrentEpochId ~p\n", [Wedged_p, CurrentEpochId]),
-                    timer:sleep(50),
                     do_net_server_read(Sock, OffsetHex, LenHex, File, DataDir,
                                        EpochIDRaw, Wedged_p, CurrentEpochId);
                 <<"L ", _EpochIDRaw:(?EpochIDSpace)/binary, "\n">> ->
