@@ -82,9 +82,15 @@ partial_stop_restart2() ->
     WedgeStatus = fun({_,#p_srvr{address=Addr, port=TcpPort}}) ->
                           machi_flu1_client:wedge_status(Addr, TcpPort)
                   end,
+    Append = fun({_,#p_srvr{address=Addr, port=TcpPort}}) ->
+                     machi_flu1_client:append_chunk(Addr, TcpPort,
+                                                    ?DUMMY_PV1_EPOCH,
+                                                    <<"prefix">>, <<"data">>)
+                  end,
     try
         [Start(P) || P <- Ps],
         [{ok, {true, _}} = WedgeStatus(P) || P <- Ps], % all are wedged
+        [bummer = Append(P) || P <- Ps], % all are wedged
 
         [machi_chain_manager1:set_chain_members(ChMgr, Dict) ||
             ChMgr <- ChMgrs ],
