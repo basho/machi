@@ -77,7 +77,7 @@
           tcp_port        :: non_neg_integer(),
           data_dir        :: string(),
           wedged = true   :: boolean(),
-          epoch_id        :: 'undefined' | machi_projection:pv_epoch(),
+          epoch_id        :: 'undefined' | pv1_epoch(),
           dbg_props = []  :: list(), % proplist
           props = []      :: list()  % proplist
          }).
@@ -174,9 +174,12 @@ listen_server_loop(LSock, S) ->
     spawn_link(fun() -> net_server_loop(Sock, S) end),
     listen_server_loop(LSock, S).
 
-append_server_loop(FluPid, #state{data_dir=DataDir}=S) ->
+append_server_loop(FluPid, #state{data_dir=DataDir,wedged=Wedged_p}=S) ->
     AppendServerPid = self(),
     receive
+        {seq_append, From, _Prefix, _Chunk, _CSum} when Wedged_p ->
+            From ! wedged,
+            append_server_loop(FluPid, S);
         {seq_append, From, Prefix, Chunk, CSum} ->
             spawn(fun() -> append_server_dispatch(From, Prefix, Chunk, CSum,
                                                   DataDir, AppendServerPid) end),
@@ -298,7 +301,9 @@ do_net_server_append2(FluName, Sock, LenHex, Prefix) ->
         {assignment, Offset, File} ->
             OffsetHex = machi_util:bin_to_hexstr(<<Offset:64/big>>),
             Out = io_lib:format("OK ~s ~s\n", [OffsetHex, File]),
-            ok = gen_tcp:send(Sock, Out)
+            ok = gen_tcp:send(Sock, Out);
+        wedged ->
+            ok = gen_tcp:send(Sock, <<"ERROR WEDGED\n">>)
     after 10*1000 ->
             ok = gen_tcp:send(Sock, "TIMEOUT\n")
     end.

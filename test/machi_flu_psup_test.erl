@@ -90,11 +90,12 @@ partial_stop_restart2() ->
     try
         [Start(P) || P <- Ps],
         [{ok, {true, _}} = WedgeStatus(P) || P <- Ps], % all are wedged
-        [bummer = Append(P) || P <- Ps], % all are wedged
+        [{error,wedged} = Append(P) || P <- Ps], % all are wedged
 
         [machi_chain_manager1:set_chain_members(ChMgr, Dict) ||
             ChMgr <- ChMgrs ],
         [{ok, {false, _}} = WedgeStatus(P) || P <- Ps], % *not* wedged
+        [{ok,_} = Append(P) || P <- Ps],                % *not* wedged
 
         {_,_,_} = machi_chain_manager1:test_react_to_env(hd(ChMgrs)),
         [begin
@@ -118,6 +119,7 @@ partial_stop_restart2() ->
         Proj_mCSum = Proj_m#projection_v1.epoch_csum,
         [{ok, {false, {Epoch_m, Proj_mCSum}}} = WedgeStatus(P) || % *not* wedged
              P <- Ps], 
+        [{ok,_} = Append(P) || P <- Ps],                % *not* wedged
 
         %% Stop all but 'a'.
         [ok = machi_flu_psup:stop_flu_package(Name) || {Name,_} <- tl(Ps)],
@@ -129,11 +131,14 @@ partial_stop_restart2() ->
         %% Remember: 'a' is not in active mode.
         {ok, Proj_m} = machi_projection_store:read_latest_projection(
                          hd(PStores), private),
-        %% TODO: confirm that 'a' is wedged
+        %% Confirm that 'a' is wedged
+        {error, wedged} = Append(hd(Ps)),
+        %% Iterate through humming consensus once
         {now_using,_,Epoch_n} = machi_chain_manager1:test_react_to_env(
                                   hd(ChMgrs)),
         true = (Epoch_n > Epoch_m),
-        %% TODO: confirm that 'b' is wedged
+        %% Confirm that 'a' is *not* wedged
+        {ok, _} = Append(hd(Ps)),
 
         ok
     after
