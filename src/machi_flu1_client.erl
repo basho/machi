@@ -488,10 +488,16 @@ list2(Sock, EpochID) ->
         EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
         ok = gen_tcp:send(Sock, [<<"L ">>, EpochIDRaw, <<"\n">>]),
         ok = inet:setopts(Sock, [{packet, line}]),
-        {ok, <<"OK\n">>} = gen_tcp:recv(Sock, 0),
-        Res = list3(gen_tcp:recv(Sock, 0), Sock),
-        ok = inet:setopts(Sock, [{packet, raw}]),
-        {ok, Res}
+        case gen_tcp:recv(Sock, 0) of
+            {ok, <<"OK\n">>} ->
+                Res = list3(gen_tcp:recv(Sock, 0), Sock),
+                ok = inet:setopts(Sock, [{packet, raw}]),
+                {ok, Res};
+            {ok, <<"ERROR WEDGED\n">>} ->
+                {error, wedged};
+            {ok, <<"ERROR ", Rest/binary>>} ->
+                {error, Rest}
+        end
     catch
         throw:Error ->
             Error;

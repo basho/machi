@@ -103,9 +103,9 @@ update_wedge_state(PidSpec, Boolean, EpochId)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 ets_table_name(FluName) when is_atom(FluName) ->
-    list_to_atom(atom_to_list(FluName) ++ "_epoch");
-ets_table_name(FluName) when is_binary(FluName) ->
-    list_to_atom(binary_to_list(FluName) ++ "_epoch").
+    list_to_atom(atom_to_list(FluName) ++ "_epoch").
+%% ets_table_name(FluName) when is_binary(FluName) ->
+%%     list_to_atom(binary_to_list(FluName) ++ "_epoch").
 
 main2(FluName, TcpPort, DataDir, Rest) ->
     {Props, DbgProps} =  case proplists:get_value(dbg, Rest) of
@@ -236,15 +236,14 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                   EpochIDRaw:(?EpochIDSpace)/binary,
                   OffsetHex:16/binary, LenHex:8/binary,
                   File:FileLenLF/binary, "\n">> ->
-                    {Wedged_p, CurrentEpochId} = ets:lookup_element(S#state.etstab, epoch, 2),
                     do_net_server_read(Sock, OffsetHex, LenHex, File, DataDir,
-                                       EpochIDRaw, Wedged_p, CurrentEpochId);
+                                       EpochIDRaw, S);
                 <<"L ", _EpochIDRaw:(?EpochIDSpace)/binary, "\n">> ->
-                    do_net_server_listing(Sock, DataDir);
+                    do_net_server_listing(Sock, DataDir, S);
                 <<"C ",
                   _EpochIDRaw:(?EpochIDSpace)/binary,
                   File:CSumFileLenLF/binary, "\n">> ->
-                    do_net_server_checksum_listing(Sock, File, DataDir);
+                    do_net_server_checksum_listing(Sock, File, DataDir, S);
                 <<"QUIT\n">> ->
                     catch gen_tcp:close(Sock),
                     exit(normal);
@@ -349,7 +348,8 @@ do_wedge_status(FluName, Sock) ->
     ok = gen_tcp:send(Sock, Reply).
 
 do_net_server_read(Sock, OffsetHex, LenHex, FileBin, DataDir,
-                   EpochIDRaw, Wedged_p, CurrentEpochId) ->
+                   EpochIDRaw, S) ->
+    {Wedged_p, CurrentEpochId} = ets:lookup_element(S#state.etstab, epoch, 2),
     DoItFun = fun(FH, Offset, Len) ->
                       case file:pread(FH, Offset, Len) of
                           {ok, Bytes} when byte_size(Bytes) == Len ->
@@ -469,7 +469,15 @@ decode_and_reply_net_server_ec_read_version_a(Sock, Rest) ->
     <<Body:BodyLen/binary, _/binary>> = Rest2,
     ok = gen_tcp:send(Sock, ["ERASURE ", BodyLenHex, " ", Hdr, Body]).
 
-do_net_server_listing(Sock, DataDir) ->
+do_net_server_listing(Sock, DataDir, S) ->
+    {Wedged_p, _CurrentEpochId} = ets:lookup_element(S#state.etstab, epoch, 2),
+    if Wedged_p ->
+            ok = gen_tcp:send(Sock, <<"ERROR WEDGED\n">>);
+       true ->
+            do_net_server_listing2(Sock, DataDir)
+    end.
+
+do_net_server_listing2(Sock, DataDir) ->
     {_, WildPath} = machi_util:make_data_filename(DataDir, ""),
     Files = filelib:wildcard("*", WildPath),
     Out = ["OK\n",
@@ -484,9 +492,12 @@ do_net_server_listing(Sock, DataDir) ->
           ],
     ok = gen_tcp:send(Sock, Out).
 
-do_net_server_checksum_listing(Sock, File, DataDir) ->
-    case sanitize_file_string(File) of
-        ok ->
+do_net_server_checksum_listing(Sock, File, DataDir, S) ->
+    {Wedged_p, _CurrentEpochId} = ets:lookup_element(S#state.etstab, epoch, 2),
+    case {Wedged_p, sanitize_file_string(File)} of
+        {true, _} ->
+            ok = gen_tcp:send(Sock, <<"ERROR WEDGED\n">>);
+        {false, ok} ->
             do_net_server_checksum_listing2(Sock, File, DataDir);
         _ ->
             ok = gen_tcp:send(Sock, <<"ERROR BAD-ARG\n">>)
