@@ -30,9 +30,9 @@ func, and pattern match Erlang style in that func.
 ** DONE Move prototype/chain-manager code to "top" of source tree
 *** DONE Preserve current test code (leave as-is? tiny changes?)
 *** DONE Make chain manager code flexible enough to run "real world" or "sim"
+** TODO Add projection wedging logic to each FLU.
 ** TODO Implement real data repair, orchestrated by the chain manager
 ** TODO Change all protocol ops to enforce the epoch ID
-** TODO Add projection wedging logic to each FLU.
 
 - Add no-wedging state to make testing easier?
     

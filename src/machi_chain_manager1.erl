@@ -523,14 +523,19 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
     Down = AllMembers -- Up,
 
     NewUPI_list = [X || X <- OldUPI_list, lists:member(X, Up)],
+    LastInNewUPI = case NewUPI_list of
+                       []    -> does_not_exist_because_upi_is_empty;
+                       [_|_] -> lists:last(NewUPI_list)
+                   end,
     Repairing_list2 = [X || X <- OldRepairing_list, lists:member(X, Up)],
+    Simulator_p = proplists:get_value(use_partition_simulator, RunEnv2, false),
     {NewUPI_list3, Repairing_list3, RunEnv3} =
         case {NewUp, Repairing_list2} of
             {[], []} ->
                 D_foo=[],
                 {NewUPI_list, [], RunEnv2};
-            {[], [H|T]} when RelativeToServer == hd(NewUPI_list) ->
-                %% The author is head of the UPI list.  Let's see if
+            {[], [H|T]} when RelativeToServer == LastInNewUPI ->
+                %% The author is tail of the UPI list.  Let's see if
                 %% *everyone* in the UPI+repairing lists are using our
                 %% projection.  This is to simulate a requirement that repair
                 %% a real repair process cannot take place until the chain is
@@ -540,12 +545,12 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                 SameEpoch_p = check_latest_private_projections_same_epoch(
                                 tl(NewUPI_list) ++ Repairing_list2,
                                 S#ch_mgr.proj, Partitions, S),
-                if not SameEpoch_p ->
-                        D_foo=[],
-                        {NewUPI_list, OldRepairing_list, RunEnv2};
-                   true ->
+                if Simulator_p andalso SameEpoch_p ->
                         D_foo=[{repair_airquote_done, {we_agree, (S#ch_mgr.proj)#projection_v1.epoch_number}}],
-                        {NewUPI_list ++ [H], T, RunEnv2}
+                        {NewUPI_list ++ [H], T, RunEnv2};
+                   true ->
+                        D_foo=[],
+                        {NewUPI_list, OldRepairing_list, RunEnv2}
                 end;
             {_, _} ->
                 D_foo=[],
