@@ -170,6 +170,11 @@ smoke1_test() ->
     {ok, M0} = ?MGR:start_link(a, MembersDict, [{active_mode,false}]),
     try
         {ok, P1} = ?MGR:test_calc_projection(M0, false),
+        % DERP! Check for race with manager's proxy vs. proj listener
+        case ?MGR:test_read_latest_public_projection(M0, false) of
+            {error, partition} -> timer:sleep(500);
+            _                  -> ok
+        end,
         {local_write_result, ok,
          {remote_write_results, [{b,ok},{c,ok}]}} =
             ?MGR:test_write_public_projection(M0, P1),

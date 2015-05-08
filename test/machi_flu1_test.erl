@@ -64,6 +64,7 @@ flu_smoke_test() ->
                                                 ?DUMMY_PV1_EPOCH, BadFile),
 
         {ok, []} = ?FLU_C:list_files(Host, TcpPort, ?DUMMY_PV1_EPOCH),
+        {ok, {true, {0,<<0:(20*8)/big>>}}} = ?FLU_C:wedge_status(Host, TcpPort),
 
         Chunk1 = <<"yo!">>,
         {ok, {Off1,Len1,File1}} = ?FLU_C:append_chunk(Host, TcpPort,

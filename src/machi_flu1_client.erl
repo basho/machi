@@ -31,6 +31,7 @@
          read_chunk/5, read_chunk/6,
          checksum_list/3, checksum_list/4,
          list_files/2, list_files/3,
+         wedge_status/1, wedge_status/2,
 
          %% Projection API
          get_latest_epoch/2, get_latest_epoch/3,
@@ -152,6 +153,27 @@ list_files(Host, TcpPort, EpochID) when is_integer(TcpPort) ->
     after
         catch gen_tcp:close(Sock)
     end.
+
+%% @doc Fetch the wedge status from the remote FLU.
+
+-spec wedge_status(port()) ->
+      {ok, {boolean(), machi_projection:pv1_epoch()}} | {error, term()}.
+
+wedge_status(Sock) when is_port(Sock) ->
+    wedge_status2(Sock).
+
+%% @doc Fetch the wedge status from the remote FLU.
+
+-spec wedge_status(inet_host(), inet_port()) ->
+      {ok, {boolean(), machi_projection:pv1_epoch()}} | {error, term()}.
+wedge_status(Host, TcpPort) when is_integer(TcpPort) ->
+    Sock = machi_util:connect(Host, TcpPort),
+    try
+        wedge_status2(Sock)
+    after
+        catch gen_tcp:close(Sock)
+    end.
+
 
 %% @doc Get the latest epoch number + checksum from the FLU's projection store.
 
@@ -475,6 +497,28 @@ list3({ok, Line}, Sock) ->
     [{Size, File}|list3(gen_tcp:recv(Sock, 0), Sock)];
 list3(Else, _Sock) ->
     throw({server_protocol_error, Else}).
+
+wedge_status2(Sock) ->
+    try
+        ok = gen_tcp:send(Sock, [<<"WEDGE-STATUS\n">>]),
+        ok = inet:setopts(Sock, [{packet, line}]),
+        {ok, <<"OK ",
+               BooleanHex:2/binary, " ",
+               EpochHex:8/binary, " ",
+               CSumHex:40/binary, "\n">>} = gen_tcp:recv(Sock, 0),
+        ok = inet:setopts(Sock, [{packet, raw}]),
+        Boolean = if BooleanHex == <<"00">> -> false;
+                     BooleanHex == <<"01">> -> true
+                  end,
+        Res = {Boolean, {machi_util:hexstr_to_int(EpochHex),
+                         machi_util:hexstr_to_bin(CSumHex)}},
+        {ok, Res}
+    catch
+        throw:Error ->
+            Error;
+        error:{badmatch,_}=BadMatch ->
+            {error, {badmatch, BadMatch}}
+    end.
 
 checksum_list2(Sock, EpochID, File) ->
     erase(bad_sock),

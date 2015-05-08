@@ -75,8 +75,8 @@
           append_pid      :: pid(),
           tcp_port        :: non_neg_integer(),
           data_dir        :: string(),
-          wedge = true    :: 'disabled' | boolean(),
-          my_epoch_id     :: 'undefined',
+          wedge = true    :: boolean(),
+          epoch_id        :: 'undefined' | machi_projection:pv_epoch(),
           dbg_props = []  :: list(), % proplist
           props = []      :: list()  % proplist
          }).
@@ -100,6 +100,8 @@ main2(FluName, TcpPort, DataDir, Rest) ->
     S0 = #state{flu_name=FluName,
                 tcp_port=TcpPort,
                 data_dir=DataDir,
+                wedge=true,
+                epoch_id=undefined,
                 props=Rest},
     AppendPid = start_append_server(S0),
     {_ProjRegName, ProjectionPid} =
@@ -118,8 +120,7 @@ main2(FluName, TcpPort, DataDir, Rest) ->
              undefined ->
                  S1;
              DbgProps ->
-                 S1#state{wedge=disabled,
-                          dbg_props=DbgProps,
+                 S1#state{dbg_props=DbgProps,
                           props=lists:keydelete(dbg, 1, Rest)}
          end,
     ListenPid = start_listen_server(S2),
@@ -176,7 +177,15 @@ append_server_loop(FluPid, #state{data_dir=DataDir}=S) ->
                                                   %% DataDir, FluPid) end),
             append_server_loop(FluPid, S);
         {wedge_state_change, Boolean} ->
-            append_server_loop(FluPid, S#state{wedge=Boolean})
+            %% append_server_loop(FluPid, S#state{wedge=Boolean})
+            append_server_loop(FluPid, S);
+        {wedge_status, FromPid} ->
+            #state{wedge=Wedge_p, epoch_id=EpochId} = S,
+            FromPid ! {wedge_status_reply, Wedge_p, EpochId},
+            append_server_loop(FluPid, S);
+        Else ->
+            io:format(user, "append_server_loop: WHA? ~p\n", [Else]),
+            append_server_loop(FluPid, S)
     end.
 
 -define(EpochIDSpace, (4+20)).
@@ -233,6 +242,8 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                     do_net_server_truncate_hackityhack(Sock, File, DataDir);
                 <<"PROJ ", LenHex:8/binary, "\n">> ->
                     do_projection_command(Sock, LenHex, S);
+                <<"WEDGE-STATUS\n">> ->
+                    do_wedge_status(FluName, Sock);
                 _ ->
                     machi_util:verb("Else Got: ~p\n", [Line]),
                     gen_tcp:send(Sock, "ERROR SYNTAX\n"),
@@ -285,6 +296,27 @@ do_net_server_append2(FluName, Sock, LenHex, Prefix) ->
     after 10*1000 ->
             ok = gen_tcp:send(Sock, "TIMEOUT\n")
     end.
+
+do_wedge_status(FluName, Sock) ->
+    FluName ! {wedge_status, self()},
+    Reply = receive
+                {wedge_status_reply, Bool, EpochId} ->
+                    BoolHex = if Bool == false -> <<"00">>;
+                                 Bool == true  -> <<"01">>
+                              end,
+                    case EpochId of
+                        undefined ->
+                            EpochHex = machi_util:int_to_hexstr(0, 32),
+                            CSumHex = machi_util:bin_to_hexstr(<<0:(20*8)/big>>);
+                        {Epoch, EpochCSum} ->
+                            EpochHex = machi_util:int_to_hexstr(Epoch, 32),
+                            CSumHex = machi_util:bin_to_hexstr(EpochCSum)
+                    end,
+                    [<<"OK ">>, BoolHex, 32, EpochHex, 32, CSumHex, 10]
+            after 30*1000 ->
+                    <<"give_it_up\n">>
+            end,
+    ok = gen_tcp:send(Sock, Reply).
 
 do_net_server_read(Sock, OffsetHex, LenHex, FileBin, DataDir) ->
     DoItFun = fun(FH, Offset, Len) ->
