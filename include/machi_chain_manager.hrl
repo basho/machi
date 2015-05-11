@@ -24,19 +24,3 @@
 
 -type projection() :: #projection_v1{}.
 
--record(ch_mgr, {
-          name            :: pv1_server(),
-          flap_limit      :: non_neg_integer(),
-          proj            :: projection(),
-          %%
-          timer           :: 'undefined' | timer:tref(),
-          ignore_timer    :: boolean(),
-          proj_history    :: queue:queue(),
-          flaps=0         :: integer(),
-          flap_start = ?NOT_FLAPPING
-                          :: erlang:timestamp(),
-          runenv          :: list(), %proplist()
-          opts            :: list(),  %proplist()
-          members_dict    :: p_srvr_dict(),
-          proxies_dict    :: orddict:orddict()
-         }).

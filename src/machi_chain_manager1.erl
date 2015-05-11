@@ -54,6 +54,26 @@
 -include("machi_projection.hrl").
 -include("machi_chain_manager.hrl").
 
+-record(ch_mgr, {
+          name            :: pv1_server(),
+          flap_limit      :: non_neg_integer(),
+          proj            :: projection(),
+          %%
+          timer           :: 'undefined' | timer:tref(),
+          ignore_timer    :: boolean(),
+          proj_history    :: queue:queue(),
+          flaps=0         :: integer(),
+          flap_start = ?NOT_FLAPPING
+                          :: erlang:timestamp(),
+          repair_worker   :: 'undefined' | pid(),
+          repair_start    :: 'undefined' | erlang:timestamp(),
+          repair_final_status :: 'undefined' | term(),
+          runenv          :: list(), %proplist()
+          opts            :: list(),  %proplist()
+          members_dict    :: p_srvr_dict(),
+          proxies_dict    :: orddict:orddict()
+         }).
+
 -define(D(X), io:format(user, "~s ~p\n", [??X, X])).
 -define(Dw(X), io:format(user, "~s ~w\n", [??X, X])).
 
@@ -63,6 +83,14 @@
 
 %% Keep a history of our flowchart execution in the process dictionary.
 -define(REACT(T), put(react, [T|get(react)])).
+
+%% Define the period of private projection stability before we'll
+%% start repair.
+-ifdef(TEST).
+-define(REPAIR_START_STABILITY_TIME, 0).
+-else. % TEST
+-define(REPAIR_START_STABILITY_TIME, 3).        % TODO suggest 10 or 15?
+-endif. % TEST
 
 %% API
 -export([start_link/2, start_link/3, stop/1, ping/1,
@@ -272,7 +300,9 @@ handle_cast(_Cast, S) ->
 handle_info(tick_check_environment, #ch_mgr{ignore_timer=true}=S) ->
     {noreply, S};
 handle_info(tick_check_environment, S) ->
-    {{_Delta, Props, _Epoch}, S2} = do_react_to_env(S),
+    {{_Delta, Props, _Epoch}, S1} = do_react_to_env(S),
+    S2 = sanitize_repair_state(S1),
+    S3 = perhaps_start_repair(S2),
     case proplists:get_value(throttle_seconds, Props) of
         N when is_integer(N), N > 0 ->
             %% We are flapping.  Set ignore_timer=true and schedule a
@@ -281,12 +311,17 @@ handle_info(tick_check_environment, S) ->
             %% state C200 is ever implemented, then it should be
             %% implemented via the test_react_to_env style.
             erlang:send_after(N*1000, self(), stop_ignoring_timer),
-            {noreply, S2#ch_mgr{ignore_timer=true}};
+            {noreply, S3#ch_mgr{ignore_timer=true}};
         _ ->
-            {noreply, S2}
+            {noreply, S3}
     end;
 handle_info(stop_ignoring_timer, S) ->
     {noreply, S#ch_mgr{ignore_timer=false}};
+handle_info({'DOWN',_Ref,process,Worker,Res},
+            #ch_mgr{repair_worker=Worker}=S)->
+    {noreply, S#ch_mgr{ignore_timer=false,
+                       repair_worker=undefined,
+                       repair_final_status=Res}};
 handle_info(Msg, S) ->
     case get(todo_bummer) of undefined -> io:format("TODO: got ~p\n", [Msg]);
                              _         -> ok
@@ -1881,6 +1916,50 @@ make_chmgr_regname(A) when is_atom(A) ->
     list_to_atom(atom_to_list(A) ++ "_chmgr");
 make_chmgr_regname(B) when is_binary(B) ->
     list_to_atom(binary_to_list(B) ++ "_chmgr").
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+perhaps_start_repair(
+  #ch_mgr{name=MyName,
+          repair_worker=undefined,
+          proj=#projection_v1{creation_time=Start,
+                              upi=[_|_]=UPI,
+                              repairing=[_|_]}}=S) ->
+    LastUPI = lists:last(UPI),
+    case timer:now_diff(os:timestamp(), Start) div 1000000 of
+        N when MyName == LastUPI,
+               N >= ?REPAIR_START_STABILITY_TIME ->
+            {WorkerPid, _Ref} = spawn_monitor(fun() -> do_repair(S) end),
+            S#ch_mgr{repair_worker=WorkerPid,
+                     repair_start=os:timestamp(),
+                     repair_final_status=undefined};
+        _ ->
+            S
+    end;
+perhaps_start_repair(S) ->
+    S.
+
+sanitize_repair_state(#ch_mgr{name=MyName,
+                              repair_start=Start,
+                              repair_final_status=Res,
+                              proj=#projection_v1{upi=[_|_]=UPI}}=S)
+  when Res /= undefined ->
+    Elapsed = (timer:now_diff(os:timestamp(), Start) div 1000) / 1000,
+    error_logger:info_msg("Chain tail ~p of ~p: "
+                          "repair finished in ~p seconds: ~p\n",
+                          [MyName, UPI, Elapsed, Res]),
+    S#ch_mgr{repair_worker=undefined, repair_start=undefined,
+             repair_final_status=undefined};
+sanitize_repair_state(S) ->
+    S.
+
+do_repair(#ch_mgr{name=MyName,
+                  proj=#projection_v1{upi=UPI,
+                                      repairing=Repairing}}=_S_copy) ->
+    error_logger:info_msg("Chain tail ~p of ~p starting repair of ~p\n",
+                          [MyName, UPI, Repairing]),
+    timer:sleep(1234),
+    exit(todo_yo).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
