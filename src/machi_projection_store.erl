@@ -258,7 +258,8 @@ do_proj_write(ProjType, #projection_v1{epoch_number=Epoch}=Proj, S) ->
             ok = file:close(FH),
             EffectiveProj = machi_chain_manager1:inner_projection_or_self(Proj),
             EffectiveEpoch = EffectiveProj#projection_v1.epoch_number,
-            EpochId = {EffectiveEpoch, EffectiveProj#projection_v1.epoch_csum},
+            EpochId = {Epoch, Proj#projection_v1.epoch_csum},
+            EffectiveEpochId = {EffectiveEpoch, EffectiveProj#projection_v1.epoch_csum},
             %% 
             NewS = if ProjType == public,
                       Epoch > element(1, S#state.max_public_epoch) ->
@@ -266,7 +267,8 @@ do_proj_write(ProjType, #projection_v1{epoch_number=Epoch}=Proj, S) ->
                                    %% This is a regular projection, i.e.,
                                    %% does not have an inner proj.
                                    update_wedge_state(
-                                     S#state.wedge_notify_pid, true, EpochId);
+                                     S#state.wedge_notify_pid, true,
+                                     EffectiveEpochId);
                               Epoch /= EffectiveEpoch ->
                                    %% This projection has an inner proj.
                                    %% The outer proj is flapping, so we do
@@ -277,7 +279,8 @@ do_proj_write(ProjType, #projection_v1{epoch_number=Epoch}=Proj, S) ->
                       ProjType == private,
                       Epoch > element(1, S#state.max_private_epoch) ->
                            update_wedge_state(
-                                 S#state.wedge_notify_pid, false, EpochId),
+                                 S#state.wedge_notify_pid, false,
+                             EffectiveEpochId),
                            S#state{max_private_epoch=EpochId};
                       true ->
                            S

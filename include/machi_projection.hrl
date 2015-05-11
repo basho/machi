@@ -58,4 +58,8 @@
 
 -define(SHA_MAX, (1 bsl (20*8))).
 
+%% Set a limit to the maximum chain length, so that it's easier to
+%% create a consistent projection ranking score.
+-define(MAX_CHAIN_LENGTH, 64).
+
 -endif. % !MACHI_PROJECTION_HRL
