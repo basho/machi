@@ -784,7 +784,8 @@ react_to_env_A20(Retries, #ch_mgr{name=MyName}=S) ->
             ok
     end,
     case lists:member(MyName, P_latest#projection_v1.all_members) of
-        false when P_latest#projection_v1.epoch_number /= LastComplaint ->
+        false when P_latest#projection_v1.epoch_number /= LastComplaint,
+                   P_latest#projection_v1.all_members /= [] ->
             put(rogue_server_epoch, P_latest#projection_v1.epoch_number),
             error_logger:info_msg("Chain manager ~p found latest public "
                                   "projection ~p has author ~p has a "
