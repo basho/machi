@@ -1925,11 +1925,12 @@ perhaps_start_repair(
           proj=#projection_v1{creation_time=Start,
                               upi=[_|_]=UPI,
                               repairing=[_|_]}}=S) ->
+    RepairFun = fun() -> do_repair_ap_mode(S) end,
     LastUPI = lists:last(UPI),
     case timer:now_diff(os:timestamp(), Start) div 1000000 of
         N when MyName == LastUPI,
                N >= ?REPAIR_START_STABILITY_TIME ->
-            {WorkerPid, _Ref} = spawn_monitor(fun() -> do_repair(S) end),
+            {WorkerPid, _Ref} = spawn_monitor(RepairFun),
             S#ch_mgr{repair_worker=WorkerPid,
                      repair_start=os:timestamp(),
                      repair_final_status=undefined};
@@ -1953,13 +1954,34 @@ sanitize_repair_state(#ch_mgr{name=MyName,
 sanitize_repair_state(S) ->
     S.
 
-do_repair(#ch_mgr{name=MyName,
-                  proj=#projection_v1{upi=UPI,
-                                      repairing=Repairing}}=_S_copy) ->
+do_repair_ap_mode(
+  #ch_mgr{name=MyName,
+          members_dict=MembersDict,
+          proj=#projection_v1{upi=UPI,
+                              repairing=[Dst|_]=Repairing}}=_S_copy) ->
     error_logger:info_msg("Chain tail ~p of ~p starting repair of ~p\n",
                           [MyName, UPI, Repairing]),
-    timer:sleep(1234),
-    exit(todo_yo).
+    {ok, ProxyA} = machi_proxy_flu1_client:start_link(
+                     orddict:fetch(MyName, MembersDict)),
+    {ok, ProxyB} = machi_proxy_flu1_client:start_link(
+                     orddict:fetch(Dst, MembersDict)),
+    Res = try
+              QQQ1 = todo_compare_servers(ProxyA, ProxyB),
+              QQQ2 = todo_compare_servers(ProxyB, ProxyA),
+              yo_no_error
+          catch
+              What:Why ->
+                  io:format(user, "What Why ~p ~p @\n\t~p\n",
+                            [What, Why, erlang:get_stacktrace()]),
+                  yo_error
+          after
+              (catch machi_proxy_flu1_client:quit(ProxyA)),
+              (catch machi_proxy_flu1_client:quit(ProxyB))
+          end,
+    exit({todo, Res}).
+
+todo_compare_servers(ProxyA, ProxyB) ->
+    io:format(user, "TODO compare ~p ~p\n", [ProxyA, ProxyB]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

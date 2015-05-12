@@ -41,7 +41,7 @@ func, and pattern match Erlang style in that func.
 *** TODO Fixes the atom table leak
 *** TODO Fixes the problem of having active sequencer for the same prefix
          on two FLUS in the same VM
-** TODO Fix all known bugs with Chain Manager
+** TODO Fix all known bugs with Chain Manager (list below)
 
 *** DONE Fix known bugs
 *** DONE Clean up crufty TODO comments and other obvious cruft
