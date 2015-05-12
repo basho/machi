@@ -57,6 +57,7 @@
          wedge_status/1, wedge_status/2,
 
          %% %% Projection API
+         get_epoch_id/1, get_epoch_id/2,
          get_latest_epoch/2, get_latest_epoch/3,
          read_latest_projection/2, read_latest_projection/3,
          read_projection/3, read_projection/4,
@@ -65,7 +66,10 @@
          list_all_projections/2, list_all_projections/3,
 
          %% Common API
-         quit/1
+         quit/1,
+
+         %% Internal API
+         write_chunk/5, write_chunk/6
         ]).
 
 %% gen_server callbacks
@@ -143,6 +147,16 @@ wedge_status(PidSpec, Timeout) ->
     gen_server:call(PidSpec, {req, {wedge_status}},
                     Timeout).
 
+%% @doc Get the `epoch_id()' of the FLU's current/latest projection.
+
+get_epoch_id(PidSpec) ->
+    get_epoch_id(PidSpec, infinity).
+
+%% @doc Get the `epoch_id()' of the FLU's current/latest projection.
+
+get_epoch_id(PidSpec, Timeout) ->
+    gen_server:call(PidSpec, {req, {get_epoch_id}}, Timeout).
+
 %% @doc Get the latest epoch number + checksum from the FLU's projection store.
 
 get_latest_epoch(PidSpec, ProjType) ->
@@ -215,6 +229,19 @@ list_all_projections(PidSpec, ProjType, Timeout) ->
 quit(PidSpec) ->
     gen_server:call(PidSpec, quit, infinity).
 
+%% @doc Write a chunk (binary- or iolist-style) of data to a file
+%% with `Prefix' at `Offset'.
+
+write_chunk(PidSpec, EpochID, File, Offset, Chunk) ->
+    write_chunk(PidSpec, EpochID, File, Offset, Chunk, infinity).
+
+%% @doc Write a chunk (binary- or iolist-style) of data to a file
+%% with `Prefix' at `Offset'.
+
+write_chunk(PidSpec, EpochID, File, Offset, Chunk, Timeout) ->
+    gen_server:call(PidSpec, {req, {write_chunk, EpochID, File, Offset, Chunk}},
+                    Timeout).
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init([I]) ->
@@ -269,12 +296,25 @@ make_req_fun({append_chunk, EpochID, Prefix, Chunk}, #state{sock=Sock}) ->
     fun() -> ?FLU_C:append_chunk(Sock, EpochID, Prefix, Chunk) end;
 make_req_fun({read_chunk, EpochID, File, Offset, Size}, #state{sock=Sock}) ->
     fun() -> ?FLU_C:read_chunk(Sock, EpochID, File, Offset, Size) end;
+make_req_fun({write_chunk, EpochID, File, Offset, Chunk}, #state{sock=Sock}) ->
+    fun() -> ?FLU_C:write_chunk(Sock, EpochID, File, Offset, Chunk) end;
 make_req_fun({checksum_list, EpochID, File}, #state{sock=Sock}) ->
     fun() -> ?FLU_C:checksum_list(Sock, EpochID, File) end;
 make_req_fun({list_files, EpochID}, #state{sock=Sock}) ->
     fun() -> ?FLU_C:list_files(Sock, EpochID) end;
 make_req_fun({wedge_status}, #state{sock=Sock}) ->
     fun() -> ?FLU_C:wedge_status(Sock) end;
+make_req_fun({get_epoch_id}, #state{sock=Sock}) ->
+    fun() -> case ?FLU_C:read_latest_projection(Sock, private) of
+                 {ok, P} ->
+                     #projection_v1{epoch_number=Epoch,
+                                    epoch_csum=CSum} =
+                         machi_chain_manager1:inner_projection_or_self(P),
+                     {ok, {Epoch, CSum}};
+                 Error ->
+                     Error
+             end
+    end;
 make_req_fun({get_latest_epoch, ProjType}, #state{sock=Sock}) ->
     fun() -> ?FLU_C:get_latest_epoch(Sock, ProjType) end;
 make_req_fun({read_latest_projection, ProjType}, #state{sock=Sock}) ->

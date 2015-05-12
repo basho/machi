@@ -1925,7 +1925,10 @@ perhaps_start_repair(
           proj=#projection_v1{creation_time=Start,
                               upi=[_|_]=UPI,
                               repairing=[_|_]}}=S) ->
-    RepairFun = fun() -> do_repair_ap_mode(S) end,
+    RepairId = {MyName, os:timestamp()},
+    RepairOpts = [{mode, repair}, verbose, {repair_id, RepairId}],
+    %% RepairOpts = [{mode, check}, verbose],
+    RepairFun = fun() -> do_repair(S, RepairOpts, ap_mode) end,
     LastUPI = lists:last(UPI),
     case timer:now_diff(os:timestamp(), Start) div 1000000 of
         N when MyName == LastUPI,
@@ -1954,34 +1957,21 @@ sanitize_repair_state(#ch_mgr{name=MyName,
 sanitize_repair_state(S) ->
     S.
 
-do_repair_ap_mode(
+do_repair(
   #ch_mgr{name=MyName,
-          members_dict=MembersDict,
           proj=#projection_v1{upi=UPI,
-                              repairing=[Dst|_]=Repairing}}=_S_copy) ->
-    error_logger:info_msg("Chain tail ~p of ~p starting repair of ~p\n",
-                          [MyName, UPI, Repairing]),
-    {ok, ProxyA} = machi_proxy_flu1_client:start_link(
-                     orddict:fetch(MyName, MembersDict)),
-    {ok, ProxyB} = machi_proxy_flu1_client:start_link(
-                     orddict:fetch(Dst, MembersDict)),
-    Res = try
-              QQQ1 = todo_compare_servers(ProxyA, ProxyB),
-              QQQ2 = todo_compare_servers(ProxyB, ProxyA),
-              yo_no_error
-          catch
-              What:Why ->
-                  io:format(user, "What Why ~p ~p @\n\t~p\n",
-                            [What, Why, erlang:get_stacktrace()]),
-                  yo_error
-          after
-              (catch machi_proxy_flu1_client:quit(ProxyA)),
-              (catch machi_proxy_flu1_client:quit(ProxyB))
-          end,
-    exit({todo, Res}).
-
-todo_compare_servers(ProxyA, ProxyB) ->
-    io:format(user, "TODO compare ~p ~p\n", [ProxyA, ProxyB]).
+                              repairing=[Dst|_]=Repairing,
+                              members_dict=MembersDict}}=_S_copy,
+  Opts, ap_mode=_RepairMode) ->
+    RepairId = proplists:get_value(repair_id, Opts, id1),
+    error_logger:info_msg("Chain tail ~p of ~p starting repair ~p of ~p\n",
+                          [MyName, UPI, RepairId, Repairing]),
+    {ok, Info} = machi_chain_repair:repair_ap(MyName, Repairing, UPI,
+                                              MembersDict, Opts),
+    error_logger:info_msg("Chain tail ~p of ~p finished repair ~p: ~p\n",
+                          [MyName, UPI, RepairId, Info]),
+    timer:sleep(12345),
+    exit({todo, Info}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

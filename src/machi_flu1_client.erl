@@ -559,7 +559,11 @@ checksum_list2(Sock, EpochID, File) ->
             {ok, <<"ERROR WEDGED", _/binary>>} ->
                 {error, wedged};
             {ok, Else} ->
-                throw({server_protocol_error, Else})
+                throw({server_protocol_error, Else});
+            {error, closed} ->
+                throw({error, closed});
+            Else ->
+                throw(Else)
         end
     catch
         throw:Error ->
@@ -725,16 +729,20 @@ do_projection_common(Sock, ProjCmd) ->
         Cmd = [<<"PROJ ">>, LenHex, <<"\n">>],
         ok = gen_tcp:send(Sock, [Cmd, ProjCmdBin]),
         ok = inet:setopts(Sock, [{packet, line}]),
-        {ok, Line} = gen_tcp:recv(Sock, 0),
-        case Line of
-            <<"OK ", ResLenHex:8/binary, "\n">> ->
-                ResLen = machi_util:hexstr_to_int(ResLenHex),
-                ok = inet:setopts(Sock, [{packet, raw}]),
-                {ok, ResBin} = gen_tcp:recv(Sock, ResLen),
-                ok = inet:setopts(Sock, [{packet, line}]),
-                binary_to_term(ResBin);
-            Else ->
-                {error, Else}
+        case gen_tcp:recv(Sock, 0) of
+            {ok, Line} ->
+                case Line of
+                    <<"OK ", ResLenHex:8/binary, "\n">> ->
+                        ResLen = machi_util:hexstr_to_int(ResLenHex),
+                        ok = inet:setopts(Sock, [{packet, raw}]),
+                        {ok, ResBin} = gen_tcp:recv(Sock, ResLen),
+                        ok = inet:setopts(Sock, [{packet, line}]),
+                        binary_to_term(ResBin);
+                    Else ->
+                        {error, Else}
+                end;
+            {error, _} = Bad ->
+                throw(Bad)
         end
     catch
         throw:Error ->
