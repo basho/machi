@@ -1926,8 +1926,8 @@ perhaps_start_repair(
                               upi=[_|_]=UPI,
                               repairing=[_|_]}}=S) ->
     RepairId = {MyName, os:timestamp()},
-    RepairOpts = [{mode, repair}, verbose, {repair_id, RepairId}],
-    %% RepairOpts = [{mode, check}, verbose],
+    RepairOpts = [{repair_mode, repair}, verbose, {repair_id, RepairId}],
+    %% RepairOpts = [{repair_mode, check}, verbose],
     RepairFun = fun() -> do_repair(S, RepairOpts, ap_mode) end,
     LastUPI = lists:last(UPI),
     case timer:now_diff(os:timestamp(), Start) div 1000000 of
