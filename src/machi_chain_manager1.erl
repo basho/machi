@@ -1943,6 +1943,39 @@ perhaps_start_repair(
 perhaps_start_repair(S) ->
     S.
 
+do_repair(
+  #ch_mgr{name=MyName,
+          proj=#projection_v1{upi=UPI,
+                              repairing=[Dst|_]=Repairing,
+                              members_dict=MembersDict}}=_S_copy,
+  Opts, ap_mode=_RepairMode) ->
+    T1 = os:timestamp(),
+    RepairId = proplists:get_value(repair_id, Opts, id1),
+    error_logger:info_msg("Repair start: tail ~p of ~p -> ~p, ID ~p\n",
+                          [MyName, UPI, Repairing, RepairId]),
+
+    ETS = ets:new(repair_stats, [private, set]),
+    ETS_T_Keys = [t_in_files, t_in_chunks, t_in_bytes,
+                  t_out_files, t_out_chunks, t_out_bytes,
+                  t_bad_chunks, t_elapsed_seconds],
+    [ets:insert(ETS, {K, 0}) || K <- ETS_T_Keys],
+
+    Res = machi_chain_repair:repair_ap(MyName, Repairing, UPI,
+                                       MembersDict, ETS, Opts),
+    T2 = os:timestamp(),
+    Elapsed = (timer:now_diff(T2, T1) div 1000) / 1000,
+    ets:insert(ETS, {t_elapsed_seconds, Elapsed}),
+    Summary = case Res of ok -> "success";
+                          _  -> "FAILURE"
+              end,
+    Stats = [{K, ets:lookup_element(ETS, K, 2)} || K <- ETS_T_Keys],
+    error_logger:info_msg("Repair ~s: tail ~p of ~p finished repair ID ~p: "
+                          "~p\nStats ~w\n",
+                          [Summary, MyName, UPI, RepairId, Res, Stats]),
+    timer:sleep(12345),
+    ets:delete(ETS),
+    exit({todo, Res}).
+
 sanitize_repair_state(#ch_mgr{name=MyName,
                               repair_start=Start,
                               repair_final_status=Res,
@@ -1956,22 +1989,6 @@ sanitize_repair_state(#ch_mgr{name=MyName,
              repair_final_status=undefined};
 sanitize_repair_state(S) ->
     S.
-
-do_repair(
-  #ch_mgr{name=MyName,
-          proj=#projection_v1{upi=UPI,
-                              repairing=[Dst|_]=Repairing,
-                              members_dict=MembersDict}}=_S_copy,
-  Opts, ap_mode=_RepairMode) ->
-    RepairId = proplists:get_value(repair_id, Opts, id1),
-    error_logger:info_msg("Chain tail ~p of ~p starting repair ~p of ~p\n",
-                          [MyName, UPI, RepairId, Repairing]),
-    {ok, Info} = machi_chain_repair:repair_ap(MyName, Repairing, UPI,
-                                              MembersDict, Opts),
-    error_logger:info_msg("Chain tail ~p of ~p finished repair ~p: ~p\n",
-                          [MyName, UPI, RepairId, Info]),
-    timer:sleep(12345),
-    exit({todo, Info}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
