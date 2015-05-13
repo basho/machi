@@ -50,12 +50,13 @@
          get_all_projections/2, get_all_projections/3,
          list_all_projections/2, list_all_projections/3
         ]).
+-export([set_wedge_notify_pid/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--define(NO_EPOCH, {-1,<<0:(20*8)/big>>}).
+-define(NO_EPOCH, ?DUMMY_PV1_EPOCH).
 
 -record(state, {
           public_dir = ""        :: string(),
@@ -148,6 +149,9 @@ list_all_projections(PidSpec, ProjType, Timeout)
   when ProjType == 'public' orelse ProjType == 'private' ->
     g_call(PidSpec, {list_all_projections, ProjType}, Timeout).
 
+set_wedge_notify_pid(PidSpec, NotifyWedgeStateChanges) ->
+    gen_server:call(PidSpec, {set_wedge_notify_pid, NotifyWedgeStateChanges}).
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 g_call(PidSpec, Arg, Timeout) ->
@@ -207,6 +211,8 @@ handle_call({{list_all_projections, ProjType}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
     Dir = pick_path(ProjType, S),
     {reply, {{ok, find_all(Dir)}, LC2}, S};
+handle_call({set_wedge_notify_pid, NotifyWedgeStateChanges}, _From, S) ->
+    {reply, ok, S#state{wedge_notify_pid=NotifyWedgeStateChanges}};
 handle_call(_Request, _From, S) ->
     Reply = whaaaaaaaaaaaaa,
     {reply, Reply, S}.

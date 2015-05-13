@@ -42,7 +42,7 @@ api_smoke_test() ->
         I = #p_srvr{name=RegName, proto=ipv4, address=Host, port=TcpPort},
         {ok, Prox1} = ?MUT:start_link(I),
         try
-            FakeEpoch = {-1, <<0:(20*8)/big>>},
+            FakeEpoch = ?DUMMY_PV1_EPOCH,
             [{ok, {_,_,_}} = ?MUT:append_chunk(Prox1,
                                           FakeEpoch, <<"prefix">>, <<"data">>,
                                           infinity) || _ <- lists:seq(1,5)],

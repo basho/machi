@@ -87,7 +87,7 @@ repair_ap(Src, Repairing, UPI, MembersDict, ETS, Opts) ->
                             [What, Why, Stack]),
                   {error, {What, Why, Stack}}
           after
-              [(catch machi_proxy_flu1_client:quit(Pid)) ||
+              [(catch machi_proxy_flu1_client:quit(Pid, ?SHORT_TIMEOUT)) ||
                   Pid <- orddict:to_list(get(proxies_dict))]
           end,
     Res.
@@ -107,7 +107,8 @@ make_missing_file_summary(Dict, AllFLUs) ->
     MissingFileSummary.
 
 append_file_dict(Proxy, FLU_name, D) ->
-    {ok, Res} = machi_proxy_flu1_client:list_files(Proxy, ?DUMMY_PV1_EPOCH),
+    {ok, Res} = machi_proxy_flu1_client:list_files(Proxy, ?DUMMY_PV1_EPOCH,
+                                                   ?SHORT_TIMEOUT),
     lists:foldl(fun({Size, File}, Dict) ->
                            dict:append(File, {FLU_name, Size}, Dict)
                 end, D, Res).
@@ -171,14 +172,16 @@ copy_file(File, SrcProxy, MissingProxiesDict, Verb, ETS) ->
                 end,
                 _T1 = os:timestamp(),
                 {ok, Chunk} = machi_proxy_flu1_client:read_chunk(
-                                SrcProxy, EpochID, File, Offset, Size),
+                                SrcProxy, EpochID, File, Offset, Size,
+                                ?SHORT_TIMEOUT),
                 _T2 = os:timestamp(),
                 case machi_util:checksum_chunk(Chunk) of
                     CSum_now when CSum_now == CSum ->
                         [begin
                              _T3 = os:timestamp(),
                              ok = machi_proxy_flu1_client:write_chunk(
-                                    DstProxy, EpochID, File, Offset, Chunk),
+                                    DstProxy, EpochID, File, Offset, Chunk,
+                                    ?SHORT_TIMEOUT),
                              _T4 = os:timestamp()
                          end || {_FLU, DstProxy} <- MissingProxiesDict],
                         ets:update_counter(ETS, in_chunks, 1),

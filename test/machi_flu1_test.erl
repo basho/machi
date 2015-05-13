@@ -132,7 +132,7 @@ flu_projection_smoke_test() ->
     FLU1 = setup_test_flu(projection_test_flu, TcpPort, DataDir),
     try
         [begin
-             {ok, {-1,_}} = ?FLU_C:get_latest_epoch(Host, TcpPort, T),
+             {ok, {0,_}} = ?FLU_C:get_latest_epoch(Host, TcpPort, T),
              {error, not_written} =
                  ?FLU_C:read_latest_projection(Host, TcpPort, T),
              {ok, []} = ?FLU_C:list_all_projections(Host, TcpPort, T),

@@ -114,30 +114,50 @@ main2(FluName, TcpPort, DataDir, Rest) ->
                              DPs ->
                                  {lists:keydelete(dbg, 1, Rest), DPs}
                          end,
+    {SendAppendPidToProj_p, ProjectionPid} =
+        case proplists:get_value(projection_store_registered_name, Rest) of
+            undefined ->
+                RN = make_projection_server_regname(FluName),
+                {ok, PP} =
+                    machi_projection_store:start_link(RN, DataDir, undefined),
+                {true, PP};
+            RN ->
+                {false, whereis(RN)}
+        end,
+    InitialWedged_p = proplists:get_value(initial_wedged, DbgProps),
+    ProjRes = machi_projection_store:read_latest_projection(ProjectionPid,
+                                                            private),
+    {Wedged_p, EpochId} =
+        if InitialWedged_p == undefined,
+           is_tuple(ProjRes), element(1, ProjRes) == ok ->
+                {ok, Proj} = ProjRes,
+                {false, {Proj#projection_v1.epoch_number,
+                         Proj#projection_v1.epoch_csum}};
+           InitialWedged_p == false ->
+                {false, ?DUMMY_PV1_EPOCH};
+           true ->
+                {true, undefined}
+        end,
     S0 = #state{flu_name=FluName,
+                proj_store=ProjectionPid,
                 tcp_port=TcpPort,
                 data_dir=DataDir,
-                wedged=proplists:get_value(initial_wedged, DbgProps, true),
+                wedged=Wedged_p,
                 etstab=ets_table_name(FluName),
-                epoch_id=undefined,
+                epoch_id=EpochId,
                 dbg_props=DbgProps,
                 props=Props},
     AppendPid = start_append_server(S0, self()),
     receive
         append_server_ack -> ok
     end,
-    {_ProjRegName, ProjectionPid} =
-        case proplists:get_value(projection_store_registered_name, Rest) of
-            undefined ->
-                RN = make_projection_server_regname(FluName),
-                {ok, PP} =
-                    machi_projection_store:start_link(RN, DataDir, AppendPid),
-                {RN, PP};
-            RN ->
-                {RN, whereis(RN)}
-        end,
-    S1 = S0#state{append_pid=AppendPid,
-                  proj_store=ProjectionPid},
+    if SendAppendPidToProj_p ->
+            machi_projection_store:set_wedge_notify_pid(ProjectionPid,
+                                                        AppendPid);
+       true ->
+            ok
+    end,
+    S1 = S0#state{append_pid=AppendPid},
     ListenPid = start_listen_server(S1),
 
     Config_e = machi_util:make_config_filename(DataDir, "unused"),
@@ -174,13 +194,15 @@ run_listen_server(#state{flu_name=FluName, tcp_port=TcpPort}=S) ->
     {ok, LSock} = gen_tcp:listen(TcpPort, SockOpts),
     listen_server_loop(LSock, S).
 
-run_append_server(FluPid, AckPid, #state{flu_name=Name,dbg_props=DbgProps}=S) ->
+run_append_server(FluPid, AckPid, #state{flu_name=Name,dbg_props=DbgProps,
+                                         wedged=Wedged_p,epoch_id=EpochId}=S) ->
     %% Reminder: Name is the "main" name of the FLU, i.e., no suffix
     register(Name, self()),
     TID = ets:new(ets_table_name(Name),
                   [set, protected, named_table, {read_concurrency, true}]),
-    InitialWedged = proplists:get_value(initial_wedged, DbgProps, true),
-    ets:insert(TID, {epoch, {InitialWedged, {-65, <<"bogus epoch, yo">>}}}),
+    %% InitialWedged = proplists:get_value(initial_wedged, DbgProps, true),
+    %% ets:insert(TID, {epoch, {InitialWedged, {-65, <<"bogus epoch, yo">>}}}),
+    ets:insert(TID, {epoch, {Wedged_p, EpochId}}),
     AckPid ! append_server_ack,
     append_server_loop(FluPid, S#state{etstab=TID}).
 

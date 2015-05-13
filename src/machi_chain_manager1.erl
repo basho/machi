@@ -77,7 +77,6 @@
 -define(D(X), io:format(user, "~s ~p\n", [??X, X])).
 -define(Dw(X), io:format(user, "~s ~w\n", [??X, X])).
 
--define(FLU_C,  machi_flu1_client).
 -define(FLU_PC, machi_proxy_flu1_client).
 -define(TO, (2*1000)).                          % default timeout
 
@@ -1946,7 +1945,7 @@ perhaps_start_repair(S) ->
 do_repair(
   #ch_mgr{name=MyName,
           proj=#projection_v1{upi=UPI,
-                              repairing=[Dst|_]=Repairing,
+                              repairing=[_|_]=Repairing,
                               members_dict=MembersDict}}=_S_copy,
   Opts, ap_mode=_RepairMode) ->
     T1 = os:timestamp(),
@@ -1976,15 +1975,9 @@ do_repair(
     ets:delete(ETS),
     exit({todo, Res}).
 
-sanitize_repair_state(#ch_mgr{name=MyName,
-                              repair_start=Start,
-                              repair_final_status=Res,
-                              proj=#projection_v1{upi=[_|_]=UPI}}=S)
+sanitize_repair_state(#ch_mgr{repair_final_status=Res,
+                              proj=#projection_v1{upi=[_|_]}}=S)
   when Res /= undefined ->
-    Elapsed = (timer:now_diff(os:timestamp(), Start) div 1000) / 1000,
-    error_logger:info_msg("Chain tail ~p of ~p: "
-                          "repair finished in ~p seconds: ~p\n",
-                          [MyName, UPI, Elapsed, Res]),
     S#ch_mgr{repair_worker=undefined, repair_start=undefined,
              repair_final_status=undefined};
 sanitize_repair_state(S) ->
