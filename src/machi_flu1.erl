@@ -194,7 +194,7 @@ run_listen_server(#state{flu_name=FluName, tcp_port=TcpPort}=S) ->
     {ok, LSock} = gen_tcp:listen(TcpPort, SockOpts),
     listen_server_loop(LSock, S).
 
-run_append_server(FluPid, AckPid, #state{flu_name=Name,dbg_props=DbgProps,
+run_append_server(FluPid, AckPid, #state{flu_name=Name,
                                          wedged=Wedged_p,epoch_id=EpochId}=S) ->
     %% Reminder: Name is the "main" name of the FLU, i.e., no suffix
     register(Name, self()),
@@ -220,7 +220,6 @@ append_server_loop(FluPid, #state{data_dir=DataDir,wedged=Wedged_p}=S) ->
         {seq_append, From, Prefix, Chunk, CSum} ->
             spawn(fun() -> append_server_dispatch(From, Prefix, Chunk, CSum,
                                                   DataDir, AppendServerPid) end),
-                                                  %% DataDir, FluPid) end),
             append_server_loop(FluPid, S);
         {wedge_state_change, Boolean, EpochId} ->
             true = ets:insert(S#state.etstab, {epoch, {Boolean, EpochId}}),
@@ -235,7 +234,12 @@ append_server_loop(FluPid, #state{data_dir=DataDir,wedged=Wedged_p}=S) ->
             append_server_loop(FluPid, S)
     end.
 
--define(EpochIDSpace, (4+20)).
+-define(EpochIDSpace, ((4*2)+(20*2))).          % hexencodingwhee!
+
+decode_epoch_id(EpochIDHex) ->
+    <<EpochNum:(4*8)/big, EpochCSum/binary>> =
+        machi_util:hexstr_to_bin(EpochIDHex),
+    {EpochNum, EpochCSum}.
 
 net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
     ok = inet:setopts(Sock, [{packet, line}]),
@@ -250,21 +254,25 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
             case Line of
                 %% For normal use
                 <<"A ",
-                  _EpochIDRaw:(?EpochIDSpace)/binary,
+                  EpochIDHex:(?EpochIDSpace)/binary,
                   LenHex:8/binary,
                   Prefix:PrefixLenLF/binary, "\n">> ->
+                    _EpochID = decode_epoch_id(EpochIDHex),
                     do_net_server_append(FluName, Sock, LenHex, Prefix);
                 <<"R ",
-                  EpochIDRaw:(?EpochIDSpace)/binary,
+                  EpochIDHex:(?EpochIDSpace)/binary,
                   OffsetHex:16/binary, LenHex:8/binary,
                   File:FileLenLF/binary, "\n">> ->
+                    EpochID = decode_epoch_id(EpochIDHex),
                     do_net_server_read(Sock, OffsetHex, LenHex, File, DataDir,
-                                       EpochIDRaw, S);
-                <<"L ", _EpochIDRaw:(?EpochIDSpace)/binary, "\n">> ->
+                                       EpochID, S);
+                <<"L ", EpochIDHex:(?EpochIDSpace)/binary, "\n">> ->
+                    _EpochID = decode_epoch_id(EpochIDHex),
                     do_net_server_listing(Sock, DataDir, S);
                 <<"C ",
-                  _EpochIDRaw:(?EpochIDSpace)/binary,
+                  EpochIDHex:(?EpochIDSpace)/binary,
                   File:CSumFileLenLF/binary, "\n">> ->
+                    _EpochID = decode_epoch_id(EpochIDHex),
                     do_net_server_checksum_listing(Sock, File, DataDir, S);
                 <<"QUIT\n">> ->
                     catch gen_tcp:close(Sock),
@@ -274,20 +282,23 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                     exit(normal);
                 %% For "internal" replication only.
                 <<"W-repl ",
-                  _EpochIDRaw:(?EpochIDSpace)/binary,
+                  EpochIDHex:(?EpochIDSpace)/binary,
                   OffsetHex:16/binary, LenHex:8/binary,
                   File:WriteFileLenLF/binary, "\n">> ->
+                    _EpochID = decode_epoch_id(EpochIDHex),
                     do_net_server_write(Sock, OffsetHex, LenHex, File, DataDir,
                                         <<"fixme1">>, false, <<"fixme2">>);
                 %% For data migration only.
                 <<"DEL-migration ",
-                  _EpochIDRaw:(?EpochIDSpace)/binary,
+                  EpochIDHex:(?EpochIDSpace)/binary,
                   File:DelFileLenLF/binary, "\n">> ->
+                    _EpochID = decode_epoch_id(EpochIDHex),
                     do_net_server_delete_migration_only(Sock, File, DataDir);
                 %% For erasure coding hackityhack
                 <<"TRUNC-hack--- ",
-                  _EpochIDRaw:(?EpochIDSpace)/binary,
+                  EpochIDHex:(?EpochIDSpace)/binary,
                   File:DelFileLenLF/binary, "\n">> ->
+                    _EpochID = decode_epoch_id(EpochIDHex),
                     do_net_server_truncate_hackityhack(Sock, File, DataDir);
                 <<"PROJ ", LenHex:8/binary, "\n">> ->
                     do_projection_command(Sock, LenHex, S);
@@ -295,6 +306,7 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                     do_wedge_status(FluName, Sock);
                 _ ->
                     machi_util:verb("Else Got: ~p\n", [Line]),
+                    io:format(user, "TODO: Else Got: ~p\n", [Line]),
                     gen_tcp:send(Sock, "ERROR SYNTAX\n"),
                     catch gen_tcp:close(Sock),
                     exit(normal)
@@ -370,7 +382,7 @@ do_wedge_status(FluName, Sock) ->
     ok = gen_tcp:send(Sock, Reply).
 
 do_net_server_read(Sock, OffsetHex, LenHex, FileBin, DataDir,
-                   EpochIDRaw, S) ->
+                   EpochID, S) ->
     {Wedged_p, CurrentEpochId} = ets:lookup_element(S#state.etstab, epoch, 2),
     DoItFun = fun(FH, Offset, Len) ->
                       case file:pread(FH, Offset, Len) of
@@ -390,16 +402,16 @@ do_net_server_read(Sock, OffsetHex, LenHex, FileBin, DataDir,
               end,
     do_net_server_readwrite_common(Sock, OffsetHex, LenHex, FileBin, DataDir,
                                    [read, binary, raw], DoItFun,
-                                   EpochIDRaw, Wedged_p, CurrentEpochId).
+                                   EpochID, Wedged_p, CurrentEpochId).
 
 do_net_server_readwrite_common(Sock, OffsetHex, LenHex, FileBin, DataDir,
                                FileOpts, DoItFun,
-                               EpochIDRaw, Wedged_p, CurrentEpochId) ->
+                               EpochID, Wedged_p, CurrentEpochId) ->
     case {Wedged_p, sanitize_file_string(FileBin)} of
         {false, ok} ->
             do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin,
                                             DataDir, FileOpts, DoItFun,
-                                            EpochIDRaw, Wedged_p, CurrentEpochId);
+                                            EpochID, Wedged_p, CurrentEpochId);
         {true, _} ->
             ok = gen_tcp:send(Sock, <<"ERROR WEDGED\n">>);
         {_, __} ->
@@ -408,7 +420,7 @@ do_net_server_readwrite_common(Sock, OffsetHex, LenHex, FileBin, DataDir,
 
 do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin, DataDir,
                                 FileOpts, DoItFun,
-                                EpochIDRaw, Wedged_p, CurrentEpochId) ->
+                                EpochID, Wedged_p, CurrentEpochId) ->
     <<Offset:64/big>> = machi_util:hexstr_to_bin(OffsetHex),
     <<Len:32/big>> = machi_util:hexstr_to_bin(LenHex),
     {_, Path} = machi_util:make_data_filename(DataDir, FileBin),
@@ -424,7 +436,7 @@ do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin, DataDir,
             do_net_server_readwrite_common(
               Sock, OffsetHex, LenHex, FileBin, DataDir,
               FileOpts, DoItFun,
-              EpochIDRaw, Wedged_p, CurrentEpochId);
+              EpochID, Wedged_p, CurrentEpochId);
         _Else ->
             %%%%%% keep?? machi_util:verb("Else ~p ~p ~p ~p\n", [Offset, Len, Path, _Else]),
             ok = gen_tcp:send(Sock, <<"ERROR BAD-IO\n">>)
@@ -432,20 +444,20 @@ do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin, DataDir,
 
 
 do_net_server_write(Sock, OffsetHex, LenHex, FileBin, DataDir,
-                    EpochIDRaw, Wedged_p, CurrentEpochId) ->
+                    EpochID, Wedged_p, CurrentEpochId) ->
     CSumPath = machi_util:make_checksum_filename(DataDir, FileBin),
     case file:open(CSumPath, [append, raw, binary, delayed_write]) of
         {ok, FHc} ->
             do_net_server_write2(Sock, OffsetHex, LenHex, FileBin, DataDir, FHc,
-                                 EpochIDRaw, Wedged_p, CurrentEpochId);
+                                 EpochID, Wedged_p, CurrentEpochId);
         {error, enoent} ->
             ok = filelib:ensure_dir(CSumPath),
             do_net_server_write(Sock, OffsetHex, LenHex, FileBin, DataDir,
-                                EpochIDRaw, Wedged_p, CurrentEpochId)
+                                EpochID, Wedged_p, CurrentEpochId)
     end.
 
 do_net_server_write2(Sock, OffsetHex, LenHex, FileBin, DataDir, FHc,
-                     EpochIDRaw, Wedged_p, CurrentEpochId) ->
+                     EpochID, Wedged_p, CurrentEpochId) ->
     DoItFun = fun(FHd, Offset, Len) ->
                       ok = inet:setopts(Sock, [{packet, raw}]),
                       {ok, Chunk} = gen_tcp:recv(Sock, Len),
@@ -465,7 +477,7 @@ do_net_server_write2(Sock, OffsetHex, LenHex, FileBin, DataDir, FHc,
               end,
     do_net_server_readwrite_common(Sock, OffsetHex, LenHex, FileBin, DataDir,
                                    [write, read, binary, raw], DoItFun,
-                                   EpochIDRaw, Wedged_p, CurrentEpochId).
+                                   EpochID, Wedged_p, CurrentEpochId).
 
 perhaps_do_net_server_ec_read(Sock, FH) ->
     case file:pread(FH, 0, ?MINIMUM_OFFSET) of

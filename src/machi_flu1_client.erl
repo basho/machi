@@ -405,9 +405,10 @@ append_chunk2(Sock, EpochID, Prefix0, Chunk0) ->
         Len = iolist_size(Chunk0),
         true = (Len =< ?MAX_CHUNK_SIZE),
         {EpochNum, EpochCSum} = EpochID,
-        EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
+        EpochIDHex = machi_util:bin_to_hexstr(
+                       <<EpochNum:(4*8)/big, EpochCSum/binary>>),
         LenHex = machi_util:int_to_hexbin(Len, 32),
-        Cmd = [<<"A ">>, EpochIDRaw, LenHex, Prefix, 10],
+        Cmd = [<<"A ">>, EpochIDHex, LenHex, Prefix, 10],
         ok = gen_tcp:send(Sock, [Cmd, Chunk]),
         {ok, Line} = gen_tcp:recv(Sock, 0),
         PathLen = byte_size(Line) - 3 - 16 - 1 - 1,
@@ -436,11 +437,12 @@ read_chunk2(Sock, EpochID, File0, Offset, Size) ->
     erase(bad_sock),
     try
         {EpochNum, EpochCSum} = EpochID,
-        EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
+        EpochIDHex = machi_util:bin_to_hexstr(
+                       <<EpochNum:(4*8)/big, EpochCSum/binary>>),
         File = machi_util:make_binary(File0),
         PrefixHex = machi_util:int_to_hexbin(Offset, 64),
         SizeHex = machi_util:int_to_hexbin(Size, 32),
-        CmdLF = [$R, 32, EpochIDRaw, PrefixHex, SizeHex, File, 10],
+        CmdLF = [$R, 32, EpochIDHex, PrefixHex, SizeHex, File, 10],
         ok = gen_tcp:send(Sock, CmdLF),
         case gen_tcp:recv(Sock, 3) of
             {ok, <<"OK\n">>} ->
@@ -485,8 +487,9 @@ read_chunk2(Sock, EpochID, File0, Offset, Size) ->
 list2(Sock, EpochID) ->
     try
         {EpochNum, EpochCSum} = EpochID,
-        EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
-        ok = gen_tcp:send(Sock, [<<"L ">>, EpochIDRaw, <<"\n">>]),
+        EpochIDHex = machi_util:bin_to_hexstr(
+                       <<EpochNum:(4*8)/big, EpochCSum/binary>>),
+        ok = gen_tcp:send(Sock, [<<"L ">>, EpochIDHex, <<"\n">>]),
         ok = inet:setopts(Sock, [{packet, line}]),
         case gen_tcp:recv(Sock, 0) of
             {ok, <<"OK\n">>} ->
@@ -541,8 +544,9 @@ checksum_list2(Sock, EpochID, File) ->
     erase(bad_sock),
     try
         {EpochNum, EpochCSum} = EpochID,
-        EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
-        ok = gen_tcp:send(Sock, [<<"C ">>, EpochIDRaw, File, <<"\n">>]),
+        EpochIDHex = machi_util:bin_to_hexstr(
+                       <<EpochNum:(4*8)/big, EpochCSum/binary>>),
+        ok = gen_tcp:send(Sock, [<<"C ">>, EpochIDHex, File, <<"\n">>]),
         ok = inet:setopts(Sock, [{packet, line}]),
         case gen_tcp:recv(Sock, 0) of
             {ok, <<"OK ", Rest/binary>> = Line} ->
@@ -603,7 +607,8 @@ write_chunk2(Sock, EpochID, File0, Offset, Chunk0) ->
     erase(bad_sock),
     try
         {EpochNum, EpochCSum} = EpochID,
-        EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
+        EpochIDHex = machi_util:bin_to_hexstr(
+                       <<EpochNum:(4*8)/big, EpochCSum/binary>>),
         %% TODO: add client-side checksum to the server's protocol
         %% _ = machi_util:checksum_chunk(Chunk),
         File = machi_util:make_binary(File0),
@@ -613,7 +618,7 @@ write_chunk2(Sock, EpochID, File0, Offset, Chunk0) ->
         Len = iolist_size(Chunk0),
         true = (Len =< ?MAX_CHUNK_SIZE),
         LenHex = machi_util:int_to_hexbin(Len, 32),
-        Cmd = [<<"W-repl ">>, EpochIDRaw, OffsetHex,
+        Cmd = [<<"W-repl ">>, EpochIDHex, OffsetHex,
                LenHex, File, <<"\n">>],
         ok = gen_tcp:send(Sock, [Cmd, Chunk]),
         {ok, Line} = gen_tcp:recv(Sock, 0),
@@ -641,8 +646,9 @@ delete_migration2(Sock, EpochID, File) ->
     erase(bad_sock),
     try
         {EpochNum, EpochCSum} = EpochID,
-        EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
-        Cmd = [<<"DEL-migration ">>, EpochIDRaw, File, <<"\n">>],
+        EpochIDHex = machi_util:bin_to_hexstr(
+                       <<EpochNum:(4*8)/big, EpochCSum/binary>>),
+        Cmd = [<<"DEL-migration ">>, EpochIDHex, File, <<"\n">>],
         ok = gen_tcp:send(Sock, Cmd),
         ok = inet:setopts(Sock, [{packet, line}]),
         case gen_tcp:recv(Sock, 0) of
@@ -670,8 +676,9 @@ trunc_hack2(Sock, EpochID, File) ->
     erase(bad_sock),
     try
         {EpochNum, EpochCSum} = EpochID,
-        EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
-        Cmd = [<<"TRUNC-hack--- ">>, EpochIDRaw, File, <<"\n">>],
+        EpochIDHex = machi_util:bin_to_hexstr(
+                       <<EpochNum:(4*8)/big, EpochCSum/binary>>),
+        Cmd = [<<"TRUNC-hack--- ">>, EpochIDHex, File, <<"\n">>],
         ok = gen_tcp:send(Sock, Cmd),
         ok = inet:setopts(Sock, [{packet, line}]),
         case gen_tcp:recv(Sock, 0) of

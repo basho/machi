@@ -48,7 +48,7 @@
 
 -export([repair_cp/4, repair_ap/6]).
 
-repair_cp(Src, Dst, MembersDict, Opts) ->
+repair_cp(_Src, _Dst, _MembersDict, _Opts) ->
     %% TODO: add missing function: wipe away any trace of chunks
     %% are present on Dst but missing on Src.
     exit(todo_cp_mode).
@@ -87,7 +87,7 @@ repair_ap(Src, Repairing, UPI, MembersDict, ETS, Opts) ->
                             [What, Why, Stack]),
                   {error, {What, Why, Stack}}
           after
-              [(catch machi_proxy_flu1_client:quit(Pid, ?SHORT_TIMEOUT)) ||
+              [(catch machi_proxy_flu1_client:quit(Pid)) ||
                   Pid <- orddict:to_list(get(proxies_dict))]
           end,
     Res.
@@ -127,8 +127,8 @@ append_file_dict(Proxy, FLU_name, D) ->
 %%    As an additional optimization, add a bit of #2 to start the next
 %%    read while the current write is still in progress.
 
-repair_file(ap_mode, RepairMode,
-            File, Size, [], Verb, Src, ProxiesDict, ETS) ->
+repair_file(ap_mode, _RepairMode,
+            File, _Size, [], Verb, Src, _ProxiesDict, _ETS) ->
     ?VERB("~p: ~s: present on both: ", [Src, File]),
     ?VERB("TODO!\n"), ok;
     %%TODO: repair_both_present(File, Size, RepairMode, V, SrcS, SrcS2, DstS, DstS2);
@@ -165,8 +165,8 @@ copy_file(File, SrcProxy, MissingProxiesDict, Verb, ETS) ->
                {out_chunks, t_out_chunks}, {out_bytes, t_out_bytes}],
     [ets:insert(ETS, {L_K, 0}) || {L_K, _T_K} <- EtsKeys],
     CopyChunks =
-        fun({Offset, Size, CSum}, {ok, ETS, _, _} = Acc) ->
-                case ets:lookup_element(ETS, in_chunks, 2) rem 100 of
+        fun({Offset, Size, CSum}, {ok, ETab, _, _} = Acc) ->
+                case ets:lookup_element(ETab, in_chunks, 2) rem 100 of
                     0 -> ?VERB(".", []);
                     _ -> ok
                 end,
@@ -184,10 +184,10 @@ copy_file(File, SrcProxy, MissingProxiesDict, Verb, ETS) ->
                                     ?SHORT_TIMEOUT),
                              _T4 = os:timestamp()
                          end || {_FLU, DstProxy} <- MissingProxiesDict],
-                        ets:update_counter(ETS, in_chunks, 1),
-                        ets:update_counter(ETS, in_bytes, Size),
-                        ets:update_counter(ETS, out_chunks, N),
-                        ets:update_counter(ETS, out_bytes, N*Size),
+                        ets:update_counter(ETab, in_chunks, 1),
+                        ets:update_counter(ETab, in_bytes, Size),
+                        ets:update_counter(ETab, out_chunks, N),
+                        ets:update_counter(ETab, out_bytes, N*Size),
                         Acc;
                     CSum_now ->
                         error_logger:error_msg(
@@ -195,7 +195,7 @@ copy_file(File, SrcProxy, MissingProxiesDict, Verb, ETS) ->
                           "file ~p offset ~p size ~p: "
                           "expected ~p got ~p\n",
                           [File, Offset, Size, CSum, CSum_now]),
-                        ets:update_counter(ETS, t_bad_chunks, 1),
+                        ets:update_counter(ETab, t_bad_chunks, 1),
                         Acc
                 end;
            (_, _=Acc) ->                        % failure: skip rest of file
@@ -234,8 +234,8 @@ copy_file(File, SrcProxy, MissingProxiesDict, Verb, ETS) ->
 %%             ok
 %%     end.
 
-repair_both_present(File, Size, RepairMode, V, SrcS, _SrcS2, DstS, _DstS2) ->
-    verb("repair_both_present TODO\n"),
+repair_both_present(_File, _Size, _RepairMode, Verb, _SrcS, _SrcS2, _DstS, _DstS2) ->
+    ?VERB("repair_both_present TODO\n"),
     ok.
     %% io:format("repair_both_present: ~p ~p mode ~p\n", [File, Size, RepairMode]).
 
