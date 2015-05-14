@@ -46,6 +46,10 @@
 -define(VERB(Fmt),       if Verb -> io:format(Fmt      ); true -> ok end).
 -define(VERB(Fmt, Args), if Verb -> io:format(Fmt, Args); true -> ok end).
 
+-ifdef(TEST).
+-compile(export_all).
+-endif. % TEST
+
 -export([repair_cp/4, repair_ap/6]).
 
 repair_cp(_Src, _Dst, _MembersDict, _Opts) ->
@@ -212,32 +216,25 @@ copy_file(File, SrcProxy, MissingProxiesDict, Verb, ETS) ->
         {L_K, T_K} <- EtsKeys],
     ok.
 
-%% copy_file_proc_checksum_fun(File, SrcS, DstS, _Verbose) ->
-%%     fun(<<OffsetHex:16/binary, " ", LenHex:8/binary, " ",
-%%           CSumHex:32/binary, "\n">>) ->
-%%             <<Len:32/big>> = hexstr_to_bin(LenHex),
-%%             DownloadChunkBin = <<OffsetHex/binary, " ", LenHex/binary, " ",
-%%                                  File/binary, "\n">>,
-%%             [Chunk] = escript_download_chunks(SrcS, {{{DownloadChunkBin}}},
-%%                                               fun(_) -> ok end),
-%%             CSum = hexstr_to_bin(CSumHex),
-%%             CSum2 = checksum(Chunk),
-%%             if Len == byte_size(Chunk), CSum == CSum2 ->
-%%                     {_,_,_} = upload_chunk_write(DstS, OffsetHex, File, Chunk),
-%%                     ok;
-%%                true ->
-%%                     io:format("ERROR: ~s ~s ~s csum/size error\n",
-%%                               [File, OffsetHex, LenHex]),
-%%                     error
-%%             end;
-%%        (_Else) ->
-%%             ok
-%%     end.
-
 repair_both_present(_File, _Size, _RepairMode, Verb, _SrcS, _SrcS2, _DstS, _DstS2) ->
     ?VERB("repair_both_present TODO\n"),
     ok.
     %% io:format("repair_both_present: ~p ~p mode ~p\n", [File, Size, RepairMode]).
+
+make_repair_compare_fun(SrcFLU) ->
+    fun({{Offset_X, _Sz_a, FLU_a, _Cs_a}, _N_a},
+        {{Offset_X, _Sz_b, FLU_b, _CS_b}, _N_b}) ->
+       %% The repair source FLU always sorts less/earlier than anything else.
+       if FLU_a == SrcFLU ->
+               true;
+          FLU_b == SrcFLU ->
+               false;
+          true ->
+               FLU_a < FLU_b
+       end;
+       (T_a, T_b) ->
+            T_a =< T_b
+    end.
 
 %% repair_both_present(File, Size, RepairMode, V, SrcS, _SrcS2, DstS, _DstS2) ->
 %%     Tmp1 = lists:flatten(io_lib:format("/tmp/sort.1.~w.~w.~w", tuple_to_list(now()))),
@@ -364,6 +361,28 @@ repair_both_present(_File, _Size, _RepairMode, Verb, _SrcS, _SrcS2, _DstS, _DstS
 %%     verb(" done\n", []),
 %%     ok.
 
+%% copy_file_proc_checksum_fun(File, SrcS, DstS, _Verbose) ->
+%%     fun(<<OffsetHex:16/binary, " ", LenHex:8/binary, " ",
+%%           CSumHex:32/binary, "\n">>) ->
+%%             <<Len:32/big>> = hexstr_to_bin(LenHex),
+%%             DownloadChunkBin = <<OffsetHex/binary, " ", LenHex/binary, " ",
+%%                                  File/binary, "\n">>,
+%%             [Chunk] = escript_download_chunks(SrcS, {{{DownloadChunkBin}}},
+%%                                               fun(_) -> ok end),
+%%             CSum = hexstr_to_bin(CSumHex),
+%%             CSum2 = checksum(Chunk),
+%%             if Len == byte_size(Chunk), CSum == CSum2 ->
+%%                     {_,_,_} = upload_chunk_write(DstS, OffsetHex, File, Chunk),
+%%                     ok;
+%%                true ->
+%%                     io:format("ERROR: ~s ~s ~s csum/size error\n",
+%%                               [File, OffsetHex, LenHex]),
+%%                     error
+%%             end;
+%%        (_Else) ->
+%%             ok
+%%     end.
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 file_folder(Fun, Acc, Path) ->
@@ -397,3 +416,18 @@ mbytes(0) ->
 mbytes(Size) ->
     lists:flatten(io_lib:format("~.1.0f", [max(0.1, Size / (1024*1024))])).
 
+-ifdef(TEST).
+
+repair_compare_fun_test() ->
+    F = make_repair_compare_fun(b),
+    List = [{{1,10,b,x},y},{{50,10,a,x},y},{{50,10,b,x},y},{{50,10,c,x},y},{{90,10,d,x},y}],
+    Input = lists:reverse(lists:sort(List)),
+    %% Although the merge func should never have two of the same FLU
+    %% represented, it doesn't matter for the purposes of this test.
+    %% 1. Smaller offset (element #1) wins, else...
+    %% 2. The FLU (element #2) that's the repair source always wins, else...
+    %% 3. The FLU with smallest name wins.
+    Expect = [{{1,10,b,x},y},{{50,10,b,x},y},{{50,10,a,x},y},{{50,10,c,x},y},{{90,10,d,x},y}],
+    Expect = lists:sort(F, Input).
+
+-endif. % TEST
