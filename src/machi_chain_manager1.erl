@@ -1959,8 +1959,8 @@ do_repair(
                   t_bad_chunks, t_elapsed_seconds],
     [ets:insert(ETS, {K, 0}) || K <- ETS_T_Keys],
 
-    Res = machi_chain_repair:repair_ap(MyName, Repairing, UPI,
-                                       MembersDict, ETS, Opts),
+    Res = machi_chain_repair:repair(ap_mode, MyName, Repairing, UPI,
+                                    MembersDict, ETS, Opts),
     T2 = os:timestamp(),
     Elapsed = (timer:now_diff(T2, T1) div 1000) / 1000,
     ets:insert(ETS, {t_elapsed_seconds, Elapsed}),
