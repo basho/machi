@@ -103,8 +103,7 @@ repair(ap_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
               ok = execute_repair_directives(ConsistencyMode, Ds, Src, EpochID,
                                              Verb, OurFLUs, ProxiesDict, ETS),
               ?VERB(" done\n"),
-
-              todo_yo_not_quite_ok
+              ok
           catch
               What:Why ->
                   Stack = erlang:get_stacktrace(),
@@ -233,11 +232,11 @@ make_repair_directives2(C2, ConsistencyMode, RepairMode,
     make_repair_directives3(C2, ConsistencyMode, RepairMode,
                             File, Verb, Src, FLUs, ProxiesDict, ETS, []).
 
-make_repair_directives3([{?MAX_OFFSET, 0, <<>>, FLU}|_Rest],
+make_repair_directives3([{?MAX_OFFSET, 0, <<>>, _FLU}|_Rest],
                        _ConsistencyMode, _RepairMode,
-                       _File, Verb, _Src, _FLUs, _ProxiesDict, _ETS, Acc) ->
+                       _File, _Verb, _Src, _FLUs, _ProxiesDict, _ETS, Acc) ->
     lists:reverse(Acc);
-make_repair_directives3([{Offset, Size, CSum, FLU}=A|Rest0],
+make_repair_directives3([{Offset, Size, CSum, _FLU}=A|Rest0],
                        ConsistencyMode, RepairMode,
                        File, Verb, Src, FLUs, ProxiesDict, ETS, Acc) ->
     {As0, Rest1} = take_same_offset_size(Rest0, Offset, Size),
@@ -266,7 +265,7 @@ make_repair_directives3([{Offset, Size, CSum, FLU}=A|Rest0],
     %% tuples guarantees that if there's a disagreement about chunk size at
     %% this offset, we can look ahead exactly one to see if there is sanity
     %% or not.
-    [{Offset_next, Size_next, _, _}=A_next|_] = Rest1,
+    [{Offset_next, _Size_next, _, _}=A_next|_] = Rest1,
     if Offset + Size =< Offset_next ->
             ok;
        true ->
@@ -276,12 +275,12 @@ make_repair_directives3([{Offset, Size, CSum, FLU}=A|Rest0],
     Do = if ConsistencyMode == ap_mode ->
                  Gots = [FLU || {_Off, _Sz, _Cs, FLU} <- As],
                  Missing = FLUs -- Gots,
-                 ThisSrc = case lists:member(Src, Gots) of
+                 _ThisSrc = case lists:member(Src, Gots) of
                                true  -> Src;
                                false -> hd(Gots)
                            end,
-                 [ets:update_counter(ETS, {directive_bytes, FLU}, Size) ||
-                     FLU <- Missing],
+                 [ets:update_counter(ETS, {directive_bytes, FLU_m}, Size) ||
+                     FLU_m <- Missing],
                  if Missing == [] ->
                          noop;
                     true ->
@@ -305,8 +304,8 @@ take_same_offset_size([{Offset, Size, _CSum, _FLU}=A|Rest], Offset, Size, Acc) -
 take_same_offset_size(Rest, _Offset, _Size, Acc) ->
     {Acc, Rest}.
 
-execute_repair_directives(ap_mode=_ConsistencyMode, Ds, Src, EpochID, Verb,
-                          OurFLUs, ProxiesDict, ETS) ->
+execute_repair_directives(ap_mode=_ConsistencyMode, Ds, _Src, EpochID, Verb,
+                          _OurFLUs, ProxiesDict, ETS) ->
     {_,_,_,_} = lists:foldl(fun execute_repair_directive/2,
                             {ProxiesDict, EpochID, Verb, ETS}, Ds),
     ok.
@@ -316,7 +315,7 @@ execute_repair_directive({File, Cmds}, {ProxiesDict, EpochID, Verb, ETS}=Acc) ->
                {in_bytes, t_in_bytes}, {out_files, t_out_files},
                {out_chunks, t_out_chunks}, {out_bytes, t_out_bytes}],
     [ets:insert(ETS, {L_K, 0}) || {L_K, _T_K} <- EtsKeys],
-    F = fun({copy, {Offset, Size, CSum, MySrc}, MyDsts}, Acc) ->
+    F = fun({copy, {Offset, Size, CSum, MySrc}, MyDsts}, Acc2) ->
                 SrcP = orddict:fetch(MySrc, ProxiesDict),
                 case ets:lookup_element(ETS, in_chunks, 2) rem 100 of
                     0 -> ?VERB(".", []);
@@ -342,7 +341,7 @@ execute_repair_directive({File, Cmds}, {ProxiesDict, EpochID, Verb, ETS}=Acc) ->
                         N = length(MyDsts),
                         ets:update_counter(ETS, out_chunks, N),
                         ets:update_counter(ETS, out_bytes, N*Size),
-                        Acc;
+                        Acc2;
                     CSum_now ->
                         error_logger:error_msg(
                           "TODO: Checksum failure: "
@@ -350,7 +349,7 @@ execute_repair_directive({File, Cmds}, {ProxiesDict, EpochID, Verb, ETS}=Acc) ->
                           "expected ~p got ~p\n",
                           [File, Offset, Size, CSum, CSum_now]),
                         ets:update_counter(ETS, t_bad_chunks, 1),
-                        Acc
+                        Acc2
                 end
         end,
     ok = lists:foldl(F, ok, Cmds),

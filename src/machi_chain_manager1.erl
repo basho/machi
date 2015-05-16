@@ -86,9 +86,9 @@
 %% Define the period of private projection stability before we'll
 %% start repair.
 -ifdef(TEST).
--define(REPAIR_START_STABILITY_TIME, 0).
+-define(REPAIR_START_STABILITY_TIME, 3).
 -else. % TEST
--define(REPAIR_START_STABILITY_TIME, 3).        % TODO suggest 10 or 15?
+-define(REPAIR_START_STABILITY_TIME, 10).
 -endif. % TEST
 
 %% API
@@ -555,7 +555,9 @@ calc_projection(#ch_mgr{proj=LastProj, runenv=RunEnv} = S,
 
 calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                 RelativeToServer, AllHosed, Dbg,
-                #ch_mgr{name=MyName, runenv=RunEnv1}=S) ->
+                #ch_mgr{name=MyName,
+                        runenv=RunEnv1,
+                        repair_final_status=RepairFS}=S) ->
     #projection_v1{epoch_number=OldEpochNum,
                    members_dict=MembersDict,
                    upi=OldUPI_list,
@@ -596,6 +598,11 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                 if Simulator_p andalso SameEpoch_p ->
                         D_foo=[{repair_airquote_done, {we_agree, (S#ch_mgr.proj)#projection_v1.epoch_number}}],
                         {NewUPI_list ++ [H], T, RunEnv2};
+                   not Simulator_p
+                   andalso
+                   RepairFS == {repair_final_status, ok} ->
+                        D_foo=[{repair_done, {repair_final_status, ok, (S#ch_mgr.proj)#projection_v1.epoch_number}}],
+                        {NewUPI_list ++ Repairing_list2, [], RunEnv2};
                    true ->
                         D_foo=[],
                         {NewUPI_list, OldRepairing_list, RunEnv2}
@@ -1947,11 +1954,11 @@ do_repair(
           proj=#projection_v1{upi=UPI,
                               repairing=[_|_]=Repairing,
                               members_dict=MembersDict}}=_S_copy,
-  Opts, ap_mode=_RepairMode) ->
+  Opts, ap_mode=RepairMode) ->
     T1 = os:timestamp(),
     RepairId = proplists:get_value(repair_id, Opts, id1),
-    error_logger:info_msg("Repair start: tail ~p of ~p -> ~p, ID ~p\n",
-                          [MyName, UPI, Repairing, RepairId]),
+    error_logger:info_msg("Repair start: tail ~p of ~p -> ~p, ~p ID ~w\n",
+                          [MyName, UPI, Repairing, RepairMode, RepairId]),
 
     ETS = ets:new(repair_stats, [private, set]),
     ETS_T_Keys = [t_in_files, t_in_chunks, t_in_bytes,
@@ -1968,12 +1975,12 @@ do_repair(
                           _  -> "FAILURE"
               end,
     Stats = [{K, ets:lookup_element(ETS, K, 2)} || K <- ETS_T_Keys],
-    error_logger:info_msg("Repair ~s: tail ~p of ~p finished repair ID ~p: "
-                          "~p\nStats ~w\n",
-                          [Summary, MyName, UPI, RepairId, Res, Stats]),
-    timer:sleep(12345),
+    error_logger:info_msg("Repair ~s: tail ~p of ~p finished ~p repair ID ~w: "
+                          "~w\nStats ~w\n",
+                          [Summary, MyName, UPI, RepairMode, RepairId,
+                           Res, Stats]),
     ets:delete(ETS),
-    exit({todo, Res}).
+    exit({repair_final_status, Res}).
 
 sanitize_repair_state(#ch_mgr{repair_final_status=Res,
                               proj=#projection_v1{upi=[_|_]}}=S)
