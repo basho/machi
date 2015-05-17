@@ -358,15 +358,6 @@ execute_repair_directive({File, Cmds}, {ProxiesDict, EpochID, Verb, ETS}=Acc) ->
         {L_K, T_K} <- EtsKeys],
     Acc.
 
-verb(Fmt) ->
-    verb(Fmt, []).
-
-verb(Fmt, Args) ->
-    case {ok, true} of % application:get_env(kernel, verbose) of
-        {ok, true} -> io:format(Fmt, Args);
-        _          -> ok
-    end.
-
 mbytes(0) ->
     "0.0";
 mbytes(Size) ->
