@@ -31,8 +31,8 @@ func, and pattern match Erlang style in that func.
 *** DONE Preserve current test code (leave as-is? tiny changes?)
 *** DONE Make chain manager code flexible enough to run "real world" or "sim"
 ** DONE Add projection wedging logic to each FLU.
-** Started.... Implement real data repair, orchestrated by the chain manager
-** TODO Change all protocol ops to enforce the epoch ID
+** DONE Implement real data repair, orchestrated by the chain manager
+** DONE Change all protocol ops to enforce the epoch ID
 
 - Add no-wedging state to make testing easier?
     

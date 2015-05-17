@@ -214,12 +214,13 @@ listen_server_loop(LSock, S) ->
 append_server_loop(FluPid, #state{data_dir=DataDir,wedged=Wedged_p}=S) ->
     AppendServerPid = self(),
     receive
-        {seq_append, From, _Prefix, _Chunk, _CSum} when Wedged_p ->
+        {seq_append, From, _Prefix, _Chunk, _CSum, _Extra} when Wedged_p ->
             From ! wedged,
             append_server_loop(FluPid, S);
-        {seq_append, From, Prefix, Chunk, CSum} ->
-            spawn(fun() -> append_server_dispatch(From, Prefix, Chunk, CSum,
-                                                  DataDir, AppendServerPid) end),
+        {seq_append, From, Prefix, Chunk, CSum, Extra} ->
+            spawn(fun() -> append_server_dispatch(From, Prefix,
+                                                 Chunk, CSum, Extra,
+                                                 DataDir, AppendServerPid) end),
             append_server_loop(FluPid, S);
         {wedge_state_change, Boolean, EpochId} ->
             true = ets:insert(S#state.etstab, {epoch, {Boolean, EpochId}}),
@@ -246,7 +247,7 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
     case gen_tcp:recv(Sock, 0, 600*1000) of
         {ok, Line} ->
             %% machi_util:verb("Got: ~p\n", [Line]),
-            PrefixLenLF = byte_size(Line) - 2 - ?EpochIDSpace - 8 - 1,
+            PrefixLenLF = byte_size(Line) - 2 - ?EpochIDSpace - 8 -8 - 1,
             FileLenLF = byte_size(Line)   - 2 - ?EpochIDSpace - 16 - 8 - 1,
             CSumFileLenLF = byte_size(Line) - 2 - ?EpochIDSpace - 1,
             WriteFileLenLF = byte_size(Line) - 7 - ?EpochIDSpace - 16 - 8 - 1,
@@ -255,10 +256,11 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                 %% For normal use
                 <<"A ",
                   EpochIDHex:(?EpochIDSpace)/binary,
-                  LenHex:8/binary,
+                  LenHex:8/binary, ExtraHex:8/binary,
                   Prefix:PrefixLenLF/binary, "\n">> ->
                     _EpochID = decode_epoch_id(EpochIDHex),
-                    do_net_server_append(FluName, Sock, LenHex, Prefix);
+                    do_net_server_append(FluName, Sock, LenHex, ExtraHex,
+                                         Prefix);
                 <<"R ",
                   EpochIDHex:(?EpochIDSpace)/binary,
                   OffsetHex:16/binary, LenHex:8/binary,
@@ -317,16 +319,16 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
             exit(normal)
     end.
 
-append_server_dispatch(From, Prefix, Chunk, CSum, DataDir, LinkPid) ->
+append_server_dispatch(From, Prefix, Chunk, CSum, Extra, DataDir, LinkPid) ->
     Pid = write_server_get_pid(Prefix, DataDir, LinkPid),
-    Pid ! {seq_append, From, Prefix, Chunk, CSum},
+    Pid ! {seq_append, From, Prefix, Chunk, CSum, Extra},
     exit(normal).
 
-do_net_server_append(FluName, Sock, LenHex, Prefix) ->
+do_net_server_append(FluName, Sock, LenHex, ExtraHex, Prefix) ->
     %% TODO: robustify against other invalid path characters such as NUL
     case sanitize_file_string(Prefix) of
         ok ->
-            do_net_server_append2(FluName, Sock, LenHex, Prefix);
+            do_net_server_append2(FluName, Sock, LenHex, ExtraHex, Prefix);
         _ ->
             ok = gen_tcp:send(Sock, <<"ERROR BAD-ARG">>)
     end.
@@ -339,13 +341,14 @@ sanitize_file_string(Str) ->
             error
     end.
 
-do_net_server_append2(FluName, Sock, LenHex, Prefix) ->
+do_net_server_append2(FluName, Sock, LenHex, ExtraHex, Prefix) ->
     <<Len:32/big>> = machi_util:hexstr_to_bin(LenHex),
+    <<Extra:32/big>> = machi_util:hexstr_to_bin(ExtraHex),
     ok = inet:setopts(Sock, [{packet, raw}]),
     {ok, Chunk} = gen_tcp:recv(Sock, Len, 60*1000),
     CSum = machi_util:checksum_chunk(Chunk),
     try
-        FluName ! {seq_append, self(), Prefix, Chunk, CSum}
+        FluName ! {seq_append, self(), Prefix, Chunk, CSum, Extra}
     catch error:badarg ->
             error_logger:error_msg("Message send to ~p gave badarg, make certain server is running with correct registered name\n", [?MODULE])
     end,
@@ -707,8 +710,12 @@ seq_append_server_loop(DataDir, Prefix, _File, {FHd,FHc}, FileNum, Offset)
     run_seq_append_server2(Prefix, DataDir);    
 seq_append_server_loop(DataDir, Prefix, File, {FHd,FHc}=FH_, FileNum, Offset) ->
     receive
-        {seq_append, From, Prefix, Chunk, CSum} ->
-            ok = file:pwrite(FHd, Offset, Chunk),
+        {seq_append, From, Prefix, Chunk, CSum, Extra} ->
+            if Chunk /= <<>> ->
+                    ok = file:pwrite(FHd, Offset, Chunk);
+               true ->
+                    ok
+            end,
             From ! {assignment, Offset, File},
             Len = byte_size(Chunk),
             OffsetHex = machi_util:bin_to_hexstr(<<Offset:64/big>>),
@@ -717,7 +724,7 @@ seq_append_server_loop(DataDir, Prefix, File, {FHd,FHc}=FH_, FileNum, Offset) ->
             CSum_info = [OffsetHex, 32, LenHex, 32, CSumHex, 10],
             ok = file:write(FHc, CSum_info),
             seq_append_server_loop(DataDir, Prefix, File, FH_,
-                                   FileNum, Offset + Len);
+                                   FileNum, Offset + Len + Extra);
         {sync_stuff, FromPid, Ref} ->
             file:sync(FHc),
             FromPid ! {sync_finished, Ref},

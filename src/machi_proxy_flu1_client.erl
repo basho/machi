@@ -51,6 +51,7 @@
 -export([
          %% File API
          append_chunk/4, append_chunk/5,
+         append_chunk_extra/5, append_chunk_extra/6,
          read_chunk/5, read_chunk/6,
          checksum_list/3, checksum_list/4,
          list_files/2, list_files/3,
@@ -101,6 +102,21 @@ append_chunk(PidSpec, EpochID, Prefix, Chunk) ->
 
 append_chunk(PidSpec, EpochID, Prefix, Chunk, Timeout) ->
     gen_server:call(PidSpec, {req, {append_chunk, EpochID, Prefix, Chunk}},
+                    Timeout).
+
+%% @doc Append a chunk (binary- or iolist-style) of data to a file
+%% with `Prefix'.
+
+append_chunk_extra(PidSpec, EpochID, Prefix, Chunk, ChunkExtra)
+  when is_integer(ChunkExtra), ChunkExtra >= 0 ->
+    append_chunk_extra(PidSpec, EpochID, Prefix, Chunk, ChunkExtra, infinity).
+
+%% @doc Append a chunk (binary- or iolist-style) of data to a file
+%% with `Prefix'.
+
+append_chunk_extra(PidSpec, EpochID, Prefix, Chunk, ChunkExtra, Timeout) ->
+    gen_server:call(PidSpec, {req, {append_chunk_extra, EpochID, Prefix,
+                                    Chunk, ChunkExtra}},
                     Timeout).
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
@@ -294,6 +310,8 @@ do_req(Req, S) ->
 
 make_req_fun({append_chunk, EpochID, Prefix, Chunk}, #state{sock=Sock}) ->
     fun() -> ?FLU_C:append_chunk(Sock, EpochID, Prefix, Chunk) end;
+make_req_fun({append_chunk_extra, EpochID, Prefix, Chunk, ChunkExtra}, #state{sock=Sock}) ->
+    fun() -> ?FLU_C:append_chunk_extra(Sock, EpochID, Prefix, Chunk, ChunkExtra) end;
 make_req_fun({read_chunk, EpochID, File, Offset, Size}, #state{sock=Sock}) ->
     fun() -> ?FLU_C:read_chunk(Sock, EpochID, File, Offset, Size) end;
 make_req_fun({write_chunk, EpochID, File, Offset, Chunk}, #state{sock=Sock}) ->

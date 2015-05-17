@@ -28,6 +28,7 @@
 -export([
          %% File API
          append_chunk/4, append_chunk/5,
+         append_chunk_extra/5, append_chunk_extra/6,
          read_chunk/5, read_chunk/6,
          checksum_list/3, checksum_list/4,
          list_files/2, list_files/3,
@@ -79,7 +80,7 @@
 -spec append_chunk(port(), epoch_id(), file_prefix(), chunk()) ->
       {ok, chunk_pos()} | {error, error_general()} | {error, term()}.
 append_chunk(Sock, EpochID, Prefix, Chunk) ->
-    append_chunk2(Sock, EpochID, Prefix, Chunk).
+    append_chunk2(Sock, EpochID, Prefix, Chunk, 0).
 
 %% @doc Append a chunk (binary- or iolist-style) of data to a file
 %% with `Prefix'.
@@ -90,7 +91,41 @@ append_chunk(Sock, EpochID, Prefix, Chunk) ->
 append_chunk(Host, TcpPort, EpochID, Prefix, Chunk) ->
     Sock = machi_util:connect(Host, TcpPort),
     try
-        append_chunk2(Sock, EpochID, Prefix, Chunk)
+        append_chunk2(Sock, EpochID, Prefix, Chunk, 0)
+    after
+        catch gen_tcp:close(Sock)
+    end.
+
+%% @doc Append a chunk (binary- or iolist-style) of data to a file
+%% with `Prefix' and also request an additional `Extra' bytes.
+%%
+%% For example, if the `Chunk' size is 1 KByte and `Extra' is 4K Bytes, then
+%% the file offsets that follow `Chunk''s position for the following 4K will
+%% be reserved by the file sequencer for later write(s) by the
+%% `write_chunk()' API.
+
+-spec append_chunk_extra(port(), epoch_id(), file_prefix(), chunk(), chunk_size()) ->
+      {ok, chunk_pos()} | {error, error_general()} | {error, term()}.
+append_chunk_extra(Sock, EpochID, Prefix, Chunk, ChunkExtra)
+  when is_integer(ChunkExtra), ChunkExtra >= 0 ->
+    append_chunk2(Sock, EpochID, Prefix, Chunk, ChunkExtra).
+
+%% @doc Append a chunk (binary- or iolist-style) of data to a file
+%% with `Prefix' and also request an additional `Extra' bytes.
+%%
+%% For example, if the `Chunk' size is 1 KByte and `Extra' is 4K Bytes, then
+%% the file offsets that follow `Chunk''s position for the following 4K will
+%% be reserved by the file sequencer for later write(s) by the
+%% `write_chunk()' API.
+
+-spec append_chunk_extra(inet_host(), inet_port(),
+                   epoch_id(), file_prefix(), chunk(), chunk_size()) ->
+      {ok, chunk_pos()} | {error, error_general()} | {error, term()}.
+append_chunk_extra(Host, TcpPort, EpochID, Prefix, Chunk, ChunkExtra)
+  when is_integer(ChunkExtra), ChunkExtra >= 0 ->
+    Sock = machi_util:connect(Host, TcpPort),
+    try
+        append_chunk2(Sock, EpochID, Prefix, Chunk, ChunkExtra)
     after
         catch gen_tcp:close(Sock)
     end.
@@ -395,7 +430,7 @@ trunc_hack(Host, TcpPort, EpochID, File) when is_integer(TcpPort) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-append_chunk2(Sock, EpochID, Prefix0, Chunk0) ->
+append_chunk2(Sock, EpochID, Prefix0, Chunk0, ChunkExtra) ->
     erase(bad_sock),
     try
         %% TODO: add client-side checksum to the server's protocol
@@ -408,7 +443,8 @@ append_chunk2(Sock, EpochID, Prefix0, Chunk0) ->
         EpochIDHex = machi_util:bin_to_hexstr(
                        <<EpochNum:(4*8)/big, EpochCSum/binary>>),
         LenHex = machi_util:int_to_hexbin(Len, 32),
-        Cmd = [<<"A ">>, EpochIDHex, LenHex, Prefix, 10],
+        ExtraHex = machi_util:int_to_hexbin(ChunkExtra, 32),
+        Cmd = [<<"A ">>, EpochIDHex, LenHex, ExtraHex, Prefix, 10],
         ok = gen_tcp:send(Sock, [Cmd, Chunk]),
         {ok, Line} = gen_tcp:recv(Sock, 0),
         PathLen = byte_size(Line) - 3 - 16 - 1 - 1,

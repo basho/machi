@@ -63,6 +63,11 @@ api_smoke_test() ->
                 ?MUT:append_chunk(Prox1, FakeEpoch, <<"prefix">>, MyChunk,
                                   infinity),
             {ok, MyChunk} = ?MUT:read_chunk(Prox1, FakeEpoch, MyFile, MyOff, MySize),
+            MyChunk2 = <<"my chunk data, yeah, again">>,
+            {ok, {MyOff2,MySize2,MyFile2}} =
+                ?MUT:append_chunk_extra(Prox1, FakeEpoch, <<"prefix">>,
+                                        MyChunk2, 4242, infinity),
+            {ok, MyChunk2} = ?MUT:read_chunk(Prox1, FakeEpoch, MyFile2, MyOff2, MySize2),
 
             %% Alright, now for the rest of the API, whee
             BadFile = <<"no-such-file">>,
