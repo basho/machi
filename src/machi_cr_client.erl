@@ -289,7 +289,6 @@ do_append_chunk_extra1(Prefix, Chunk, ChunkExtra,
                                     EpochID, Prefix, Chunk, ChunkExtra,
                                     ?TIMEOUT) of
         {ok, {Offset, _Size, File}=_X} ->
-            io:format(user, "TODO: X ~p\n", [_X]),
             do_append_chunk_extra2(RestFLUs, File, Offset, Chunk,
                                    HeadFLU, 1, S);
         {error, Change} when Change == bad_epoch; Change == wedged ->
@@ -298,8 +297,8 @@ do_append_chunk_extra1(Prefix, Chunk, ChunkExtra,
         %% TODO return values here
     end.
 
-do_append_chunk_extra2([], File, Offset, _Chunk, _OldHeadFLU, _OkCount, S) ->
-    {reply, {ok, {File, Offset}}, S};
+do_append_chunk_extra2([], File, Offset, Chunk, _OldHeadFLU, _OkCount, S) ->
+    {reply, {ok, {Offset, size(Chunk), File}}, S};
 do_append_chunk_extra2([FLU|RestFLUs], File, Offset, Chunk, OldHeadFLU, OkCount,
                        #state{epoch_id=EpochID, proj=P,
                               proxies_dict=PD}=S) ->

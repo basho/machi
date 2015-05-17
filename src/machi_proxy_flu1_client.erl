@@ -295,8 +295,16 @@ do_req(Req, S) ->
     case connected_p(S2) of
         true ->
             case Fun() of
+                ok ->
+                    {ok, S2};
                 T when element(1, T) == ok ->
                     {T, S2};
+                {error, {badmatch, {badmatch, {error, Why}}, _Stk}}
+                  when Why == closed; Why == timeout ->
+                    %% TODO: Infinite recursion isn't
+                    %% good. Exponential backoff might be good.
+                    timer:sleep(500),
+                    do_req(Req, disconnect(S2));
                 Else ->
                     case get(bad_sock) of
                         Bad when Bad == S2#state.sock ->

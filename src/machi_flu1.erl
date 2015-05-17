@@ -66,6 +66,8 @@
 -include("machi.hrl").
 -include("machi_projection.hrl").
 
+-define(SERVER_CMD_READ_TIMEOUT, 600*1000).
+
 -export([start_link/1, stop/1,
          update_wedge_state/3]).
 -export([make_listener_regname/1, make_projection_server_regname/1]).
@@ -244,7 +246,9 @@ decode_epoch_id(EpochIDHex) ->
 
 net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
     ok = inet:setopts(Sock, [{packet, line}]),
-    case gen_tcp:recv(Sock, 0, 600*1000) of
+    %% TODO: Add testing control knob to adjust this timeout and/or inject
+    %% timeout condition.
+    case gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT) of
         {ok, Line} ->
             %% machi_util:verb("Got: ~p\n", [Line]),
             PrefixLenLF = byte_size(Line) - 2 - ?EpochIDSpace - 8 -8 - 1,
