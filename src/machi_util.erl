@@ -274,4 +274,3 @@ escript_connect(Host, Port, Timeout) when is_integer(Port) ->
     {ok, Sock} = gen_tcp:connect(Host, Port, [{active,false}, {mode,binary},
                                               {packet, raw}], Timeout),
     Sock.
-

@@ -70,7 +70,10 @@
          quit/1,
 
          %% Internal API
-         write_chunk/5, write_chunk/6
+         write_chunk/5, write_chunk/6,
+
+         %% Helpers
+         stop_proxies/1, start_proxies/1
         ]).
 
 %% gen_server callbacks
@@ -377,3 +380,22 @@ disconnect(#state{sock=Sock,
                   i=#p_srvr{proto_mod=Mod}=_I}=S) ->
     Mod:disconnect(Sock),
     S#state{sock=undefined}.
+
+
+stop_proxies(undefined) ->
+    [];
+stop_proxies(ProxiesDict) ->
+    orddict:fold(
+      fun(_K, Pid, _Acc) ->
+              _ = (catch machi_proxy_flu1_client:quit(Pid))
+      end, [], ProxiesDict).
+
+start_proxies(MembersDict) ->
+    Proxies = orddict:fold(
+                fun(K, P, Acc) ->
+                        {ok, Pid} = machi_proxy_flu1_client:start_link(P),
+                        [{K, Pid}|Acc]
+                end, [], orddict:to_list(MembersDict)),
+    orddict:from_list(Proxies).
+
+

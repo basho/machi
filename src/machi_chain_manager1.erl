@@ -762,17 +762,10 @@ rank_projection(#projection_v1{author_server=Author,
         (N*N * length(UPI_list)).
 
 do_set_chain_members_dict(MembersDict, #ch_mgr{proxies_dict=OldProxiesDict}=S)->
-    catch orddict:fold(
-            fun(_K, Pid, _Acc) ->
-                    _ = (catch ?FLU_PC:quit(Pid))
-            end, [], OldProxiesDict),
-    Proxies = orddict:fold(
-                fun(K, P, Acc) ->
-                        {ok, Pid} = ?FLU_PC:start_link(P),
-                        [{K, Pid}|Acc]
-                end, [], MembersDict),
+    _ = ?FLU_PC:stop_proxies(OldProxiesDict),
+    ProxiesDict = ?FLU_PC:start_proxies(MembersDict),
     {ok, S#ch_mgr{members_dict=MembersDict,
-                  proxies_dict=orddict:from_list(Proxies)}}.
+                  proxies_dict=ProxiesDict}}.
 
 do_react_to_env(#ch_mgr{name=MyName,
                         proj=#projection_v1{epoch_number=Epoch,

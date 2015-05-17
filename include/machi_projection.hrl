@@ -21,6 +21,7 @@
 -ifndef(MACHI_PROJECTION_HRL).
 -define(MACHI_PROJECTION_HRL, true).
 
+-type pv1_consistency_mode() :: 'ap_mode' | 'cp_mode'.
 -type pv1_csum()      :: binary().
 -type pv1_epoch()     :: {pv1_epoch_n(), pv1_csum()}.
 -type pv1_epoch_n()   :: non_neg_integer().
@@ -46,6 +47,7 @@
           author_server   :: pv1_server(),
           all_members     :: [pv1_server()],
           creation_time   :: pv1_timestamp(),
+          mode = ap_mode  :: pv1_consistency_mode(),
           upi             :: [pv1_server()],
           repairing       :: [pv1_server()],
           down            :: [pv1_server()],
