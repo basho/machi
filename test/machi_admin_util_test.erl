@@ -38,7 +38,7 @@ verify_file_checksums_test() ->
     W_props = [{initial_wedged, false}],
     FLU1 = machi_flu1_test:setup_test_flu(verify1_flu, TcpPort, DataDir,
                                           W_props),
-    Sock1 = machi_util:connect(Host, TcpPort),
+    Sock1 = ?FLU_C:connect(#p_srvr{address=Host, port=TcpPort}),
     try
         Prefix = <<"verify_prefix">>,
         [{ok, _} = ?FLU_C:append_chunk(Sock1, ?DUMMY_PV1_EPOCH,

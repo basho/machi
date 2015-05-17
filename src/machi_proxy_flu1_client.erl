@@ -347,35 +347,21 @@ make_req_fun({list_all_projections, ProjType}, #state{sock=Sock}) ->
     fun() -> ?FLU_C:list_all_projections(Sock, ProjType) end.
 
 connected_p(#state{sock=SockMaybe,
-                   i=#p_srvr{proto=ipv4}=_I}=_S) ->
-    is_port(SockMaybe);
-connected_p(#state{i=#p_srvr{proto=disterl,
-                             name=_NodeName}=_I}=_S) ->
-    true.
-    %% case net_adm:ping(NodeName) of
-    %%     ping ->
-    %%         true;
-    %%     _ ->
-    %%         false
-    %% end.
+                   i=#p_srvr{proto_mod=Mod}=_I}=_S) ->
+    Mod:connected_p(SockMaybe).
 
 try_connect(#state{sock=undefined,
-                   i=#p_srvr{proto=ipv4, address=Host, port=TcpPort}=_I}=S) ->
-    try
-        Sock = machi_util:connect(Host, TcpPort),
-        S#state{sock=Sock}
-    catch
-        _:_ ->
-            S
-    end;
+                   i=#p_srvr{proto_mod=Mod}=P}=S) ->
+    Sock = Mod:connect(P),
+    S#state{sock=Sock};
 try_connect(S) ->
     %% If we're connection-based, we're already connected.
     %% If we're not connection-based, then there's nothing to do.
     S.
 
+disconnect(#state{sock=undefined}=S) ->
+    S;
 disconnect(#state{sock=Sock,
-                  i=#p_srvr{proto=ipv4}=_I}=S) ->
-    (catch gen_tcp:close(Sock)),
-    S#state{sock=undefined};
-disconnect(S) ->
-    S.
+                  i=#p_srvr{proto_mod=Mod}=_I}=S) ->
+    Mod:disconnect(Sock),
+    S#state{sock=undefined}.

@@ -46,11 +46,11 @@ verify_file_checksums_local(Sock1, EpochID, Path) when is_port(Sock1) ->
                                   machi_flu1_client:epoch_id(), binary()|list()) ->
       {ok, [tuple()]} | {error, term()}.
 verify_file_checksums_local(Host, TcpPort, EpochID, Path) ->
-    Sock1 = machi_util:connect(Host, TcpPort),
+    Sock1 = ?FLU_C:connect(#p_srvr{address=Host, port=TcpPort}),
     try
         verify_file_checksums_local2(Sock1, EpochID, Path)
     after
-        catch gen_tcp:close(Sock1)
+        catch ?FLU_C:disconnect(Sock1)
     end.
 
 -spec verify_file_checksums_remote(port(), machi_flu1_client:epoch_id(), binary()|list()) ->
@@ -62,11 +62,11 @@ verify_file_checksums_remote(Sock1, EpochID, File) when is_port(Sock1) ->
                                    machi_flu1_client:epoch_id(), binary()|list()) ->
       {ok, [tuple()]} | {error, term()}.
 verify_file_checksums_remote(Host, TcpPort, EpochID, File) ->
-    Sock1 = machi_util:connect(Host, TcpPort),
+    Sock1 = ?FLU_C:connect(#p_srvr{address=Host, port=TcpPort}),
     try
         verify_file_checksums_remote2(Sock1, EpochID, File)
     after
-        catch gen_tcp:close(Sock1)
+        catch ?FLU_C:disconnect(Sock1)
     end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%

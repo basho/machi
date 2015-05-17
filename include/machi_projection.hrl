@@ -29,7 +29,7 @@
 
 -record(p_srvr, {
           name            :: pv1_server(),
-          proto = 'ipv4'  :: 'ipv4' | 'disterl', % disterl? Hrm.
+          proto_mod = 'machi_flu1_client' :: atom(), % Module name
           address         :: term(), % Protocol-specific
           port            :: term(), % Protocol-specific
           props = []      :: list()  % proplist for other related info

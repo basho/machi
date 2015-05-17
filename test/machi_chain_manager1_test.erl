@@ -140,7 +140,7 @@ smoke0_test() ->
     Host = "localhost",
     TcpPort = 6623,
     {ok, FLUa} = machi_flu1:start_link([{a,TcpPort,"./data.a"}]),
-    Pa = #p_srvr{name=a, proto=ipv4, address=Host, port=TcpPort},
+    Pa = #p_srvr{name=a, address=Host, port=TcpPort},
     Members_Dict = machi_projection:make_members_dict([Pa]),
     %% Egadz, more racing on startup, yay.  TODO fix.
     timer:sleep(1),

@@ -39,7 +39,7 @@ api_smoke_test() ->
     erase(flu_pid),
 
     try
-        I = #p_srvr{name=RegName, proto=ipv4, address=Host, port=TcpPort},
+        I = #p_srvr{name=RegName, address=Host, port=TcpPort},
         {ok, Prox1} = ?MUT:start_link(I),
         try
             FakeEpoch = ?DUMMY_PV1_EPOCH,
