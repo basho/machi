@@ -819,10 +819,22 @@ do_projection_common(Sock, ProjCmd) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-w_connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}) ->
+w_connect(#p_srvr{proto_mod=?MODULE, address=Host, port=Port, props=Props})->
     try
-        Sock = machi_util:connect(Host, TcpPort),
-        {w,tcp,Sock}
+        case proplists:get_value(session_proto, Props, tcp) of
+            tcp ->
+                Sock = machi_util:connect(Host, Port),
+                {w,tcp,Sock};
+            %% sctp ->
+            %%     %% TODO: not implemented
+            %%     {w,sctp,Sock}
+            ssl ->
+                %% TODO: veryveryuntested
+                SslOptions = proplists:get_value(ssl_options, Props),
+                Sock = machi_util:connect(Port, Port),
+                {ok, SslSock} = ssl:connect(Sock, SslOptions),
+                {w,ssl,SslSock}
+        end
     catch
         _:_ ->
             undefined
