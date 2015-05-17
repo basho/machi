@@ -59,6 +59,11 @@ new(EpochNum, MyName, [_|_] = MembersDict0, Down_list, UPI_list, Repairing_list,
        is_list(Repairing_list), is_list(Dbg), is_list(Dbg2) ->
     MembersDict = make_members_dict(MembersDict0),
     All_list = [Name || {Name, _P} <- MembersDict],
+    if length(All_list) =< ?MAX_CHAIN_LENGTH ->
+            ok;
+       true ->
+            exit(max_chain_length_error)
+    end,
     true = lists:all(fun(X) when is_atom(X) orelse is_binary(X) -> true;
                         (_)                                     -> false
                      end, All_list),

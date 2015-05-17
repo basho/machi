@@ -51,12 +51,14 @@
 -export([
          %% File API
          append_chunk/4, append_chunk/5,
+         append_chunk_extra/5, append_chunk_extra/6,
          read_chunk/5, read_chunk/6,
          checksum_list/3, checksum_list/4,
          list_files/2, list_files/3,
          wedge_status/1, wedge_status/2,
 
          %% %% Projection API
+         get_epoch_id/1, get_epoch_id/2,
          get_latest_epoch/2, get_latest_epoch/3,
          read_latest_projection/2, read_latest_projection/3,
          read_projection/3, read_projection/4,
@@ -65,14 +67,15 @@
          list_all_projections/2, list_all_projections/3,
 
          %% Common API
-         quit/1
+         quit/1,
+
+         %% Internal API
+         write_chunk/5, write_chunk/6
         ]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
-
--define(FLU_C, machi_flu1_client).
 
 -record(state, {
           i    :: #p_srvr{},
@@ -97,6 +100,21 @@ append_chunk(PidSpec, EpochID, Prefix, Chunk) ->
 
 append_chunk(PidSpec, EpochID, Prefix, Chunk, Timeout) ->
     gen_server:call(PidSpec, {req, {append_chunk, EpochID, Prefix, Chunk}},
+                    Timeout).
+
+%% @doc Append a chunk (binary- or iolist-style) of data to a file
+%% with `Prefix'.
+
+append_chunk_extra(PidSpec, EpochID, Prefix, Chunk, ChunkExtra)
+  when is_integer(ChunkExtra), ChunkExtra >= 0 ->
+    append_chunk_extra(PidSpec, EpochID, Prefix, Chunk, ChunkExtra, infinity).
+
+%% @doc Append a chunk (binary- or iolist-style) of data to a file
+%% with `Prefix'.
+
+append_chunk_extra(PidSpec, EpochID, Prefix, Chunk, ChunkExtra, Timeout) ->
+    gen_server:call(PidSpec, {req, {append_chunk_extra, EpochID, Prefix,
+                                    Chunk, ChunkExtra}},
                     Timeout).
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
@@ -142,6 +160,16 @@ wedge_status(PidSpec) ->
 wedge_status(PidSpec, Timeout) ->
     gen_server:call(PidSpec, {req, {wedge_status}},
                     Timeout).
+
+%% @doc Get the `epoch_id()' of the FLU's current/latest projection.
+
+get_epoch_id(PidSpec) ->
+    get_epoch_id(PidSpec, infinity).
+
+%% @doc Get the `epoch_id()' of the FLU's current/latest projection.
+
+get_epoch_id(PidSpec, Timeout) ->
+    gen_server:call(PidSpec, {req, {get_epoch_id}}, Timeout).
 
 %% @doc Get the latest epoch number + checksum from the FLU's projection store.
 
@@ -215,6 +243,19 @@ list_all_projections(PidSpec, ProjType, Timeout) ->
 quit(PidSpec) ->
     gen_server:call(PidSpec, quit, infinity).
 
+%% @doc Write a chunk (binary- or iolist-style) of data to a file
+%% with `Prefix' at `Offset'.
+
+write_chunk(PidSpec, EpochID, File, Offset, Chunk) ->
+    write_chunk(PidSpec, EpochID, File, Offset, Chunk, infinity).
+
+%% @doc Write a chunk (binary- or iolist-style) of data to a file
+%% with `Prefix' at `Offset'.
+
+write_chunk(PidSpec, EpochID, File, Offset, Chunk, Timeout) ->
+    gen_server:call(PidSpec, {req, {write_chunk, EpochID, File, Offset, Chunk}},
+                    Timeout).
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init([I]) ->
@@ -265,59 +306,74 @@ do_req(Req, S) ->
             {{error, partition}, S2}
     end.
 
-make_req_fun({append_chunk, EpochID, Prefix, Chunk}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:append_chunk(Sock, EpochID, Prefix, Chunk) end;
-make_req_fun({read_chunk, EpochID, File, Offset, Size}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:read_chunk(Sock, EpochID, File, Offset, Size) end;
-make_req_fun({checksum_list, EpochID, File}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:checksum_list(Sock, EpochID, File) end;
-make_req_fun({list_files, EpochID}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:list_files(Sock, EpochID) end;
-make_req_fun({wedge_status}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:wedge_status(Sock) end;
-make_req_fun({get_latest_epoch, ProjType}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:get_latest_epoch(Sock, ProjType) end;
-make_req_fun({read_latest_projection, ProjType}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:read_latest_projection(Sock, ProjType) end;
-make_req_fun({read_projection, ProjType, Epoch}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:read_projection(Sock, ProjType, Epoch) end;
-make_req_fun({write_projection, ProjType, Proj}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:write_projection(Sock, ProjType, Proj) end;
-make_req_fun({get_all_projections, ProjType}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:get_all_projections(Sock, ProjType) end;
-make_req_fun({list_all_projections, ProjType}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:list_all_projections(Sock, ProjType) end.
+make_req_fun({append_chunk, EpochID, Prefix, Chunk},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:append_chunk(Sock, EpochID, Prefix, Chunk) end;
+make_req_fun({append_chunk_extra, EpochID, Prefix, Chunk, ChunkExtra},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:append_chunk_extra(Sock, EpochID, Prefix, Chunk, ChunkExtra) end;
+make_req_fun({read_chunk, EpochID, File, Offset, Size},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:read_chunk(Sock, EpochID, File, Offset, Size) end;
+make_req_fun({write_chunk, EpochID, File, Offset, Chunk},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:write_chunk(Sock, EpochID, File, Offset, Chunk) end;
+make_req_fun({checksum_list, EpochID, File},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:checksum_list(Sock, EpochID, File) end;
+make_req_fun({list_files, EpochID},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:list_files(Sock, EpochID) end;
+make_req_fun({wedge_status},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:wedge_status(Sock) end;
+make_req_fun({get_epoch_id},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> case Mod:read_latest_projection(Sock, private) of
+                 {ok, P} ->
+                     #projection_v1{epoch_number=Epoch,
+                                    epoch_csum=CSum} =
+                         machi_chain_manager1:inner_projection_or_self(P),
+                     {ok, {Epoch, CSum}};
+                 Error ->
+                     Error
+             end
+    end;
+make_req_fun({get_latest_epoch, ProjType},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:get_latest_epoch(Sock, ProjType) end;
+make_req_fun({read_latest_projection, ProjType},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:read_latest_projection(Sock, ProjType) end;
+make_req_fun({read_projection, ProjType, Epoch},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:read_projection(Sock, ProjType, Epoch) end;
+make_req_fun({write_projection, ProjType, Proj},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:write_projection(Sock, ProjType, Proj) end;
+make_req_fun({get_all_projections, ProjType},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:get_all_projections(Sock, ProjType) end;
+make_req_fun({list_all_projections, ProjType},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:list_all_projections(Sock, ProjType) end.
 
 connected_p(#state{sock=SockMaybe,
-                   i=#p_srvr{proto=ipv4}=_I}=_S) ->
-    is_port(SockMaybe);
-connected_p(#state{i=#p_srvr{proto=disterl,
-                             name=_NodeName}=_I}=_S) ->
-    true.
-    %% case net_adm:ping(NodeName) of
-    %%     ping ->
-    %%         true;
-    %%     _ ->
-    %%         false
-    %% end.
+                   i=#p_srvr{proto_mod=Mod}=_I}=_S) ->
+    Mod:connected_p(SockMaybe).
 
 try_connect(#state{sock=undefined,
-                   i=#p_srvr{proto=ipv4, address=Host, port=TcpPort}=_I}=S) ->
-    try
-        Sock = machi_util:connect(Host, TcpPort),
-        S#state{sock=Sock}
-    catch
-        _:_ ->
-            S
-    end;
+                   i=#p_srvr{proto_mod=Mod}=P}=S) ->
+    Sock = Mod:connect(P),
+    S#state{sock=Sock};
 try_connect(S) ->
     %% If we're connection-based, we're already connected.
     %% If we're not connection-based, then there's nothing to do.
     S.
 
+disconnect(#state{sock=undefined}=S) ->
+    S;
 disconnect(#state{sock=Sock,
-                  i=#p_srvr{proto=ipv4}=_I}=S) ->
-    (catch gen_tcp:close(Sock)),
-    S#state{sock=undefined};
-disconnect(S) ->
-    S.
+                  i=#p_srvr{proto_mod=Mod}=_I}=S) ->
+    Mod:disconnect(Sock),
+    S#state{sock=undefined}.

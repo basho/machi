@@ -74,10 +74,11 @@ partial_stop_restart2() ->
     Dict = orddict:from_list(Ps),
     [os:cmd("rm -rf " ++ P#p_srvr.props) || {_,P} <- Ps],
     {ok, SupPid} = machi_flu_sup:start_link(),
+    DbgProps = [{dbg, [{initial_wedged, true}]}],
     Start = fun({_,P}) ->
                     #p_srvr{name=Name, port=Port, props=Dir} = P,
                     {ok, _} = machi_flu_psup:start_flu_package(
-                                Name, Port, Dir, [{active_mode,false}])
+                                Name, Port, Dir, [{active_mode,false}|DbgProps])
             end,
     WedgeStatus = fun({_,#p_srvr{address=Addr, port=TcpPort}}) ->
                           machi_flu1_client:wedge_status(Addr, TcpPort)

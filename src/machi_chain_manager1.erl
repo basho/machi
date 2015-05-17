@@ -54,15 +54,42 @@
 -include("machi_projection.hrl").
 -include("machi_chain_manager.hrl").
 
+-record(ch_mgr, {
+          name            :: pv1_server(),
+          flap_limit      :: non_neg_integer(),
+          proj            :: projection(),
+          %%
+          timer           :: 'undefined' | timer:tref(),
+          ignore_timer    :: boolean(),
+          proj_history    :: queue:queue(),
+          flaps=0         :: integer(),
+          flap_start = ?NOT_FLAPPING
+                          :: erlang:timestamp(),
+          repair_worker   :: 'undefined' | pid(),
+          repair_start    :: 'undefined' | erlang:timestamp(),
+          repair_final_status :: 'undefined' | term(),
+          runenv          :: list(), %proplist()
+          opts            :: list(),  %proplist()
+          members_dict    :: p_srvr_dict(),
+          proxies_dict    :: orddict:orddict()
+         }).
+
 -define(D(X), io:format(user, "~s ~p\n", [??X, X])).
 -define(Dw(X), io:format(user, "~s ~w\n", [??X, X])).
 
--define(FLU_C,  machi_flu1_client).
 -define(FLU_PC, machi_proxy_flu1_client).
 -define(TO, (2*1000)).                          % default timeout
 
 %% Keep a history of our flowchart execution in the process dictionary.
 -define(REACT(T), put(react, [T|get(react)])).
+
+%% Define the period of private projection stability before we'll
+%% start repair.
+-ifdef(TEST).
+-define(REPAIR_START_STABILITY_TIME, 3).
+-else. % TEST
+-define(REPAIR_START_STABILITY_TIME, 10).
+-endif. % TEST
 
 %% API
 -export([start_link/2, start_link/3, stop/1, ping/1,
@@ -162,6 +189,7 @@ test_react_to_env(Pid) ->
 %% local projection store.
 
 init({MyName, InitMembersDict, MgrOpts}) ->
+    random:seed(now()),
     init_remember_partition_hack(),
     ZeroAll_list = [P#p_srvr.name || {_,P} <- orddict:to_list(InitMembersDict)],
     ZeroProj = make_none_projection(MyName, ZeroAll_list, InitMembersDict),
@@ -223,7 +251,11 @@ handle_call({set_chain_members, MembersDict}, _From,
                                       repairing=[],
                                       down=NewDown,
                                       members_dict=MembersDict}),
-    S3 = S2#ch_mgr{proj=NewProj},
+    %% Reset all flapping state.
+    NewProj2 = NewProj#projection_v1{dbg=replace(NewProj#projection_v1.dbg,
+                                                 [make_flapping_i()])},
+    S3 = S2#ch_mgr{proj=NewProj2,
+                   proj_history=queue:new()},
     {_QQ, S4} = do_react_to_env(S3),
     {reply, Reply, S4};
 handle_call({set_active, Boolean}, _From, #ch_mgr{timer=TRef}=S) ->
@@ -255,7 +287,7 @@ handle_call({test_read_latest_public_projection, ReadRepairP}, _From, S) ->
     Res = {Perhaps, Val, ExtraInfo},
     {reply, Res, S2};
 handle_call({test_react_to_env}, _From, S) ->
-    {TODOtodo, S2} =  do_react_to_env(S),
+    {TODOtodo, S2} = do_react_to_env(S),
     {reply, TODOtodo, S2};
 handle_call(_Call, _From, S) ->
     {reply, whaaaaaaaaaa, S}.
@@ -267,7 +299,9 @@ handle_cast(_Cast, S) ->
 handle_info(tick_check_environment, #ch_mgr{ignore_timer=true}=S) ->
     {noreply, S};
 handle_info(tick_check_environment, S) ->
-    {{_Delta, Props, _Epoch}, S2} = do_react_to_env(S),
+    {{_Delta, Props, _Epoch}, S1} = do_react_to_env(S),
+    S2 = sanitize_repair_state(S1),
+    S3 = perhaps_start_repair(S2),
     case proplists:get_value(throttle_seconds, Props) of
         N when is_integer(N), N > 0 ->
             %% We are flapping.  Set ignore_timer=true and schedule a
@@ -276,12 +310,17 @@ handle_info(tick_check_environment, S) ->
             %% state C200 is ever implemented, then it should be
             %% implemented via the test_react_to_env style.
             erlang:send_after(N*1000, self(), stop_ignoring_timer),
-            {noreply, S#ch_mgr{ignore_timer=true}};
+            {noreply, S3#ch_mgr{ignore_timer=true}};
         _ ->
-            {noreply, S2}
+            {noreply, S3}
     end;
 handle_info(stop_ignoring_timer, S) ->
     {noreply, S#ch_mgr{ignore_timer=false}};
+handle_info({'DOWN',_Ref,process,Worker,Res},
+            #ch_mgr{repair_worker=Worker}=S)->
+    {noreply, S#ch_mgr{ignore_timer=false,
+                       repair_worker=undefined,
+                       repair_final_status=Res}};
 handle_info(Msg, S) ->
     case get(todo_bummer) of undefined -> io:format("TODO: got ~p\n", [Msg]);
                              _         -> ok
@@ -303,12 +342,18 @@ make_none_projection(MyName, All_list, MembersDict) ->
     machi_projection:new(MyName, MembersDict, UPI_list, Down_list, [], []).
 
 get_my_private_proj_boot_info(MgrOpts, DefaultDict, DefaultProj) ->
+    get_my_proj_boot_info(MgrOpts, DefaultDict, DefaultProj, private).
+
+get_my_public_proj_boot_info(MgrOpts, DefaultDict, DefaultProj) ->
+    get_my_proj_boot_info(MgrOpts, DefaultDict, DefaultProj, public).
+
+get_my_proj_boot_info(MgrOpts, DefaultDict, DefaultProj, ProjType) ->
     case proplists:get_value(projection_store_registered_name, MgrOpts) of
         undefined ->
             {DefaultDict, DefaultProj};
         Store ->
             {ok, P} = machi_projection_store:read_latest_projection(Store,
-                                                                    private),
+                                                                    ProjType),
             {P#projection_v1.members_dict, P}
     end.
 
@@ -327,8 +372,11 @@ store_zeroth_projection_maybe(ZeroProj, MgrOpts) ->
 
 set_active_timer(#ch_mgr{name=MyName, members_dict=MembersDict}=S) ->
     FLU_list = [P#p_srvr.name || {_,P} <- orddict:to_list(MembersDict)],
-    USec = calc_sleep_ranked_order(1000, 2000, MyName, FLU_list),
-    {ok, TRef} = timer:send_interval(USec, tick_check_environment),
+    %% Perturb the order a little bit, to avoid near-lock-step
+    %% operations every few ticks.
+    MSec = calc_sleep_ranked_order(400, 1500, MyName, FLU_list) +
+        random:uniform(100),
+    {ok, TRef} = timer:send_interval(MSec, tick_check_environment),
     S#ch_mgr{timer=TRef}.
 
 do_cl_write_public_proj(Proj, S) ->
@@ -392,7 +440,7 @@ do_cl_read_latest_public_projection(ReadRepairP,
     end.
 
 read_latest_projection_call_only(ProjectionType, AllHosed,
-                                      #ch_mgr{proj=CurrentProj}=S) ->
+                                 #ch_mgr{proj=CurrentProj}=S) ->
     #projection_v1{all_members=All_list} = CurrentProj,
     All_queried_list = All_list -- AllHosed,
 
@@ -403,7 +451,6 @@ read_latest_projection_call_only(ProjectionType, AllHosed,
                        Else    -> Else
                    end
            end,
-%% io:format(user, "All_queried_list ~p\n", [All_queried_list]),
     Rs = [perhaps_call_t(S, Partitions, FLU, fun(Pid) -> DoIt(Pid) end) ||
              FLU <- All_queried_list],
     %% Rs = [perhaps_call_t(S, Partitions, FLU, fun(Pid) -> DoIt(Pid) end) ||
@@ -508,7 +555,9 @@ calc_projection(#ch_mgr{proj=LastProj, runenv=RunEnv} = S,
 
 calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                 RelativeToServer, AllHosed, Dbg,
-                #ch_mgr{name=MyName, runenv=RunEnv1}=S) ->
+                #ch_mgr{name=MyName,
+                        runenv=RunEnv1,
+                        repair_final_status=RepairFS}=S) ->
     #projection_v1{epoch_number=OldEpochNum,
                    members_dict=MembersDict,
                    upi=OldUPI_list,
@@ -549,6 +598,11 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                 if Simulator_p andalso SameEpoch_p ->
                         D_foo=[{repair_airquote_done, {we_agree, (S#ch_mgr.proj)#projection_v1.epoch_number}}],
                         {NewUPI_list ++ [H], T, RunEnv2};
+                   not Simulator_p
+                   andalso
+                   RepairFS == {repair_final_status, ok} ->
+                        D_foo=[{repair_done, {repair_final_status, ok, (S#ch_mgr.proj)#projection_v1.epoch_number}}],
+                        {NewUPI_list ++ Repairing_list2, [], RunEnv2};
                    true ->
                         D_foo=[],
                         {NewUPI_list, OldRepairing_list, RunEnv2}
@@ -679,7 +733,7 @@ rank_projections(Projs, CurrentProj) ->
     #projection_v1{all_members=All_list} = CurrentProj,
     MemberRank = orddict:from_list(
                    lists:zip(All_list, lists:seq(1, length(All_list)))),
-    N = length(All_list),
+    N = ?MAX_CHAIN_LENGTH + 1,
     [{rank_projection(Proj, MemberRank, N), Proj} || Proj <- Projs].
 
 rank_projection(#projection_v1{upi=[]}, _MemberRank, _N) ->
@@ -687,7 +741,22 @@ rank_projection(#projection_v1{upi=[]}, _MemberRank, _N) ->
 rank_projection(#projection_v1{author_server=Author,
                                upi=UPI_list,
                                repairing=Repairing_list}, MemberRank, N) ->
-    AuthorRank = orddict:fetch(Author, MemberRank),
+    %% It's possible that there's "cross-talk" across projection
+    %% stores.  For example, we were a chain of [a,b], then the
+    %% administrator sets a's members_dict to include only a.
+    %% However, b is still running and has written a public projection
+    %% suggestion to a, and a has seen it.  (Or perhaps b has old
+    %% chain information from one/many configurations ago, and its
+    %% projection store was not wiped clean, then b was restarted &
+    %% begins using its local outdated projection information.)
+    %%
+    %% Server b is no longer a member of a's MemberRank scheme, so we
+    %% need to compensate for this by giving b an extremely low author
+    %% ranking.
+    AuthorRank = case orddict:find(Author, MemberRank) of
+                     {ok, Rank} -> Rank;
+                     error      -> -(N*N*N*N)
+                 end,
     AuthorRank +
         (  N * length(Repairing_list)) +
         (N*N * length(UPI_list)).
@@ -705,9 +774,24 @@ do_set_chain_members_dict(MembersDict, #ch_mgr{proxies_dict=OldProxiesDict}=S)->
     {ok, S#ch_mgr{members_dict=MembersDict,
                   proxies_dict=orddict:from_list(Proxies)}}.
 
-do_react_to_env(#ch_mgr{proj=#projection_v1{epoch_number=Epoch,
-                                            members_dict=[]}}=S) ->
-    {{empty_members_dict, [], Epoch}, S};
+do_react_to_env(#ch_mgr{name=MyName,
+                        proj=#projection_v1{epoch_number=Epoch,
+                                            members_dict=[]=OldDict}=OldProj,
+                        opts=Opts}=S) ->
+    %% Read from our local *public* projection store.  If some other
+    %% chain member has written something there, and if we are a
+    %% member of that chain, then we'll adopt that projection and then
+    %% start actively humming in that chain.
+    {NewMembersDict, NewProj} =
+        get_my_public_proj_boot_info(Opts, OldDict, OldProj),
+    case orddict:is_key(MyName, NewMembersDict) of
+        false ->
+            {{empty_members_dict, [], Epoch}, S};
+        true ->
+            {_, S2} = do_set_chain_members_dict(NewMembersDict, S),
+            {{empty_members_dict, [], Epoch},
+             S2#ch_mgr{proj=NewProj, members_dict=NewMembersDict}}
+    end;
 do_react_to_env(S) ->
     put(react, []),
     react_to_env_A10(S).
@@ -716,11 +800,44 @@ react_to_env_A10(S) ->
     ?REACT(a10),
     react_to_env_A20(0, S).
 
-react_to_env_A20(Retries, S) ->
+react_to_env_A20(Retries, #ch_mgr{name=MyName}=S) ->
     ?REACT(a20),
     init_remember_partition_hack(),
     {UnanimousTag, P_latest, ReadExtra, S2} =
         do_cl_read_latest_public_projection(true, S),
+    LastComplaint = get(rogue_server_epoch),
+    case orddict:is_key(P_latest#projection_v1.author_server,
+                        S#ch_mgr.members_dict) of
+        false when P_latest#projection_v1.epoch_number /= LastComplaint ->
+            put(rogue_server_epoch, P_latest#projection_v1.epoch_number),
+            Rogue = P_latest#projection_v1.author_server,
+            error_logger:info_msg("Chain manager ~w found latest public "
+                                  "projection ~w has author ~w not a member "
+                                  "of our members list ~w.  Please check "
+                                  "chain membership on this "
+                                  "rogue chain manager ~w.\n",
+                                  [S#ch_mgr.name,
+                                   P_latest#projection_v1.epoch_number,
+                                   Rogue,
+                                   [K || {K,_} <- orddict:to_list(S#ch_mgr.members_dict)],
+                                   Rogue]);
+        _ ->
+            ok
+    end,
+    case lists:member(MyName, P_latest#projection_v1.all_members) of
+        false when P_latest#projection_v1.epoch_number /= LastComplaint,
+                   P_latest#projection_v1.all_members /= [] ->
+            put(rogue_server_epoch, P_latest#projection_v1.epoch_number),
+            error_logger:info_msg("Chain manager ~p found latest public "
+                                  "projection ~p has author ~p has a "
+                                  "members list ~p that does not include me.\n",
+                                  [S#ch_mgr.name,
+                                   P_latest#projection_v1.epoch_number,
+                                   P_latest#projection_v1.author_server,
+                                   P_latest#projection_v1.all_members]);
+        _ ->
+            ok
+    end,
 
     %% The UnanimousTag isn't quite sufficient for our needs.  We need
     %% to determine if *all* of the UPI+Repairing FLUs are members of
@@ -1140,10 +1257,10 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                     {X, S2} = gimme_random_uniform(100, S),
                     if X < 80 ->
                             ?REACT({b10, ?LINE, [flap_stop]}),
-                            ThrottleTime = if FlapLimit <  500 -> 1;
-                                              FlapLimit < 1000 -> 5;
-                                              FlapLimit < 5000 -> 10;
-                                              true             -> 30
+                            ThrottleTime = if P_newprop_flap_count <  500 -> 1;
+                                              P_newprop_flap_count < 1000 -> 5;
+                                              P_newprop_flap_count < 5000 -> 10;
+                                              true                        -> 30
                                            end,
                             FinalProps = [{my_flap_limit, FlapLimit},
                                           {throttle_seconds, ThrottleTime}],
@@ -1429,10 +1546,8 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
             AllHosed = []
     end,
 
-    FlappingI = {flapping_i, [{flap_count, {NewFlapStart, NewFlaps}},
-                              {all_hosed, AllHosed},
-                              {all_flap_counts, lists:sort(AllFlapCounts)},
-                              {bad,BadFLUs}]},
+    FlappingI = make_flapping_i(NewFlapStart, NewFlaps, AllHosed,
+                                AllFlapCounts, BadFLUs),
     Dbg2 = [FlappingI|P_newprop#projection_v1.dbg],
     %% TODO: 2015-03-04: I'm growing increasingly suspicious of
     %% the 'runenv' variable that's threaded through all this code.
@@ -1451,6 +1566,15 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
     %%       cluster.
     {machi_projection:update_checksum(P_newprop#projection_v1{dbg=Dbg2}),
      S#ch_mgr{flaps=NewFlaps, flap_start=NewFlapStart, runenv=RunEnv2}}.
+
+make_flapping_i() ->
+    make_flapping_i({{epk,-1},?NOT_FLAPPING}, 0, [], [], []).
+
+make_flapping_i(NewFlapStart, NewFlaps, AllHosed, AllFlapCounts, BadFLUs) ->
+    {flapping_i, [{flap_count, {NewFlapStart, NewFlaps}},
+                  {all_hosed, AllHosed},
+                  {all_flap_counts, lists:sort(AllFlapCounts)},
+                  {bad,BadFLUs}]}.
 
 projection_transitions_are_sane(Ps, RelativeToServer) ->
     projection_transitions_are_sane(Ps, RelativeToServer, false).
@@ -1717,7 +1841,8 @@ sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list) ->
     USec.
 
 calc_sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list) ->
-    Front = lists:takewhile(fun(X) -> X /= FLU end, lists:sort(FLU_list)),
+    Front = lists:takewhile(fun(X) -> X /= FLU end,
+                            lists:reverse(lists:sort(FLU_list))),
     Index = length(Front),
     NumNodes = length(FLU_list),
     SleepChunk = if NumNodes == 0 -> 0;
@@ -1797,6 +1922,73 @@ make_chmgr_regname(A) when is_atom(A) ->
     list_to_atom(atom_to_list(A) ++ "_chmgr");
 make_chmgr_regname(B) when is_binary(B) ->
     list_to_atom(binary_to_list(B) ++ "_chmgr").
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+perhaps_start_repair(
+  #ch_mgr{name=MyName,
+          repair_worker=undefined,
+          proj=#projection_v1{creation_time=Start,
+                              upi=[_|_]=UPI,
+                              repairing=[_|_]}}=S) ->
+    RepairId = {MyName, os:timestamp()},
+    RepairOpts = [{repair_mode, repair}, verbose, {repair_id, RepairId}],
+    %% RepairOpts = [{repair_mode, check}, verbose],
+    RepairFun = fun() -> do_repair(S, RepairOpts, ap_mode) end,
+    LastUPI = lists:last(UPI),
+    case timer:now_diff(os:timestamp(), Start) div 1000000 of
+        N when MyName == LastUPI,
+               N >= ?REPAIR_START_STABILITY_TIME ->
+            {WorkerPid, _Ref} = spawn_monitor(RepairFun),
+            S#ch_mgr{repair_worker=WorkerPid,
+                     repair_start=os:timestamp(),
+                     repair_final_status=undefined};
+        _ ->
+            S
+    end;
+perhaps_start_repair(S) ->
+    S.
+
+do_repair(
+  #ch_mgr{name=MyName,
+          proj=#projection_v1{upi=UPI,
+                              repairing=[_|_]=Repairing,
+                              members_dict=MembersDict}}=_S_copy,
+  Opts, ap_mode=RepairMode) ->
+    T1 = os:timestamp(),
+    RepairId = proplists:get_value(repair_id, Opts, id1),
+    error_logger:info_msg("Repair start: tail ~p of ~p -> ~p, ~p ID ~w\n",
+                          [MyName, UPI, Repairing, RepairMode, RepairId]),
+
+    ETS = ets:new(repair_stats, [private, set]),
+    ETS_T_Keys = [t_in_files, t_in_chunks, t_in_bytes,
+                  t_out_files, t_out_chunks, t_out_bytes,
+                  t_bad_chunks, t_elapsed_seconds],
+    [ets:insert(ETS, {K, 0}) || K <- ETS_T_Keys],
+
+    Res = machi_chain_repair:repair(ap_mode, MyName, Repairing, UPI,
+                                    MembersDict, ETS, Opts),
+    T2 = os:timestamp(),
+    Elapsed = (timer:now_diff(T2, T1) div 1000) / 1000,
+    ets:insert(ETS, {t_elapsed_seconds, Elapsed}),
+    Summary = case Res of ok -> "success";
+                          _  -> "FAILURE"
+              end,
+    Stats = [{K, ets:lookup_element(ETS, K, 2)} || K <- ETS_T_Keys],
+    error_logger:info_msg("Repair ~s: tail ~p of ~p finished ~p repair ID ~w: "
+                          "~w\nStats ~w\n",
+                          [Summary, MyName, UPI, RepairMode, RepairId,
+                           Res, Stats]),
+    ets:delete(ETS),
+    exit({repair_final_status, Res}).
+
+sanitize_repair_state(#ch_mgr{repair_final_status=Res,
+                              proj=#projection_v1{upi=[_|_]}}=S)
+  when Res /= undefined ->
+    S#ch_mgr{repair_worker=undefined, repair_start=undefined,
+             repair_final_status=undefined};
+sanitize_repair_state(S) ->
+    S.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

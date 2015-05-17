@@ -29,7 +29,7 @@
 
 -record(p_srvr, {
           name            :: pv1_server(),
-          proto = 'ipv4'  :: 'ipv4' | 'disterl', % disterl? Hrm.
+          proto_mod = 'machi_flu1_client' :: atom(), % Module name
           address         :: term(), % Protocol-specific
           port            :: term(), % Protocol-specific
           props = []      :: list()  % proplist for other related info
@@ -57,5 +57,9 @@
 -define(MACHI_DEFAULT_TCP_PORT, 50000).
 
 -define(SHA_MAX, (1 bsl (20*8))).
+
+%% Set a limit to the maximum chain length, so that it's easier to
+%% create a consistent projection ranking score.
+-define(MAX_CHAIN_LENGTH, 64).
 
 -endif. % !MACHI_PROJECTION_HRL

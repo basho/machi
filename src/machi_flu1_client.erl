@@ -28,6 +28,7 @@
 -export([
          %% File API
          append_chunk/4, append_chunk/5,
+         append_chunk_extra/5, append_chunk_extra/6,
          read_chunk/5, read_chunk/6,
          checksum_list/3, checksum_list/4,
          list_files/2, list_files/3,
@@ -42,7 +43,10 @@
          list_all_projections/2, list_all_projections/3,
 
          %% Common API
-         quit/1
+         quit/1,
+
+         %% Connection management API
+         connected_p/1, connect/1, disconnect/1
         ]).
 %% For "internal" replication only.
 -export([
@@ -68,6 +72,7 @@
 -type file_prefix() :: binary() | list().
 -type inet_host()   :: inet:ip_address() | inet:hostname().
 -type inet_port()   :: inet:port_number().
+-type port_wrap()   :: {w,atom(),term()}.
 -type projection()      :: #projection_v1{}.
 -type projection_type() :: 'public' | 'private'.
 
@@ -76,10 +81,10 @@
 %% @doc Append a chunk (binary- or iolist-style) of data to a file
 %% with `Prefix'.
 
--spec append_chunk(port(), epoch_id(), file_prefix(), chunk()) ->
+-spec append_chunk(port_wrap(), epoch_id(), file_prefix(), chunk()) ->
       {ok, chunk_pos()} | {error, error_general()} | {error, term()}.
 append_chunk(Sock, EpochID, Prefix, Chunk) ->
-    append_chunk2(Sock, EpochID, Prefix, Chunk).
+    append_chunk2(Sock, EpochID, Prefix, Chunk, 0).
 
 %% @doc Append a chunk (binary- or iolist-style) of data to a file
 %% with `Prefix'.
@@ -88,16 +93,50 @@ append_chunk(Sock, EpochID, Prefix, Chunk) ->
                    epoch_id(), file_prefix(), chunk()) ->
       {ok, chunk_pos()} | {error, error_general()} | {error, term()}.
 append_chunk(Host, TcpPort, EpochID, Prefix, Chunk) ->
-    Sock = machi_util:connect(Host, TcpPort),
+    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
-        append_chunk2(Sock, EpochID, Prefix, Chunk)
+        append_chunk2(Sock, EpochID, Prefix, Chunk, 0)
     after
-        catch gen_tcp:close(Sock)
+        disconnect(Sock)
+    end.
+
+%% @doc Append a chunk (binary- or iolist-style) of data to a file
+%% with `Prefix' and also request an additional `Extra' bytes.
+%%
+%% For example, if the `Chunk' size is 1 KByte and `Extra' is 4K Bytes, then
+%% the file offsets that follow `Chunk''s position for the following 4K will
+%% be reserved by the file sequencer for later write(s) by the
+%% `write_chunk()' API.
+
+-spec append_chunk_extra(port_wrap(), epoch_id(), file_prefix(), chunk(), chunk_size()) ->
+      {ok, chunk_pos()} | {error, error_general()} | {error, term()}.
+append_chunk_extra(Sock, EpochID, Prefix, Chunk, ChunkExtra)
+  when is_integer(ChunkExtra), ChunkExtra >= 0 ->
+    append_chunk2(Sock, EpochID, Prefix, Chunk, ChunkExtra).
+
+%% @doc Append a chunk (binary- or iolist-style) of data to a file
+%% with `Prefix' and also request an additional `Extra' bytes.
+%%
+%% For example, if the `Chunk' size is 1 KByte and `Extra' is 4K Bytes, then
+%% the file offsets that follow `Chunk''s position for the following 4K will
+%% be reserved by the file sequencer for later write(s) by the
+%% `write_chunk()' API.
+
+-spec append_chunk_extra(inet_host(), inet_port(),
+                   epoch_id(), file_prefix(), chunk(), chunk_size()) ->
+      {ok, chunk_pos()} | {error, error_general()} | {error, term()}.
+append_chunk_extra(Host, TcpPort, EpochID, Prefix, Chunk, ChunkExtra)
+  when is_integer(ChunkExtra), ChunkExtra >= 0 ->
+    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
+    try
+        append_chunk2(Sock, EpochID, Prefix, Chunk, ChunkExtra)
+    after
+        disconnect(Sock)
     end.
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
--spec read_chunk(port(), epoch_id(), file_name(), file_offset(), chunk_size()) ->
+-spec read_chunk(port_wrap(), epoch_id(), file_name(), file_offset(), chunk_size()) ->
       {ok, chunk_s()} |
       {error, error_general() | 'no_such_file' | 'partial_read'} |
       {error, term()}.
@@ -114,20 +153,20 @@ read_chunk(Sock, EpochID, File, Offset, Size)
       {error, term()}.
 read_chunk(Host, TcpPort, EpochID, File, Offset, Size)
   when Offset >= ?MINIMUM_OFFSET, Size >= 0 ->
-    Sock = machi_util:connect(Host, TcpPort),
+    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
         read_chunk2(Sock, EpochID, File, Offset, Size)
     after
-        catch gen_tcp:close(Sock)
+        disconnect(Sock)
     end.
 
 %% @doc Fetch the list of chunk checksums for `File'.
 
--spec checksum_list(port(), epoch_id(), file_name()) ->
+-spec checksum_list(port_wrap(), epoch_id(), file_name()) ->
       {ok, [chunk_csum()]} |
       {error, error_general() | 'no_such_file' | 'partial_read'} |
       {error, term()}.
-checksum_list(Sock, EpochID, File) when is_port(Sock) ->
+checksum_list(Sock, EpochID, File) ->
     checksum_list2(Sock, EpochID, File).
 
 %% @doc Fetch the list of chunk checksums for `File'.
@@ -136,18 +175,18 @@ checksum_list(Sock, EpochID, File) when is_port(Sock) ->
       {ok, [chunk_csum()]} |
       {error, error_general() | 'no_such_file'} | {error, term()}.
 checksum_list(Host, TcpPort, EpochID, File) when is_integer(TcpPort) ->
-    Sock = machi_util:connect(Host, TcpPort),
+    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
         checksum_list2(Sock, EpochID, File)
     after
-        catch gen_tcp:close(Sock)
+        disconnect(Sock)
     end.
 
 %% @doc Fetch the list of all files on the remote FLU.
 
--spec list_files(port(), epoch_id()) ->
+-spec list_files(port_wrap(), epoch_id()) ->
       {ok, [file_info()]} | {error, term()}.
-list_files(Sock, EpochID) when is_port(Sock) ->
+list_files(Sock, EpochID) ->
     list2(Sock, EpochID).
 
 %% @doc Fetch the list of all files on the remote FLU.
@@ -155,19 +194,19 @@ list_files(Sock, EpochID) when is_port(Sock) ->
 -spec list_files(inet_host(), inet_port(), epoch_id()) ->
       {ok, [file_info()]} | {error, term()}.
 list_files(Host, TcpPort, EpochID) when is_integer(TcpPort) ->
-    Sock = machi_util:connect(Host, TcpPort),
+    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
         list2(Sock, EpochID)
     after
-        catch gen_tcp:close(Sock)
+        disconnect(Sock)
     end.
 
 %% @doc Fetch the wedge status from the remote FLU.
 
--spec wedge_status(port()) ->
+-spec wedge_status(port_wrap()) ->
       {ok, {boolean(), pv1_epoch()}} | {error, term()}.
 
-wedge_status(Sock) when is_port(Sock) ->
+wedge_status(Sock) ->
     wedge_status2(Sock).
 
 %% @doc Fetch the wedge status from the remote FLU.
@@ -175,16 +214,16 @@ wedge_status(Sock) when is_port(Sock) ->
 -spec wedge_status(inet_host(), inet_port()) ->
       {ok, {boolean(), pv1_epoch()}} | {error, term()}.
 wedge_status(Host, TcpPort) when is_integer(TcpPort) ->
-    Sock = machi_util:connect(Host, TcpPort),
+    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
         wedge_status2(Sock)
     after
-        catch gen_tcp:close(Sock)
+        disconnect(Sock)
     end.
 
 %% @doc Get the latest epoch number + checksum from the FLU's projection store.
 
--spec get_latest_epoch(port(), projection_type()) ->
+-spec get_latest_epoch(port_wrap(), projection_type()) ->
       {ok, epoch_id()} | {error, term()}.
 get_latest_epoch(Sock, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
@@ -197,16 +236,16 @@ get_latest_epoch(Sock, ProjType)
       {ok, epoch_id()} | {error, term()}.
 get_latest_epoch(Host, TcpPort, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
-    Sock = machi_util:connect(Host, TcpPort),
+    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
         get_latest_epoch2(Sock, ProjType)
     after
-        catch gen_tcp:close(Sock)
+        disconnect(Sock)
     end.
 
 %% @doc Get the latest projection from the FLU's projection store for `ProjType'
 
--spec read_latest_projection(port(), projection_type()) ->
+-spec read_latest_projection(port_wrap(), projection_type()) ->
       {ok, projection()} | {error, not_written} | {error, term()}.
 read_latest_projection(Sock, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
@@ -219,17 +258,17 @@ read_latest_projection(Sock, ProjType)
       {ok, projection()} | {error, not_written} | {error, term()}.
 read_latest_projection(Host, TcpPort, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
-    Sock = machi_util:connect(Host, TcpPort),
+    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
         read_latest_projection2(Sock, ProjType)
     after
-        catch gen_tcp:close(Sock)
+        disconnect(Sock)
     end.
 
 %% @doc Read a projection `Proj' of type `ProjType'.
 
--spec read_projection(port(), projection_type(), epoch_num()) ->
-      {ok, projection()} | {error, written} | {error, term()}.
+-spec read_projection(port_wrap(), projection_type(), epoch_num()) ->
+      {ok, projection()} | {error, not_written} | {error, term()}.
 read_projection(Sock, ProjType, Epoch)
   when ProjType == 'public' orelse ProjType == 'private' ->
     read_projection2(Sock, ProjType, Epoch).
@@ -238,19 +277,19 @@ read_projection(Sock, ProjType, Epoch)
 
 -spec read_projection(inet_host(), inet_port(),
                        projection_type(), epoch_num()) ->
-      {ok, projection()} | {error, written} | {error, term()}.
+      {ok, projection()} | {error, not_written} | {error, term()}.
 read_projection(Host, TcpPort, ProjType, Epoch)
   when ProjType == 'public' orelse ProjType == 'private' ->
-    Sock = machi_util:connect(Host, TcpPort),
+    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
         read_projection2(Sock, ProjType, Epoch)
     after
-        catch gen_tcp:close(Sock)
+        disconnect(Sock)
     end.
 
 %% @doc Write a projection `Proj' of type `ProjType'.
 
--spec write_projection(port(), projection_type(), projection()) ->
+-spec write_projection(port_wrap(), projection_type(), projection()) ->
       'ok' | {error, written} | {error, term()}.
 write_projection(Sock, ProjType, Proj)
   when ProjType == 'public' orelse ProjType == 'private',
@@ -265,16 +304,16 @@ write_projection(Sock, ProjType, Proj)
 write_projection(Host, TcpPort, ProjType, Proj)
   when ProjType == 'public' orelse ProjType == 'private',
        is_record(Proj, projection_v1) ->
-    Sock = machi_util:connect(Host, TcpPort),
+    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
         write_projection2(Sock, ProjType, Proj)
     after
-        catch gen_tcp:close(Sock)
+        disconnect(Sock)
     end.
 
 %% @doc Get all projections from the FLU's projection store.
 
--spec get_all_projections(port(), projection_type()) ->
+-spec get_all_projections(port_wrap(), projection_type()) ->
       {ok, [projection()]} | {error, term()}.
 get_all_projections(Sock, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
@@ -287,16 +326,16 @@ get_all_projections(Sock, ProjType)
       {ok, [projection()]} | {error, term()}.
 get_all_projections(Host, TcpPort, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
-    Sock = machi_util:connect(Host, TcpPort),
+    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
         get_all_projections2(Sock, ProjType)
     after
-        catch gen_tcp:close(Sock)
+        disconnect(Sock)
     end.
 
 %% @doc Get all epoch numbers from the FLU's projection store.
 
--spec list_all_projections(port(), projection_type()) ->
+-spec list_all_projections(port_wrap(), projection_type()) ->
       {ok, [non_neg_integer()]} | {error, term()}.
 list_all_projections(Sock, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
@@ -309,20 +348,37 @@ list_all_projections(Sock, ProjType)
       {ok, [non_neg_integer()]} | {error, term()}.
 list_all_projections(Host, TcpPort, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
-    Sock = machi_util:connect(Host, TcpPort),
+    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
         list_all_projections2(Sock, ProjType)
     after
-        catch gen_tcp:close(Sock)
+        disconnect(Sock)
     end.
 
 %% @doc Quit &amp; close the connection to remote FLU.
 
--spec quit(port()) ->
+-spec quit(port_wrap()) ->
       ok.
-quit(Sock) when is_port(Sock) ->
-    catch (_ = gen_tcp:send(Sock, <<"QUIT\n">>)),
-    catch gen_tcp:close(Sock),
+quit(Sock) ->
+    catch (_ = w_send(Sock, <<"QUIT\n">>)),
+    disconnect(Sock),
+    ok.
+
+connected_p({w,tcp,Sock}) ->
+    case (catch inet:peername(Sock)) of
+        {ok, _} -> true;
+        _       -> false
+    end;
+connected_p(_) ->
+    false.
+
+connect(#p_srvr{}=P) ->
+    w_connect(P).
+
+disconnect({w,tcp,_Sock}=WS) ->
+    w_close(WS),
+    ok;
+disconnect(_) ->
     ok.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -330,7 +386,7 @@ quit(Sock) when is_port(Sock) ->
 %% @doc Restricted API: Write a chunk of already-sequenced data to
 %% `File' at `Offset'.
 
--spec write_chunk(port(), epoch_id(), file_name(), file_offset(), chunk()) ->
+-spec write_chunk(port_wrap(), epoch_id(), file_name(), file_offset(), chunk()) ->
       ok | {error, error_general()} | {error, term()}.
 write_chunk(Sock, EpochID, File, Offset, Chunk)
   when Offset >= ?MINIMUM_OFFSET ->
@@ -344,19 +400,19 @@ write_chunk(Sock, EpochID, File, Offset, Chunk)
       ok | {error, error_general()} | {error, term()}.
 write_chunk(Host, TcpPort, EpochID, File, Offset, Chunk)
   when Offset >= ?MINIMUM_OFFSET ->
-    Sock = machi_util:connect(Host, TcpPort),
+    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
         write_chunk2(Sock, EpochID, File, Offset, Chunk)
     after
-        catch gen_tcp:close(Sock)
+        disconnect(Sock)
     end.
 
 %% @doc Restricted API: Delete a file after it has been successfully
 %% migrated.
 
--spec delete_migration(port(), epoch_id(), file_name()) ->
+-spec delete_migration(port_wrap(), epoch_id(), file_name()) ->
       ok | {error, error_general() | 'no_such_file'} | {error, term()}.
-delete_migration(Sock, EpochID, File) when is_port(Sock) ->
+delete_migration(Sock, EpochID, File) ->
     delete_migration2(Sock, EpochID, File).
 
 %% @doc Restricted API: Delete a file after it has been successfully
@@ -365,19 +421,19 @@ delete_migration(Sock, EpochID, File) when is_port(Sock) ->
 -spec delete_migration(inet_host(), inet_port(), epoch_id(), file_name()) ->
       ok | {error, error_general() | 'no_such_file'} | {error, term()}.
 delete_migration(Host, TcpPort, EpochID, File) when is_integer(TcpPort) ->
-    Sock = machi_util:connect(Host, TcpPort),
+    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
         delete_migration2(Sock, EpochID, File)
     after
-        catch gen_tcp:close(Sock)
+        disconnect(Sock)
     end.
 
 %% @doc Restricted API: Truncate a file after it has been successfully
 %% erasure coded.
 
--spec trunc_hack(port(), epoch_id(), file_name()) ->
+-spec trunc_hack(port_wrap(), epoch_id(), file_name()) ->
       ok | {error, error_general() | 'no_such_file'} | {error, term()}.
-trunc_hack(Sock, EpochID, File) when is_port(Sock) ->
+trunc_hack(Sock, EpochID, File) ->
     trunc_hack2(Sock, EpochID, File).
 
 %% @doc Restricted API: Truncate a file after it has been successfully
@@ -386,16 +442,16 @@ trunc_hack(Sock, EpochID, File) when is_port(Sock) ->
 -spec trunc_hack(inet_host(), inet_port(), epoch_id(), file_name()) ->
       ok | {error, error_general() | 'no_such_file'} | {error, term()}.
 trunc_hack(Host, TcpPort, EpochID, File) when is_integer(TcpPort) ->
-    Sock = machi_util:connect(Host, TcpPort),
+    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
         trunc_hack2(Sock, EpochID, File)
     after
-        catch gen_tcp:close(Sock)
+        disconnect(Sock)
     end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-append_chunk2(Sock, EpochID, Prefix0, Chunk0) ->
+append_chunk2(Sock, EpochID, Prefix0, Chunk0, ChunkExtra) ->
     erase(bad_sock),
     try
         %% TODO: add client-side checksum to the server's protocol
@@ -405,11 +461,13 @@ append_chunk2(Sock, EpochID, Prefix0, Chunk0) ->
         Len = iolist_size(Chunk0),
         true = (Len =< ?MAX_CHUNK_SIZE),
         {EpochNum, EpochCSum} = EpochID,
-        EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
+        EpochIDHex = machi_util:bin_to_hexstr(
+                       <<EpochNum:(4*8)/big, EpochCSum/binary>>),
         LenHex = machi_util:int_to_hexbin(Len, 32),
-        Cmd = [<<"A ">>, EpochIDRaw, LenHex, Prefix, 10],
-        ok = gen_tcp:send(Sock, [Cmd, Chunk]),
-        {ok, Line} = gen_tcp:recv(Sock, 0),
+        ExtraHex = machi_util:int_to_hexbin(ChunkExtra, 32),
+        Cmd = [<<"A ">>, EpochIDHex, LenHex, ExtraHex, Prefix, 10],
+        ok = w_send(Sock, [Cmd, Chunk]),
+        {ok, Line} = w_recv(Sock, 0),
         PathLen = byte_size(Line) - 3 - 16 - 1 - 1,
         case Line of
             <<"OK ", OffsetHex:16/binary, " ",
@@ -436,21 +494,22 @@ read_chunk2(Sock, EpochID, File0, Offset, Size) ->
     erase(bad_sock),
     try
         {EpochNum, EpochCSum} = EpochID,
-        EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
+        EpochIDHex = machi_util:bin_to_hexstr(
+                       <<EpochNum:(4*8)/big, EpochCSum/binary>>),
         File = machi_util:make_binary(File0),
         PrefixHex = machi_util:int_to_hexbin(Offset, 64),
         SizeHex = machi_util:int_to_hexbin(Size, 32),
-        CmdLF = [$R, 32, EpochIDRaw, PrefixHex, SizeHex, File, 10],
-        ok = gen_tcp:send(Sock, CmdLF),
-        case gen_tcp:recv(Sock, 3) of
+        CmdLF = [$R, 32, EpochIDHex, PrefixHex, SizeHex, File, 10],
+        ok = w_send(Sock, CmdLF),
+        case w_recv(Sock, 3) of
             {ok, <<"OK\n">>} ->
-                {ok, _Chunk}=Res = gen_tcp:recv(Sock, Size),
+                {ok, _Chunk}=Res = w_recv(Sock, Size),
                 Res;
             {ok, Else} ->
-                {ok, OldOpts} = inet:getopts(Sock, [packet]),
-                ok = inet:setopts(Sock, [{packet, line}]),
-                {ok, Else2} = gen_tcp:recv(Sock, 0),
-                ok = inet:setopts(Sock, OldOpts),
+                {ok, OldOpts} = w_getopts(Sock, [packet]),
+                ok = w_setopts(Sock, [{packet, line}]),
+                {ok, Else2} = w_recv(Sock, 0),
+                ok = w_setopts(Sock, OldOpts),
                 case Else of
                     <<"ERA">> ->
                         {error, todo_erasure_coded}; %% escript_cc_parse_ec_info(Sock, Line, Else2);
@@ -485,13 +544,14 @@ read_chunk2(Sock, EpochID, File0, Offset, Size) ->
 list2(Sock, EpochID) ->
     try
         {EpochNum, EpochCSum} = EpochID,
-        EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
-        ok = gen_tcp:send(Sock, [<<"L ">>, EpochIDRaw, <<"\n">>]),
-        ok = inet:setopts(Sock, [{packet, line}]),
-        case gen_tcp:recv(Sock, 0) of
+        EpochIDHex = machi_util:bin_to_hexstr(
+                       <<EpochNum:(4*8)/big, EpochCSum/binary>>),
+        ok = w_send(Sock, [<<"L ">>, EpochIDHex, <<"\n">>]),
+        ok = w_setopts(Sock, [{packet, line}]),
+        case w_recv(Sock, 0) of
             {ok, <<"OK\n">>} ->
-                Res = list3(gen_tcp:recv(Sock, 0), Sock),
-                ok = inet:setopts(Sock, [{packet, raw}]),
+                Res = list3(w_recv(Sock, 0), Sock),
+                ok = w_setopts(Sock, [{packet, raw}]),
                 {ok, Res};
             {ok, <<"ERROR WEDGED\n">>} ->
                 {error, wedged};
@@ -511,19 +571,19 @@ list3({ok, Line}, Sock) ->
     FileLen = byte_size(Line) - 16 - 1 - 1,
     <<SizeHex:16/binary, " ", File:FileLen/binary, _/binary>> = Line,
     Size = machi_util:hexstr_to_int(SizeHex),
-    [{Size, File}|list3(gen_tcp:recv(Sock, 0), Sock)];
+    [{Size, File}|list3(w_recv(Sock, 0), Sock)];
 list3(Else, _Sock) ->
     throw({server_protocol_error, Else}).
 
 wedge_status2(Sock) ->
     try
-        ok = gen_tcp:send(Sock, [<<"WEDGE-STATUS\n">>]),
-        ok = inet:setopts(Sock, [{packet, line}]),
+        ok = w_send(Sock, [<<"WEDGE-STATUS\n">>]),
+        ok = w_setopts(Sock, [{packet, line}]),
         {ok, <<"OK ",
                BooleanHex:2/binary, " ",
                EpochHex:8/binary, " ",
-               CSumHex:40/binary, "\n">>} = gen_tcp:recv(Sock, 0),
-        ok = inet:setopts(Sock, [{packet, raw}]),
+               CSumHex:40/binary, "\n">>} = w_recv(Sock, 0),
+        ok = w_setopts(Sock, [{packet, raw}]),
         Boolean = if BooleanHex == <<"00">> -> false;
                      BooleanHex == <<"01">> -> true
                   end,
@@ -541,16 +601,17 @@ checksum_list2(Sock, EpochID, File) ->
     erase(bad_sock),
     try
         {EpochNum, EpochCSum} = EpochID,
-        EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
-        ok = gen_tcp:send(Sock, [<<"C ">>, EpochIDRaw, File, <<"\n">>]),
-        ok = inet:setopts(Sock, [{packet, line}]),
-        case gen_tcp:recv(Sock, 0) of
+        EpochIDHex = machi_util:bin_to_hexstr(
+                       <<EpochNum:(4*8)/big, EpochCSum/binary>>),
+        ok = w_send(Sock, [<<"C ">>, EpochIDHex, File, <<"\n">>]),
+        ok = w_setopts(Sock, [{packet, line}]),
+        case w_recv(Sock, 0) of
             {ok, <<"OK ", Rest/binary>> = Line} ->
                 put(status, ok),                    % may be unset later
                 RestLen = byte_size(Rest) - 1,
                 <<LenHex:RestLen/binary, _:1/binary>> = Rest,
                 <<Len:64/big>> = machi_util:hexstr_to_bin(LenHex),
-                ok = inet:setopts(Sock, [{packet, raw}]),
+                ok = w_setopts(Sock, [{packet, raw}]),
                 {ok, checksum_list_finish(checksum_list_fast(Sock, Len))};
             {ok, <<"ERROR NO-SUCH-FILE", _/binary>>} ->
                 {error, no_such_file};
@@ -559,7 +620,11 @@ checksum_list2(Sock, EpochID, File) ->
             {ok, <<"ERROR WEDGED", _/binary>>} ->
                 {error, wedged};
             {ok, Else} ->
-                throw({server_protocol_error, Else})
+                throw({server_protocol_error, Else});
+            {error, closed} ->
+                throw({error, closed});
+            Else ->
+                throw(Else)
         end
     catch
         throw:Error ->
@@ -571,11 +636,11 @@ checksum_list2(Sock, EpochID, File) ->
     end.
 
 checksum_list_fast(Sock, 0) ->
-    {ok, <<".\n">> = _Line} = gen_tcp:recv(Sock, 2),
+    {ok, <<".\n">> = _Line} = w_recv(Sock, 2),
     [];
 checksum_list_fast(Sock, Remaining) ->
     Num = erlang:min(Remaining, 1024*1024),
-    {ok, Bytes} = gen_tcp:recv(Sock, Num),
+    {ok, Bytes} = w_recv(Sock, Num),
     [Bytes|checksum_list_fast(Sock, Remaining - byte_size(Bytes))].
 
 checksum_list_finish(Chunks) ->
@@ -599,7 +664,8 @@ write_chunk2(Sock, EpochID, File0, Offset, Chunk0) ->
     erase(bad_sock),
     try
         {EpochNum, EpochCSum} = EpochID,
-        EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
+        EpochIDHex = machi_util:bin_to_hexstr(
+                       <<EpochNum:(4*8)/big, EpochCSum/binary>>),
         %% TODO: add client-side checksum to the server's protocol
         %% _ = machi_util:checksum_chunk(Chunk),
         File = machi_util:make_binary(File0),
@@ -609,10 +675,10 @@ write_chunk2(Sock, EpochID, File0, Offset, Chunk0) ->
         Len = iolist_size(Chunk0),
         true = (Len =< ?MAX_CHUNK_SIZE),
         LenHex = machi_util:int_to_hexbin(Len, 32),
-        Cmd = [<<"W-repl ">>, EpochIDRaw, OffsetHex,
+        Cmd = [<<"W-repl ">>, EpochIDHex, OffsetHex,
                LenHex, File, <<"\n">>],
-        ok = gen_tcp:send(Sock, [Cmd, Chunk]),
-        {ok, Line} = gen_tcp:recv(Sock, 0),
+        ok = w_send(Sock, [Cmd, Chunk]),
+        {ok, Line} = w_recv(Sock, 0),
         PathLen = byte_size(Line) - 3 - 16 - 1 - 1,
         case Line of
             <<"OK\n">> ->
@@ -637,11 +703,12 @@ delete_migration2(Sock, EpochID, File) ->
     erase(bad_sock),
     try
         {EpochNum, EpochCSum} = EpochID,
-        EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
-        Cmd = [<<"DEL-migration ">>, EpochIDRaw, File, <<"\n">>],
-        ok = gen_tcp:send(Sock, Cmd),
-        ok = inet:setopts(Sock, [{packet, line}]),
-        case gen_tcp:recv(Sock, 0) of
+        EpochIDHex = machi_util:bin_to_hexstr(
+                       <<EpochNum:(4*8)/big, EpochCSum/binary>>),
+        Cmd = [<<"DEL-migration ">>, EpochIDHex, File, <<"\n">>],
+        ok = w_send(Sock, Cmd),
+        ok = w_setopts(Sock, [{packet, line}]),
+        case w_recv(Sock, 0) of
             {ok, <<"OK\n">>} ->
                 ok;
             {ok, <<"ERROR NO-SUCH-FILE", _/binary>>} ->
@@ -666,11 +733,12 @@ trunc_hack2(Sock, EpochID, File) ->
     erase(bad_sock),
     try
         {EpochNum, EpochCSum} = EpochID,
-        EpochIDRaw = <<EpochNum:(4*8)/big, EpochCSum/binary>>,
-        Cmd = [<<"TRUNC-hack--- ">>, EpochIDRaw, File, <<"\n">>],
-        ok = gen_tcp:send(Sock, Cmd),
-        ok = inet:setopts(Sock, [{packet, line}]),
-        case gen_tcp:recv(Sock, 0) of
+        EpochIDHex = machi_util:bin_to_hexstr(
+                       <<EpochNum:(4*8)/big, EpochCSum/binary>>),
+        Cmd = [<<"TRUNC-hack--- ">>, EpochIDHex, File, <<"\n">>],
+        ok = w_send(Sock, Cmd),
+        ok = w_setopts(Sock, [{packet, line}]),
+        case w_recv(Sock, 0) of
             {ok, <<"OK\n">>} ->
                 ok;
             {ok, <<"ERROR NO-SUCH-FILE", _/binary>>} ->
@@ -723,18 +791,22 @@ do_projection_common(Sock, ProjCmd) ->
         true = (Len =< ?MAX_CHUNK_SIZE),
         LenHex = machi_util:int_to_hexbin(Len, 32),
         Cmd = [<<"PROJ ">>, LenHex, <<"\n">>],
-        ok = gen_tcp:send(Sock, [Cmd, ProjCmdBin]),
-        ok = inet:setopts(Sock, [{packet, line}]),
-        {ok, Line} = gen_tcp:recv(Sock, 0),
-        case Line of
-            <<"OK ", ResLenHex:8/binary, "\n">> ->
-                ResLen = machi_util:hexstr_to_int(ResLenHex),
-                ok = inet:setopts(Sock, [{packet, raw}]),
-                {ok, ResBin} = gen_tcp:recv(Sock, ResLen),
-                ok = inet:setopts(Sock, [{packet, line}]),
-                binary_to_term(ResBin);
-            Else ->
-                {error, Else}
+        ok = w_send(Sock, [Cmd, ProjCmdBin]),
+        ok = w_setopts(Sock, [{packet, line}]),
+        case w_recv(Sock, 0) of
+            {ok, Line} ->
+                case Line of
+                    <<"OK ", ResLenHex:8/binary, "\n">> ->
+                        ResLen = machi_util:hexstr_to_int(ResLenHex),
+                        ok = w_setopts(Sock, [{packet, raw}]),
+                        {ok, ResBin} = w_recv(Sock, ResLen),
+                        ok = w_setopts(Sock, [{packet, line}]),
+                        binary_to_term(ResBin);
+                    Else ->
+                        {error, Else}
+                end;
+            {error, _} = Bad ->
+                throw(Bad)
         end
     catch
         throw:Error ->
@@ -744,3 +816,43 @@ do_projection_common(Sock, ProjCmd) ->
             put(bad_sock, Sock),
             {error, {badmatch, BadMatch, erlang:get_stacktrace()}}
     end.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+w_connect(#p_srvr{proto_mod=?MODULE, address=Host, port=Port, props=Props})->
+    try
+        case proplists:get_value(session_proto, Props, tcp) of
+            tcp ->
+                Sock = machi_util:connect(Host, Port),
+                {w,tcp,Sock};
+            %% sctp ->
+            %%     %% TODO: not implemented
+            %%     {w,sctp,Sock}
+            ssl ->
+                %% TODO: veryveryuntested
+                SslOptions = proplists:get_value(ssl_options, Props),
+                Sock = machi_util:connect(Port, Port),
+                {ok, SslSock} = ssl:connect(Sock, SslOptions),
+                {w,ssl,SslSock}
+        end
+    catch
+        _:_ ->
+            undefined
+    end.
+
+w_close({w,tcp,Sock}) ->
+    catch gen_tcp:close(Sock),
+    ok.
+
+w_recv({w,tcp,Sock}, Amt) ->
+    gen_tcp:recv(Sock, Amt).
+
+w_send({w,tcp,Sock}, IoData) ->
+    gen_tcp:send(Sock, IoData).
+
+w_getopts({w,tcp,Sock}, Opts) ->
+    inet:getopts(Sock, Opts).
+
+w_setopts({w,tcp,Sock}, Opts) ->
+    inet:setopts(Sock, Opts).
+

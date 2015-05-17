@@ -87,6 +87,23 @@ flu_smoke_test() ->
                                                   ?DUMMY_PV1_EPOCH,
                                                   File1, Off1, Len1*984),
 
+        {ok, {Off1b,Len1b,File1b}} = ?FLU_C:append_chunk(Host, TcpPort,
+                                                         ?DUMMY_PV1_EPOCH,
+                                                         Prefix, Chunk1),
+        Extra = 42,
+        {ok, {Off1c,Len1c,File1c}} = ?FLU_C:append_chunk_extra(Host, TcpPort,
+                                                         ?DUMMY_PV1_EPOCH,
+                                                         Prefix, Chunk1, Extra),
+        {ok, {Off1d,Len1d,File1d}} = ?FLU_C:append_chunk(Host, TcpPort,
+                                                         ?DUMMY_PV1_EPOCH,
+                                                         Prefix, Chunk1),
+        if File1b == File1c, File1c == File1d ->
+                true = (Off1c == Off1b + Len1b),
+                true = (Off1d == Off1c + Len1c + Extra);
+           true ->
+                exit(not_mandatory_but_test_expected_same_file_fixme)
+        end,
+
         Chunk2 = <<"yo yo">>,
         Len2 = byte_size(Chunk2),
         Off2 = ?MINIMUM_OFFSET + 77,
@@ -132,7 +149,7 @@ flu_projection_smoke_test() ->
     FLU1 = setup_test_flu(projection_test_flu, TcpPort, DataDir),
     try
         [begin
-             {ok, {-1,_}} = ?FLU_C:get_latest_epoch(Host, TcpPort, T),
+             {ok, {0,_}} = ?FLU_C:get_latest_epoch(Host, TcpPort, T),
              {error, not_written} =
                  ?FLU_C:read_latest_projection(Host, TcpPort, T),
              {ok, []} = ?FLU_C:list_all_projections(Host, TcpPort, T),

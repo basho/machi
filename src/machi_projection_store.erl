@@ -50,12 +50,13 @@
          get_all_projections/2, get_all_projections/3,
          list_all_projections/2, list_all_projections/3
         ]).
+-export([set_wedge_notify_pid/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--define(NO_EPOCH, {-1,<<0:(20*8)/big>>}).
+-define(NO_EPOCH, ?DUMMY_PV1_EPOCH).
 
 -record(state, {
           public_dir = ""        :: string(),
@@ -148,6 +149,9 @@ list_all_projections(PidSpec, ProjType, Timeout)
   when ProjType == 'public' orelse ProjType == 'private' ->
     g_call(PidSpec, {list_all_projections, ProjType}, Timeout).
 
+set_wedge_notify_pid(PidSpec, NotifyWedgeStateChanges) ->
+    gen_server:call(PidSpec, {set_wedge_notify_pid, NotifyWedgeStateChanges}).
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 g_call(PidSpec, Arg, Timeout) ->
@@ -207,6 +211,8 @@ handle_call({{list_all_projections, ProjType}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
     Dir = pick_path(ProjType, S),
     {reply, {{ok, find_all(Dir)}, LC2}, S};
+handle_call({set_wedge_notify_pid, NotifyWedgeStateChanges}, _From, S) ->
+    {reply, ok, S#state{wedge_notify_pid=NotifyWedgeStateChanges}};
 handle_call(_Request, _From, S) ->
     Reply = whaaaaaaaaaaaaa,
     {reply, Reply, S}.
@@ -258,7 +264,8 @@ do_proj_write(ProjType, #projection_v1{epoch_number=Epoch}=Proj, S) ->
             ok = file:close(FH),
             EffectiveProj = machi_chain_manager1:inner_projection_or_self(Proj),
             EffectiveEpoch = EffectiveProj#projection_v1.epoch_number,
-            EpochId = {EffectiveEpoch, EffectiveProj#projection_v1.epoch_csum},
+            EpochId = {Epoch, Proj#projection_v1.epoch_csum},
+            EffectiveEpochId = {EffectiveEpoch, EffectiveProj#projection_v1.epoch_csum},
             %% 
             NewS = if ProjType == public,
                       Epoch > element(1, S#state.max_public_epoch) ->
@@ -266,7 +273,8 @@ do_proj_write(ProjType, #projection_v1{epoch_number=Epoch}=Proj, S) ->
                                    %% This is a regular projection, i.e.,
                                    %% does not have an inner proj.
                                    update_wedge_state(
-                                     S#state.wedge_notify_pid, true, EpochId);
+                                     S#state.wedge_notify_pid, true,
+                                     EffectiveEpochId);
                               Epoch /= EffectiveEpoch ->
                                    %% This projection has an inner proj.
                                    %% The outer proj is flapping, so we do
@@ -277,7 +285,8 @@ do_proj_write(ProjType, #projection_v1{epoch_number=Epoch}=Proj, S) ->
                       ProjType == private,
                       Epoch > element(1, S#state.max_private_epoch) ->
                            update_wedge_state(
-                                 S#state.wedge_notify_pid, false, EpochId),
+                                 S#state.wedge_notify_pid, false,
+                             EffectiveEpochId),
                            S#state{max_private_epoch=EpochId};
                       true ->
                            S

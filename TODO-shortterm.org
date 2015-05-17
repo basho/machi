@@ -31,20 +31,24 @@ func, and pattern match Erlang style in that func.
 *** DONE Preserve current test code (leave as-is? tiny changes?)
 *** DONE Make chain manager code flexible enough to run "real world" or "sim"
 ** DONE Add projection wedging logic to each FLU.
-** Started.... Implement real data repair, orchestrated by the chain manager
-** TODO Change all protocol ops to enforce the epoch ID
+** DONE Implement real data repair, orchestrated by the chain manager
+** DONE Change all protocol ops to enforce the epoch ID
 
 - Add no-wedging state to make testing easier?
     
-** TODO Move the FLU server to gen_server behavior?
+
+** TODO Adapt the projection-aware, CR-implementing client from demo-day
+** TODO Create parallel PULSE test for basic API plus chain manager repair
 ** TODO Add gproc and get rid of registered name rendezvous
 *** TODO Fixes the atom table leak
 *** TODO Fixes the problem of having active sequencer for the same prefix
          on two FLUS in the same VM
-** TODO Fix all known bugs with Chain Manager
 
+** TODO Fix all known bugs with Chain Manager (list below)
 *** DONE Fix known bugs
 *** DONE Clean up crufty TODO comments and other obvious cruft
 *** TODO Re-add verification step of stable epochs, including inner projections!
 *** TODO Attempt to remove cruft items in flapping_i?
+
+** TODO Move the FLU server to gen_server behavior?
 

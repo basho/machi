@@ -39,10 +39,10 @@ api_smoke_test() ->
     erase(flu_pid),
 
     try
-        I = #p_srvr{name=RegName, proto=ipv4, address=Host, port=TcpPort},
+        I = #p_srvr{name=RegName, address=Host, port=TcpPort},
         {ok, Prox1} = ?MUT:start_link(I),
         try
-            FakeEpoch = {-1, <<0:(20*8)/big>>},
+            FakeEpoch = ?DUMMY_PV1_EPOCH,
             [{ok, {_,_,_}} = ?MUT:append_chunk(Prox1,
                                           FakeEpoch, <<"prefix">>, <<"data">>,
                                           infinity) || _ <- lists:seq(1,5)],
@@ -63,6 +63,11 @@ api_smoke_test() ->
                 ?MUT:append_chunk(Prox1, FakeEpoch, <<"prefix">>, MyChunk,
                                   infinity),
             {ok, MyChunk} = ?MUT:read_chunk(Prox1, FakeEpoch, MyFile, MyOff, MySize),
+            MyChunk2 = <<"my chunk data, yeah, again">>,
+            {ok, {MyOff2,MySize2,MyFile2}} =
+                ?MUT:append_chunk_extra(Prox1, FakeEpoch, <<"prefix">>,
+                                        MyChunk2, 4242, infinity),
+            {ok, MyChunk2} = ?MUT:read_chunk(Prox1, FakeEpoch, MyFile2, MyOff2, MySize2),
 
             %% Alright, now for the rest of the API, whee
             BadFile = <<"no-such-file">>,
