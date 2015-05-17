@@ -99,7 +99,7 @@ repair(ap_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
                          [FLU, mbytes(Bytes)])
                end || FLU <- OurFLUs],
 
-              ?VERB("Make repair directives: "),
+              ?VERB("Execute repair directives: "),
               ok = execute_repair_directives(ConsistencyMode, Ds, Src, EpochID,
                                              Verb, OurFLUs, ProxiesDict, ETS),
               ?VERB(" done\n"),
@@ -348,7 +348,12 @@ execute_repair_directive({File, Cmds}, {ProxiesDict, EpochID, Verb, ETS}=Acc) ->
                           "file ~p offset ~p size ~p: "
                           "expected ~p got ~p\n",
                           [File, Offset, Size, CSum, CSum_now]),
-                        ets:update_counter(ETS, t_bad_chunks, 1),
+                        case ets:update_counter(ETS, t_bad_chunks, 1) of
+                            N when N > 100 ->
+                                throw(todo_wow_so_many_errors_so_verbose);
+                            _ ->
+                                ok
+                        end,
                         Acc2
                 end
         end,

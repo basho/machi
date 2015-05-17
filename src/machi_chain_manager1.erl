@@ -811,11 +811,11 @@ react_to_env_A20(Retries, #ch_mgr{name=MyName}=S) ->
         false when P_latest#projection_v1.epoch_number /= LastComplaint ->
             put(rogue_server_epoch, P_latest#projection_v1.epoch_number),
             Rogue = P_latest#projection_v1.author_server,
-            error_logger:info_msg("Chain manager ~p found latest public "
-                                  "projection ~p has author ~p not a member "
-                                  "of our members list ~p.  Please check "
+            error_logger:info_msg("Chain manager ~w found latest public "
+                                  "projection ~w has author ~w not a member "
+                                  "of our members list ~w.  Please check "
                                   "chain membership on this "
-                                  "rogue chain manager ~p.\n",
+                                  "rogue chain manager ~w.\n",
                                   [S#ch_mgr.name,
                                    P_latest#projection_v1.epoch_number,
                                    Rogue,

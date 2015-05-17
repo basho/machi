@@ -268,7 +268,7 @@ read_latest_projection(Host, TcpPort, ProjType)
 %% @doc Read a projection `Proj' of type `ProjType'.
 
 -spec read_projection(port_wrap(), projection_type(), epoch_num()) ->
-      {ok, projection()} | {error, written} | {error, term()}.
+      {ok, projection()} | {error, not_written} | {error, term()}.
 read_projection(Sock, ProjType, Epoch)
   when ProjType == 'public' orelse ProjType == 'private' ->
     read_projection2(Sock, ProjType, Epoch).
@@ -277,7 +277,7 @@ read_projection(Sock, ProjType, Epoch)
 
 -spec read_projection(inet_host(), inet_port(),
                        projection_type(), epoch_num()) ->
-      {ok, projection()} | {error, written} | {error, term()}.
+      {ok, projection()} | {error, not_written} | {error, term()}.
 read_projection(Host, TcpPort, ProjType, Epoch)
   when ProjType == 'public' orelse ProjType == 'private' ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
