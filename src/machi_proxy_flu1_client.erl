@@ -77,8 +77,6 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--define(FLU_C, machi_flu1_client).
-
 -record(state, {
           i    :: #p_srvr{},
           sock :: 'undefined' | port()
@@ -308,22 +306,30 @@ do_req(Req, S) ->
             {{error, partition}, S2}
     end.
 
-make_req_fun({append_chunk, EpochID, Prefix, Chunk}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:append_chunk(Sock, EpochID, Prefix, Chunk) end;
-make_req_fun({append_chunk_extra, EpochID, Prefix, Chunk, ChunkExtra}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:append_chunk_extra(Sock, EpochID, Prefix, Chunk, ChunkExtra) end;
-make_req_fun({read_chunk, EpochID, File, Offset, Size}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:read_chunk(Sock, EpochID, File, Offset, Size) end;
-make_req_fun({write_chunk, EpochID, File, Offset, Chunk}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:write_chunk(Sock, EpochID, File, Offset, Chunk) end;
-make_req_fun({checksum_list, EpochID, File}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:checksum_list(Sock, EpochID, File) end;
-make_req_fun({list_files, EpochID}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:list_files(Sock, EpochID) end;
-make_req_fun({wedge_status}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:wedge_status(Sock) end;
-make_req_fun({get_epoch_id}, #state{sock=Sock}) ->
-    fun() -> case ?FLU_C:read_latest_projection(Sock, private) of
+make_req_fun({append_chunk, EpochID, Prefix, Chunk},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:append_chunk(Sock, EpochID, Prefix, Chunk) end;
+make_req_fun({append_chunk_extra, EpochID, Prefix, Chunk, ChunkExtra},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:append_chunk_extra(Sock, EpochID, Prefix, Chunk, ChunkExtra) end;
+make_req_fun({read_chunk, EpochID, File, Offset, Size},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:read_chunk(Sock, EpochID, File, Offset, Size) end;
+make_req_fun({write_chunk, EpochID, File, Offset, Chunk},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:write_chunk(Sock, EpochID, File, Offset, Chunk) end;
+make_req_fun({checksum_list, EpochID, File},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:checksum_list(Sock, EpochID, File) end;
+make_req_fun({list_files, EpochID},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:list_files(Sock, EpochID) end;
+make_req_fun({wedge_status},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:wedge_status(Sock) end;
+make_req_fun({get_epoch_id},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> case Mod:read_latest_projection(Sock, private) of
                  {ok, P} ->
                      #projection_v1{epoch_number=Epoch,
                                     epoch_csum=CSum} =
@@ -333,18 +339,24 @@ make_req_fun({get_epoch_id}, #state{sock=Sock}) ->
                      Error
              end
     end;
-make_req_fun({get_latest_epoch, ProjType}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:get_latest_epoch(Sock, ProjType) end;
-make_req_fun({read_latest_projection, ProjType}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:read_latest_projection(Sock, ProjType) end;
-make_req_fun({read_projection, ProjType, Epoch}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:read_projection(Sock, ProjType, Epoch) end;
-make_req_fun({write_projection, ProjType, Proj}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:write_projection(Sock, ProjType, Proj) end;
-make_req_fun({get_all_projections, ProjType}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:get_all_projections(Sock, ProjType) end;
-make_req_fun({list_all_projections, ProjType}, #state{sock=Sock}) ->
-    fun() -> ?FLU_C:list_all_projections(Sock, ProjType) end.
+make_req_fun({get_latest_epoch, ProjType},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:get_latest_epoch(Sock, ProjType) end;
+make_req_fun({read_latest_projection, ProjType},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:read_latest_projection(Sock, ProjType) end;
+make_req_fun({read_projection, ProjType, Epoch},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:read_projection(Sock, ProjType, Epoch) end;
+make_req_fun({write_projection, ProjType, Proj},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:write_projection(Sock, ProjType, Proj) end;
+make_req_fun({get_all_projections, ProjType},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:get_all_projections(Sock, ProjType) end;
+make_req_fun({list_all_projections, ProjType},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:list_all_projections(Sock, ProjType) end.
 
 connected_p(#state{sock=SockMaybe,
                    i=#p_srvr{proto_mod=Mod}=_I}=_S) ->
