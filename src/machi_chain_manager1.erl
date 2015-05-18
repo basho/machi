@@ -466,11 +466,12 @@ cl_read_latest_projection(ProjectionType, AllHosed, S) ->
     {All_queried_list, FLUsRs, S2} =
         read_latest_projection_call_only(ProjectionType, AllHosed, S),
 
-    rank_and_sort_projections_with_extra(All_queried_list, FLUsRs, S2).
+    rank_and_sort_projections_with_extra(All_queried_list, FLUsRs,
+                                         ProjectionType, S2).
 
-rank_and_sort_projections_with_extra(All_queried_list, FLUsRs,
+rank_and_sort_projections_with_extra(All_queried_list, FLUsRs, ProjectionType,
                                      #ch_mgr{name=MyName,proj=CurrentProj}=S) ->
-    UnwrittenRs = [x || {_, error_unwritten} <- FLUsRs],
+    UnwrittenRs = [x || {_, {error, not_written}} <- FLUsRs],
     Ps = [Proj || {_FLU, Proj} <- FLUsRs, is_record(Proj, projection_v1)],
     BadAnswerFLUs = [FLU || {FLU, Answer} <- FLUsRs,
                             not is_record(Answer, projection_v1)],
@@ -489,7 +490,7 @@ rank_and_sort_projections_with_extra(All_queried_list, FLUsRs,
                       {trans_all_hosed, []},
                       {trans_all_flap_counts, []}],
             {not_unanimous, NoneProj, Extra2, S};
-       UnwrittenRs /= [] ->
+       ProjectionType == public, UnwrittenRs /= [] ->
             {needs_repair, FLUsRs, [flarfus], S};
        true ->
             [{_Rank, BestProj}|_] = rank_and_sort_projections(Ps, CurrentProj),
@@ -516,7 +517,7 @@ rank_and_sort_projections_with_extra(All_queried_list, FLUsRs,
     end.
 
 do_read_repair(FLUsRs, _Extra, #ch_mgr{proj=CurrentProj} = S) ->
-    Unwrittens = [x || {_FLU, error_unwritten} <- FLUsRs],
+    Unwrittens = [x || {_FLU, {error, not_written}} <- FLUsRs],
     Ps = [Proj || {_FLU, Proj} <- FLUsRs, is_record(Proj, projection_v1)],
     if Unwrittens == [] orelse Ps == [] ->
             {nothing_to_do, S};
