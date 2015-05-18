@@ -292,8 +292,17 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                   OffsetHex:16/binary, LenHex:8/binary,
                   File:WriteFileLenLF/binary, "\n">> ->
                     _EpochID = decode_epoch_id(EpochIDHex),
+                    %% do_net_server_write(Sock, OffsetHex, LenHex, File, DataDir,
+                    %%                     <<"fixme1">>, false, <<"fixme2">>);
+                    if FluName == a ->
                     do_net_server_write(Sock, OffsetHex, LenHex, File, DataDir,
                                         <<"fixme1">>, false, <<"fixme2">>);
+                       true ->
+                            ok = inet:setopts(Sock, [{packet, raw}]),
+                            Len = machi_util:hexstr_to_int(LenHex),
+                            {ok, Chunk} = gen_tcp:recv(Sock, Len),
+                            ok = gen_tcp:send(Sock, <<"OK\n">>)
+                    end;
                 %% For data migration only.
                 <<"DEL-migration ",
                   EpochIDHex:(?EpochIDSpace)/binary,
@@ -432,6 +441,7 @@ do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin, DataDir,
     <<Len:32/big>> = machi_util:hexstr_to_bin(LenHex),
     {_, Path} = machi_util:make_data_filename(DataDir, FileBin),
     OptsHasWrite = lists:member(write, FileOpts),
+    OptsHasRead = lists:member(read, FileOpts),
     case file:open(Path, FileOpts) of
         {ok, FH} ->
             try
@@ -444,8 +454,9 @@ do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin, DataDir,
               Sock, OffsetHex, LenHex, FileBin, DataDir,
               FileOpts, DoItFun,
               EpochID, Wedged_p, CurrentEpochId);
+        {error, enoent} when OptsHasRead ->
+            ok = gen_tcp:send(Sock, <<"ERROR NO-SUCH-FILE\n">>);
         _Else ->
-            %%%%%% keep?? machi_util:verb("Else ~p ~p ~p ~p\n", [Offset, Len, Path, _Else]),
             ok = gen_tcp:send(Sock, <<"ERROR BAD-IO\n">>)
     end.
 

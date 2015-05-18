@@ -515,8 +515,8 @@ read_chunk2(Sock, EpochID, File0, Offset, Size) ->
                         {error, todo_erasure_coded}; %% escript_cc_parse_ec_info(Sock, Line, Else2);
                     <<"ERR">> ->
                         case Else2 of
-                            <<"OR BAD-IO\n">> ->
-                                {error, no_such_file};
+                            <<"OR NO-SUCH-FILE\n">> ->
+                                {error, not_written};
                             <<"OR NOT-ERASURE\n">> ->
                                 {error, no_such_file};
                             <<"OR BAD-ARG\n">> ->

@@ -279,6 +279,7 @@ handle_cast(_Msg, S) ->
     {noreply, S}.
 
 handle_info(_Info, S) ->
+    io:format(user, "~s:handle_info: ~p\n", [?MODULE, _Info]),
     {noreply, S}.
 
 terminate(_Reason, _S) ->
