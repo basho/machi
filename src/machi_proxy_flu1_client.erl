@@ -59,7 +59,7 @@
 
          %% %% Projection API
          get_epoch_id/1, get_epoch_id/2,
-         get_latest_epoch/2, get_latest_epoch/3,
+         get_latest_epochid/2, get_latest_epochid/3,
          read_latest_projection/2, read_latest_projection/3,
          read_projection/3, read_projection/4,
          write_projection/3, write_projection/4,
@@ -176,13 +176,13 @@ get_epoch_id(PidSpec, Timeout) ->
 
 %% @doc Get the latest epoch number + checksum from the FLU's projection store.
 
-get_latest_epoch(PidSpec, ProjType) ->
-    get_latest_epoch(PidSpec, ProjType, infinity).
+get_latest_epochid(PidSpec, ProjType) ->
+    get_latest_epochid(PidSpec, ProjType, infinity).
 
 %% @doc Get the latest epoch number + checksum from the FLU's projection store.
 
-get_latest_epoch(PidSpec, ProjType, Timeout) ->
-    gen_server:call(PidSpec, {req, {get_latest_epoch, ProjType}},
+get_latest_epochid(PidSpec, ProjType, Timeout) ->
+    gen_server:call(PidSpec, {req, {get_latest_epochid, ProjType}},
                     Timeout).
 
 %% @doc Get the latest projection from the FLU's projection store for `ProjType'
@@ -290,6 +290,9 @@ code_change(_OldVsn, S, _Extra) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 do_req(Req, S) ->
+    do_req(Req, 1, S).
+
+do_req(Req, Depth, S) ->
     S2 = try_connect(S),
     Fun = make_req_fun(Req, S2),
     case connected_p(S2) of
@@ -299,23 +302,25 @@ do_req(Req, S) ->
                     {ok, S2};
                 T when element(1, T) == ok ->
                     {T, S2};
-                {error, {badmatch, {badmatch, {error, Why}}, _Stk}}
-                  when Why == closed; Why == timeout ->
-                    %% TODO: Infinite recursion isn't
-                    %% good. Exponential backoff might be good.
-                    timer:sleep(500),
-                    do_req(Req, disconnect(S2));
-                Else ->
+                %% {error, {badmatch, {badmatch, {error, Why}=TheErr}, _Stk}}
+                %%   when Why == closed; Why == timeout ->
+                %%     do_req_retry(Req, Depth, TheErr, S2);
+                TheErr ->
                     case get(bad_sock) of
                         Bad when Bad == S2#state.sock ->
-                            {Else, disconnect(S2)};
+                            do_req_retry(Req, Depth, TheErr, S2);
                         _ ->
-                            {Else, S2}
+                            {TheErr, S2}
                     end
             end;
         false ->
             {{error, partition}, S2}
     end.
+
+do_req_retry(_Req, 2, Err, S) ->
+    {Err, disconnect(S)};
+do_req_retry(Req, Depth, _Err, S) ->
+    do_req(Req, Depth + 1, try_connect(disconnect(S))).
 
 make_req_fun({append_chunk, EpochID, Prefix, Chunk},
              #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
@@ -350,9 +355,9 @@ make_req_fun({get_epoch_id},
                      Error
              end
     end;
-make_req_fun({get_latest_epoch, ProjType},
+make_req_fun({get_latest_epochid, ProjType},
              #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
-    fun() -> Mod:get_latest_epoch(Sock, ProjType) end;
+    fun() -> Mod:get_latest_epochid(Sock, ProjType) end;
 make_req_fun({read_latest_projection, ProjType},
              #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
     fun() -> Mod:read_latest_projection(Sock, ProjType) end;

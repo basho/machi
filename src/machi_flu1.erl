@@ -763,9 +763,9 @@ do_projection_command(Sock, LenHex, S) ->
             _ = (catch gen_tcp:send(Sock, [<<"ERROR ">>, WHA, <<"\n">>]))
     end.
 
-handle_projection_command({get_latest_epoch, ProjType},
+handle_projection_command({get_latest_epochid, ProjType},
                           #state{proj_store=ProjStore}) ->
-    machi_projection_store:get_latest_epoch(ProjStore, ProjType);
+    machi_projection_store:get_latest_epochid(ProjStore, ProjType);
 handle_projection_command({read_latest_projection, ProjType},
                           #state{proj_store=ProjStore}) ->
     machi_projection_store:read_latest_projection(ProjStore, ProjType);

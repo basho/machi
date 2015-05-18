@@ -378,10 +378,10 @@ todo_why_does_this_crash_sometimes(FLUName, FLU, PPPepoch) ->
     end.
 
 private_projections_are_stable(Namez, PollFunc) ->
-    Private1 = [?FLU_PC:get_latest_epoch(FLU, private) ||
+    Private1 = [?FLU_PC:get_latest_epochid(FLU, private) ||
                    {_Name, FLU} <- Namez],
     PollFunc(5, 1, 10),
-    Private2 = [?FLU_PC:get_latest_epoch(FLU, private) ||
+    Private2 = [?FLU_PC:get_latest_epochid(FLU, private) ||
                    {_Name, FLU} <- Namez],
     true = (Private1 == Private2).
 
