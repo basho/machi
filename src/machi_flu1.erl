@@ -292,17 +292,8 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                   OffsetHex:16/binary, LenHex:8/binary,
                   File:WriteFileLenLF/binary, "\n">> ->
                     _EpochID = decode_epoch_id(EpochIDHex),
-                    %% do_net_server_write(Sock, OffsetHex, LenHex, File, DataDir,
-                    %%                     <<"fixme1">>, false, <<"fixme2">>);
-                    if FluName == a ->
                     do_net_server_write(Sock, OffsetHex, LenHex, File, DataDir,
                                         <<"fixme1">>, false, <<"fixme2">>);
-                       true ->
-                            ok = inet:setopts(Sock, [{packet, raw}]),
-                            Len = machi_util:hexstr_to_int(LenHex),
-                            {ok, Chunk} = gen_tcp:recv(Sock, Len),
-                            ok = gen_tcp:send(Sock, <<"OK\n">>)
-                    end;
                 %% For data migration only.
                 <<"DEL-migration ",
                   EpochIDHex:(?EpochIDSpace)/binary,
