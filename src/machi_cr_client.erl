@@ -261,7 +261,7 @@ handle_call({req, Req}, From, S) ->
 handle_call(quit, _From, S) ->
     {stop, normal, ok, S};
 handle_call(_Request, _From, S) ->
-    Reply = ok,
+    Reply = whaaaaaaaaaaaaaaaaaaaa,
     {reply, Reply, S}.
 
 handle_cast(_Msg, S) ->
@@ -292,7 +292,7 @@ do_append_head(Prefix, Chunk, ChunkExtra, Depth, STime, #state{proj=P}=S) ->
     sleep_a_while(Depth),
     DiffMs = timer:now_diff(os:timestamp(), STime) div 1000,
     if DiffMs > ?MAX_RUNTIME ->
-            {error, partition};
+            {reply, {error, partition}, S};
        true ->
             %% This is suboptimal for performance: there are some paths
             %% through this point where our current projection is good
@@ -345,12 +345,12 @@ do_append_midtail(_RestFLUs, Prefix, File, Offset, Chunk, ChunkExtra,
     sleep_a_while(Depth),
     DiffMs = timer:now_diff(os:timestamp(), STime) div 1000,
     if DiffMs > ?MAX_RUNTIME ->
-            {error, partition};
+            {reply, {error, partition}, S};
        true ->
             S2 = update_proj(S#state{proj=undefined, bad_proj=P}),
             case S2#state.proj of
                 undefined ->
-                    {error, partition};
+                    {reply, {error, partition}, S};
                 P2 ->
                     RestFLUs2 = mutation_flus(P2),
                     case RestFLUs2 -- Ws of
@@ -400,13 +400,13 @@ do_append_midtail2([FLU|RestFLUs]=FLUs, Prefix, File, Offset, Chunk,
 
 do_read_chunk(File, Offset, Size, 0=Depth, STime,
               #state{proj=#projection_v1{upi=[_|_]}}=S) -> % UPI is non-empty
-    do_read_chunk2(File, Offset, Size, Depth, STime, S);
+    do_read_chunk2(File, Offset, Size, Depth + 1, STime, S);
 do_read_chunk(File, Offset, Size, Depth, STime, #state{proj=P}=S) ->
     %% io:format(user, "read sleep1,", []),
     sleep_a_while(Depth),
     DiffMs = timer:now_diff(os:timestamp(), STime) div 1000,
     if DiffMs > ?MAX_RUNTIME ->
-            {error, partition};
+            {reply, {error, partition}, S};
        true ->
             S2 = update_proj(S#state{proj=undefined, bad_proj=P}),
             case S2#state.proj of
@@ -421,8 +421,8 @@ do_read_chunk(File, Offset, Size, Depth, STime, #state{proj=P}=S) ->
 do_read_chunk2(File, Offset, Size, Depth, STime,
                #state{proj=P, epoch_id=EpochID, proxies_dict=PD}=S) ->
     UPI = readonly_flus(P),
-    Head = hd(UPI),
     Tail = lists:last(UPI),
+    ConsistencyMode = P#projection_v1.mode,
     case ?FLU_PC:read_chunk(orddict:fetch(Tail, PD), EpochID,
                             File, Offset, Size, ?TIMEOUT) of
         {ok, Chunk} when byte_size(Chunk) == Size ->
@@ -433,52 +433,84 @@ do_read_chunk2(File, Offset, Size, Depth, STime,
         {error, Retry}
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
             do_read_chunk(File, Offset, Size, Depth, STime, S);
-        {error, not_written} when Tail == Head ->
-            {{error, not_written}, S};
-        {error, not_written} when Tail /= Head ->
-            read_repair(read, File, Offset, Size, Depth, STime, S);
+        {error, not_written} ->
+            read_repair(ConsistencyMode, read, File, Offset, Size, Depth, STime, S);
+            %% {reply, {error, not_written}, S};
         {error, written} ->
             exit({todo_should_never_happen,?MODULE,?LINE,File,Offset,Size})
     end.
 
-read_repair(ReturnMode, File, Offset, Size, 0=Depth, STime,
-            #state{proj=#projection_v1{upi=[_|_]}}=S) -> % UPI is non-empty
-    read_repair2(ReturnMode, File, Offset, Size, Depth, STime, S);
-read_repair(ReturnMode, File, Offset, Size, Depth, STime, #state{proj=P}=S) ->
-    %% io:format(user, "read_repair sleep1,", []),
+%% Read repair: depends on the consistency mode that we're in:
+%%
+%% CP mode: If the head is written, then use it to repair UPI++Repairing.
+%%          If head is not_written, then do nothing.
+%% AP mode: If any FLU in UPI++Repairing is written, then use it to repair
+%%          UPI+repairing.
+%%          If all FLUs in UPI++Repairing are not_written, then do nothing.
+
+read_repair(ConsistencyMode, ReturnMode, File, Offset, Size, 0=Depth,
+          STime, #state{proj=#projection_v1{upi=[_|_]}}=S) -> % UPI is non-empty
+    read_repair2(ConsistencyMode, ReturnMode, File, Offset, Size, Depth + 1,
+                 STime, S);
+read_repair(ConsistencyMode, ReturnMode, File, Offset, Size, Depth,
+            STime, #state{proj=P}=S) ->
     sleep_a_while(Depth),
     DiffMs = timer:now_diff(os:timestamp(), STime) div 1000,
     if DiffMs > ?MAX_RUNTIME ->
-            {error, partition};
+            {reply, {error, partition}, S};
        true ->
             S2 = update_proj(S#state{proj=undefined, bad_proj=P}),
             case S2#state.proj of
                 P2 when P2 == undefined orelse
                         P2#projection_v1.upi == [] ->
-                    read_repair(ReturnMode, File, Offset, Size,
-                                Depth + 1, STime, S2);
+                    read_repair(ConsistencyMode, ReturnMode, File, Offset,
+                                Size, Depth + 1, STime, S2);
                 _ ->
-                    read_repair2(ReturnMode, File, Offset, Size,
-                                 Depth + 1, STime, S2)
+                    read_repair2(ConsistencyMode, ReturnMode, File, Offset,
+                                 Size, Depth + 1, STime, S2)
             end
     end.
 
-read_repair2(ReturnMode, File, Offset, Size, Depth, STime,
+read_repair2(cp_mode=ConsistencyMode,
+             ReturnMode, File, Offset, Size, Depth, STime,
              #state{proj=P, epoch_id=EpochID, proxies_dict=PD}=S) ->
-    [Head|MidsTails] = readonly_flus(P),
-    case ?FLU_PC:read_chunk(orddict:fetch(Head, PD), EpochID,
+    Tail = lists:last(readonly_flus(P)),
+    case ?FLU_PC:read_chunk(orddict:fetch(Tail, PD), EpochID,
                             File, Offset, Size, ?TIMEOUT) of
         {ok, Chunk} when byte_size(Chunk) == Size ->
-            read_repair3(MidsTails, ReturnMode, Chunk, [Head], File, Offset,
+            ToRepair = mutation_flus(P) -- [Tail],
+            read_repair3(ToRepair, ReturnMode, Chunk, [Tail], File, Offset,
                          Size, Depth, STime, S);
         {ok, BadChunk} ->
-            exit({todo, bad_chunk_size, ?MODULE, ?LINE, File, Offset, Size,
-                  got, byte_size(BadChunk)});
+            exit({todo, bad_chunk_size, ?MODULE, ?LINE, File, Offset,
+                  Size, got, byte_size(BadChunk)});
         {error, Retry}
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
-            read_repair(ReturnMode, File, Offset, Size, Depth, STime, S);
+            read_repair(ConsistencyMode, ReturnMode, File, Offset,
+                        Size, Depth, STime, S);
         {error, not_written} ->
-            {{error, not_written}, S};
+            {reply, {error, not_written}, S};
+        {error, written} ->
+            exit({todo_should_never_happen,?MODULE,?LINE,File,Offset,Size})
+    end;
+read_repair2(ap_mode=ConsistencyMode,
+             ReturnMode, File, Offset, Size, Depth, STime,
+             #state{proj=P, epoch_id=EpochID, proxies_dict=PD}=S) ->
+    Eligible = mutation_flus(P),
+    case try_to_find_chunk(Eligible, File, Offset, Size, S) of
+        {ok, Chunk, GotItFrom} when byte_size(Chunk) == Size ->
+            ToRepair = mutation_flus(P) -- [GotItFrom],
+            read_repair3(ToRepair, ReturnMode, Chunk, [GotItFrom], File,
+                         Offset, Size, Depth, STime, S);
+        {ok, BadChunk} ->
+            exit({todo, bad_chunk_size, ?MODULE, ?LINE, File,
+                  Offset, Size, got, byte_size(BadChunk)});
+        {error, Retry}
+          when Retry == partition; Retry == bad_epoch; Retry == wedged ->
+            read_repair(ConsistencyMode, ReturnMode, File,
+                        Offset, Size, Depth, STime, S);
+        {error, not_written} ->
+            {reply, {error, not_written}, S};
         {error, written} ->
             exit({todo_should_never_happen,?MODULE,?LINE,File,Offset,Size})
     end.
@@ -487,27 +519,27 @@ read_repair3([], ReturnMode, Chunk, Repaired, File, Offset,
              Size, Depth, STime, S) ->
     read_repair4([], ReturnMode, Chunk, Repaired, File, Offset,
                  Size, Depth, STime, S);
-read_repair3(MidsTails, ReturnMode, Chunk, Repaired, File, Offset,
+read_repair3(ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
              Size, 0=Depth, STime, S) ->
-    read_repair4(MidsTails, ReturnMode, Chunk, Repaired, File, Offset,
-                  Size, Depth, STime, S);
-read_repair3(MidsTails, ReturnMode, Chunk, File, Repaired, Offset,
+    read_repair4(ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
+                  Size, Depth + 1, STime, S);
+read_repair3(ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
              Size, Depth, STime, #state{proj=P}=S) ->
     %% io:format(user, "read_repair3 sleep1,", []),
     sleep_a_while(Depth),
     DiffMs = timer:now_diff(os:timestamp(), STime) div 1000,
     if DiffMs > ?MAX_RUNTIME ->
-            {error, partition};
+            {reply, {error, partition}, S};
        true ->
             S2 = update_proj(S#state{proj=undefined, bad_proj=P}),
             case S2#state.proj of
                 P2 when P2 == undefined orelse
                         P2#projection_v1.upi == [] ->
-                    read_repair3(MidsTails, ReturnMode, Chunk, Repaired, File,
+                    read_repair3(ToRepair, ReturnMode, Chunk, Repaired, File,
                                  Offset, Size, Depth + 1, STime, S2);
                 P2 ->
-                    MidsTails2 = P2#projection_v1.upi -- Repaired,
-                    read_repair4(MidsTails2, ReturnMode, Chunk, Repaired, File,
+                    ToRepair2 = mutation_flus(P2) -- Repaired,
+                    read_repair4(ToRepair2, ReturnMode, Chunk, Repaired, File,
                                  Offset, Size, Depth + 1, STime, S2)
             end
     end.
@@ -518,7 +550,7 @@ read_repair4([], ReturnMode, Chunk, Repaired, File, Offset,
         read ->
             {reply, {ok, Chunk}, S}
     end;
-read_repair4([First|Rest]=MidsTails, ReturnMode, Chunk, Repaired, File, Offset,
+read_repair4([First|Rest]=ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
              Size, Depth, STime, #state{epoch_id=EpochID, proxies_dict=PD}=S) ->
     Proxy = orddict:fetch(First, PD),
     case ?FLU_PC:write_chunk(Proxy, EpochID, File, Offset, Chunk, ?TIMEOUT) of
@@ -527,7 +559,7 @@ read_repair4([First|Rest]=MidsTails, ReturnMode, Chunk, Repaired, File, Offset,
                          Offset, Size, Depth, STime, S);
         {error, Retry}
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
-            read_repair3(MidsTails, ReturnMode, Chunk, Repaired, File,
+            read_repair3(ToRepair, ReturnMode, Chunk, Repaired, File,
                          Offset, Size, Depth, STime, S);
         {error, written} ->
             %% TODO: To be very paranoid, read the chunk here to verify
@@ -545,22 +577,12 @@ update_proj(S) ->
 
 update_proj2(Count, #state{bad_proj=BadProj, proxies_dict=ProxiesDict}=S) ->
     Timeout = 2*1000,
-    Parent = self(),
+    WTimeout = 2*Timeout,
     Proxies = orddict:to_list(ProxiesDict),
-    MiddleWorker = spawn(
-               fun() ->
-                  PidsMons =
-                      [spawn_monitor(fun() ->
-                                      exit(catch ?FLU_PC:read_latest_projection(
-                                                       Proxy, private, Timeout))
-                                      end) || {_K, Proxy} <- Proxies],
-                  Rs = gather_worker_statuses(PidsMons, Timeout*2),
-                  Parent ! {res, self(), Rs},
-                  exit(normal)
-               end),
-    Rs = receive {res, MiddleWorker, Results} -> Results
-         after Timeout*2 -> []
-         end,
+    Work = fun({_K, Proxy}) ->
+                   ?FLU_PC:read_latest_projection(Proxy, private, Timeout)
+           end,
+    Rs = run_middleworker_job(Work, Proxies, WTimeout),
     %% TODO: There's a possible bug here when running multiple independent
     %% Machi clusters/chains.  If our chain used to be [a,b], but our
     %% sysadmin has changed our cluster to be [a] and a completely seprate
@@ -581,6 +603,26 @@ update_proj2(Count, #state{bad_proj=BadProj, proxies_dict=ProxiesDict}=S) ->
             update_proj2(Count + 1, S)
     end.
 
+run_middleworker_job(Fun, ArgList, WTimeout) ->
+    Parent = self(),
+    MiddleWorker =
+        spawn(fun() ->
+                  PidsMons =
+                      [spawn_monitor(fun() ->
+                                             Res = (catch Fun(Arg)),
+                                             exit(Res)
+                                     end) || Arg <- ArgList],
+                      Rs = gather_worker_statuses(PidsMons, WTimeout),
+                      Parent ! {res, self(), Rs},
+                      exit(normal)
+              end),
+    receive
+        {res, MiddleWorker, Results} ->
+            Results
+    after WTimeout+100 ->
+            []
+    end.
+
 gather_worker_statuses([], _Timeout) ->
     [];
 gather_worker_statuses([{Pid,Ref}|Rest], Timeout) ->
@@ -599,6 +641,34 @@ choose_best_proj(Rs) ->
                    (_, BestEpoch) ->
                         BestEpoch
                 end, WorstEpoch, Rs).
+
+try_to_find_chunk(Eligible, File, Offset, Size,
+                  #state{proj=P, epoch_id=EpochID, proxies_dict=PD}=S) ->
+    Timeout = 2*1000,
+    Work = fun(FLU) ->
+                   Proxy = orddict:fetch(FLU, PD),
+                   case ?FLU_PC:read_chunk(Proxy, EpochID,
+                                           File, Offset, Size) of
+                       {ok, Chunk} when byte_size(Chunk) == Size ->
+                           {FLU, {ok, Chunk}};
+                       Else ->
+                           {FLU, Else}
+                   end
+           end,
+    Rs = run_middleworker_job(Work, Eligible, Timeout),
+    case [X || {_, {ok, B}}=X <- Rs, is_binary(B)] of
+        [{FoundFLU, {ok, Chunk}}|_] ->
+            {ok, Chunk, FoundFLU};
+        [] ->
+            RetryErrs = [partition, bad_epoch, wedged],
+            case [Err || {error, Err} <- Rs, lists:member(Err, RetryErrs)] of
+                [SomeErr|_] ->
+                    {error, SomeErr};
+                [] ->
+                    %% TODO does this really work 100% of the time?
+                    {error, not_written}
+            end
+    end.
 
 mutation_flus(#projection_v1{upi=UPI, repairing=Repairing}) ->
     UPI ++ Repairing;
