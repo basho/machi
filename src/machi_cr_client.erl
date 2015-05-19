@@ -519,17 +519,17 @@ read_repair4([First|Rest]=MidsTails, ReturnMode, Chunk, Repaired, File, Offset,
     Proxy = orddict:fetch(First, PD),
     case ?FLU_PC:write_chunk(Proxy, EpochID, File, Offset, Chunk, ?TIMEOUT) of
         ok ->
-            read_repair4(Rest, ReturnMode, Chunk, Repaired, File, Offset,
-                         Size, Depth, STime, S);
+            read_repair4(Rest, ReturnMode, Chunk, [First|Repaired], File,
+                         Offset, Size, Depth, STime, S);
         {error, Retry}
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
-            read_repair3(MidsTails, ReturnMode, Chunk, Repaired, File, Offset,
-                         Size, Depth, STime, S);
+            read_repair3(MidsTails, ReturnMode, Chunk, Repaired, File,
+                         Offset, Size, Depth, STime, S);
         {error, written} ->
             %% TODO: To be very paranoid, read the chunk here to verify
             %% that it is exactly our Chunk.
-            read_repair4(Rest, ReturnMode, Chunk, Repaired, File, Offset,
-                         Size, Depth, STime, S);
+            read_repair4(Rest, ReturnMode, Chunk, Repaired, File,
+                         Offset, Size, Depth, STime, S);
         {error, not_written} ->
             exit({todo_should_never_happen,?MODULE,?LINE,File,Offset,Size})
     end.
