@@ -20,8 +20,6 @@
 
 -module(machi_cr_client_test).
 
--behaviour(gen_server).
-
 -include("machi.hrl").
 -include("machi_projection.hrl").
 
@@ -66,7 +64,7 @@ smoke_test() ->
                   end,
         _ = lists:foldl(
               fun(_, [{c,[a,b,c]}]=Acc) -> Acc;
-                 (_, Acc)  ->
+                 (_, _Acc)  ->
                       TickAll(),                % has some sleep time inside
                       Xs = [begin
                                 {ok, Prj} = machi_projection_store:read_latest_projection(PStore, private),
@@ -120,6 +118,13 @@ smoke_test() ->
         [{X,{ok, Chunk2}} = {X,machi_flu1_client:read_chunk(
                                  Host, PortBase+X, EpochID,
                                  File1, FooOff2, Size2)} || X <- [0,1,2] ],
+
+        %% Misc API smoke
+        %% Checksum lists are 3-tuples
+        {ok, [{_,_,_}|_]} = machi_cr_client:checksum_list(C1, File1),
+        {error, no_such_file} = machi_cr_client:checksum_list(C1, <<"!!!!">>),
+        %% Exactly one file right now
+        {ok, [_]} = machi_cr_client:list_files(C1),
 
         ok
     after

@@ -20,6 +20,28 @@
 
 %% @doc Erlang API for the Machi client-implemented Chain Replication
 %% (CORFU-style) protocol.
+%%
+%% The major operation processing is implemented in a state machine-like
+%% manner.  Before attempting an operation `X', there's an initial
+%% operation `pre-X' that takes care of updating the epoch id,
+%% restarting client protocol proxies, and if there's any server
+%% instability (e.g. some server is wedged), then insert some sleep
+%% time.  When the chain appears to have stabilized, then we try the `X'
+%% operation again.
+%%
+%% Function name for the `pre-X' stuff is usually `X()', and the
+%% function name for the `X' stuff is usually `X2()'.  (I.e., the `X'
+%% stuff follows after `pre-X' and therefore has a `2' suffix on the
+%% function name.)
+%%
+%% In the case of read repair, there are two stages: find the value to
+%% perform the repair, then perform the repair writes.  In the case of
+%% the repair writes, the `pre-X' function is named `read_repair3()',
+%% and the `X' function is named `read_repair4()'.
+%%
+%% TODO: It would be nifty to lift the very-nearly-but-not-quite-boilerplate
+%% of the `pre-X' functions into a single common function ... but I'm not
+%% sure yet on how to do it without making the code uglier.
 
 -module(machi_cr_client).
 
@@ -39,25 +61,11 @@
          append_chunk/3, append_chunk/4,
          append_chunk_extra/4, append_chunk_extra/5,
          read_chunk/4, read_chunk/5,
-%%          checksum_list/3, checksum_list/4,
-%%          list_files/2, list_files/3,
-%%          wedge_status/1, wedge_status/2,
+         checksum_list/2, checksum_list/3,
+         list_files/1, list_files/2,
 
-%%          %% %% Projection API
-%%          get_epoch_id/1, get_epoch_id/2,
-%%          get_latest_epoch/2, get_latest_epoch/3,
-%%          read_latest_projection/2, read_latest_projection/3,
-%%          read_projection/3, read_projection/4,
-%%          write_projection/3, write_projection/4,
-%%          get_all_projections/2, get_all_projections/3,
-%%          list_all_projections/2, list_all_projections/3,
-
-%%          %% Common API
-%%          quit/1,
-
-%%          %% Internal API
-%%          write_chunk/5, write_chunk/6
-         noop/0
+         %% Common API
+         quit/1
         ]).
 
 %% gen_server callbacks
@@ -121,133 +129,33 @@ read_chunk(PidSpec, File, Offset, Size, Timeout) ->
     gen_server:call(PidSpec, {req, {read_chunk, File, Offset, Size}},
                     Timeout).
 
-%% %% @doc Fetch the list of chunk checksums for `File'.
+%% @doc Fetch the list of chunk checksums for `File'.
 
-%% checksum_list(PidSpec, EpochID, File) ->
-%%     checksum_list(PidSpec, EpochID, File, infinity).
+checksum_list(PidSpec, File) ->
+    checksum_list(PidSpec, File, infinity).
 
-%% %% @doc Fetch the list of chunk checksums for `File'.
+%% @doc Fetch the list of chunk checksums for `File'.
 
-%% checksum_list(PidSpec, EpochID, File, Timeout) ->
-%%     gen_server:call(PidSpec, {req, {checksum_list, EpochID, File}},
-%%                     Timeout).
+checksum_list(PidSpec, File, Timeout) ->
+    gen_server:call(PidSpec, {req, {checksum_list, File}},
+                    Timeout).
 
-%% %% @doc Fetch the list of all files on the remote FLU.
+%% @doc Fetch the list of all files on the remote FLU.
 
-%% list_files(PidSpec, EpochID) ->
-%%     list_files(PidSpec, EpochID, infinity).
+list_files(PidSpec) ->
+    list_files(PidSpec, infinity).
 
-%% %% @doc Fetch the list of all files on the remote FLU.
+%% @doc Fetch the list of all files on the remote FLU.
 
-%% list_files(PidSpec, EpochID, Timeout) ->
-%%     gen_server:call(PidSpec, {req, {list_files, EpochID}},
-%%                     Timeout).
+list_files(PidSpec, Timeout) ->
+    gen_server:call(PidSpec, {req, {list_files}},
+                    Timeout).
 
-%% %% @doc Fetch the wedge status from the remote FLU.
+%% @doc Quit &amp; close the connection to remote FLU and stop our
+%% proxy process.
 
-%% wedge_status(PidSpec) ->
-%%     wedge_status(PidSpec, infinity).
-
-%% %% @doc Fetch the wedge status from the remote FLU.
-
-%% wedge_status(PidSpec, Timeout) ->
-%%     gen_server:call(PidSpec, {req, {wedge_status}},
-%%                     Timeout).
-
-%% %% @doc Get the `epoch_id()' of the FLU's current/latest projection.
-
-%% get_epoch_id(PidSpec) ->
-%%     get_epoch_id(PidSpec, infinity).
-
-%% %% @doc Get the `epoch_id()' of the FLU's current/latest projection.
-
-%% get_epoch_id(PidSpec, Timeout) ->
-%%     gen_server:call(PidSpec, {req, {get_epoch_id}}, Timeout).
-
-%% %% @doc Get the latest epoch number + checksum from the FLU's projection store.
-
-%% get_latest_epoch(PidSpec, ProjType) ->
-%%     get_latest_epoch(PidSpec, ProjType, infinity).
-
-%% %% @doc Get the latest epoch number + checksum from the FLU's projection store.
-
-%% get_latest_epoch(PidSpec, ProjType, Timeout) ->
-%%     gen_server:call(PidSpec, {req, {get_latest_epoch, ProjType}},
-%%                     Timeout).
-
-%% %% @doc Get the latest projection from the FLU's projection store for `ProjType'
-
-%% read_latest_projection(PidSpec, ProjType) ->
-%%     read_latest_projection(PidSpec, ProjType, infinity).
-
-%% %% @doc Get the latest projection from the FLU's projection store for `ProjType'
-
-%% read_latest_projection(PidSpec, ProjType, Timeout) ->
-%%     gen_server:call(PidSpec, {req, {read_latest_projection, ProjType}},
-%%                     Timeout).
-
-%% %% @doc Read a projection `Proj' of type `ProjType'.
-
-%% read_projection(PidSpec, ProjType, Epoch) ->
-%%     read_projection(PidSpec, ProjType, Epoch, infinity).
-
-%% %% @doc Read a projection `Proj' of type `ProjType'.
-
-%% read_projection(PidSpec, ProjType, Epoch, Timeout) ->
-%%     gen_server:call(PidSpec, {req, {read_projection, ProjType, Epoch}},
-%%                     Timeout).
-
-%% %% @doc Write a projection `Proj' of type `ProjType'.
-
-%% write_projection(PidSpec, ProjType, Proj) ->
-%%     write_projection(PidSpec, ProjType, Proj, infinity).
-
-%% %% @doc Write a projection `Proj' of type `ProjType'.
-
-%% write_projection(PidSpec, ProjType, Proj, Timeout) ->
-%%     gen_server:call(PidSpec, {req, {write_projection, ProjType, Proj}},
-%%                     Timeout).
-
-%% %% @doc Get all projections from the FLU's projection store.
-
-%% get_all_projections(PidSpec, ProjType) ->
-%%     get_all_projections(PidSpec, ProjType, infinity).
-
-%% %% @doc Get all projections from the FLU's projection store.
-
-%% get_all_projections(PidSpec, ProjType, Timeout) ->
-%%     gen_server:call(PidSpec, {req, {get_all_projections, ProjType}},
-%%                     Timeout).
-
-%% %% @doc Get all epoch numbers from the FLU's projection store.
-
-%% list_all_projections(PidSpec, ProjType) ->
-%%     list_all_projections(PidSpec, ProjType, infinity).
-
-%% %% @doc Get all epoch numbers from the FLU's projection store.
-
-%% list_all_projections(PidSpec, ProjType, Timeout) ->
-%%     gen_server:call(PidSpec, {req, {list_all_projections, ProjType}},
-%%                     Timeout).
-
-%% %% @doc Quit &amp; close the connection to remote FLU and stop our
-%% %% proxy process.
-
-%% quit(PidSpec) ->
-%%     gen_server:call(PidSpec, quit, infinity).
-
-%% %% @doc Write a chunk (binary- or iolist-style) of data to a file
-%% %% with `Prefix' at `Offset'.
-
-%% write_chunk(PidSpec, EpochID, File, Offset, Chunk) ->
-%%     write_chunk(PidSpec, EpochID, File, Offset, Chunk, infinity).
-
-%% %% @doc Write a chunk (binary- or iolist-style) of data to a file
-%% %% with `Prefix' at `Offset'.
-
-%% write_chunk(PidSpec, EpochID, File, Offset, Chunk, Timeout) ->
-%%     gen_server:call(PidSpec, {req, {write_chunk, EpochID, File, Offset, Chunk}},
-%%                     Timeout).
+quit(PidSpec) ->
+    gen_server:call(PidSpec, quit, infinity).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -283,7 +191,11 @@ code_change(_OldVsn, S, _Extra) ->
 handle_call2({append_chunk_extra, Prefix, Chunk, ChunkExtra}, _From, S) ->
     do_append_head(Prefix, Chunk, ChunkExtra, 0, os:timestamp(), S);
 handle_call2({read_chunk, File, Offset, Size}, _From, S) ->
-    do_read_chunk(File, Offset, Size, 0, os:timestamp(), S).
+    do_read_chunk(File, Offset, Size, 0, os:timestamp(), S);
+handle_call2({checksum_list, File}, _From, S) ->
+    do_checksum_list(File, 0, os:timestamp(), S);
+handle_call2({list_files}, _From, S) ->
+    do_list_files(0, os:timestamp(), S).
 
 do_append_head(Prefix, Chunk, ChunkExtra, 0=Depth, STime, S) ->
     do_append_head2(Prefix, Chunk, ChunkExtra, Depth + 1, STime, S);
@@ -392,7 +304,8 @@ do_append_midtail2([FLU|RestFLUs]=FLUs, Prefix, File, Offset, Chunk,
         {error, written} ->
             %% We know what the chunk ought to be, so jump to the
             %% middle of read-repair.
-            read_repair3(FLUs, {append}, Chunk, [], File, Offset,
+            Resume = {append, Offset, iolist_size(Chunk), File},
+            read_repair3(FLUs, Resume, Chunk, [], File, Offset,
                          iolist_size(Chunk), Depth, STime, S);
         {error, not_written} ->
             exit({todo_should_never_happen,?MODULE,?LINE,File,Offset})
@@ -495,7 +408,7 @@ read_repair2(cp_mode=ConsistencyMode,
     end;
 read_repair2(ap_mode=ConsistencyMode,
              ReturnMode, File, Offset, Size, Depth, STime,
-             #state{proj=P, epoch_id=EpochID, proxies_dict=PD}=S) ->
+             #state{proj=P}=S) ->
     Eligible = mutation_flus(P),
     case try_to_find_chunk(Eligible, File, Offset, Size, S) of
         {ok, Chunk, GotItFrom} when byte_size(Chunk) == Size ->
@@ -544,11 +457,14 @@ read_repair3(ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
             end
     end.
 
-read_repair4([], ReturnMode, Chunk, Repaired, File, Offset,
-             Size, Depth, STime, S) ->
+read_repair4([], ReturnMode, Chunk, _Repaired, File, Offset,
+             _IgnoreSize, _Depth, _STime, S) ->
+    %% TODO: add stats for # of repairs, length(_Repaired)-1, etc etc?
     case ReturnMode of
         read ->
-            {reply, {ok, Chunk}, S}
+            {reply, {ok, Chunk}, S};
+        {append, Offset, Size, File} ->
+            {reply, {ok, {Offset, Size, File}}, S}
     end;
 read_repair4([First|Rest]=ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
              Size, Depth, STime, #state{epoch_id=EpochID, proxies_dict=PD}=S) ->
@@ -568,6 +484,76 @@ read_repair4([First|Rest]=ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
                          Offset, Size, Depth, STime, S);
         {error, not_written} ->
             exit({todo_should_never_happen,?MODULE,?LINE,File,Offset,Size})
+    end.
+
+do_checksum_list(File, 0=Depth, STime, S) ->
+    do_checksum_list2(File, Depth + 1, STime, S);
+do_checksum_list(File, Depth, STime, #state{proj=P}=S) ->
+    sleep_a_while(Depth),
+    DiffMs = timer:now_diff(os:timestamp(), STime) div 1000,
+    if DiffMs > ?MAX_RUNTIME ->
+            {reply, {error, partition}, S};
+       true ->
+            %% This is suboptimal for performance: there are some paths
+            %% through this point where our current projection is good
+            %% enough.  But we're going to try to keep the code as simple
+            %% as we can for now.
+            S2 = update_proj(S#state{proj=undefined, bad_proj=P}),
+            case S2#state.proj of
+                P2 when P2 == undefined orelse
+                        P2#projection_v1.upi == [] ->
+                    do_checksum_list(File, Depth + 1, STime, S2);
+                _ ->
+                    do_checksum_list2(File, Depth + 1, STime, S2)
+            end
+    end.
+
+do_checksum_list2(File, Depth, STime,
+                  #state{epoch_id=EpochID, proj=P, proxies_dict=PD}=S) ->
+    Proxy = orddict:fetch(lists:last(readonly_flus(P)), PD),
+    case ?FLU_PC:checksum_list(Proxy, EpochID, File, ?TIMEOUT) of
+        {ok, _}=OK ->
+            {reply, OK, S};
+        {error, Retry}
+          when Retry == partition; Retry == bad_epoch; Retry == wedged ->
+            do_checksum_list(File, Depth, STime, S);
+        {error, _}=Error ->
+            {reply, Error, S}
+    end.
+
+do_list_files(0=Depth, STime, S) ->
+    do_list_files2(Depth + 1, STime, S);
+do_list_files(Depth, STime, #state{proj=P}=S) ->
+    sleep_a_while(Depth),
+    DiffMs = timer:now_diff(os:timestamp(), STime) div 1000,
+    if DiffMs > ?MAX_RUNTIME ->
+            {reply, {error, partition}, S};
+       true ->
+            %% This is suboptimal for performance: there are some paths
+            %% through this point where our current projection is good
+            %% enough.  But we're going to try to keep the code as simple
+            %% as we can for now.
+            S2 = update_proj(S#state{proj=undefined, bad_proj=P}),
+            case S2#state.proj of
+                P2 when P2 == undefined orelse
+                        P2#projection_v1.upi == [] ->
+                    do_list_files(Depth + 1, STime, S2);
+                _ ->
+                    do_list_files2(Depth + 1, STime, S2)
+            end
+    end.
+
+do_list_files2(Depth, STime,
+                  #state{epoch_id=EpochID, proj=P, proxies_dict=PD}=S) ->
+    Proxy = orddict:fetch(lists:last(readonly_flus(P)), PD),
+    case ?FLU_PC:list_files(Proxy, EpochID, ?TIMEOUT) of
+        {ok, _}=OK ->
+            {reply, OK, S};
+        {error, Retry}
+          when Retry == partition; Retry == bad_epoch; Retry == wedged ->
+            do_list_files(Depth, STime, S);
+        {error, _}=Error ->
+            {reply, Error, S}
     end.
 
 update_proj(#state{proj=undefined}=S) ->
@@ -643,7 +629,7 @@ choose_best_proj(Rs) ->
                 end, WorstEpoch, Rs).
 
 try_to_find_chunk(Eligible, File, Offset, Size,
-                  #state{proj=P, epoch_id=EpochID, proxies_dict=PD}=S) ->
+                  #state{epoch_id=EpochID, proxies_dict=PD}) ->
     Timeout = 2*1000,
     Work = fun(FLU) ->
                    Proxy = orddict:fetch(FLU, PD),
@@ -686,6 +672,3 @@ sleep_a_while(1) ->
     ok;
 sleep_a_while(Depth) ->
     timer:sleep(30 + trunc(math:pow(1.9, Depth))).
-
-noop() ->
-    ok.
