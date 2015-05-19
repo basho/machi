@@ -39,6 +39,7 @@ func, and pattern match Erlang style in that func.
 
 ** TODO Adapt the projection-aware, CR-implementing client from demo-day
 ** TODO Add major comment sections to the CR-impl client
+** TODO Add client-side vs. server-side checksum type, expand client API?
 ** TODO Create parallel PULSE test for basic API plus chain manager repair
 ** TODO Add gproc and get rid of registered name rendezvous
 *** TODO Fixes the atom table leak

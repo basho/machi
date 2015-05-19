@@ -140,7 +140,7 @@ append_chunk_extra(Host, TcpPort, EpochID, Prefix, Chunk, ChunkExtra)
 
 -spec read_chunk(port_wrap(), epoch_id(), file_name(), file_offset(), chunk_size()) ->
       {ok, chunk_s()} |
-      {error, error_general() | 'no_such_file' | 'partial_read'} |
+      {error, error_general() | 'not_written' | 'partial_read'} |
       {error, term()}.
 read_chunk(Sock, EpochID, File, Offset, Size)
   when Offset >= ?MINIMUM_OFFSET, Size >= 0 ->
@@ -151,7 +151,7 @@ read_chunk(Sock, EpochID, File, Offset, Size)
 -spec read_chunk(inet_host(), inet_port(), epoch_id(),
                  file_name(), file_offset(), chunk_size()) ->
       {ok, chunk_s()} |
-      {error, error_general() | 'no_such_file' | 'partial_read'} |
+      {error, error_general() | 'not_written' | 'partial_read'} |
       {error, term()}.
 read_chunk(Host, TcpPort, EpochID, File, Offset, Size)
   when Offset >= ?MINIMUM_OFFSET, Size >= 0 ->
@@ -291,7 +291,7 @@ read_projection(Host, TcpPort, ProjType, Epoch)
 %% @doc Write a projection `Proj' of type `ProjType'.
 
 -spec write_projection(port_wrap(), projection_type(), projection()) ->
-      'ok' | {error, written} | {error, term()}.
+      'ok' | {error, 'written'} | {error, term()}.
 write_projection(Sock, ProjType, Proj)
   when ProjType == 'public' orelse ProjType == 'private',
        is_record(Proj, projection_v1) ->
@@ -301,7 +301,7 @@ write_projection(Sock, ProjType, Proj)
 
 -spec write_projection(inet_host(), inet_port(),
                        projection_type(), projection()) ->
-      'ok' | {error, written} | {error, term()}.
+      'ok' | {error, 'written'} | {error, term()}.
 write_projection(Host, TcpPort, ProjType, Proj)
   when ProjType == 'public' orelse ProjType == 'private',
        is_record(Proj, projection_v1) ->
@@ -518,7 +518,9 @@ read_chunk2(Sock, EpochID, File0, Offset, Size) ->
                             <<"OR NO-SUCH-FILE\n">> ->
                                 {error, not_written};
                             <<"OR NOT-ERASURE\n">> ->
-                                {error, no_such_file};
+                                %% {error, no_such_file};
+                                %% Ignore the fact that the file doesn't exist.
+                                {error, not_written};
                             <<"OR BAD-ARG\n">> ->
                                 {error, bad_arg};
                             <<"OR PARTIAL-READ\n">> ->

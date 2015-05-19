@@ -390,8 +390,12 @@ do_append_midtail2([FLU|RestFLUs]=FLUs, Prefix, File, Offset, Chunk,
             do_append_midtail(FLUs, Prefix, File, Offset, Chunk,
                               ChunkExtra, Ws, Depth, STime, S);
         {error, written} ->
-            exit({todo,read_repair,?MODULE,?LINE,File,Offset,iolist_size(Chunk)})
-        %% TODO return values here
+            %% We know what the chunk ought to be, so jump to the
+            %% middle of read-repair.
+            read_repair3(FLUs, {append}, Chunk, [], File, Offset,
+                         iolist_size(Chunk), Depth, STime, S);
+        {error, not_written} ->
+            exit({todo_should_never_happen,?MODULE,?LINE,File,Offset})
     end.
 
 do_read_chunk(File, Offset, Size, 0=Depth, STime,
@@ -422,7 +426,7 @@ do_read_chunk2(File, Offset, Size, Depth, STime,
     case ?FLU_PC:read_chunk(orddict:fetch(Tail, PD), EpochID,
                             File, Offset, Size, ?TIMEOUT) of
         {ok, Chunk} when byte_size(Chunk) == Size ->
-            {{ok, Chunk}, S};
+            {reply, {ok, Chunk}, S};
         {ok, BadChunk} ->
             exit({todo, bad_chunk_size, ?MODULE, ?LINE, File, Offset, Size,
                   got, byte_size(BadChunk)});

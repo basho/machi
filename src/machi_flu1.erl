@@ -193,8 +193,15 @@ run_listen_server(#state{flu_name=FluName, tcp_port=TcpPort}=S) ->
     register(make_listener_regname(FluName), self()),
     SockOpts = [{reuseaddr, true},
                 {mode, binary}, {active, false}, {packet, line}],
-    {ok, LSock} = gen_tcp:listen(TcpPort, SockOpts),
-    listen_server_loop(LSock, S).
+    case gen_tcp:listen(TcpPort, SockOpts) of
+        {ok, LSock} ->
+            listen_server_loop(LSock, S);
+        Else ->
+            error_logger:warning_msg("~s:run_listen_server: "
+                                     "listen to TCP port ~w: ~w\n",
+                                     [?MODULE, TcpPort, Else]),
+            exit({?MODULE, run_listen_server, tcp_port, TcpPort, Else})
+    end.
 
 run_append_server(FluPid, AckPid, #state{flu_name=Name,
                                          wedged=Wedged_p,epoch_id=EpochId}=S) ->
