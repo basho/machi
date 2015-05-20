@@ -39,7 +39,7 @@ func, and pattern match Erlang style in that func.
 
 ** DONE Adapt the projection-aware, CR-implementing client from demo-day
 ** DONE Add major comment sections to the CR-impl client
-** TODO Simple basho_bench driver, put some unscientific chalk on the benchtop
+** DONE Simple basho_bench driver, put some unscientific chalk on the benchtop
 ** TODO Create parallel PULSE test for basic API plus chain manager repair
 ** TODO Add client-side vs. server-side checksum type, expand client API?
 ** TODO Add gproc and get rid of registered name rendezvous
