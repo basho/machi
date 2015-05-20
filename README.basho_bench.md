@@ -225,7 +225,7 @@ So, without a lot of context about the **Machi system** or about the
 **basho_bench system** or about the ops being performed, here is an
 example graph that was created by R:
 
-![](basho.github.io/machi/images/basho_bench.example0.png)
+![](https://basho.github.io/machi/images/basho_bench.example0.png)
 
 **Without context??*  How do I remember the context?
 
