@@ -34,6 +34,7 @@
          make_projection_filename/2,
          read_max_filenum/2, increment_max_filenum/2,
          info_msg/2, verb/1, verb/2,
+         mbytes/1,
          %% TCP protocol helpers
          connect/2, connect/3
         ]).
@@ -230,6 +231,11 @@ verb(Fmt, Args) ->
         {ok, true} -> io:format(Fmt, Args);
         _          -> ok
     end.
+
+mbytes(0) ->
+    "0.0";
+mbytes(Size) ->
+    lists:flatten(io_lib:format("~.1.0f", [max(0.1, Size / (1024*1024))])).
 
 %% @doc Log an 'info' level message.
 
