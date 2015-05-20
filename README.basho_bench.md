@@ -254,5 +254,5 @@ Machi](https://github.com/basho/machi/issues) ... use the green "New
 issue" button.  There are bugs and misfeatures in the `basho_bench`
 plugin, sorry, but please help us fix them.
 
-> -Scott Lystig Fritchie
+> -Scott Lystig Fritchie,
 > Machi Team @ Basho
