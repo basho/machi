@@ -20,6 +20,42 @@
 
 %% @doc Supervisor for Machi FLU servers and their related support
 %% servers.
+%%
+%% Our parent supervisor, {@link machi_flu_sup}, is responsible for
+%% managing FLUs as a single entity.  However, the actual
+%% implementation of a FLU includes three major Erlang processes (not
+%% including support/worker procs): the FLU itself, the FLU's
+%% projection store, and the FLU's local chain manager.  This
+%% supervisor is responsible for managing those three major services
+%% as a single "package", to be started &amp; stopped together.
+%%
+%% The illustration below shows the OTP process supervision tree for
+%% the Machi application.  Two FLUs are running, called `a' and `b'.
+%% The chain is configured for a third FLU, `c', which is not running
+%% at this time.
+%%
+%% <img src="/machi/{@docRoot}/images/supervisor-2flus.png"></img>
+%%
+%% <ul>
+%% <li> The FLU process itself is named `a'.
+%% </li>
+%% <li> The projection store process is named `a_pstore'.
+%% </li>
+%% <li> The chain manager process is named `a_chmgr'.  The three
+%%      linked subprocesses are long-lived {@link
+%%      machi_proxy_flu1_client} processes for communicating to all
+%%      chain participants' projection stores (including the local
+%%      store `a_pstore').
+%% </li>
+%% <li> A fourth major process, `a_listener', which is responsible for
+%%      listening on a TCP socket and creating new connections.
+%%      Currently, each listener has two processes handling incoming
+%%      requests, one from each chain manager proxy.
+%% </li>
+%% <li> Note that the sub-supervisor parent of `a' and `a_listener' does
+%%      not have a registered name.
+%% </li>
+%% </ul>
 
 -module(machi_flu_psup).
 

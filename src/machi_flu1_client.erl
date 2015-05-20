@@ -19,6 +19,34 @@
 %% -------------------------------------------------------------------
 
 %% @doc Erlang API for the Machi FLU TCP protocol version 1.
+%%
+%% This client API handles low-level PDU serialization/deserialization
+%% and low-level TCP session management, e.g. open, receive, write,
+%% close.  The API for higher-level session management and Machi state
+%% management can be found in {@link machi_proxy_flu1_client} and
+%% {@link machi_cr_client}.
+%%
+%% TODO This EDoc was written first, and the EDoc and also `-type' and
+%% `-spec' definitions for {@link machi_proxy_flu1_client} and {@link
+%% machi_cr_client} must be improved.
+%%
+%% === Protocol origins ===
+%%
+%% The protocol implemented here is an artisanal, hand-crafted, silly
+%% thing that was very quick to put together for a "demo day" proof of
+%% concept.  It will almost certainly be replaced with something else,
+%% both in terms of wire format and better code separation of
+%% serialization/deserialization vs. network transport management,
+%% etc.
+%%
+%% For the moment, this module implements a rudimentary TCP-based
+%% protocol as the sole supported access method to the server,
+%% sequencer, and projection store.  Conceptually, those three
+%% services are independent and ought to have their own protocols.  As
+%% a practical matter, there is no need for wire protocol
+%% compatibility.  Furthermore, from the perspective of failure
+%% detection, it is very convenient that all three FLU-related
+%% services are accessed using the same single TCP port.
 
 -module(machi_flu1_client).
 

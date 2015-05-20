@@ -22,11 +22,13 @@
 %%
 %% This API is gen_server-style message passing, intended for use
 %% within a single Erlang node to glue together the projection store
-%% server with the node-local process that implements Machi's TCP
+%% server with the node-local process that implements Machi's FLU
 %% client access protocol (on the "server side" of the TCP connection).
 %%
 %% All Machi client access to the projection store SHOULD NOT use this
-%% module's API.
+%% module's API.  Instead, clients should access indirectly via {@link
+%% machi_cr_client}, {@link machi_proxy_flu1_client}, or {@link
+%% machi_flu1_client}.
 %%
 %% The projection store is implemented by an Erlang/OTP `gen_server'
 %% process that is associated with each FLU.  Conceptually, the

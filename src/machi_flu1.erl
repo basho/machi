@@ -26,7 +26,18 @@
 %% primitive file server process vs. the larger Machi design of a FLU
 %% as a sequencer + file server + chain manager group of processes.
 %%
-%% For the moment, this module also implements a rudimentary TCP-based
+%% The FLU is named after the CORFU server "FLU" or "FLash Unit" server.
+%%
+%% === Protocol origins ===
+%%
+%% The protocol implemented here is an artisanal, hand-crafted, silly
+%% thing that was very quick to put together for a "demo day" proof of
+%% concept.  It will almost certainly be replaced with something else,
+%% both in terms of wire format and better code separation of
+%% serialization/deserialization vs. network transport management,
+%% etc.
+%%
+%% For the moment, this module implements a rudimentary TCP-based
 %% protocol as the sole supported access method to the server,
 %% sequencer, and projection store.  Conceptually, those three
 %% services are independent and ought to have their own protocols.  As
@@ -35,7 +46,7 @@
 %% detection, it is very convenient that all three FLU-related
 %% services are accessed using the same single TCP port.
 %%
-%% The FLU is named after the CORFU server "FLU" or "FLash Unit" server.
+%% === TODO items ===
 %%
 %% TODO There is a major missing feature in this FLU implementation:
 %% there is no "write-once" enforcement for any position in a Machi
@@ -53,7 +64,7 @@
 %% replication/chain repair.
 %%
 %% TODO Section 4.2 ("The Sequencer") says that the sequencer must
-%% change its file assignments to new & unique names whenever we move
+%% change its file assignments to new &amp; unique names whenever we move
 %% to wedge state.  This is not yet implemented.  In the current
 %% Erlang process scheme (which will probably be changing soon), a
 %% simple implementation would stop all existing processes that are

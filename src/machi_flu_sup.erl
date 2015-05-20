@@ -20,6 +20,9 @@
 
 %% @doc Supervisor for Machi FLU servers and their related support
 %% servers.
+%%
+%% See {@link machi_flu_psup} for an illustration of the entire Machi
+%% application process structure.
 
 -module(machi_flu_sup).
 

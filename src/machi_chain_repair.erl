@@ -18,22 +18,65 @@
 %%
 %% -------------------------------------------------------------------
 
-%% @doc Erlang API for the Machi FLU TCP protocol version 1, with a
-%% proxy-process style API for hiding messy details such as TCP
-%% connection/disconnection with the remote Machi server.
+%% @doc Perform "chain repair", i.e., resynchronization of Machi file
+%% contents and metadata as servers are (re-)added to the chain.
 %%
-%% Machi is intentionally avoiding using distributed Erlang for
-%% Machi's communication.  This design decision makes Erlang-side code
-%% more difficult &amp; complex, but it's the price to pay for some
-%% language independence.  Later in Machi's life cycle, we need to
-%% (re-)implement some components in a non-Erlang/BEAM-based language.
+%% The implementation here is a very basic one, and is probably a bit
+%% slower than the original "demo day" implementation at
+%% [https://github.com/basho/machi/blob/master/prototype/demo-day-hack/file0_repair_server.escript]
 %%
-%% This module implements a "man in the middle" proxy between the
-%% Erlang client and Machi server (which is on the "far side" of a TCP
-%% connection to somewhere).  This proxy process will always execute
-%% on the same Erlang node as the Erlang client that uses it.  The
-%% proxy is intended to be a stable, long-lived process that survives
-%% TCP communication problems with the remote server.
+%% It's so easy to bikeshed this into a 1 year programming exercise.
+%%
+%% General TODO note: There are a lot of areas for exploiting parallelism here.
+%% I've set the bikeshed aside for now, but "make repair faster" has a
+%% lot of room for exploiting concurrency, overlapping reads &amp; writes,
+%% etc etc.  There are also lots of different trade-offs to make with
+%% regard to RAM use vs. disk use.
+%%
+%% There's no reason why repair can't be done:
+%%
+%% <ol>
+%% <li> Repair in parallel across multiple repairees ... Optimization.
+%% </li>
+%% <li> Repair multiple byte ranges concurrently ... Optimization.
+%% </li>
+%% <li> Use bigger chunks than the client originally used to write the file
+%%    ... Optimization ... but it would be the easiest to implement, e.g. use
+%%    constant-sized 4MB chunks.  Unfortuntely, it would also destroy
+%%    the ability to verify here that the chunk checksums are correct
+%%    *and* also propagate the correct checksum metadata to the
+%%    destination FLU.
+%%
+%%    As an additional optimization, add a bit of #2 to start the next
+%%    read while the current write is still in progress.
+%% </li>
+%% <li> The current method centralizes the "smarts" required to compare
+%%    checksum differences ... move some computation to each FLU, then use
+%%    a Merkle- or other-compression-style scheme to reduce the amount of
+%%    data sent across a network.
+%% </li>
+%% </ol>
+%%
+%% Most/all of this could be executed in parallel on each FLU relative to
+%% its own files.  Then, in another TODO option, perhaps build a Merkle tree
+%% or other summary of the local files and send that data structure to the
+%% repair coordinator.
+%%
+%% Also, as another TODO note, repair_both_present() in the
+%% prototype/demo-day code uses an optimization of calculating the MD5
+%% checksum of the chunk checksum data as it arrives, and if the two MD5s
+%% match, then we consider the two files in sync.  If there isn't a match,
+%% then we sort the lines and try another MD5, and if they match, then we're
+%% in sync.  In theory, that's lower overhead than the procedure used here.
+%%
+%% NOTE that one reason I chose the "directives list" method is to have an
+%% option, later, of choosing to repair a subset of repairee FLUs if there
+%% is a big discrepency between out of sync files: e.g., if FLU x has N
+%% bytes out of sync but FLU y has 50N bytes out of sync, then it's likely
+%% better to repair x only so that x can return to the UPI list quickly.
+%% Also, in the event that all repairees are roughly comparably out of sync,
+%% then the repair network traffic can be minimized by reading each chunk
+%% only once.
 
 -module(machi_chain_repair).
 
@@ -138,49 +181,6 @@ get_file_lists(Proxy, FLU_name, D) ->
     lists:foldl(fun({Size, File}, Dict) ->
                            dict:append(File, {FLU_name, Size}, Dict)
                 end, D, Res).
-
-%% Wow, it's so easy to bikeshed this into a 1 year programming exercise.
-%%
-%% TODO: There are a lot of areas for exploiting parallelism here.
-%% I've set the bikeshed aside for now, but "make repair faster" has a
-%% lot of room for exploiting concurrency, overlapping reads & writes,
-%% etc etc.  There are also lots of different trade-offs to make with
-%% regard to RAM use vs. disk use.
-%%
-%% TODO: There's no reason why repair can't be done 1).in parallel
-%% across multiple repairees, and/or 2). with multiple byte ranges in
-%% the same file, and/or 3). with bigger chunks.
-%%
-%% 1. Optimization
-%% 2. Optimization
-%% 3. Optimization, but it would be the easiest to implement, e.g. use
-%%    constant-sized 4MB chunks.  Unfortuntely, it would also destroy
-%%    the ability to verify here that the chunk checksums are correct
-%%    *and* also propagate the correct checksum metadata to the
-%%    destination FLU.
-%%    As an additional optimization, add a bit of #2 to start the next
-%%    read while the current write is still in progress.
-%%
-%% Most/all of this could be executed in parallel on each FLU relative to
-%% its own files.  Then, in another TODO option, perhaps build a Merkle tree
-%% or other summary of the local files & send that data structure to the
-%% repair coordinator.
-%%
-%% Also, as another TODO note, repair_both_present() in the
-%% prototype/demo-day code uses an optimization of calculating the MD5
-%% checksum of the chunk checksum data as it arrives, and if the two MD5s
-%% match, then we consider the two files in sync.  If there isn't a match,
-%% then we sort the lines and try another MD5, and if they match, then we're
-%% in sync.  In theory, that's lower overhead than the procedure used here.
-%%
-%% NOTE that one reason I chose the "directives list" method is to have an
-%% option, later, of choosing to repair a subset of repairee FLUs if there
-%% is a big discrepency between out of sync files: e.g., if FLU x has N
-%% bytes out of sync but FLU y has 50N bytes out of sync, then it's likely
-%% better to repair x only so that x can return to the UPI list quickly.
-%% Also, in the event that all repairees are roughly comparably out of sync,
-%% then the repair network traffic can be minimized by reading each chunk
-%% only once.
 
 make_repair_compare_fun(SrcFLU) ->
     fun({{Offset_X, _Sz_a, _Cs_a, FLU_a}, _N_a},

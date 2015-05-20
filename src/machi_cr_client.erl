@@ -21,6 +21,65 @@
 %% @doc Erlang API for the Machi client-implemented Chain Replication
 %% (CORFU-style) protocol.
 %%
+%% See also the docs for {@link machi_flu1_client} for additional
+%% details on data types and operation descriptions.
+%%
+%% The API here is much simpler than the {@link machi_flu1_client} or
+%% {@link machi_proxy_flu1_client} APIs.  This module's API is a
+%% proposed simple-but-complete form for clients who are not
+%% interested in being an active participant in a Machi cluster and to
+%% have the responsibility for Machi internals, i.e., client-side
+%% Chain Replication, client-side read repair, client-side tracking of
+%% internal Machi epoch &amp; projection changes, etc.
+%%
+%% This client is implemented as a long-lived Erlang process using
+%% `gen_server'-style OTP code practice.  A naive client can expect
+%% that this process will manage all transient TCP session
+%% disconnections and Machi chain reconfigurations.  This client's
+%% efforts are best-effort and can require some time to retry
+%% operations in certain failure cases, i.e., up to several seconds
+%% during a Machi projection &amp; epoch change when a new server is
+%% added to the chain.
+%%
+%% Doc TODO: Once this API stabilizes, add all relevant data type details
+%% to the EDoc here.
+%%
+%%
+%% === Missing API features ===
+%%
+%% So far, there is one missing client API feature that ought to be
+%% added to Machi in the near future: more flexible checksum
+%% management.
+%%
+%% Add a `source' annotation to all checksums to indicate where the
+%% checksum was calculated.  For example,
+%%
+%% <ul>
+%%
+%% <li> Calculated by client that performed the original chunk append,
+%% </li>
+%%
+%% <li> Calculated by the 1st Machi server to receive an
+%%      un-checksummed append request
+%% </li>
+%%
+%% <li> Re-calculated by Machi to manage fewer checksums of blocks of
+%%      data larger than the original client-specified chunks.
+%% </li>
+%% </ul>
+%%
+%% Client-side checksums would be the "strongest" type of
+%% checksum, meaning that any data corruption (of the original
+%% data and/or of the checksum itself) can be detected after the
+%% client-side calculation.  There are too many horror stories on
+%% The Net about IP PDUs that are corrupted but unnoticed due to
+%% weak TCP checksums, buggy hardware, buggy OS drivers, etc.
+%% Checksum versioning is also desirable if/when the current checksum
+%% implementation changes from SHA-1 to something else.
+%%
+%%
+%% === Implementation notes ===
+%%
 %% The major operation processing is implemented in a state machine-like
 %% manner.  Before attempting an operation `X', there's an initial
 %% operation `pre-X' that takes care of updating the epoch id,
@@ -74,6 +133,7 @@
 
 -define(FLU_PC, machi_proxy_flu1_client).
 -define(TIMEOUT, 2*1000).
+-define(DEFAULT_TIMEOUT, 10*1000).
 -define(MAX_RUNTIME, 8*1000).
 
 -record(state, {
@@ -95,7 +155,7 @@ start_link(P_srvr_list) ->
 %% with `Prefix'.
 
 append_chunk(PidSpec, Prefix, Chunk) ->
-    append_chunk(PidSpec, Prefix, Chunk, infinity).
+    append_chunk(PidSpec, Prefix, Chunk, ?DEFAULT_TIMEOUT).
 
 %% @doc Append a chunk (binary- or iolist-style) of data to a file
 %% with `Prefix'.
@@ -108,7 +168,7 @@ append_chunk(PidSpec, Prefix, Chunk, Timeout) ->
 
 append_chunk_extra(PidSpec, Prefix, Chunk, ChunkExtra)
   when is_integer(ChunkExtra), ChunkExtra >= 0 ->
-    append_chunk_extra(PidSpec, Prefix, Chunk, ChunkExtra, infinity).
+    append_chunk_extra(PidSpec, Prefix, Chunk, ChunkExtra, ?DEFAULT_TIMEOUT).
 
 %% @doc Append a chunk (binary- or iolist-style) of data to a file
 %% with `Prefix'.
@@ -118,10 +178,10 @@ append_chunk_extra(PidSpec, Prefix, Chunk, ChunkExtra, Timeout) ->
                                     Chunk, ChunkExtra}},
                     Timeout).
 
-%% %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
+%% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
 read_chunk(PidSpec, File, Offset, Size) ->
-    read_chunk(PidSpec, File, Offset, Size, infinity).
+    read_chunk(PidSpec, File, Offset, Size, ?DEFAULT_TIMEOUT).
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
@@ -132,7 +192,7 @@ read_chunk(PidSpec, File, Offset, Size, Timeout) ->
 %% @doc Fetch the list of chunk checksums for `File'.
 
 checksum_list(PidSpec, File) ->
-    checksum_list(PidSpec, File, infinity).
+    checksum_list(PidSpec, File, ?DEFAULT_TIMEOUT).
 
 %% @doc Fetch the list of chunk checksums for `File'.
 
@@ -143,7 +203,7 @@ checksum_list(PidSpec, File, Timeout) ->
 %% @doc Fetch the list of all files on the remote FLU.
 
 list_files(PidSpec) ->
-    list_files(PidSpec, infinity).
+    list_files(PidSpec, ?DEFAULT_TIMEOUT).
 
 %% @doc Fetch the list of all files on the remote FLU.
 
@@ -155,7 +215,7 @@ list_files(PidSpec, Timeout) ->
 %% proxy process.
 
 quit(PidSpec) ->
-    gen_server:call(PidSpec, quit, infinity).
+    gen_server:call(PidSpec, quit, ?DEFAULT_TIMEOUT).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 

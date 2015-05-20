@@ -722,7 +722,7 @@ rank_and_sort_projections(Ps, CurrentProj) ->
 %%          E+5: author=b, upi=[a,b], repairing=[c,d] (**)
 %%          E+6: author=c, upi=[a,b], repairing=[c,d] (**)
 %%          E+7: author=d, upi=[a,b], repairing=[c,d] (**)
-%%          E+... 6 more (**) epochs when c & d finish their respective repairs.
+%%          E+... 6 more (**) epochs when c &amp; d finish their repairs.
 %%       Ideally, the "(**)" epochs are avoidable churn.
 %%       Perhaps this means that we should change the responsibility
 %%       for repair management to the highest ranking member of the

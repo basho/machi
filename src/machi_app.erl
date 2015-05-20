@@ -18,7 +18,10 @@
 %%
 %% -------------------------------------------------------------------
 
-%% @doc Top-level supervisor for the Machi application.
+%% @doc Start the top-level supervisor for the Machi application.
+%%
+%% See {@link machi_flu_psup} for an illustration of the entire Machi
+%% application process structure.
 
 -module(machi_app).
 

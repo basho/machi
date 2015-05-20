@@ -25,7 +25,7 @@
 %% Machi is intentionally avoiding using distributed Erlang for
 %% Machi's communication.  This design decision makes Erlang-side code
 %% more difficult &amp; complex, but it's the price to pay for some
-%% language independence.  Later in Machi's life cycle, we need to
+%% language independence.  Later in Machi's life cycle, we may (?) need to
 %% (re-)implement some components in a non-Erlang/BEAM-based language.
 %%
 %% This module implements a "man in the middle" proxy between the
@@ -34,6 +34,9 @@
 %% on the same Erlang node as the Erlang client that uses it.  The
 %% proxy is intended to be a stable, long-lived process that survives
 %% TCP communication problems with the remote server.
+%%
+%% For a higher level interface, see {@link machi_cr_client}.
+%% For a lower level interface, see {@link machi_flu1_client}.
 
 -module(machi_proxy_flu1_client).
 
