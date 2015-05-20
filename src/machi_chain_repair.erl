@@ -361,10 +361,8 @@ execute_repair_directive({File, Cmds}, {ProxiesDict, EpochID, Verb, ETS}=Acc) ->
         {L_K, T_K} <- EtsKeys],
     Acc.
 
-mbytes(0) ->
-    "0.0";
-mbytes(Size) ->
-    lists:flatten(io_lib:format("~.1.0f", [max(0.1, Size / (1024*1024))])).
+mbytes(N) ->
+    machi_util:mbytes(N).
 
 -ifdef(TEST).
 

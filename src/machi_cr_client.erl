@@ -135,6 +135,8 @@
 -define(TIMEOUT, 2*1000).
 -define(DEFAULT_TIMEOUT, 10*1000).
 -define(MAX_RUNTIME, 8*1000).
+-define(WORST_PROJ, #projection_v1{epoch_number=-1,epoch_csum= <<>>,
+                                   members_dict=[]}).
 
 -record(state, {
           members_dict    :: p_srvr_dict(),
@@ -636,6 +638,10 @@ update_proj2(Count, #state{bad_proj=BadProj, proxies_dict=ProxiesDict}=S) ->
     %% then it is possible that choose_best_projs() can incorrectly choose
     %% b's projection.
     case choose_best_proj(Rs) of
+        P when P == ?WORST_PROJ ->
+            io:format(user, "TODO: Using ?WORST_PROJ, chain is not available\n", []),
+            sleep_a_while(Count),
+            update_proj2(Count + 1, S);
         P when P >= BadProj ->
             #projection_v1{epoch_number=Epoch, epoch_csum=CSum,
                            members_dict=NewMembersDict} = P,
@@ -680,13 +686,12 @@ gather_worker_statuses([{Pid,Ref}|Rest], Timeout) ->
     end.
 
 choose_best_proj(Rs) ->
-    WorstEpoch = #projection_v1{epoch_number=-1,epoch_csum= <<>>},
-    lists:foldl(fun({ok, NewEpoch}, BestEpoch)
-                      when NewEpoch > BestEpoch ->
-                        NewEpoch;
-                   (_, BestEpoch) ->
-                        BestEpoch
-                end, WorstEpoch, Rs).
+    lists:foldl(fun({ok, NewProj}, BestProj)
+                      when NewProj > BestProj ->
+                        NewProj;
+                   (_, BestProj) ->
+                        BestProj
+                end, ?WORST_PROJ, Rs).
 
 try_to_find_chunk(Eligible, File, Offset, Size,
                   #state{epoch_id=EpochID, proxies_dict=PD}) ->
