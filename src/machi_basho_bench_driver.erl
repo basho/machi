@@ -65,6 +65,7 @@
          }).
 
 -define(ETS_TAB, machi_keys).
+-define(THE_TIMEOUT, 60*1000).
 
 -define(INFO(Str, Args), lager:info(Str, Args)).
 -define(WARN(Str, Args), lager:warning(Str, Args)).
@@ -94,7 +95,7 @@ new(Id) ->
 run(append, KeyGen, ValueGen, #m{conn=Conn}=S) ->
     Prefix = KeyGen(),
     Value = ValueGen(),
-    case machi_cr_client:append_chunk(Conn, Prefix, Value) of
+    case machi_cr_client:append_chunk(Conn, Prefix, Value, ?THE_TIMEOUT) of
         {ok, Pos} ->
             EtsKey = ets:update_counter(?ETS_TAB, max_key, 1),
             true = ets:insert(?ETS_TAB, {EtsKey, Pos}),
@@ -111,12 +112,12 @@ run(read, KeyGen, _ValueGen, #m{conn=Conn, max_key=MaxKey}=S) ->
     Idx = KeyGen() rem MaxKey,
     %% {File, Offset, Size, _CSum} = ets:lookup_element(?ETS_TAB, Idx, 2),
     {File, Offset, Size} = ets:lookup_element(?ETS_TAB, Idx, 2),
-    case machi_cr_client:read_chunk(Conn, File, Offset, Size) of
+    case machi_cr_client:read_chunk(Conn, File, Offset, Size, ?THE_TIMEOUT) of
         {ok, _Chunk} ->
             {ok, S};
         {error, _}=Err ->
             ?ERROR("read file ~p offset ~w size ~w: ~w\n",
-                   [File, Offset, Size]),
+                   [File, Offset, Size, Err]),
             {error, Err, S}
     end.
 
