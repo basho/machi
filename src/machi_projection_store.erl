@@ -43,7 +43,7 @@
 %% API
 -export([
          start_link/3,
-         get_latest_epoch/2, get_latest_epoch/3,
+         get_latest_epochid/2, get_latest_epochid/3,
          read_latest_projection/2, read_latest_projection/3,
          read/3, read/4,
          write/3, write/4,
@@ -62,8 +62,8 @@
           public_dir = ""        :: string(),
           private_dir = ""       :: string(),
           wedge_notify_pid       :: pid() | atom(),
-          max_public_epoch =  ?NO_EPOCH :: {-1 | non_neg_integer(), binary()},
-          max_private_epoch = ?NO_EPOCH :: {-1 | non_neg_integer(), binary()}
+          max_public_epochid =  ?NO_EPOCH :: {-1 | non_neg_integer(), binary()},
+          max_private_epochid = ?NO_EPOCH :: {-1 | non_neg_integer(), binary()}
          }).
 
 %% @doc Start a new projection store server.
@@ -80,15 +80,15 @@ start_link(RegName, DataDir, NotifyWedgeStateChanges) ->
 
 %% @doc Fetch the latest epoch number + checksum for type `ProjType'.
 
-get_latest_epoch(PidSpec, ProjType) ->
-    get_latest_epoch(PidSpec, ProjType, infinity).
+get_latest_epochid(PidSpec, ProjType) ->
+    get_latest_epochid(PidSpec, ProjType, infinity).
 
 %% @doc Fetch the latest epoch number + checksum for type `ProjType'.
 %% projection.
 
-get_latest_epoch(PidSpec, ProjType, Timeout)
+get_latest_epochid(PidSpec, ProjType, Timeout)
   when ProjType == 'public' orelse ProjType == 'private' ->
-    g_call(PidSpec, {get_latest_epoch, ProjType}, Timeout).
+    g_call(PidSpec, {get_latest_epochid, ProjType}, Timeout).
 
 %% @doc Fetch the latest projection record for type `ProjType'.
 
@@ -168,25 +168,27 @@ init([DataDir, NotifyWedgeStateChanges]) ->
     PrivateDir = machi_util:make_projection_filename(DataDir, "private"),
     ok = filelib:ensure_dir(PublicDir ++ "/ignored"),
     ok = filelib:ensure_dir(PrivateDir ++ "/ignored"),
-    MaxPublicEpoch = find_max_epoch(PublicDir),
-    MaxPrivateEpoch = find_max_epoch(PrivateDir),
+    MbEpoch = find_max_epochid(PublicDir),
+    %% MbEpoch = {Mb#projection_v1.epoch_number, Mb#projection_v1.epoch_csum},
+    MvEpoch = find_max_epochid(PrivateDir),
+    %% MvEpoch = {Mv#projection_v1.epoch_number, Mv#projection_v1.epoch_csum},
 
     {ok, #state{public_dir=PublicDir,
                 private_dir=PrivateDir,
                 wedge_notify_pid=NotifyWedgeStateChanges,
-                max_public_epoch=MaxPublicEpoch,
-                max_private_epoch=MaxPrivateEpoch}}.
+                max_public_epochid=MbEpoch,
+                max_private_epochid=MvEpoch}}.
 
-handle_call({{get_latest_epoch, ProjType}, LC1}, _From, S) ->
+handle_call({{get_latest_epochid, ProjType}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
-    EpochId = if ProjType == public  -> S#state.max_public_epoch;
-                 ProjType == private -> S#state.max_private_epoch
+    EpochId = if ProjType == public  -> S#state.max_public_epochid;
+                 ProjType == private -> S#state.max_private_epochid
              end,
     {reply, {{ok, EpochId}, LC2}, S};
 handle_call({{read_latest_projection, ProjType}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),
-    {EpochNum, _CSum} = if ProjType == public  -> S#state.max_public_epoch;
-                           ProjType == private -> S#state.max_private_epoch
+    {EpochNum, _CSum} = if ProjType == public  -> S#state.max_public_epochid;
+                           ProjType == private -> S#state.max_private_epochid
             end,
     {Reply, NewS} = do_proj_read(ProjType, EpochNum, S),
     {reply, {Reply, LC2}, NewS};
@@ -268,7 +270,7 @@ do_proj_write(ProjType, #projection_v1{epoch_number=Epoch}=Proj, S) ->
             EffectiveEpochId = {EffectiveEpoch, EffectiveProj#projection_v1.epoch_csum},
             %% 
             NewS = if ProjType == public,
-                      Epoch > element(1, S#state.max_public_epoch) ->
+                      Epoch > element(1, S#state.max_public_epochid) ->
                            if Epoch == EffectiveEpoch ->
                                    %% This is a regular projection, i.e.,
                                    %% does not have an inner proj.
@@ -281,13 +283,13 @@ do_proj_write(ProjType, #projection_v1{epoch_number=Epoch}=Proj, S) ->
                                    %% not bother wedging.
                                    ok
                            end,
-                           S#state{max_public_epoch=EpochId};
+                           S#state{max_public_epochid=EpochId};
                       ProjType == private,
-                      Epoch > element(1, S#state.max_private_epoch) ->
+                      Epoch > element(1, S#state.max_private_epochid) ->
                            update_wedge_state(
                                  S#state.wedge_notify_pid, false,
                              EffectiveEpochId),
-                           S#state{max_private_epoch=EpochId};
+                           S#state{max_private_epochid=EpochId};
                       true ->
                            S
                    end,
@@ -344,14 +346,14 @@ find_all(Dir) ->
     Fs = filelib:wildcard("*", Dir),
     lists:sort([name2epoch(F) || F <- Fs]).
 
-find_max_epoch(Dir) ->
+find_max_epochid(Dir) ->
     Fs = lists:sort(filelib:wildcard("*", Dir)),
     if Fs == [] ->
             ?NO_EPOCH;
        true ->
             EpochNum = name2epoch(lists:last(Fs)),
             {{ok, Proj}, _} = do_proj_read(proj_type_ignored, EpochNum, Dir),
-            {EpochNum, Proj}
+            {EpochNum, Proj#projection_v1.epoch_csum}
     end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%

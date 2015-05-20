@@ -466,11 +466,12 @@ cl_read_latest_projection(ProjectionType, AllHosed, S) ->
     {All_queried_list, FLUsRs, S2} =
         read_latest_projection_call_only(ProjectionType, AllHosed, S),
 
-    rank_and_sort_projections_with_extra(All_queried_list, FLUsRs, S2).
+    rank_and_sort_projections_with_extra(All_queried_list, FLUsRs,
+                                         ProjectionType, S2).
 
-rank_and_sort_projections_with_extra(All_queried_list, FLUsRs,
+rank_and_sort_projections_with_extra(All_queried_list, FLUsRs, ProjectionType,
                                      #ch_mgr{name=MyName,proj=CurrentProj}=S) ->
-    UnwrittenRs = [x || {_, error_unwritten} <- FLUsRs],
+    UnwrittenRs = [x || {_, {error, not_written}} <- FLUsRs],
     Ps = [Proj || {_FLU, Proj} <- FLUsRs, is_record(Proj, projection_v1)],
     BadAnswerFLUs = [FLU || {FLU, Answer} <- FLUsRs,
                             not is_record(Answer, projection_v1)],
@@ -489,7 +490,7 @@ rank_and_sort_projections_with_extra(All_queried_list, FLUsRs,
                       {trans_all_hosed, []},
                       {trans_all_flap_counts, []}],
             {not_unanimous, NoneProj, Extra2, S};
-       UnwrittenRs /= [] ->
+       ProjectionType == public, UnwrittenRs /= [] ->
             {needs_repair, FLUsRs, [flarfus], S};
        true ->
             [{_Rank, BestProj}|_] = rank_and_sort_projections(Ps, CurrentProj),
@@ -516,7 +517,7 @@ rank_and_sort_projections_with_extra(All_queried_list, FLUsRs,
     end.
 
 do_read_repair(FLUsRs, _Extra, #ch_mgr{proj=CurrentProj} = S) ->
-    Unwrittens = [x || {_FLU, error_unwritten} <- FLUsRs],
+    Unwrittens = [x || {_FLU, {error, not_written}} <- FLUsRs],
     Ps = [Proj || {_FLU, Proj} <- FLUsRs, is_record(Proj, projection_v1)],
     if Unwrittens == [] orelse Ps == [] ->
             {nothing_to_do, S};
@@ -762,17 +763,10 @@ rank_projection(#projection_v1{author_server=Author,
         (N*N * length(UPI_list)).
 
 do_set_chain_members_dict(MembersDict, #ch_mgr{proxies_dict=OldProxiesDict}=S)->
-    catch orddict:fold(
-            fun(_K, Pid, _Acc) ->
-                    _ = (catch ?FLU_PC:quit(Pid))
-            end, [], OldProxiesDict),
-    Proxies = orddict:fold(
-                fun(K, P, Acc) ->
-                        {ok, Pid} = ?FLU_PC:start_link(P),
-                        [{K, Pid}|Acc]
-                end, [], MembersDict),
+    _ = ?FLU_PC:stop_proxies(OldProxiesDict),
+    ProxiesDict = ?FLU_PC:start_proxies(MembersDict),
     {ok, S#ch_mgr{members_dict=MembersDict,
-                  proxies_dict=orddict:from_list(Proxies)}}.
+                  proxies_dict=ProxiesDict}}.
 
 do_react_to_env(#ch_mgr{name=MyName,
                         proj=#projection_v1{epoch_number=Epoch,
@@ -1936,9 +1930,12 @@ perhaps_start_repair(
     %% RepairOpts = [{repair_mode, check}, verbose],
     RepairFun = fun() -> do_repair(S, RepairOpts, ap_mode) end,
     LastUPI = lists:last(UPI),
+    IgnoreStabilityTime_p = proplists:get_value(ignore_stability_time,
+                                                S#ch_mgr.opts, false),
     case timer:now_diff(os:timestamp(), Start) div 1000000 of
-        N when MyName == LastUPI,
-               N >= ?REPAIR_START_STABILITY_TIME ->
+        N when MyName == LastUPI andalso
+               (IgnoreStabilityTime_p orelse
+                N >= ?REPAIR_START_STABILITY_TIME) ->
             {WorkerPid, _Ref} = spawn_monitor(RepairFun),
             S#ch_mgr{repair_worker=WorkerPid,
                      repair_start=os:timestamp(),

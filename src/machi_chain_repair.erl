@@ -107,8 +107,6 @@ repair(ap_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
           catch
               What:Why ->
                   Stack = erlang:get_stacktrace(),
-                  io:format(user, "What Why ~p ~p @\n\t~p\n",
-                            [What, Why, Stack]),
                   {error, {What, Why, Stack}}
           after
               [(catch machi_proxy_flu1_client:quit(Pid)) ||

@@ -25,6 +25,8 @@
 -include("machi.hrl").
 -include("machi_projection.hrl").
 
+-define(HARD_TIMEOUT, 2500).
+
 -export([
          %% File API
          append_chunk/4, append_chunk/5,
@@ -35,7 +37,7 @@
          wedge_status/1, wedge_status/2,
 
          %% Projection API
-         get_latest_epoch/2, get_latest_epoch/3,
+         get_latest_epochid/2, get_latest_epochid/3,
          read_latest_projection/2, read_latest_projection/3,
          read_projection/3, read_projection/4,
          write_projection/3, write_projection/4,
@@ -138,7 +140,7 @@ append_chunk_extra(Host, TcpPort, EpochID, Prefix, Chunk, ChunkExtra)
 
 -spec read_chunk(port_wrap(), epoch_id(), file_name(), file_offset(), chunk_size()) ->
       {ok, chunk_s()} |
-      {error, error_general() | 'no_such_file' | 'partial_read'} |
+      {error, error_general() | 'not_written' | 'partial_read'} |
       {error, term()}.
 read_chunk(Sock, EpochID, File, Offset, Size)
   when Offset >= ?MINIMUM_OFFSET, Size >= 0 ->
@@ -149,7 +151,7 @@ read_chunk(Sock, EpochID, File, Offset, Size)
 -spec read_chunk(inet_host(), inet_port(), epoch_id(),
                  file_name(), file_offset(), chunk_size()) ->
       {ok, chunk_s()} |
-      {error, error_general() | 'no_such_file' | 'partial_read'} |
+      {error, error_general() | 'not_written' | 'partial_read'} |
       {error, term()}.
 read_chunk(Host, TcpPort, EpochID, File, Offset, Size)
   when Offset >= ?MINIMUM_OFFSET, Size >= 0 ->
@@ -223,22 +225,21 @@ wedge_status(Host, TcpPort) when is_integer(TcpPort) ->
 
 %% @doc Get the latest epoch number + checksum from the FLU's projection store.
 
--spec get_latest_epoch(port_wrap(), projection_type()) ->
+-spec get_latest_epochid(port_wrap(), projection_type()) ->
       {ok, epoch_id()} | {error, term()}.
-get_latest_epoch(Sock, ProjType)
+get_latest_epochid(Sock, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
-    get_latest_epoch2(Sock, ProjType).
+    get_latest_epochid2(Sock, ProjType).
 
 %% @doc Get the latest epoch number + checksum from the FLU's projection store.
 
--spec get_latest_epoch(inet_host(), inet_port(),
-                       projection_type()) ->
+-spec get_latest_epochid(inet_host(), inet_port(), projection_type()) ->
       {ok, epoch_id()} | {error, term()}.
-get_latest_epoch(Host, TcpPort, ProjType)
+get_latest_epochid(Host, TcpPort, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
-        get_latest_epoch2(Sock, ProjType)
+        get_latest_epochid2(Sock, ProjType)
     after
         disconnect(Sock)
     end.
@@ -290,7 +291,7 @@ read_projection(Host, TcpPort, ProjType, Epoch)
 %% @doc Write a projection `Proj' of type `ProjType'.
 
 -spec write_projection(port_wrap(), projection_type(), projection()) ->
-      'ok' | {error, written} | {error, term()}.
+      'ok' | {error, 'written'} | {error, term()}.
 write_projection(Sock, ProjType, Proj)
   when ProjType == 'public' orelse ProjType == 'private',
        is_record(Proj, projection_v1) ->
@@ -300,7 +301,7 @@ write_projection(Sock, ProjType, Proj)
 
 -spec write_projection(inet_host(), inet_port(),
                        projection_type(), projection()) ->
-      'ok' | {error, written} | {error, term()}.
+      'ok' | {error, 'written'} | {error, term()}.
 write_projection(Host, TcpPort, ProjType, Proj)
   when ProjType == 'public' orelse ProjType == 'private',
        is_record(Proj, projection_v1) ->
@@ -501,24 +502,25 @@ read_chunk2(Sock, EpochID, File0, Offset, Size) ->
         SizeHex = machi_util:int_to_hexbin(Size, 32),
         CmdLF = [$R, 32, EpochIDHex, PrefixHex, SizeHex, File, 10],
         ok = w_send(Sock, CmdLF),
+        ok = w_setopts(Sock, [{packet, raw}]),
         case w_recv(Sock, 3) of
             {ok, <<"OK\n">>} ->
                 {ok, _Chunk}=Res = w_recv(Sock, Size),
                 Res;
             {ok, Else} ->
-                {ok, OldOpts} = w_getopts(Sock, [packet]),
                 ok = w_setopts(Sock, [{packet, line}]),
                 {ok, Else2} = w_recv(Sock, 0),
-                ok = w_setopts(Sock, OldOpts),
                 case Else of
                     <<"ERA">> ->
                         {error, todo_erasure_coded}; %% escript_cc_parse_ec_info(Sock, Line, Else2);
                     <<"ERR">> ->
                         case Else2 of
-                            <<"OR BAD-IO\n">> ->
-                                {error, no_such_file};
+                            <<"OR NO-SUCH-FILE\n">> ->
+                                {error, not_written};
                             <<"OR NOT-ERASURE\n">> ->
-                                {error, no_such_file};
+                                %% {error, no_such_file};
+                                %% Ignore the fact that the file doesn't exist.
+                                {error, not_written};
                             <<"OR BAD-ARG\n">> ->
                                 {error, bad_arg};
                             <<"OR PARTIAL-READ\n">> ->
@@ -536,6 +538,9 @@ read_chunk2(Sock, EpochID, File0, Offset, Size) ->
         throw:Error ->
             put(bad_sock, Sock),
             Error;
+        error:{case_clause,_}=Noo ->
+            put(bad_sock, Sock),
+            {error, {badmatch, Noo, erlang:get_stacktrace()}};
         error:{badmatch,_}=BadMatch ->
             put(bad_sock, Sock),
             {error, {badmatch, BadMatch, erlang:get_stacktrace()}}
@@ -561,7 +566,11 @@ list2(Sock, EpochID) ->
     catch
         throw:Error ->
             Error;
+        error:{case_clause,_}=Noo ->
+            put(bad_sock, Sock),
+            {error, {badmatch, Noo, erlang:get_stacktrace()}};
         error:{badmatch,_}=BadMatch ->
+            put(bad_sock, Sock),
             {error, {badmatch, BadMatch}}
     end.
 
@@ -593,7 +602,11 @@ wedge_status2(Sock) ->
     catch
         throw:Error ->
             Error;
+        error:{case_clause,_}=Noo ->
+            put(bad_sock, Sock),
+            {error, {badmatch, Noo, erlang:get_stacktrace()}};
         error:{badmatch,_}=BadMatch ->
+            put(bad_sock, Sock),
             {error, {badmatch, BadMatch}}
     end.
 
@@ -620,16 +633,15 @@ checksum_list2(Sock, EpochID, File) ->
             {ok, <<"ERROR WEDGED", _/binary>>} ->
                 {error, wedged};
             {ok, Else} ->
-                throw({server_protocol_error, Else});
-            {error, closed} ->
-                throw({error, closed});
-            Else ->
-                throw(Else)
+                throw({server_protocol_error, Else})
         end
     catch
         throw:Error ->
             put(bad_sock, Sock),
             Error;
+        error:{case_clause,_}=Noo ->
+            put(bad_sock, Sock),
+            {error, {badmatch, Noo, erlang:get_stacktrace()}};
         error:{badmatch,_}=BadMatch ->
             put(bad_sock, Sock),
             {error, {badmatch, BadMatch}}
@@ -724,6 +736,9 @@ delete_migration2(Sock, EpochID, File) ->
         throw:Error ->
             put(bad_sock, Sock),
             Error;
+        error:{case_clause,_}=Noo ->
+            put(bad_sock, Sock),
+            {error, {badmatch, Noo, erlang:get_stacktrace()}};
         error:{badmatch,_}=BadMatch ->
             put(bad_sock, Sock),
             {error, {badmatch, BadMatch}}
@@ -754,13 +769,16 @@ trunc_hack2(Sock, EpochID, File) ->
         throw:Error ->
             put(bad_sock, Sock),
             Error;
+        error:{case_clause,_}=Noo ->
+            put(bad_sock, Sock),
+            {error, {badmatch, Noo, erlang:get_stacktrace()}};
         error:{badmatch,_}=BadMatch ->
             put(bad_sock, Sock),
             {error, {badmatch, BadMatch}}
     end.
 
-get_latest_epoch2(Sock, ProjType) ->
-    ProjCmd = {get_latest_epoch, ProjType},
+get_latest_epochid2(Sock, ProjType) ->
+    ProjCmd = {get_latest_epochid, ProjType},
     do_projection_common(Sock, ProjCmd).
 
 read_latest_projection2(Sock, ProjType) ->
@@ -804,14 +822,15 @@ do_projection_common(Sock, ProjCmd) ->
                         binary_to_term(ResBin);
                     Else ->
                         {error, Else}
-                end;
-            {error, _} = Bad ->
-                throw(Bad)
+                end
         end
     catch
         throw:Error ->
             put(bad_sock, Sock),
             Error;
+        error:{case_clause,_}=Noo ->
+            put(bad_sock, Sock),
+            {error, {badmatch, Noo, erlang:get_stacktrace()}};
         error:{badmatch,_}=BadMatch ->
             put(bad_sock, Sock),
             {error, {badmatch, BadMatch, erlang:get_stacktrace()}}
@@ -823,7 +842,7 @@ w_connect(#p_srvr{proto_mod=?MODULE, address=Host, port=Port, props=Props})->
     try
         case proplists:get_value(session_proto, Props, tcp) of
             tcp ->
-                Sock = machi_util:connect(Host, Port),
+                Sock = machi_util:connect(Host, Port, ?HARD_TIMEOUT),
                 {w,tcp,Sock};
             %% sctp ->
             %%     %% TODO: not implemented
@@ -845,13 +864,10 @@ w_close({w,tcp,Sock}) ->
     ok.
 
 w_recv({w,tcp,Sock}, Amt) ->
-    gen_tcp:recv(Sock, Amt).
+    gen_tcp:recv(Sock, Amt, ?HARD_TIMEOUT).
 
 w_send({w,tcp,Sock}, IoData) ->
     gen_tcp:send(Sock, IoData).
-
-w_getopts({w,tcp,Sock}, Opts) ->
-    inet:getopts(Sock, Opts).
 
 w_setopts({w,tcp,Sock}, Opts) ->
     inet:setopts(Sock, Opts).

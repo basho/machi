@@ -66,6 +66,8 @@
 -include("machi.hrl").
 -include("machi_projection.hrl").
 
+-define(SERVER_CMD_READ_TIMEOUT, 600*1000).
+
 -export([start_link/1, stop/1,
          update_wedge_state/3]).
 -export([make_listener_regname/1, make_projection_server_regname/1]).
@@ -191,8 +193,15 @@ run_listen_server(#state{flu_name=FluName, tcp_port=TcpPort}=S) ->
     register(make_listener_regname(FluName), self()),
     SockOpts = [{reuseaddr, true},
                 {mode, binary}, {active, false}, {packet, line}],
-    {ok, LSock} = gen_tcp:listen(TcpPort, SockOpts),
-    listen_server_loop(LSock, S).
+    case gen_tcp:listen(TcpPort, SockOpts) of
+        {ok, LSock} ->
+            listen_server_loop(LSock, S);
+        Else ->
+            error_logger:warning_msg("~s:run_listen_server: "
+                                     "listen to TCP port ~w: ~w\n",
+                                     [?MODULE, TcpPort, Else]),
+            exit({?MODULE, run_listen_server, tcp_port, TcpPort, Else})
+    end.
 
 run_append_server(FluPid, AckPid, #state{flu_name=Name,
                                          wedged=Wedged_p,epoch_id=EpochId}=S) ->
@@ -244,7 +253,9 @@ decode_epoch_id(EpochIDHex) ->
 
 net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
     ok = inet:setopts(Sock, [{packet, line}]),
-    case gen_tcp:recv(Sock, 0, 600*1000) of
+    %% TODO: Add testing control knob to adjust this timeout and/or inject
+    %% timeout condition.
+    case gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT) of
         {ok, Line} ->
             %% machi_util:verb("Got: ~p\n", [Line]),
             PrefixLenLF = byte_size(Line) - 2 - ?EpochIDSpace - 8 -8 - 1,
@@ -428,6 +439,7 @@ do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin, DataDir,
     <<Len:32/big>> = machi_util:hexstr_to_bin(LenHex),
     {_, Path} = machi_util:make_data_filename(DataDir, FileBin),
     OptsHasWrite = lists:member(write, FileOpts),
+    OptsHasRead = lists:member(read, FileOpts),
     case file:open(Path, FileOpts) of
         {ok, FH} ->
             try
@@ -440,8 +452,9 @@ do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin, DataDir,
               Sock, OffsetHex, LenHex, FileBin, DataDir,
               FileOpts, DoItFun,
               EpochID, Wedged_p, CurrentEpochId);
+        {error, enoent} when OptsHasRead ->
+            ok = gen_tcp:send(Sock, <<"ERROR NO-SUCH-FILE\n">>);
         _Else ->
-            %%%%%% keep?? machi_util:verb("Else ~p ~p ~p ~p\n", [Offset, Len, Path, _Else]),
             ok = gen_tcp:send(Sock, <<"ERROR BAD-IO\n">>)
     end.
 
@@ -759,9 +772,9 @@ do_projection_command(Sock, LenHex, S) ->
             _ = (catch gen_tcp:send(Sock, [<<"ERROR ">>, WHA, <<"\n">>]))
     end.
 
-handle_projection_command({get_latest_epoch, ProjType},
+handle_projection_command({get_latest_epochid, ProjType},
                           #state{proj_store=ProjStore}) ->
-    machi_projection_store:get_latest_epoch(ProjStore, ProjType);
+    machi_projection_store:get_latest_epochid(ProjStore, ProjType);
 handle_projection_command({read_latest_projection, ProjType},
                           #state{proj_store=ProjStore}) ->
     machi_projection_store:read_latest_projection(ProjStore, ProjType);
