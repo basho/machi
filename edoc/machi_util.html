@@ -30,7 +30,10 @@
   based on <code>I_size</code>.</td></tr>
 <tr><td valign="top"><a href="#make_binary-1">make_binary/1</a></td><td>Convert a compatible Erlang data type into a <code>binary()</code> equivalent.</td></tr>
 <tr><td valign="top"><a href="#make_checksum_filename-2">make_checksum_filename/2</a></td><td>Calculate a checksum file path, by common convention.</td></tr>
+<tr><td valign="top"><a href="#make_checksum_filename-4">make_checksum_filename/4</a></td><td>Calculate a checksum file path, by common convention.</td></tr>
+<tr><td valign="top"><a href="#make_config_filename-2">make_config_filename/2</a></td><td>Calculate a config file path, by common convention.</td></tr>
 <tr><td valign="top"><a href="#make_data_filename-2">make_data_filename/2</a></td><td>Calculate a file data file path, by common convention.</td></tr>
+<tr><td valign="top"><a href="#make_data_filename-4">make_data_filename/4</a></td><td>Calculate a file data file path, by common convention.</td></tr>
 <tr><td valign="top"><a href="#make_projection_filename-2">make_projection_filename/2</a></td><td>Calculate a projection store file path, by common convention.</td></tr>
 <tr><td valign="top"><a href="#make_regname-1">make_regname/1</a></td><td>Create a registered name atom for FLU sequencer internal
   rendezvous/message passing use.</td></tr>
@@ -45,12 +48,12 @@
 
 <h3 class="function"><a name="bin_to_hexstr-1">bin_to_hexstr/1</a></h3>
 <div class="spec">
-<p><tt>bin_to_hexstr(X1) -&gt; any()</tt></p>
+<p><tt>bin_to_hexstr(X1::binary()) -&gt; string()</tt><br></p>
 </div><p>Convert a <code>binary()</code> to a hexadecimal string.</p>
 
 <h3 class="function"><a name="checksum_chunk-1">checksum_chunk/1</a></h3>
 <div class="spec">
-<p><tt>checksum_chunk(Chunk) -&gt; any()</tt></p>
+<p><tt>checksum_chunk(Chunk::binary() | iolist()) -&gt; binary()</tt><br></p>
 </div><p>Calculate a checksum for a chunk of file data.</p>
 
 <h3 class="function"><a name="connect-2">connect/2</a></h3>
@@ -65,86 +68,101 @@
 
 <h3 class="function"><a name="hexstr_to_bin-1">hexstr_to_bin/1</a></h3>
 <div class="spec">
-<p><tt>hexstr_to_bin(S) -&gt; any()</tt></p>
+<p><tt>hexstr_to_bin(S::string() | binary()) -&gt; binary()</tt><br></p>
 </div><p>Convert a hexadecimal string to a <code>binary()</code>.</p>
 
 <h3 class="function"><a name="hexstr_to_int-1">hexstr_to_int/1</a></h3>
 <div class="spec">
-<p><tt>hexstr_to_int(X) -&gt; any()</tt></p>
+<p><tt>hexstr_to_int(X::string() | binary()) -&gt; non_neg_integer()</tt><br></p>
 </div><p>Convert a hexadecimal string to an integer.</p>
 
 <h3 class="function"><a name="increment_max_filenum-2">increment_max_filenum/2</a></h3>
 <div class="spec">
-<p><tt>increment_max_filenum(DataDir, Prefix) -&gt; any()</tt></p>
+<p><tt>increment_max_filenum(DataDir::string(), Prefix::string()) -&gt; ok | {error, term()}</tt><br></p>
 </div><p>Increase the file size of a config file, which is used as the
   basis for a minimum sequence number.</p>
 
 <h3 class="function"><a name="info_msg-2">info_msg/2</a></h3>
 <div class="spec">
-<p><tt>info_msg(Fmt, Args) -&gt; any()</tt></p>
+<p><tt>info_msg(Fmt::string(), Args::list()) -&gt; term()</tt><br></p>
 </div><p>Log an 'info' level message.</p>
 
 <h3 class="function"><a name="int_to_hexbin-2">int_to_hexbin/2</a></h3>
 <div class="spec">
-<p><tt>int_to_hexbin(I, I_size) -&gt; any()</tt></p>
+<p><tt>int_to_hexbin(I::non_neg_integer(), I_size::non_neg_integer()) -&gt; binary()</tt><br></p>
 </div><p>Convert an integer into a hexadecimal string (in <code>binary()</code>
   form) whose length is based on <code>I_size</code>.</p>
 
 <h3 class="function"><a name="int_to_hexstr-2">int_to_hexstr/2</a></h3>
 <div class="spec">
-<p><tt>int_to_hexstr(I, I_size) -&gt; any()</tt></p>
+<p><tt>int_to_hexstr(I::non_neg_integer(), I_size::non_neg_integer()) -&gt; string()</tt><br></p>
 </div><p>Convert an integer into a hexadecimal string whose length is
   based on <code>I_size</code>.</p>
 
 <h3 class="function"><a name="make_binary-1">make_binary/1</a></h3>
 <div class="spec">
-<p><tt>make_binary(X) -&gt; any()</tt></p>
+<p><tt>make_binary(X::binary() | iolist()) -&gt; binary()</tt><br></p>
 </div><p>Convert a compatible Erlang data type into a <code>binary()</code> equivalent.</p>
 
 <h3 class="function"><a name="make_checksum_filename-2">make_checksum_filename/2</a></h3>
 <div class="spec">
-<p><tt>make_checksum_filename(DataDir, FileName) -&gt; any()</tt></p>
+<p><tt>make_checksum_filename(DataDir::string(), FileName::[] | string() | binary()) -&gt; string()</tt><br></p>
 </div><p>Calculate a checksum file path, by common convention.</p>
+
+<h3 class="function"><a name="make_checksum_filename-4">make_checksum_filename/4</a></h3>
+<div class="spec">
+<p><tt>make_checksum_filename(DataDir::string(), Prefix::string(), SequencerName::atom() | string() | binary(), FileNum::integer()) -&gt; string()</tt><br></p>
+</div><p>Calculate a checksum file path, by common convention.</p>
+
+<h3 class="function"><a name="make_config_filename-2">make_config_filename/2</a></h3>
+<div class="spec">
+<p><tt>make_config_filename(DataDir::string(), Prefix::string()) -&gt; string()</tt><br></p>
+</div><p>Calculate a config file path, by common convention.</p>
 
 <h3 class="function"><a name="make_data_filename-2">make_data_filename/2</a></h3>
 <div class="spec">
-<p><tt>make_data_filename(DataDir, File) -&gt; any()</tt></p>
+<p><tt>make_data_filename(DataDir::string(), File::[] | string() | binary()) -&gt; {binary(), string()}</tt><br></p>
+</div><p>Calculate a file data file path, by common convention.</p>
+
+<h3 class="function"><a name="make_data_filename-4">make_data_filename/4</a></h3>
+<div class="spec">
+<p><tt>make_data_filename(DataDir::string(), Prefix::string(), SequencerName::atom() | string() | binary(), FileNum::integer()) -&gt; {binary(), string()}</tt><br></p>
 </div><p>Calculate a file data file path, by common convention.</p>
 
 <h3 class="function"><a name="make_projection_filename-2">make_projection_filename/2</a></h3>
 <div class="spec">
-<p><tt>make_projection_filename(DataDir, File) -&gt; any()</tt></p>
+<p><tt>make_projection_filename(DataDir::string(), File::[] | string()) -&gt; string()</tt><br></p>
 </div><p>Calculate a projection store file path, by common convention.</p>
 
 <h3 class="function"><a name="make_regname-1">make_regname/1</a></h3>
 <div class="spec">
-<p><tt>make_regname(Prefix) -&gt; any()</tt></p>
+<p><tt>make_regname(Prefix::binary() | list()) -&gt; atom()</tt><br></p>
 </div><p>Create a registered name atom for FLU sequencer internal
   rendezvous/message passing use.</p>
 
 <h3 class="function"><a name="make_string-1">make_string/1</a></h3>
 <div class="spec">
-<p><tt>make_string(X) -&gt; any()</tt></p>
+<p><tt>make_string(X::binary() | iolist()) -&gt; string()</tt><br></p>
 </div><p>Convert a compatible Erlang data type into a <code>string()</code> equivalent.</p>
 
 <h3 class="function"><a name="read_max_filenum-2">read_max_filenum/2</a></h3>
 <div class="spec">
-<p><tt>read_max_filenum(DataDir, Prefix) -&gt; any()</tt></p>
+<p><tt>read_max_filenum(DataDir::string(), Prefix::string()) -&gt; non_neg_integer()</tt><br></p>
 </div><p>Read the file size of a config file, which is used as the
   basis for a minimum sequence number.</p>
 
 <h3 class="function"><a name="verb-1">verb/1</a></h3>
 <div class="spec">
-<p><tt>verb(Fmt) -&gt; any()</tt></p>
+<p><tt>verb(Fmt::string()) -&gt; term()</tt><br></p>
 </div><p>Log a verbose message.</p>
 
 <h3 class="function"><a name="verb-2">verb/2</a></h3>
 <div class="spec">
-<p><tt>verb(Fmt, Args) -&gt; any()</tt></p>
+<p><tt>verb(Fmt::string(), Args::list()) -&gt; term()</tt><br></p>
 </div><p>Log a verbose message.</p>
 <hr>
 
 <div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
-<p><i>Generated by EDoc, Apr 8 2015, 17:31:11.</i></p>
+<p><i>Generated by EDoc, May 20 2015, 11:11:34.</i></p>
 </body>
 </html>

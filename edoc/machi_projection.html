@@ -15,14 +15,16 @@
 
 <h2><a name="description">Description</a></h2>API for manipulating Machi projection data structures (i.e., records).
 <h2><a name="index">Function Index</a></h2>
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#compare-2">compare/2</a></td><td>Compare two projection records for equality (assuming that the
-  checksum element has been correctly calculated).</td></tr>
-<tr><td valign="top"><a href="#make_projection_summary-1">make_projection_summary/1</a></td><td>Create a proplist-style summary of a projection record.</td></tr>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#compare-2">compare/2</a></td><td>Compare two projection records for equality (assuming that the  
+checksum element has been correctly calculated).</td></tr>
+<tr><td valign="top"><a href="#make_members_dict-1">make_members_dict/1</a></td><td>Make a <code>p_srvr_dict()</code> out of a list of <code>p_srvr()</code> or out of a
+  <code>p_srvr_dict()</code>.</td></tr>
+<tr><td valign="top"><a href="#make_summary-1">make_summary/1</a></td><td>Create a proplist-style summary of a projection record.</td></tr>
 <tr><td valign="top"><a href="#new-6">new/6</a></td><td>Create a new projection record.</td></tr>
 <tr><td valign="top"><a href="#new-7">new/7</a></td><td>Create a new projection record.</td></tr>
 <tr><td valign="top"><a href="#new-8">new/8</a></td><td>Create a new projection record.</td></tr>
-<tr><td valign="top"><a href="#update_projection_checksum-1">update_projection_checksum/1</a></td><td>Update the checksum element of a projection record.</td></tr>
-<tr><td valign="top"><a href="#update_projection_dbg2-2">update_projection_dbg2/2</a></td><td>Update the <code>dbg2</code> element of a projection record.</td></tr>
+<tr><td valign="top"><a href="#update_checksum-1">update_checksum/1</a></td><td>Update the checksum element of a projection record.</td></tr>
+<tr><td valign="top"><a href="#update_dbg2-2">update_dbg2/2</a></td><td>Update the <code>dbg2</code> element of a projection record.</td></tr>
 </table>
 
 <h2><a name="functions">Function Details</a></h2>
@@ -30,41 +32,63 @@
 <h3 class="function"><a name="compare-2">compare/2</a></h3>
 <div class="spec">
 <p><tt>compare(Projection_v1::#projection_v1{}, Projection_v1::#projection_v1{}) -&gt; integer()</tt><br></p>
-</div><p>Compare two projection records for equality (assuming that the
-  checksum element has been correctly calculated).</p>
+</div><p><p>Compare two projection records for equality (assuming that the  
+checksum element has been correctly calculated).</p>
+ 
+  The name "compare" is probably too close to "rank"?  This
+  comparison has nothing to do with projection ranking.</p>
 
-<h3 class="function"><a name="make_projection_summary-1">make_projection_summary/1</a></h3>
+<h3 class="function"><a name="make_members_dict-1">make_members_dict/1</a></h3>
 <div class="spec">
-<p><tt>make_projection_summary(Projection_v1) -&gt; any()</tt></p>
+<p><tt>make_members_dict(Ps::[<a href="#type-p_srvr">p_srvr()</a>] | <a href="#type-p_srvr_dict">p_srvr_dict()</a>) -&gt; <a href="#type-p_srvr_dict">p_srvr_dict()</a></tt><br></p>
+</div><p><p>Make a <code>p_srvr_dict()</code> out of a list of <code>p_srvr()</code> or out of a
+  <code>p_srvr_dict()</code>.</p>
+ 
+  <p>If <code>Ps</code> is a <code>p_srvr_dict()</code>, then this function is usually a
+  no-op.  However, if someone has tampered with the list and screwed
+  up its order, then we should fix it so <code>orddict</code> can work  
+correctly.</p>
+ 
+  If <code>Ps</code> is simply <code>list(p_srvr())</code>, in which case we'll convert it
+  to a <code>p_srvr_dict()</code>.</p>
+
+<h3 class="function"><a name="make_summary-1">make_summary/1</a></h3>
+<div class="spec">
+<p><tt>make_summary(Projection_v1) -&gt; any()</tt></p>
 </div><p>Create a proplist-style summary of a projection record.</p>
 
 <h3 class="function"><a name="new-6">new/6</a></h3>
 <div class="spec">
-<p><tt>new(MyName, All_list, UPI_list, Down_list, Repairing_list, Ps) -&gt; any()</tt></p>
+<p><tt>new(MyName, MemberDict, UPI_list, Down_list, Repairing_list, Ps) -&gt; any()</tt></p>
 </div><p>Create a new projection record.</p>
 
 <h3 class="function"><a name="new-7">new/7</a></h3>
 <div class="spec">
-<p><tt>new(EpochNum, MyName, All_list, Down_list, UPI_list, Repairing_list, Dbg) -&gt; any()</tt></p>
+<p><tt>new(EpochNum, MyName, MemberDict, Down_list, UPI_list, Repairing_list, Dbg) -&gt; any()</tt></p>
 </div><p>Create a new projection record.</p>
 
 <h3 class="function"><a name="new-8">new/8</a></h3>
 <div class="spec">
-<p><tt>new(EpochNum, MyName, All_list0, Down_list, UPI_list, Repairing_list, Dbg, Dbg2) -&gt; any()</tt></p>
-</div><p>Create a new projection record.</p>
+<p><tt>new(EpochNum, MyName, MembersDict0, Down_list, UPI_list, Repairing_list, Dbg, Dbg2) -&gt; any()</tt></p>
+</div><p><p>Create a new projection record.</p>
+ 
+  The <code>MemberDict0</code> argument may be a true <code>p_srvr_dict()</code> (i.e, it
+  is a well-formed <code>orddict</code> with the correct 2-tuple key-value form)
+  or it may be simply <code>list(p_srvr())</code>, in which case we'll convert it
+  to a <code>p_srvr_dict()</code>.</p>
 
-<h3 class="function"><a name="update_projection_checksum-1">update_projection_checksum/1</a></h3>
+<h3 class="function"><a name="update_checksum-1">update_checksum/1</a></h3>
 <div class="spec">
-<p><tt>update_projection_checksum(P) -&gt; any()</tt></p>
+<p><tt>update_checksum(P) -&gt; any()</tt></p>
 </div><p>Update the checksum element of a projection record.</p>
 
-<h3 class="function"><a name="update_projection_dbg2-2">update_projection_dbg2/2</a></h3>
+<h3 class="function"><a name="update_dbg2-2">update_dbg2/2</a></h3>
 <div class="spec">
-<p><tt>update_projection_dbg2(P, Dbg2) -&gt; any()</tt></p>
+<p><tt>update_dbg2(P, Dbg2) -&gt; any()</tt></p>
 </div><p>Update the <code>dbg2</code> element of a projection record.</p>
 <hr>
 
 <div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
-<p><i>Generated by EDoc, Apr 8 2015, 17:31:11.</i></p>
+<p><i>Generated by EDoc, May 20 2015, 11:11:34.</i></p>
 </body>
 </html>

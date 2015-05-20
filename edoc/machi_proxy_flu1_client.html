@@ -37,13 +37,19 @@ language independence.  Later in Machi's life cycle, we need to
   with <code>Prefix</code>.</td></tr>
 <tr><td valign="top"><a href="#append_chunk-5">append_chunk/5</a></td><td>Append a chunk (binary- or iolist-style) of data to a file
   with <code>Prefix</code>.</td></tr>
+<tr><td valign="top"><a href="#append_chunk_extra-5">append_chunk_extra/5</a></td><td>Append a chunk (binary- or iolist-style) of data to a file
+  with <code>Prefix</code>.</td></tr>
+<tr><td valign="top"><a href="#append_chunk_extra-6">append_chunk_extra/6</a></td><td>Append a chunk (binary- or iolist-style) of data to a file
+  with <code>Prefix</code>.</td></tr>
 <tr><td valign="top"><a href="#checksum_list-3">checksum_list/3</a></td><td>Fetch the list of chunk checksums for <code>File</code>.</td></tr>
 <tr><td valign="top"><a href="#checksum_list-4">checksum_list/4</a></td><td>Fetch the list of chunk checksums for <code>File</code>.</td></tr>
 <tr><td valign="top"><a href="#code_change-3">code_change/3</a></td><td></td></tr>
 <tr><td valign="top"><a href="#get_all_projections-2">get_all_projections/2</a></td><td>Get all projections from the FLU's projection store.</td></tr>
 <tr><td valign="top"><a href="#get_all_projections-3">get_all_projections/3</a></td><td>Get all projections from the FLU's projection store.</td></tr>
-<tr><td valign="top"><a href="#get_latest_epoch-2">get_latest_epoch/2</a></td><td>Get the latest epoch number + checksum from the FLU's projection store.</td></tr>
-<tr><td valign="top"><a href="#get_latest_epoch-3">get_latest_epoch/3</a></td><td>Get the latest epoch number + checksum from the FLU's projection store.</td></tr>
+<tr><td valign="top"><a href="#get_epoch_id-1">get_epoch_id/1</a></td><td>Get the <code>epoch_id()</code> of the FLU's current/latest projection.</td></tr>
+<tr><td valign="top"><a href="#get_epoch_id-2">get_epoch_id/2</a></td><td>Get the <code>epoch_id()</code> of the FLU's current/latest projection.</td></tr>
+<tr><td valign="top"><a href="#get_latest_epochid-2">get_latest_epochid/2</a></td><td>Get the latest epoch number + checksum from the FLU's projection store.</td></tr>
+<tr><td valign="top"><a href="#get_latest_epochid-3">get_latest_epochid/3</a></td><td>Get the latest epoch number + checksum from the FLU's projection store.</td></tr>
 <tr><td valign="top"><a href="#handle_call-3">handle_call/3</a></td><td></td></tr>
 <tr><td valign="top"><a href="#handle_cast-2">handle_cast/2</a></td><td></td></tr>
 <tr><td valign="top"><a href="#handle_info-2">handle_info/2</a></td><td></td></tr>
@@ -63,7 +69,15 @@ language independence.  Later in Machi's life cycle, we need to
 <tr><td valign="top"><a href="#start_link-1">start_link/1</a></td><td>Start a local, long-lived process that will be our steady
   &amp; reliable communication proxy with the fickle &amp; flaky
   remote Machi server.</td></tr>
+<tr><td valign="top"><a href="#start_proxies-1">start_proxies/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#stop_proxies-1">stop_proxies/1</a></td><td></td></tr>
 <tr><td valign="top"><a href="#terminate-2">terminate/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#wedge_status-1">wedge_status/1</a></td><td>Fetch the wedge status from the remote FLU.</td></tr>
+<tr><td valign="top"><a href="#wedge_status-2">wedge_status/2</a></td><td>Fetch the wedge status from the remote FLU.</td></tr>
+<tr><td valign="top"><a href="#write_chunk-5">write_chunk/5</a></td><td>Write a chunk (binary- or iolist-style) of data to a file
+  with <code>Prefix</code> at <code>Offset</code>.</td></tr>
+<tr><td valign="top"><a href="#write_chunk-6">write_chunk/6</a></td><td>Write a chunk (binary- or iolist-style) of data to a file
+  with <code>Prefix</code> at <code>Offset</code>.</td></tr>
 <tr><td valign="top"><a href="#write_projection-3">write_projection/3</a></td><td>Write a projection <code>Proj</code> of type <code>ProjType</code>.</td></tr>
 <tr><td valign="top"><a href="#write_projection-4">write_projection/4</a></td><td>Write a projection <code>Proj</code> of type <code>ProjType</code>.</td></tr>
 </table>
@@ -79,6 +93,18 @@ language independence.  Later in Machi's life cycle, we need to
 <h3 class="function"><a name="append_chunk-5">append_chunk/5</a></h3>
 <div class="spec">
 <p><tt>append_chunk(PidSpec, EpochID, Prefix, Chunk, Timeout) -&gt; any()</tt></p>
+</div><p>Append a chunk (binary- or iolist-style) of data to a file
+  with <code>Prefix</code>.</p>
+
+<h3 class="function"><a name="append_chunk_extra-5">append_chunk_extra/5</a></h3>
+<div class="spec">
+<p><tt>append_chunk_extra(PidSpec, EpochID, Prefix, Chunk, ChunkExtra) -&gt; any()</tt></p>
+</div><p>Append a chunk (binary- or iolist-style) of data to a file
+  with <code>Prefix</code>.</p>
+
+<h3 class="function"><a name="append_chunk_extra-6">append_chunk_extra/6</a></h3>
+<div class="spec">
+<p><tt>append_chunk_extra(PidSpec, EpochID, Prefix, Chunk, ChunkExtra, Timeout) -&gt; any()</tt></p>
 </div><p>Append a chunk (binary- or iolist-style) of data to a file
   with <code>Prefix</code>.</p>
 
@@ -107,14 +133,24 @@ language independence.  Later in Machi's life cycle, we need to
 <p><tt>get_all_projections(PidSpec, ProjType, Timeout) -&gt; any()</tt></p>
 </div><p>Get all projections from the FLU's projection store.</p>
 
-<h3 class="function"><a name="get_latest_epoch-2">get_latest_epoch/2</a></h3>
+<h3 class="function"><a name="get_epoch_id-1">get_epoch_id/1</a></h3>
 <div class="spec">
-<p><tt>get_latest_epoch(PidSpec, ProjType) -&gt; any()</tt></p>
+<p><tt>get_epoch_id(PidSpec) -&gt; any()</tt></p>
+</div><p>Get the <code>epoch_id()</code> of the FLU's current/latest projection.</p>
+
+<h3 class="function"><a name="get_epoch_id-2">get_epoch_id/2</a></h3>
+<div class="spec">
+<p><tt>get_epoch_id(PidSpec, Timeout) -&gt; any()</tt></p>
+</div><p>Get the <code>epoch_id()</code> of the FLU's current/latest projection.</p>
+
+<h3 class="function"><a name="get_latest_epochid-2">get_latest_epochid/2</a></h3>
+<div class="spec">
+<p><tt>get_latest_epochid(PidSpec, ProjType) -&gt; any()</tt></p>
 </div><p>Get the latest epoch number + checksum from the FLU's projection store.</p>
 
-<h3 class="function"><a name="get_latest_epoch-3">get_latest_epoch/3</a></h3>
+<h3 class="function"><a name="get_latest_epochid-3">get_latest_epochid/3</a></h3>
 <div class="spec">
-<p><tt>get_latest_epoch(PidSpec, ProjType, Timeout) -&gt; any()</tt></p>
+<p><tt>get_latest_epochid(PidSpec, ProjType, Timeout) -&gt; any()</tt></p>
 </div><p>Get the latest epoch number + checksum from the FLU's projection store.</p>
 
 <h3 class="function"><a name="handle_call-3">handle_call/3</a></h3>
@@ -200,10 +236,42 @@ language independence.  Later in Machi's life cycle, we need to
   &amp; reliable communication proxy with the fickle &amp; flaky
   remote Machi server.</p>
 
+<h3 class="function"><a name="start_proxies-1">start_proxies/1</a></h3>
+<div class="spec">
+<p><tt>start_proxies(MembersDict) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="stop_proxies-1">stop_proxies/1</a></h3>
+<div class="spec">
+<p><tt>stop_proxies(ProxiesDict) -&gt; any()</tt></p>
+</div>
+
 <h3 class="function"><a name="terminate-2">terminate/2</a></h3>
 <div class="spec">
 <p><tt>terminate(Reason, S) -&gt; any()</tt></p>
 </div>
+
+<h3 class="function"><a name="wedge_status-1">wedge_status/1</a></h3>
+<div class="spec">
+<p><tt>wedge_status(PidSpec) -&gt; any()</tt></p>
+</div><p>Fetch the wedge status from the remote FLU.</p>
+
+<h3 class="function"><a name="wedge_status-2">wedge_status/2</a></h3>
+<div class="spec">
+<p><tt>wedge_status(PidSpec, Timeout) -&gt; any()</tt></p>
+</div><p>Fetch the wedge status from the remote FLU.</p>
+
+<h3 class="function"><a name="write_chunk-5">write_chunk/5</a></h3>
+<div class="spec">
+<p><tt>write_chunk(PidSpec, EpochID, File, Offset, Chunk) -&gt; any()</tt></p>
+</div><p>Write a chunk (binary- or iolist-style) of data to a file
+  with <code>Prefix</code> at <code>Offset</code>.</p>
+
+<h3 class="function"><a name="write_chunk-6">write_chunk/6</a></h3>
+<div class="spec">
+<p><tt>write_chunk(PidSpec, EpochID, File, Offset, Chunk, Timeout) -&gt; any()</tt></p>
+</div><p>Write a chunk (binary- or iolist-style) of data to a file
+  with <code>Prefix</code> at <code>Offset</code>.</p>
 
 <h3 class="function"><a name="write_projection-3">write_projection/3</a></h3>
 <div class="spec">
@@ -217,6 +285,6 @@ language independence.  Later in Machi's life cycle, we need to
 <hr>
 
 <div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
-<p><i>Generated by EDoc, Apr 8 2015, 17:31:11.</i></p>
+<p><i>Generated by EDoc, May 20 2015, 11:11:34.</i></p>
 </body>
 </html>
