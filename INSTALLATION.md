@@ -255,7 +255,38 @@ directly from FLU `b` again ... we should see something different.
 That is correct! The command at prompt #20 automatically performed
 "read repair" on FLU `b`.
 
-### 6. Exploring the rest of the client APIs
+### 6. Exploring what happens when a server is stopped, data written, and server restarted
+
+Cut-and-paste the following into your CLI.  We assume that your CLI
+still remembers the value of the `D` dictionary from the previous
+steps above.  We will stop FLU `a`, write one thousand small
+chunks, then restart FLU `a`, then see what happens.
+
+    {ok, C3} = machi_cr_client:start_link([P || {_,P} <- orddict:to_list(D)]).
+    machi_flu_psup:stop_flu_package(a).
+    [machi_cr_client:append_chunk(C3, <<"foo">>, <<"Lots of stuff">>) || _ <- lists:seq(1,1000)].
+    machi_flu_psup:start_flu_package(a, 4444, "./data.a", []).
+
+About 10 seconds after we restarting `a` with the
+`machi_flu_psup:start_flu_package()` function, this appears on the
+console:
+
+    =INFO REPORT==== 21-May-2015::15:53:46 ===
+    Repair start: tail b of [b] -> [a], ap_mode ID {b,{1432,191226,707262}}
+    MissingFileSummary [{<<"foo.CYLJ16ZT.1">>,{14024,[a]}}]
+    Make repair directives: . done
+    Out-of-sync data for FLU a: 0.1 MBytes
+    Out-of-sync data for FLU b: 0.0 MBytes
+    Execute repair directives: .......... done
+    
+    =INFO REPORT==== 21-May-2015::15:53:47 ===
+    Repair success: tail b of [b] finished ap_mode repair ID {b,{1432,191226,707262}}: ok
+    Stats [{t_in_files,0},{t_in_chunks,1000},{t_in_bytes,13000},{t_out_files,0},{t_out_chunks,1000},{t_out_bytes,13000},{t_bad_chunks,0},{t_elapsed_seconds,0.647}]
+
+The data repair process, executed by `b`'s chain manager, found 1000
+chunks that were out of sync and copied them to `a` successfully.
+
+### 7. Exploring the rest of the client APIs
 
 Please see the EDoc documentation for the client APIs.  Feel free to
 explore!
@@ -263,3 +294,4 @@ explore!
 * [Erlang type definitions for the client APIs](http://basho.github.io/machi/edoc/machi_flu1_client.html)
 * [EDoc for machi_cr_client.erl](http://basho.github.io/machi/edoc/machi_cr_client.html)
 * [EDoc for machi_proxy_flu1_client.erl](http://basho.github.io/machi/edoc/machi_proxy_flu1_client.html)
+* [Top level EDoc collection](http://basho.github.io/machi/edoc/)
