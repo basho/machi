@@ -405,6 +405,8 @@ do_read_chunk2(File, Offset, Size, Depth, STime,
         {ok, BadChunk} ->
             exit({todo, bad_chunk_size, ?MODULE, ?LINE, File, Offset, Size,
                   got, byte_size(BadChunk)});
+        {error, partial_read}=Err ->
+            {reply, Err, S};
         {error, Retry}
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
             do_read_chunk(File, Offset, Size, Depth, STime, S);

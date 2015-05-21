@@ -95,7 +95,7 @@ copy the output files to machine **Y** and generate the graphs there.
 
 ## Compiling the Machi source
 
-First, clone the `basho_bench` source code, then compile it.  You will
+First, clone the Machi source code, then compile it.  You will
 need Erlang/OTP version 17.x to compile.
 
     cd /some/nice/dev/place

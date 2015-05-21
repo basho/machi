@@ -35,7 +35,7 @@ smoke_test() ->
         Prefix = <<"pre">>,
         Chunk1 = <<"yochunk">>,
         Host = "localhost",
-        PortBase = 4444,
+        PortBase = 64444,
         Os = [{ignore_stability_time, true}, {active_mode, false}],
         {ok,_}=machi_flu_psup:start_flu_package(a, PortBase+0, "./data.a", Os),
         {ok,_}=machi_flu_psup:start_flu_package(b, PortBase+1, "./data.b", Os),
@@ -84,7 +84,6 @@ smoke_test() ->
         %% Whew ... ok, now start some damn tests.
         {ok, C1} = machi_cr_client:start_link([P || {_,P}<-orddict:to_list(D)]),
         machi_cr_client:append_chunk(C1, Prefix, Chunk1),
-        %% {machi_flu_psup:stop_flu_package(c), timer:sleep(50)},
         {ok, {Off1,Size1,File1}} =
             machi_cr_client:append_chunk(C1, Prefix, Chunk1),
         {ok, Chunk1} = machi_cr_client:read_chunk(C1, File1, Off1, Size1),
@@ -119,7 +118,11 @@ smoke_test() ->
                                  Host, PortBase+X, EpochID,
                                  File1, FooOff2, Size2)} || X <- [0,1,2] ],
 
-        %% Misc API smoke
+        %% Misc API smoke & minor regression checks
+        {error, not_written} = machi_cr_client:read_chunk(C1, <<"no">>,
+                                                          999999999, 1),
+        {error, partial_read} = machi_cr_client:read_chunk(C1, File1,
+                                                           Off1, 88888888),
         %% Checksum lists are 3-tuples
         {ok, [{_,_,_}|_]} = machi_cr_client:checksum_list(C1, File1),
         {error, no_such_file} = machi_cr_client:checksum_list(C1, <<"!!!!">>),
