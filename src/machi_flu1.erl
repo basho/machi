@@ -96,6 +96,10 @@
           props = []      :: list()  % proplist
          }).
 
+-record(http_goop, {
+          len                                   % content-length
+         }).
+
 start_link([{FluName, TcpPort, DataDir}|Rest])
   when is_atom(FluName), is_integer(TcpPort), is_list(DataDir) ->
     {ok, spawn_link(fun() -> main2(FluName, TcpPort, DataDir, Rest) end)}.
@@ -328,6 +332,10 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                     do_projection_command(Sock, LenHex, S);
                 <<"WEDGE-STATUS\n">> ->
                     do_wedge_status(FluName, Sock);
+                <<"PUT ", _/binary>>=PutLine ->
+                    http_server_hack(FluName, PutLine, Sock, S);
+                <<"GET ", _/binary>>=PutLine ->
+                    http_server_hack(FluName, PutLine, Sock, S);
                 _ ->
                     machi_util:verb("Else Got: ~p\n", [Line]),
                     io:format(user, "TODO: Else Got: ~p\n", [Line]),
@@ -446,6 +454,21 @@ do_net_server_readwrite_common(Sock, OffsetHex, LenHex, FileBin, DataDir,
 do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin, DataDir,
                                 FileOpts, DoItFun,
                                 EpochID, Wedged_p, CurrentEpochId) ->
+    NoSuchFileFun = fun(Sck) ->
+                            ok = gen_tcp:send(Sck, <<"ERROR NO-SUCH-FILE\n">>)
+                    end,
+    BadIoFun = fun(Sck) ->
+                       ok = gen_tcp:send(Sck, <<"ERROR BAD-IO\n">>)
+               end,
+    do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin, DataDir,
+                                    FileOpts, DoItFun,
+                                    EpochID, Wedged_p, CurrentEpochId,
+                                    NoSuchFileFun, BadIoFun).
+
+do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin, DataDir,
+                                FileOpts, DoItFun,
+                                EpochID, Wedged_p, CurrentEpochId,
+                                NoSuchFileFun, BadIoFun) ->
     <<Offset:64/big>> = machi_util:hexstr_to_bin(OffsetHex),
     <<Len:32/big>> = machi_util:hexstr_to_bin(LenHex),
     {_, Path} = machi_util:make_data_filename(DataDir, FileBin),
@@ -464,11 +487,10 @@ do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin, DataDir,
               FileOpts, DoItFun,
               EpochID, Wedged_p, CurrentEpochId);
         {error, enoent} when OptsHasRead ->
-            ok = gen_tcp:send(Sock, <<"ERROR NO-SUCH-FILE\n">>);
+            ok = NoSuchFileFun(Sock);
         _Else ->
-            ok = gen_tcp:send(Sock, <<"ERROR BAD-IO\n">>)
+            ok = BadIoFun(Sock)
     end.
-
 
 do_net_server_write(Sock, OffsetHex, LenHex, FileBin, DataDir,
                     EpochID, Wedged_p, CurrentEpochId) ->
@@ -816,3 +838,108 @@ make_listener_regname(BaseName) ->
 
 make_projection_server_regname(BaseName) ->
     list_to_atom(atom_to_list(BaseName) ++ "_pstore2").
+
+http_server_hack(FluName, Line1, Sock, S) ->
+    {ok, {http_request, HttpOp, URI0, _HttpV}, _x} =
+        erlang:decode_packet(http_bin, Line1, [{line_length,4095}]),
+    MyURI = case URI0 of
+              {abs_path, Path} -> <<"/", Rest/binary>> = Path,
+                                  Rest;
+              _                -> URI0
+          end,
+    Hdrs = http_harvest_headers(Sock),
+    G = digest_header_goop(Hdrs, #http_goop{}),
+    case HttpOp of
+        'PUT' ->
+            http_server_hack_put(Sock, G, FluName, MyURI);
+        'GET' ->
+            http_server_hack_get(Sock, G, FluName, MyURI, S)
+    end,
+    ok = gen_tcp:close(Sock),
+    exit(normal).
+
+http_server_hack_put(Sock, G, FluName, MyURI) ->
+    ok = inet:setopts(Sock, [{packet, raw}]),
+    {ok, Chunk} = gen_tcp:recv(Sock, G#http_goop.len, 60*1000),
+    CSum = machi_util:checksum_chunk(Chunk),
+    try
+        FluName ! {seq_append, self(), MyURI, Chunk, CSum, 0}
+    catch error:badarg ->
+            error_logger:error_msg("Message send to ~p gave badarg, make certain server is running with correct registered name\n", [?MODULE])
+    end,
+    receive
+        {assignment, Offset, File} ->
+            Out = io_lib:format("HTTP/1.0 201 Created\r\nLocation: ~s\r\n"
+                                "X-Offset: ~w\r\nX-Size: ~w\r\n\r\n",
+                                [File, Offset, byte_size(Chunk)]),
+            ok = gen_tcp:send(Sock, Out);
+        wedged ->
+            ok = gen_tcp:send(Sock, <<"HTTP/1.0 499 WEDGED\r\n\r\n">>)
+    after 10*1000 ->
+            ok = gen_tcp:send(Sock, <<"HTTP/1.0 499 TIMEOUT\r\n\r\n">>)
+    end.
+
+http_server_hack_get(Sock, _G, _FluName, MyURI, S) ->
+    DataDir = S#state.data_dir,
+    {Wedged_p, CurrentEpochId} = ets:lookup_element(S#state.etstab, epoch, 2),
+    EpochID = <<"unused">>,
+    NoSuchFileFun = fun(Sck) ->
+                            ok = gen_tcp:send(Sck, "HTTP/1.0 455 NOT-WRITTEN\r\n\r\n")
+                    end,
+    BadIoFun = fun(Sck) ->
+                            ok = gen_tcp:send(Sck, "HTTP/1.0 466 BAD-IO\r\n\r\n")
+               end,
+    DoItFun = fun(FH, Offset, Len) ->
+                      case file:pread(FH, Offset, Len) of
+                          {ok, Bytes} when byte_size(Bytes) == Len ->
+                              Hdrs = io_lib:format("HTTP/1.0 200 OK\r\nContent-Length: ~w\r\n\r\n", [Len]),
+                              gen_tcp:send(Sock, [Hdrs, Bytes]);
+                          {ok, Bytes} ->
+                              machi_util:verb("ok read but wanted ~p  got ~p: ~p @ offset ~p\n",
+                                  [Len, size(Bytes), Bytes, Offset]),
+                              ok = gen_tcp:send(Sock, "HTTP/1.0 455 PARTIAL-READ\r\n\r\n");
+                          eof ->
+                              ok = gen_tcp:send(Sock, "HTTP/1.0 455 NOT-WRITTEN\r\n\r\n");
+                          _Else2 ->
+                              machi_util:verb("Else2 ~p ~p ~P\n",
+                                              [Offset, Len, _Else2, 20]),
+                              ok = gen_tcp:send(Sock, "HTTP/1.0 466 ERROR BAD-READ\r\n\r\n")
+                      end
+              end,
+    [File, OptsBin] = binary:split(MyURI, <<"?">>),
+    Opts = split_uri_options(OptsBin),
+    OffsetHex = machi_util:int_to_hexstr(proplists:get_value(offset, Opts), 64),
+    LenHex = machi_util:int_to_hexstr(proplists:get_value(size, Opts), 32),
+    do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, File, DataDir,
+                                    [read, binary, raw], DoItFun,
+                                    EpochID, Wedged_p, CurrentEpochId,
+                                    NoSuchFileFun, BadIoFun).
+
+http_harvest_headers(Sock) ->
+    ok = inet:setopts(Sock, [{packet, httph}]),
+    http_harvest_headers(gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT),
+                         Sock, []).
+
+http_harvest_headers({ok, http_eoh}, _Sock, Acc) ->
+    Acc;
+http_harvest_headers({error, _}, _Sock, _Acc) ->
+    [];
+http_harvest_headers({ok, Hdr}, Sock, Acc) ->
+    http_harvest_headers(gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT),
+                         Sock, [Hdr|Acc]).
+
+digest_header_goop([], G) ->
+    G;
+digest_header_goop([{http_header, _, 'Content-Length', _, Str}|T], G) ->
+    digest_header_goop(T, G#http_goop{len=list_to_integer(Str)});
+digest_header_goop([_H|T], G) ->
+    digest_header_goop(T, G).
+
+split_uri_options(OpsBin) ->
+    L = binary:split(OpsBin, <<"&">>),
+    [case binary:split(X, <<"=">>) of
+         [<<"offset">>, Bin] ->
+             {offset, binary_to_integer(Bin)};
+         [<<"size">>, Bin] ->
+             {size, binary_to_integer(Bin)}
+     end || X <- L].
