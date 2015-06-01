@@ -113,7 +113,7 @@ verify_file_checksums_common(Sock1, EpochID, File, ReadChunk) ->
     end.
 
 verify_chunk_checksum(File, ReadChunk) ->
-    fun({Offset, Size, CSum}, Acc) ->
+    fun({Offset, Size, <<_Tag:1/binary, CSum/binary>>}, Acc) ->
             case ReadChunk(File, Offset, Size) of
                 {ok, Chunk} ->
                     CSum2 = machi_util:checksum_chunk(Chunk),
