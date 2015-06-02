@@ -199,16 +199,9 @@ convergence_demo_testfun(NumFLUs) ->
                                                        S_min, S_max_rand,
                                                        M_name, All_list),
                                                 _ = ?MGR:test_react_to_env(MMM),
-                        %% if M_name == d ->
-                        %%         [_ = ?MGR:test_react_to_env(MMM) ||
-                        %%             _ <- lists:seq(1,3)],
-                        %%         superunfair;
-                        %%    true ->
-                        %%         ok
-                        %% end,
                                                 %% Be more unfair by not
                                                 %% sleeping here.
-                                                %% timer:sleep(S_max - Elapsed),
+                                                % timer:sleep(S_max - Elapsed),
                                                 Elapsed
                                             end || _ <- lists:seq(1, Iters)],
                                            Parent ! done
@@ -221,100 +214,26 @@ convergence_demo_testfun(NumFLUs) ->
                       end || _ <- Pids]
              end,
 
-      _XandYs1 = [[{X,Y}] || X <- All_list, Y <- All_list, X /= Y],
-      _XandYs2 = [[{X,Y}, {A,B}] || X <- All_list, Y <- All_list, X /= Y,
-                                   A <- All_list, B <- All_list, A /= B,
-                                   X /= A],
-      _XandYs3 = [[{X,Y}, {A,B}, {C,D}] || X <- All_list, Y <- All_list, X /= Y,
-                                          A <- All_list, B <- All_list, A /= B,
-                                          C <- All_list, D <- All_list, C /= D,
-                                          X /= A, X /= C, A /= C],
-      %% AllPartitionCombinations = _XandYs1 ++ _XandYs2,
-      %% AllPartitionCombinations = _XandYs3,
-      AllPartitionCombinations = _XandYs1 ++ _XandYs2 ++ _XandYs3,
-      ?D({?LINE, length(AllPartitionCombinations)}),
-
       machi_partition_simulator:reset_thresholds(10, 50),
       io:format(user, "\nLet loose the dogs of war!\n", []),
       DoIt(30, 0, 0),
       [begin
-           %% io:format(user, "\nSET partitions = ~w.\n", [ [] ]),machi_partition_simulator:no_partitions(),
-           %% [DoIt(50, 10, 100) || _ <- [1,2,3]],
-           io:format(user, "\nLet loose the dogs of war!\n", []),
-           DoIt(30, 0, 0),
-           io:format(user, "\nSET partitions = ~w.\n", [ [] ]),machi_partition_simulator:no_partitions(),
-           [DoIt(10, 10, 100) || _ <- [1]],
-
-           %% machi_partition_simulator:reset_thresholds(10, 50),
-           %% io:format(user, "\nLet loose the dogs of war!\n", []),
-           %% DoIt(30, 0, 0),
-
            machi_partition_simulator:always_these_partitions(Partition),
            io:format(user, "\nSET partitions = ~w.\n", [Partition]),
-           [DoIt(50, 10, 100) || _ <- [1,2,3,4] ],
-           _PPP =
-               [begin
-                    {ok, PPPallPubs} = ?FLU_PC:list_all_projections(FLU,public),
-                    [begin
-                         {ok, Pr} = todo_why_does_this_crash_sometimes(
-                                      FLUName, FLU, PPPepoch),
-                         {Pr#projection_v1.epoch_number, FLUName, Pr}
-                     end || PPPepoch <- PPPallPubs]
-                end || {FLUName, FLU} <- Namez],
-           %% io:format(user, "PPP ~p\n", [lists:sort(lists:append(_PPP))]),
+           [DoIt(40, 10, 50) || _ <- [1,2,3,4,5,6] ],
 
-           %%%%%%%% {stable,true} = {stable,private_projections_are_stable(Namez, DoIt)},
-           {hosed_ok,true} = {hosed_ok,all_hosed_lists_are_identical(Namez, Partition)},
-           io:format(user, "\nSweet, all_hosed are identical-or-islands-inconclusive.\n", []),
-           timer:sleep(1000),
+           {stable,true} = {stable,private_projections_are_stable(Namez, DoIt)},
+           io:format(user, "\nSweet, private projections are stable\n", []),
+           timer:sleep(1250),
            ok
-       %% end || Partition <- AllPartitionCombinations
-       %% end || Partition <- [ [{a,b},{b,d},{c,b}],
-       %%                       [{a,b},{b,d},{c,b}, {a,b},{b,a},{a,c},{c,a},{a,d},{d,a}],
-       %%                       %% [{a,b},{b,d},{c,b}, {b,a},{a,b},{b,c},{c,b},{b,d},{d,b}],
-       %%                       [{a,b},{b,d},{c,b}, {c,a},{a,c},{c,b},{b,c},{c,d},{d,c}],
-       %%                       [{a,b},{b,d},{c,b}, {d,a},{a,d},{d,b},{b,d},{d,c},{c,d}] ]
-       %% end || Partition <- [ [{a,b}, {b,c}],
-       %%                       [{a,b}, {c,b}]  ]
-       %% end || Partition <- [ [{a,b}, {b,c}]  ]  %% hosed-not-equal @ 3 FLUs
-       %% end || Partition <- [ [{b,d}] ]
-       %% end || Partition <- [ [{a,b}, {b,a}] ]
-       %% end || Partition <- [ [{a,b}, {b,a}, {a,c},{c,a}] ]
-       end || Partition <- [ [{a,b}],
-                             [{b,a}] ]
-       %% end || Partition <- [ [{a,b}, {c,b}],
-       %%                       [{a,b}, {b,c}] ]
-       %% end || Partition <- [ [{a,b}, {b,c},       {c,d}],
-       %%                       [{a,b}, {b,c},{b,d}, {c,d}],
-       %%                       [{b,a}, {b,c},       {c,d}],
-       %%                       [{a,b}, {c,b},       {c,d}],
-       %%                       [{a,b}, {b,c},       {d,c}] ]
-       %% end || Partition <- [ [{a,b}, {b,c}, {c,d}, {d,e}],
-       %%                       [{b,a}, {b,c}, {c,d}, {d,e}],
-       %%                       [{a,b}, {c,b}, {c,d}, {d,e}],
-       %%                       [{a,b}, {b,c}, {d,c}, {d,e}],
-       %%                       [{a,b}, {b,c}, {c,d}, {e,d}] ]
-       %% end || Partition <- [ [{c,a}] ]
-       %% end || Partition <- [ [{c,a}], [{c,b}, {a, b}] ]
-       %% end || Partition <- [ [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}],
-       %%                       [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {b,c}],
-       %%                       [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {c,d}] ]
-       %% end || Partition <- [ [{a,b}],
-       %%                       [{a,b}, {a,b},{b,a},{a,c},{c,a},{a,d},{d,a}],
-       %%                       [{a,b}, {b,a},{a,b},{b,c},{c,b},{b,d},{d,b}],
-       %%                       [{a,b}, {c,a},{a,c},{c,b},{b,c},{c,d},{d,c}],
-       %%                       [{a,b}, {d,a},{a,d},{d,b},{b,d},{d,c},{c,d}] ]
+       end || Partition <- make_partition_list(All_list)
       ],
        %% exit(end_experiment),
 
       io:format(user, "\nSET partitions = []\n", []),
       io:format(user, "We should see convergence to 1 correct chain.\n", []),
       machi_partition_simulator:no_partitions(),
-      [DoIt(50, 10, 100) || _ <- [1]],
-      io:format(user, "Sweet, finishing early\n", []), exit(yoyoyo_testing_hack_finishing_early),
-      %% WARNING: In asymmetric partitions, private_projections_are_stable()
-      %%          will never be true; code beyond this point on the -exp3
-      %%          branch is bit-rotted, sorry!
+      [DoIt(50, 10, 50) || _ <- [1]],
       true = private_projections_are_stable(Namez, DoIt),
       io:format(user, "~s\n", [os:cmd("date")]),
 
@@ -333,6 +252,17 @@ convergence_demo_testfun(NumFLUs) ->
 
       %% Given the report, we flip it around so that we observe the
       %% sets of chain transitions relative to each FLU.
+      %% R_Chains's type is: list({RelativeFlu, list({Epoch, UPI, Repairing})})
+      %% For example:
+      %%          [{a,[{3,[a],[b,c]},
+      %%               {7,[a,b],[c]},
+      %%               {14,[a,b,c],[]},
+      %%               {83,[a],[]},
+      %%               {164,[c],[a,b]},
+      %%               {218,[a],[]},
+      %%               {226,[a],[b,c]},
+      %%               {228,[a],[b,c]},
+      %%               ....
       R_Chains = [machi_chain_manager1_test:extract_chains_relative_to_flu(
                     FLU, Report) || FLU <- All_list],
       %% ?D(R_Chains),
@@ -366,6 +296,71 @@ convergence_demo_testfun(NumFLUs) ->
         ok = machi_partition_simulator:stop()
     end.
 
+%% Many of the static partition lists below have been problematic at one
+%% time or another.....
+%%
+%% Uncomment *one* of the following make_partition_list() bodies.
+
+make_partition_list(All_list) ->
+    _X_Ys1 = [[{X,Y}] || X <- All_list, Y <- All_list, X /= Y],
+    _X_Ys2 = [[{X,Y}, {A,B}] || X <- All_list, Y <- All_list, X /= Y,
+                                A <- All_list, B <- All_list, A /= B,
+                                X /= A],
+    _X_Ys3 = [[{X,Y}, {A,B}, {C,D}] || X <- All_list, Y <- All_list, X /= Y,
+                                       A <- All_list, B <- All_list, A /= B,
+                                       C <- All_list, D <- All_list, C /= D,
+                                       X /= A, X /= C, A /= C],
+    %% _X_Ys1 ++ _X_Ys2.
+    _X_Ys3.
+    %% _X_Ys1 ++ _X_Ys2 ++ _X_Ys3.
+
+    %% [ [{a,b},{b,d},{c,b}],
+    %%   [{a,b},{b,d},{c,b}, {a,b},{b,a},{a,c},{c,a},{a,d},{d,a}],
+    %%   %% [{a,b},{b,d},{c,b}, {b,a},{a,b},{b,c},{c,b},{b,d},{d,b}],
+    %%   [{a,b},{b,d},{c,b}, {c,a},{a,c},{c,b},{b,c},{c,d},{d,c}],
+    %%   [{a,b},{b,d},{c,b}, {d,a},{a,d},{d,b},{b,d},{d,c},{c,d}] ].
+
+    %% [ [{a,b}, {b,c}],
+    %%   [{a,b}, {c,b}]  ].
+
+    %% [{a,b}, {b,c}]  ].  %% hosed-not-equal @ 3 FLUs
+
+    %% [{b,d}] ].
+
+    %% [ [{a,b}, {b,a}] ].
+
+    %% [ [{a,b},{b,c},{c,a}],
+    %%   [{a,b}, {b,a}, {a,c},{c,a}] ].
+
+    %% [{a,b}, {c,b}],
+    %% [{a,b}, {b,c}] ].
+
+    %% [ [{a,b}, {b,c},       {c,d}],
+    %%   [{a,b}, {b,c},{b,d}, {c,d}],
+    %%   [{b,a}, {b,c},       {c,d}],
+    %%   [{a,b}, {c,b},       {c,d}],
+    %%   [{a,b}, {b,c},       {d,c}] ].
+
+    %% [ [{a,b}, {b,c}, {c,d}, {d,e}],
+    %%   [{b,a}, {b,c}, {c,d}, {d,e}],
+    %%   [{a,b}, {c,b}, {c,d}, {d,e}],
+    %%   [{a,b}, {b,c}, {d,c}, {d,e}],
+    %%   [{a,b}, {b,c}, {c,d}, {e,d}] ].
+
+    %% [ [{c,a}] ].
+
+    %% [ [{c,a}], [{c,b}, {a, b}] ].
+
+    %% [ [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}],
+    %%   [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {b,c}],
+    %%   [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {c,d}] ].
+
+    %% [ [{a,b}],
+    %%   [{a,b}, {a,b},{b,a},{a,c},{c,a},{a,d},{d,a}],
+    %%   [{a,b}, {b,a},{a,b},{b,c},{c,b},{b,d},{d,b}],
+    %%   [{a,b}, {c,a},{a,c},{c,b},{b,c},{c,d},{d,c}],
+    %%   [{a,b}, {d,a},{a,d},{d,b},{b,d},{d,c},{c,d}] ].
+
 todo_why_does_this_crash_sometimes(FLUName, FLU, PPPepoch) ->
     try
         {ok, _}=Res = ?FLU_PC:read_projection(FLU, public, PPPepoch),
@@ -374,75 +369,26 @@ todo_why_does_this_crash_sometimes(FLUName, FLU, PPPepoch) ->
             io:format(user, "QQQ Whoa, it crashed this time for ~p at epoch ~p\n",
                       [FLUName, PPPepoch]),
             timer:sleep(1000),
+            exit(still_a_problem),
             ?FLU_PC:read_projection(FLU, public, PPPepoch)
     end.
 
 private_projections_are_stable(Namez, PollFunc) ->
-    Private1 = [?FLU_PC:get_latest_epochid(FLU, private) ||
-                   {_Name, FLU} <- Namez],
+    Private1 = [get_latest_inner_proj_summ(FLU) || {_Name, FLU} <- Namez],
     PollFunc(5, 1, 10),
-    Private2 = [?FLU_PC:get_latest_epochid(FLU, private) ||
-                   {_Name, FLU} <- Namez],
+    Private2 = [get_latest_inner_proj_summ(FLU) || {_Name, FLU} <- Namez],
+    if Private1 == Private2 ->
+            ok;
+       true ->
+            io:format(user, "Oops: Private1: ~p\n", [Private1]),
+            io:format(user, "Oops: Private2: ~p\n", [Private2])
+    end,
     true = (Private1 == Private2).
 
-all_hosed_lists_are_identical(Namez, Partition0) ->
-    Partition = lists:usort(Partition0),
-    Ps = [element(2,?FLU_PC:read_latest_projection(FLU, private)) ||
-             {_Name, FLU} <- Namez],
-    UniqueAllHoseds = lists:usort([machi_chain_manager1:get_all_hosed(P) ||
-                                      {ok, P} <- Ps]),
-    Members = [M || {M, _Pid} <- Namez],
-    Islands = machi_partition_simulator:partitions2num_islands(
-                Members, Partition),
-    %% io:format(user, "all_hosed_lists_are_identical:\n", []),
-    %% io:format(user, "  Uniques = ~p Islands ~p\n  Partition ~p\n",
-    %%           [Uniques, Islands, Partition]),
-    case length(UniqueAllHoseds) of
-        1 ->
-            true;
-        %% TODO: With the addition of the digraph stuff below, the clause
-        %%       below probably isn't necessary anymore, since the
-        %%       digraph calculation should catch complete partition islands?
-        _ when Islands == 'many' ->
-            %% There are at least two partitions, so yes, it's quite
-            %% possible that the all_hosed lists may differ.
-            %% TODO Fix this up to be smarter about fully-isolated
-            %% islands of partition.
-            true;
-        _ ->
-            DG = digraph:new(),
-            Connection = machi_partition_simulator:partition2connection(
-                           Members, Partition),
-            [digraph:add_vertex(DG, X) || X <- Members],
-            [digraph:add_edge(DG, X, Y) || {X,Y} <- Connection],
-            Any = 
-                lists:any(
-                  fun(X) ->
-                          NotX = Members -- [X],
-                          lists:any(
-                            fun(Y) ->
-                                    %% There must be a shortest path of length
-                                    %% two in both directions, otherwise
-                                    %% the read projection call will fail.
-                                    %% And it's that failure that we're
-                                    %% interested in here.
-                                    XtoY = digraph:get_short_path(DG, X, Y),
-                                    YtoX = digraph:get_short_path(DG, Y, X),
-                                    (XtoY == false orelse
-                                     length(XtoY) > 2)
-                                    orelse
-                                    (YtoX == false orelse
-                                     length(YtoX) > 2)
-                            end, NotX)
-                  end, Members),
-            digraph:delete(DG),
-            if Any == true ->
-                    %% There's a missing path of length 2 between some
-                    %% two FLUs, so yes, there's going to be
-                    %% non-identical all_hosed lists.
-                    true;
-               true ->
-                    false                   % There's no excuse, buddy
-            end
-    end.
+get_latest_inner_proj_summ(FLU) ->
+    {ok, Proj} = ?FLU_PC:read_latest_projection(FLU, private),
+    #projection_v1{epoch_number=E, upi=UPI, repairing=Repairing, down=Down} =
+        machi_chain_manager1:inner_projection_or_self(Proj),
+    {E, UPI, Repairing, Down}.
+
 -endif. % TEST
