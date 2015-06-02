@@ -24,8 +24,9 @@
 -include("machi_projection.hrl").
 
 -ifdef(TEST).
--include_lib("eunit/include/eunit.hrl").
+-ifndef(PULSE).
 
+-include_lib("eunit/include/eunit.hrl").
 
 smoke_test_() -> {timeout, 1*60, fun() -> smoke_test2() end}.
 
@@ -141,4 +142,5 @@ smoke_test2() ->
         exit(SupPid, normal)
     end.
 
+-endif. % !PULSE
 -endif. % TEST.

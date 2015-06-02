@@ -28,6 +28,7 @@
 -define(MUT, machi_proxy_flu1_client).
 
 -ifdef(TEST).
+-ifndef(PULSE).
 
 api_smoke_test() ->
     RegName = api_smoke_flu,
@@ -279,4 +280,5 @@ flu_restart_test() ->
         [catch machi_flu1:stop(Pid) || Pid <- get(flu_pid)]
     end.
     
+-endif. % !PULSE
 -endif. % TEST

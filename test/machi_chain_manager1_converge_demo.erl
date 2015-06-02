@@ -34,6 +34,7 @@
 -compile(export_all).
 
 -ifdef(TEST).
+-ifndef(PULSE).
 
 -ifdef(EQC).
 -include_lib("eqc/include/eqc.hrl").
@@ -391,4 +392,5 @@ get_latest_inner_proj_summ(FLU) ->
         machi_chain_manager1:inner_projection_or_self(Proj),
     {E, UPI, Repairing, Down}.
 
+-endif. % !PULSE
 -endif. % TEST

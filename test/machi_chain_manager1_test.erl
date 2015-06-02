@@ -256,5 +256,5 @@ nonunanimous_setup_and_fix_test() ->
         ok = machi_partition_simulator:stop()
     end.
 
--endif. % not PULSE
+-endif. % !PULSE
 -endif. % TEST

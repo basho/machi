@@ -22,6 +22,8 @@
 -compile(export_all).
 
 -ifdef(TEST).
+-ifndef(PULSE).
+
 -include("machi.hrl").
 -include("machi_projection.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -207,4 +209,5 @@ clean_up_data_dir(DataDir) ->
     _ = file:del_dir(DataDir),
     ok.
 
+-endif. % !PULSE
 -endif. % TEST

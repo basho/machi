@@ -21,6 +21,7 @@
 -module(machi_flu_psup_test).
 
 -ifdef(TEST).
+-ifndef(PULSE).
 
 -include_lib("eunit/include/eunit.hrl").
 
@@ -158,6 +159,7 @@ partial_stop_restart2() ->
         ok
     end.
 
+-endif. % !PULSE
 -endif. % TEST
 
         

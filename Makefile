@@ -29,7 +29,7 @@ edoc-clean:
 
 pulse: compile
 	env USE_PULSE=1 $(REBAR_BIN) skip_deps=true clean compile
-	env USE_PULSE=1 $(REBAR_BIN) skip_deps=true -D PULSE eunit
+	env USE_PULSE=1 $(REBAR_BIN) skip_deps=true -D PULSE eunit -v
 
 APPS = kernel stdlib sasl erts ssl compiler eunit crypto
 PLT = $(HOME)/.machi_dialyzer_plt

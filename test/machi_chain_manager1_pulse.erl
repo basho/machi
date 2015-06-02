@@ -26,6 +26,7 @@
 
 -compile(export_all).
 
+-include("machi_projection.hrl").
 -include_lib("eqc/include/eqc.hrl").
 -include_lib("eqc/include/eqc_statem.hrl").
 
@@ -100,9 +101,19 @@ next_state2(S, _Res, {call, _, _Func, _Args}) ->
 postcondition(_S, {call, _, _Func, _Args}, _Res) ->
     true.
 
+all_list_extra() ->
+    [  {a, 7400, "./data.pulse.a"}
+     , {b, 7401, "./data.pulse.b"}
+     , {c, 7402, "./data.pulse.c"}
+     %% , {d, 7403, "./data.pulse.d"}
+     %% , {e, 7404, "./data.pulse.e"}
+     %% , {f, 7405, "./data.pulse.f"}
+     %% , {g, 7405, "./data.pulse.g"}
+     %% , {h, 7406, "./data.pulse.h"}
+    ].
+
 all_list() ->
-    [a,b,c].
-    %% [a,b,c,d,e].
+    [Name || {Name, _Port, _Dir} <- all_list_extra()].
 
 setup(_Num, Seed) ->
     ?QC_FMT("\nsetup,", []),
@@ -111,10 +122,9 @@ setup(_Num, Seed) ->
     _Partitions = machi_partition_simulator:get(All_list),
 
     FLU_pids = [begin
-                    {ok, FLUPid} = machi_flu0:start_link(Name),
-                    _ = machi_flu0:get_epoch(FLUPid),
+                    {ok, FLUPid} = machi_flu1:start_link([StartTuple]),
                     FLUPid
-                end || Name <- All_list],
+                end || StartTuple <- all_list_extra()],
     Namez = lists:zip(All_list, FLU_pids),
     Mgr_pids = [begin
                     {ok, Mgr} = ?MGR:start_link(Name, All_list, FLU_pid),
@@ -122,7 +132,7 @@ setup(_Num, Seed) ->
                 end || {Name, FLU_pid} <- Namez],
     timer:sleep(1),
     {ok, P1} = ?MGR:test_calc_projection(hd(Mgr_pids), false),
-    P1Epoch = P1#projection.epoch_number,
+    P1Epoch = P1#projection_v1.epoch_number,
     [ok = machi_flu0:proj_write(FLU, P1Epoch, public, P1) || FLU <- FLU_pids],
     [?MGR:test_react_to_env(Mgr) || Mgr <- Mgr_pids],
 
@@ -185,7 +195,7 @@ dump_state() ->
 
     Diag1 = [begin
                  Ps = machi_flu0:proj_get_all(FLU, Type),
-                 [io_lib:format("~p ~p ~p: ~w\n", [FLUName, Type, P#projection.epoch_number, ?MGR:make_projection_summary(P)]) || P <- Ps]
+                 [io_lib:format("~p ~p ~p: ~w\n", [FLUName, Type, P#projection_v1.epoch_number, ?MGR:make_projection_summary(P)]) || P <- Ps]
              end || {FLUName, FLU} <- Namez,
                     Type <- [public] ],
 
@@ -198,7 +208,7 @@ dump_state() ->
     P_lists = [{FLUName, Type, P} || {FLUName, Type, Ps} <- P_lists0,
                                      P <- Ps],
     AllDict = lists:foldl(fun({FLU, Type, P}, D) ->
-                                  K = {FLU, Type, P#projection.epoch_number},
+                                  K = {FLU, Type, P#projection_v1.epoch_number},
                                   dict:store(K, P, D)
                           end, dict:new(), lists:flatten(P_lists)),
     DumbFinderBackward =
@@ -262,6 +272,7 @@ prop_pulse() ->
                                  {strategy, unfair}]),
         ok = shutdown_hard(),
 
+        ?QC_FMT("S2 ~p\n", [S2]),
         {Report, Diag} = S2#state.dump_state,
 
         %% Report is ordered by Epoch.  For each private projection
