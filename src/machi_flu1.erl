@@ -97,7 +97,8 @@
          }).
 
 -record(http_goop, {
-          len                                   % content-length
+          len,                                  % content-length
+          x_csum                                % x-checksum
          }).
 
 start_link([{FluName, TcpPort, DataDir}|Rest])
@@ -260,6 +261,7 @@ append_server_loop(FluPid, #state{data_dir=DataDir,wedged=Wedged_p}=S) ->
     end.
 
 -define(EpochIDSpace, ((4*2)+(20*2))).          % hexencodingwhee!
+-define(CSumSpace, ((1*2)+(20*2))).             % hexencodingwhee!
 
 decode_epoch_id(EpochIDHex) ->
     <<EpochNum:(4*8)/big, EpochCSum/binary>> =
@@ -273,20 +275,23 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
     case gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT) of
         {ok, Line} ->
             %% machi_util:verb("Got: ~p\n", [Line]),
-            PrefixLenLF = byte_size(Line) - 2 - ?EpochIDSpace - 8 -8 - 1,
+            PrefixLenLF = byte_size(Line) - 2 - ?EpochIDSpace - ?CSumSpace
+                                                                    - 8 - 8 - 1,
             FileLenLF = byte_size(Line)   - 2 - ?EpochIDSpace - 16 - 8 - 1,
             CSumFileLenLF = byte_size(Line) - 2 - ?EpochIDSpace - 1,
-            WriteFileLenLF = byte_size(Line) - 7 - ?EpochIDSpace - 16 - 8 - 1,
+            WriteFileLenLF = byte_size(Line) - 7 - ?EpochIDSpace - ?CSumSpace
+                                                                   - 16 - 8 - 1,
             DelFileLenLF = byte_size(Line) - 14 - ?EpochIDSpace - 1,
             case Line of
                 %% For normal use
                 <<"A ",
                   EpochIDHex:(?EpochIDSpace)/binary,
+                  CSumHex:(?CSumSpace)/binary,
                   LenHex:8/binary, ExtraHex:8/binary,
                   Prefix:PrefixLenLF/binary, "\n">> ->
                     _EpochID = decode_epoch_id(EpochIDHex),
-                    do_net_server_append(FluName, Sock, LenHex, ExtraHex,
-                                         Prefix);
+                    do_net_server_append(FluName, Sock, CSumHex,
+                                         LenHex, ExtraHex, Prefix);
                 <<"R ",
                   EpochIDHex:(?EpochIDSpace)/binary,
                   OffsetHex:16/binary, LenHex:8/binary,
@@ -311,10 +316,12 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                 %% For "internal" replication only.
                 <<"W-repl ",
                   EpochIDHex:(?EpochIDSpace)/binary,
+                  CSumHex:(?CSumSpace)/binary,
                   OffsetHex:16/binary, LenHex:8/binary,
                   File:WriteFileLenLF/binary, "\n">> ->
                     _EpochID = decode_epoch_id(EpochIDHex),
-                    do_net_server_write(Sock, OffsetHex, LenHex, File, DataDir,
+                    do_net_server_write(Sock, CSumHex, OffsetHex, LenHex,
+                                        File, DataDir,
                                         <<"fixme1">>, false, <<"fixme2">>);
                 %% For data migration only.
                 <<"DEL-migration ",
@@ -354,11 +361,12 @@ append_server_dispatch(From, Prefix, Chunk, CSum, Extra, DataDir, LinkPid) ->
     Pid ! {seq_append, From, Prefix, Chunk, CSum, Extra},
     exit(normal).
 
-do_net_server_append(FluName, Sock, LenHex, ExtraHex, Prefix) ->
+do_net_server_append(FluName, Sock, CSumHex, LenHex, ExtraHex, Prefix) ->
     %% TODO: robustify against other invalid path characters such as NUL
     case sanitize_file_string(Prefix) of
         ok ->
-            do_net_server_append2(FluName, Sock, LenHex, ExtraHex, Prefix);
+            do_net_server_append2(FluName, Sock, CSumHex,
+                                  LenHex, ExtraHex, Prefix);
         _ ->
             ok = gen_tcp:send(Sock, <<"ERROR BAD-ARG">>)
     end.
@@ -371,21 +379,48 @@ sanitize_file_string(Str) ->
             error
     end.
 
-do_net_server_append2(FluName, Sock, LenHex, ExtraHex, Prefix) ->
+do_net_server_append2(FluName, Sock, CSumHex, LenHex, ExtraHex, Prefix) ->
     <<Len:32/big>> = machi_util:hexstr_to_bin(LenHex),
     <<Extra:32/big>> = machi_util:hexstr_to_bin(ExtraHex),
+    ClientCSum = machi_util:hexstr_to_bin(CSumHex),
     ok = inet:setopts(Sock, [{packet, raw}]),
     {ok, Chunk} = gen_tcp:recv(Sock, Len, 60*1000),
-    CSum = machi_util:checksum_chunk(Chunk),
     try
+        CSum = case ClientCSum of
+                   <<?CSUM_TAG_NONE:8, _/binary>> ->
+                       %% TODO: If the client was foolish enough to use
+                       %% this type of non-checksum, then the client gets
+                       %% what it deserves wrt data integrity, alas.  In
+                       %% the client-side Chain Replication method, each
+                       %% server will calculated this independently, which
+                       %% isn't exactly what ought to happen for best data
+                       %% integrity checking.  In server-side CR, the csum
+                       %% should be calculated by the head and passed down
+                       %% the chain together with the value.
+                       CS = machi_util:checksum_chunk(Chunk),
+                       machi_util:make_tagged_csum(server_gen, CS);
+                   <<?CSUM_TAG_CLIENT_GEN:8, ClientCS/binary>> ->
+                       CS = machi_util:checksum_chunk(Chunk),
+                       if CS == ClientCS ->
+                               ClientCSum;
+                          true ->
+                               throw({bad_csum, CS})
+                       end;
+                   _ ->
+                       ClientCSum
+               end,
         FluName ! {seq_append, self(), Prefix, Chunk, CSum, Extra}
-    catch error:badarg ->
+    catch
+        throw:{bad_csum, _CS} ->
+            ok = gen_tcp:send(Sock, <<"ERROR BAD-CHECKSUM\n">>),
+            exit(normal);
+        error:badarg ->
             error_logger:error_msg("Message send to ~p gave badarg, make certain server is running with correct registered name\n", [?MODULE])
     end,
     receive
         {assignment, Offset, File} ->
             OffsetHex = machi_util:bin_to_hexstr(<<Offset:64/big>>),
-            Out = io_lib:format("OK ~s ~s\n", [OffsetHex, File]),
+            Out = io_lib:format("OK ~s ~s ~s\n", [CSumHex, OffsetHex, File]),
             ok = gen_tcp:send(Sock, Out);
         wedged ->
             ok = gen_tcp:send(Sock, <<"ERROR WEDGED\n">>)
@@ -478,6 +513,9 @@ do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin, DataDir,
         {ok, FH} ->
             try
                 DoItFun(FH, Offset, Len)
+            catch
+                throw:{bad_csum, _CS} ->
+                    ok = gen_tcp:send(Sock, <<"ERROR BAD-CHECKSUM\n">>)
             after
                 file:close(FH)
             end;
@@ -492,29 +530,55 @@ do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin, DataDir,
             ok = BadIoFun(Sock)
     end.
 
-do_net_server_write(Sock, OffsetHex, LenHex, FileBin, DataDir,
+do_net_server_write(Sock, CSumHex, OffsetHex, LenHex, FileBin, DataDir,
                     EpochID, Wedged_p, CurrentEpochId) ->
     CSumPath = machi_util:make_checksum_filename(DataDir, FileBin),
     case file:open(CSumPath, [append, raw, binary, delayed_write]) of
         {ok, FHc} ->
-            do_net_server_write2(Sock, OffsetHex, LenHex, FileBin, DataDir, FHc,
-                                 EpochID, Wedged_p, CurrentEpochId);
+            do_net_server_write2(Sock, CSumHex, OffsetHex, LenHex, FileBin,
+                                 DataDir, FHc, EpochID, Wedged_p,
+                                 CurrentEpochId);
         {error, enoent} ->
             ok = filelib:ensure_dir(CSumPath),
-            do_net_server_write(Sock, OffsetHex, LenHex, FileBin, DataDir,
-                                EpochID, Wedged_p, CurrentEpochId)
+            do_net_server_write(Sock, CSumHex, OffsetHex, LenHex, FileBin,
+                                DataDir, EpochID, Wedged_p,
+                                CurrentEpochId)
     end.
 
-do_net_server_write2(Sock, OffsetHex, LenHex, FileBin, DataDir, FHc,
+do_net_server_write2(Sock, CSumHex, OffsetHex, LenHex, FileBin, DataDir, FHc,
                      EpochID, Wedged_p, CurrentEpochId) ->
+    ClientCSum = machi_util:hexstr_to_bin(CSumHex),
     DoItFun = fun(FHd, Offset, Len) ->
                       ok = inet:setopts(Sock, [{packet, raw}]),
                       {ok, Chunk} = gen_tcp:recv(Sock, Len),
-                      CSum = machi_util:checksum_chunk(Chunk),
+                      CSum = case ClientCSum of
+                                 <<?CSUM_TAG_NONE:8, _/binary>> ->
+                                     %% TODO: If the client was foolish enough to use
+                                     %% this type of non-checksum, then the client gets
+                                     %% what it deserves wrt data integrity, alas.  In
+                                     %% the client-side Chain Replication method, each
+                                     %% server will calculated this independently, which
+                                     %% isn't exactly what ought to happen for best data
+                                     %% integrity checking.  In server-side CR, the csum
+                                     %% should be calculated by the head and passed down
+                                     %% the chain together with the value.
+                                     CS = machi_util:checksum_chunk(Chunk),
+                                     machi_util:make_tagged_csum(server_gen,CS);
+                                 <<?CSUM_TAG_CLIENT_GEN:8, ClientCS/binary>> ->
+                                     CS = machi_util:checksum_chunk(Chunk),
+                                     if CS == ClientCS ->
+                                             ClientCSum;
+                                        true ->
+                                             throw({bad_csum, CS})
+                                     end;
+                                 _ ->
+                                     ClientCSum
+                             end,
                       case file:pwrite(FHd, Offset, Chunk) of
                           ok ->
-                              CSumHex = machi_util:bin_to_hexstr(CSum),
-                              CSum_info = [OffsetHex, 32, LenHex, 32, CSumHex, 10],
+                              CSumHex2 = machi_util:bin_to_hexstr(CSum),
+                              CSum_info = [OffsetHex, 32, LenHex, 32,
+                                           CSumHex2, 10],
                               ok = file:write(FHc, CSum_info),
                               ok = file:close(FHc),
                               gen_tcp:send(Sock, <<"OK\n">>);
@@ -861,18 +925,35 @@ http_server_hack(FluName, Line1, Sock, S) ->
 http_server_hack_put(Sock, G, FluName, MyURI) ->
     ok = inet:setopts(Sock, [{packet, raw}]),
     {ok, Chunk} = gen_tcp:recv(Sock, G#http_goop.len, 60*1000),
-    CSum = machi_util:checksum_chunk(Chunk),
+    CSum0 = machi_util:checksum_chunk(Chunk),
     try
+        CSum = case G#http_goop.x_csum of
+                   undefined ->
+                       machi_util:make_tagged_csum(server_gen,  CSum0);
+                   XX when is_binary(XX) ->
+                       if XX == CSum0 ->
+                               machi_util:make_tagged_csum(client_gen,  CSum0);
+                          true ->
+                               throw({bad_csum, XX})
+                       end
+               end,
         FluName ! {seq_append, self(), MyURI, Chunk, CSum, 0}
-    catch error:badarg ->
+    catch
+        throw:{bad_csum, _CS} ->
+            Out = "HTTP/1.0 412 Precondition failed\r\n"
+                "X-Reason: bad checksum\r\n\r\n",
+            ok = gen_tcp:send(Sock, Out),
+            ok = gen_tcp:close(Sock),
+            exit(normal);
+        error:badarg ->
             error_logger:error_msg("Message send to ~p gave badarg, make certain server is running with correct registered name\n", [?MODULE])
     end,
     receive
         {assignment, Offset, File} ->
-            Out = io_lib:format("HTTP/1.0 201 Created\r\nLocation: ~s\r\n"
+            Msg = io_lib:format("HTTP/1.0 201 Created\r\nLocation: ~s\r\n"
                                 "X-Offset: ~w\r\nX-Size: ~w\r\n\r\n",
                                 [File, Offset, byte_size(Chunk)]),
-            ok = gen_tcp:send(Sock, Out);
+            ok = gen_tcp:send(Sock, Msg);
         wedged ->
             ok = gen_tcp:send(Sock, <<"HTTP/1.0 499 WEDGED\r\n\r\n">>)
     after 10*1000 ->
@@ -932,6 +1013,10 @@ digest_header_goop([], G) ->
     G;
 digest_header_goop([{http_header, _, 'Content-Length', _, Str}|T], G) ->
     digest_header_goop(T, G#http_goop{len=list_to_integer(Str)});
+digest_header_goop([{http_header, _, "X-Checksum", _, Str}|T], G) ->
+    SHA = machi_util:hexstr_to_bin(Str),
+    CSum = machi_util:make_tagged_csum(client_gen, SHA),
+    digest_header_goop(T, G#http_goop{x_csum=CSum});
 digest_header_goop([_H|T], G) ->
     digest_header_goop(T, G).
 

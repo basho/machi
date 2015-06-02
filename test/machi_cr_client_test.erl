@@ -27,7 +27,9 @@
 -include_lib("eunit/include/eunit.hrl").
 
 
-smoke_test() ->
+smoke_test_() -> {timeout, 1*60, fun() -> smoke_test2() end}.
+
+smoke_test2() ->
     os:cmd("rm -rf ./data.a ./data.b ./data.c"),
     {ok, SupPid} = machi_flu_sup:start_link(),
     error_logger:tty(false),
@@ -86,6 +88,9 @@ smoke_test() ->
         machi_cr_client:append_chunk(C1, Prefix, Chunk1),
         {ok, {Off1,Size1,File1}} =
             machi_cr_client:append_chunk(C1, Prefix, Chunk1),
+        Chunk1_badcs = {<<?CSUM_TAG_CLIENT_GEN:8, 0:(8*20)>>, Chunk1},
+        {error, bad_checksum} =
+            machi_cr_client:append_chunk(C1, Prefix, Chunk1_badcs),
         {ok, Chunk1} = machi_cr_client:read_chunk(C1, File1, Off1, Size1),
         {ok, PPP} = machi_flu1_client:read_latest_projection(Host, PortBase+0,
                                                              private),

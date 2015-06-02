@@ -85,12 +85,16 @@
          trunc_hack/3, trunc_hack/4
         ]).
 
--type chunk()       :: binary() | iolist().    % client can use either
--type chunk_csum()  :: {file_offset(), chunk_size(), binary()}.
+%% TODO: Hrm, this kind of API use ... is it a bad idea?  We really want to
+%% encourage client-side checksums; thus it ought to be dead easy.
+-type chunk()       :: chunk_bin() | {chunk_csum(), chunk_bin()}.
+-type chunk_bin()   :: binary() | iolist().    % client can use either
+-type chunk_csum()  :: binary().               % 1 byte tag, N-1 bytes checksum
+-type chunk_summary() :: {file_offset(), chunk_size(), binary()}.
 -type chunk_s()     :: binary().               % server always uses binary()
 -type chunk_pos()   :: {file_offset(), chunk_size(), file_name_s()}.
 -type chunk_size()  :: non_neg_integer().
--type error_general() :: 'bad_arg' | 'wedged'.
+-type error_general() :: 'bad_arg' | 'wedged' | 'bad_checksum'.
 -type epoch_csum()  :: binary().
 -type epoch_num()   :: -1 | non_neg_integer().
 -type epoch_id()    :: {epoch_num(), epoch_csum()}.
@@ -193,7 +197,7 @@ read_chunk(Host, TcpPort, EpochID, File, Offset, Size)
 %% @doc Fetch the list of chunk checksums for `File'.
 
 -spec checksum_list(port_wrap(), epoch_id(), file_name()) ->
-      {ok, [chunk_csum()]} |
+      {ok, [chunk_summary()]} |
       {error, error_general() | 'no_such_file' | 'partial_read'} |
       {error, term()}.
 checksum_list(Sock, EpochID, File) ->
@@ -202,7 +206,7 @@ checksum_list(Sock, EpochID, File) ->
 %% @doc Fetch the list of chunk checksums for `File'.
 
 -spec checksum_list(inet_host(), inet_port(), epoch_id(), file_name()) ->
-      {ok, [chunk_csum()]} |
+      {ok, [chunk_summary()]} |
       {error, error_general() | 'no_such_file'} | {error, term()}.
 checksum_list(Host, TcpPort, EpochID, File) when is_integer(TcpPort) ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
@@ -486,20 +490,28 @@ append_chunk2(Sock, EpochID, Prefix0, Chunk0, ChunkExtra) ->
         %% TODO: add client-side checksum to the server's protocol
         %% _ = machi_util:checksum_chunk(Chunk),
         Prefix = machi_util:make_binary(Prefix0),
-        Chunk = machi_util:make_binary(Chunk0),
-        Len = iolist_size(Chunk0),
+        {CSum, Chunk} = case Chunk0 of
+                            {_,_} ->
+                                Chunk0;
+                            XX when is_binary(XX) ->
+                                SHA = machi_util:checksum_chunk(Chunk0),
+                                {<<?CSUM_TAG_CLIENT_GEN:8, SHA/binary>>, Chunk0}
+                        end,
+        Len = iolist_size(Chunk),
         true = (Len =< ?MAX_CHUNK_SIZE),
         {EpochNum, EpochCSum} = EpochID,
         EpochIDHex = machi_util:bin_to_hexstr(
                        <<EpochNum:(4*8)/big, EpochCSum/binary>>),
+        CSumHex = machi_util:bin_to_hexstr(CSum),
         LenHex = machi_util:int_to_hexbin(Len, 32),
         ExtraHex = machi_util:int_to_hexbin(ChunkExtra, 32),
-        Cmd = [<<"A ">>, EpochIDHex, LenHex, ExtraHex, Prefix, 10],
+        Cmd = [<<"A ">>, EpochIDHex, CSumHex, LenHex, ExtraHex, Prefix, 10],
         ok = w_send(Sock, [Cmd, Chunk]),
         {ok, Line} = w_recv(Sock, 0),
-        PathLen = byte_size(Line) - 3 - 16 - 1 - 1,
+        PathLen = byte_size(Line) - 3 - (2*(1+20)) - 16 - 1 - 1 - 1,
         case Line of
-            <<"OK ", OffsetHex:16/binary, " ",
+            <<"OK ", ServerCSum:(2*(1+20))/binary, " ",
+              OffsetHex:16/binary, " ",
               Path:PathLen/binary, _:1/binary>> ->
                 Offset = machi_util:hexstr_to_int(OffsetHex),
                 {ok, {Offset, Len, Path}};
@@ -507,6 +519,8 @@ append_chunk2(Sock, EpochID, Prefix0, Chunk0, ChunkExtra) ->
                 {error, bad_arg};
             <<"ERROR WEDGED", _/binary>> ->
                 {error, wedged};
+            <<"ERROR BAD-CHECKSUM", _/binary>> ->
+                {error, bad_checksum};
             <<"ERROR ", Rest/binary>> ->
                 {error, Rest}
         end
@@ -711,11 +725,18 @@ write_chunk2(Sock, EpochID, File0, Offset, Chunk0) ->
         File = machi_util:make_binary(File0),
         true = (Offset >= ?MINIMUM_OFFSET),
         OffsetHex = machi_util:int_to_hexbin(Offset, 64),
-        Chunk = machi_util:make_binary(Chunk0),
-        Len = iolist_size(Chunk0),
+        {CSum, Chunk} = case Chunk0 of
+                            {_,_} ->
+                                Chunk0;
+                            XX when is_binary(XX) ->
+                                SHA = machi_util:checksum_chunk(Chunk0),
+                                {<<?CSUM_TAG_CLIENT_GEN:8, SHA/binary>>, Chunk0}
+                        end,
+        CSumHex = machi_util:bin_to_hexstr(CSum),
+        Len = iolist_size(Chunk),
         true = (Len =< ?MAX_CHUNK_SIZE),
         LenHex = machi_util:int_to_hexbin(Len, 32),
-        Cmd = [<<"W-repl ">>, EpochIDHex, OffsetHex,
+        Cmd = [<<"W-repl ">>, EpochIDHex, CSumHex, OffsetHex,
                LenHex, File, <<"\n">>],
         ok = w_send(Sock, [Cmd, Chunk]),
         {ok, Line} = w_recv(Sock, 0),
@@ -727,6 +748,8 @@ write_chunk2(Sock, EpochID, File0, Offset, Chunk0) ->
                 {error, bad_arg};
             <<"ERROR WEDGED", _/binary>> ->
                 {error, wedged};
+            <<"ERROR BAD-CHECKSUM", _/binary>> ->
+                {error, bad_checksum};
             <<"ERROR ", _/binary>>=Else ->
                 {error, {server_said, Else}}
         end

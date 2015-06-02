@@ -104,6 +104,11 @@ flu_smoke_test() ->
                 exit(not_mandatory_but_test_expected_same_file_fixme)
         end,
 
+        Chunk1_cs = {<<?CSUM_TAG_NONE:8, 0:(8*20)>>, Chunk1},
+        {ok, {Off1e,Len1e,File1e}} = ?FLU_C:append_chunk(Host, TcpPort,
+                                                         ?DUMMY_PV1_EPOCH,
+                                                         Prefix, Chunk1_cs),
+
         Chunk2 = <<"yo yo">>,
         Len2 = byte_size(Chunk2),
         Off2 = ?MINIMUM_OFFSET + 77,
@@ -166,6 +171,28 @@ flu_projection_smoke_test() ->
              {ok, [P1]} = ?FLU_C:get_all_projections(Host, TcpPort, T),
              {error, not_written} = ?FLU_C:read_projection(Host, TcpPort, T, 2)
          end || T <- [public, private] ]
+    after
+        ok = ?FLU:stop(FLU1)
+    end.
+
+bad_checksum_test() ->
+    Host = "localhost",
+    TcpPort = 32960,
+    DataDir = "./data",
+
+    FLU1 = setup_test_flu(projection_test_flu, TcpPort, DataDir),
+    try
+        Prefix = <<"some prefix">>,
+        Chunk1 = <<"yo yo yo">>,
+        Chunk1_badcs = {<<?CSUM_TAG_CLIENT_GEN:8, 0:(8*20)>>, Chunk1},
+        {error, bad_checksum} = ?FLU_C:append_chunk(Host, TcpPort,
+                                                    ?DUMMY_PV1_EPOCH,
+                                                    Prefix, Chunk1_badcs),
+        {error, bad_checksum} = ?FLU_C:write_chunk(Host, TcpPort,
+                                                   ?DUMMY_PV1_EPOCH,
+                                                   <<"foo-file">>, 99832,
+                                                   Chunk1_badcs),
+        ok
     after
         ok = ?FLU:stop(FLU1)
     end.

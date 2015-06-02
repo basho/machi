@@ -24,3 +24,9 @@
 -define(DATA_DIR, "./data").
 -define(MINIMUM_OFFSET, 1024).
 
+%% 0th draft of checksum typing with 1st byte.
+-define(CSUM_TAG_NONE, 0).                   % No csum provided by client
+-define(CSUM_TAG_CLIENT_GEN, 1).             % Client-generated csum
+-define(CSUM_TAG_SERVER_GEN, 2).             % Server-genereated csum
+-define(CSUM_TAG_SERVER_REGEN, 3).           % Server-regenerated csum
+
