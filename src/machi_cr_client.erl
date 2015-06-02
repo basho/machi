@@ -295,6 +295,8 @@ do_append_head2(Prefix, Chunk, ChunkExtra, Depth, STime,
             %% io:format(user, "append ~w,", [HeadFLU]),
             do_append_midtail(RestFLUs, Prefix, File, Offset, Chunk, ChunkExtra,
                               [HeadFLU], 0, STime, S);
+        {error, bad_checksum}=BadCS ->
+            {reply, BadCS, S};
         {error, Retry}
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
             do_append_head(Prefix, Chunk, ChunkExtra, Depth, STime, S);
@@ -359,6 +361,9 @@ do_append_midtail2([FLU|RestFLUs]=FLUs, Prefix, File, Offset, Chunk,
             %% io:format(user, "write ~w,", [FLU]),
             do_append_midtail2(RestFLUs, Prefix, File, Offset, Chunk,
                                ChunkExtra, [FLU|Ws], Depth, STime, S);
+        {error, bad_checksum}=BadCS ->
+            %% TODO: alternate strategy?
+            {reply, BadCS, S};
         {error, Retry}
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
             do_append_midtail(FLUs, Prefix, File, Offset, Chunk,
@@ -407,6 +412,9 @@ do_read_chunk2(File, Offset, Size, Depth, STime,
                   got, byte_size(BadChunk)});
         {error, partial_read}=Err ->
             {reply, Err, S};
+        {error, bad_checksum}=BadCS ->
+            %% TODO: alternate strategy?
+            {reply, BadCS, S};
         {error, Retry}
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
             do_read_chunk(File, Offset, Size, Depth, STime, S);
@@ -461,6 +469,9 @@ read_repair2(cp_mode=ConsistencyMode,
         {ok, BadChunk} ->
             exit({todo, bad_chunk_size, ?MODULE, ?LINE, File, Offset,
                   Size, got, byte_size(BadChunk)});
+        {error, bad_checksum}=BadCS ->
+            %% TODO: alternate strategy?
+            {reply, BadCS, S};
         {error, Retry}
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
             read_repair(ConsistencyMode, ReturnMode, File, Offset,
@@ -482,6 +493,9 @@ read_repair2(ap_mode=ConsistencyMode,
         {ok, BadChunk} ->
             exit({todo, bad_chunk_size, ?MODULE, ?LINE, File,
                   Offset, Size, got, byte_size(BadChunk)});
+        {error, bad_checksum}=BadCS ->
+            %% TODO: alternate strategy?
+            {reply, BadCS, S};
         {error, Retry}
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
             read_repair(ConsistencyMode, ReturnMode, File,
@@ -537,6 +551,9 @@ read_repair4([First|Rest]=ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
         ok ->
             read_repair4(Rest, ReturnMode, Chunk, [First|Repaired], File,
                          Offset, Size, Depth, STime, S);
+        {error, bad_checksum}=BadCS ->
+            %% TODO: alternate strategy?
+            {reply, BadCS, S};
         {error, Retry}
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
             read_repair3(ToRepair, ReturnMode, Chunk, Repaired, File,
