@@ -97,7 +97,8 @@
          }).
 
 -record(http_goop, {
-          len                                   % content-length
+          len,                                  % content-length
+          x_csum                                % x-checksum
          }).
 
 start_link([{FluName, TcpPort, DataDir}|Rest])
@@ -397,7 +398,7 @@ do_net_server_append2(FluName, Sock, CSumHex, LenHex, ExtraHex, Prefix) ->
                        %% should be calculated by the head and passed down
                        %% the chain together with the value.
                        CS = machi_util:checksum_chunk(Chunk),
-                       <<?CSUM_TAG_SERVER_GEN:8, CS/binary>>;
+                       machi_util:make_tagged_csum(server_gen, CS);
                    <<?CSUM_TAG_CLIENT_GEN:8, ClientCS/binary>> ->
                        CS = machi_util:checksum_chunk(Chunk),
                        if CS == ClientCS ->
@@ -562,7 +563,7 @@ do_net_server_write2(Sock, CSumHex, OffsetHex, LenHex, FileBin, DataDir, FHc,
                                      %% should be calculated by the head and passed down
                                      %% the chain together with the value.
                                      CS = machi_util:checksum_chunk(Chunk),
-                                     <<?CSUM_TAG_SERVER_GEN:8, CS/binary>>;
+                                     machi_util:make_tagged_csum(server_gen,CS);
                                  <<?CSUM_TAG_CLIENT_GEN:8, ClientCS/binary>> ->
                                      CS = machi_util:checksum_chunk(Chunk),
                                      if CS == ClientCS ->
@@ -924,18 +925,35 @@ http_server_hack(FluName, Line1, Sock, S) ->
 http_server_hack_put(Sock, G, FluName, MyURI) ->
     ok = inet:setopts(Sock, [{packet, raw}]),
     {ok, Chunk} = gen_tcp:recv(Sock, G#http_goop.len, 60*1000),
-    CSum = machi_util:checksum_chunk(Chunk),
+    CSum0 = machi_util:checksum_chunk(Chunk),
     try
+        CSum = case G#http_goop.x_csum of
+                   undefined ->
+                       machi_util:make_tagged_csum(server_gen,  CSum0);
+                   XX when is_binary(XX) ->
+                       if XX == CSum0 ->
+                               machi_util:make_tagged_csum(client_gen,  CSum0);
+                          true ->
+                               throw({bad_csum, XX})
+                       end
+               end,
         FluName ! {seq_append, self(), MyURI, Chunk, CSum, 0}
-    catch error:badarg ->
+    catch
+        throw:{bad_csum, _CS} ->
+            Out = "HTTP/1.0 412 Precondition failed\r\n"
+                "X-Reason: bad checksum\r\n\r\n",
+            ok = gen_tcp:send(Sock, Out),
+            ok = gen_tcp:close(Sock),
+            exit(normal);
+        error:badarg ->
             error_logger:error_msg("Message send to ~p gave badarg, make certain server is running with correct registered name\n", [?MODULE])
     end,
     receive
         {assignment, Offset, File} ->
-            Out = io_lib:format("HTTP/1.0 201 Created\r\nLocation: ~s\r\n"
+            Msg = io_lib:format("HTTP/1.0 201 Created\r\nLocation: ~s\r\n"
                                 "X-Offset: ~w\r\nX-Size: ~w\r\n\r\n",
                                 [File, Offset, byte_size(Chunk)]),
-            ok = gen_tcp:send(Sock, Out);
+            ok = gen_tcp:send(Sock, Msg);
         wedged ->
             ok = gen_tcp:send(Sock, <<"HTTP/1.0 499 WEDGED\r\n\r\n">>)
     after 10*1000 ->
@@ -995,6 +1013,10 @@ digest_header_goop([], G) ->
     G;
 digest_header_goop([{http_header, _, 'Content-Length', _, Str}|T], G) ->
     digest_header_goop(T, G#http_goop{len=list_to_integer(Str)});
+digest_header_goop([{http_header, _, "X-Checksum", _, Str}|T], G) ->
+    SHA = machi_util:hexstr_to_bin(Str),
+    CSum = machi_util:make_tagged_csum(client_gen, SHA),
+    digest_header_goop(T, G#http_goop{x_csum=CSum});
 digest_header_goop([_H|T], G) ->
     digest_header_goop(T, G).
 
