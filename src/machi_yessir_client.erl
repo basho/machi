@@ -64,8 +64,10 @@
           chunk_size
          }).
 
--type chunk()       :: binary() | iolist().    % client can use either
--type chunk_csum()  :: {file_offset(), chunk_size(), binary()}.
+-type chunk()       :: chunk_bin() | {chunk_csum(), chunk_bin()}.
+-type chunk_bin()   :: binary() | iolist().    % client can use either
+-type chunk_csum()  :: binary().               % 1 byte tag, N-1 bytes checksum
+%% -type chunk_summary() :: {file_offset(), chunk_size(), binary()}.
 -type chunk_s()     :: binary().               % server always uses binary()
 -type chunk_pos()   :: {file_offset(), chunk_size(), file_name_s()}.
 -type chunk_size()  :: non_neg_integer().
@@ -81,7 +83,7 @@
 -type file_prefix() :: binary() | list().
 -type inet_host()   :: inet:ip_address() | inet:hostname().
 -type inet_port()   :: inet:port_number().
--type port_wrap()   :: {w,atom(),term()}.
+-type port_wrap()   :: #yessir{}. % yessir non-standard!
 -type projection()      :: #projection_v1{}.
 -type projection_type() :: 'public' | 'private'.
 
@@ -118,7 +120,7 @@ append_chunk(_Host, _TcpPort, EpochID, Prefix, Chunk) ->
 %% `write_chunk()' API.
 
 -spec append_chunk_extra(port_wrap(), epoch_id(), file_prefix(), chunk(), chunk_size()) ->
-      {ok, chunk_pos()} | {error, error_general()} | {error, term()}.
+      {ok, chunk_pos()}. %%%%  | {error, error_general()} | {error, term()}.
 append_chunk_extra(#yessir{name=Name,start_bin=StartBin},
                    _EpochID, Prefix, Chunk, ChunkExtra)
   when is_integer(ChunkExtra), ChunkExtra >= 0 ->
@@ -128,7 +130,7 @@ append_chunk_extra(#yessir{name=Name,start_bin=StartBin},
               N         -> N
           end,
     put({Name,offset,File}, Pos + size(Chunk) + ChunkExtra),
-    {ok, {File, Pos}}.
+    {ok, {Pos, iolist_size(Chunk), Prefix}}.
 
 %% @doc Append a chunk (binary- or iolist-style) of data to a file
 %% with `Prefix' and also request an additional `Extra' bytes.
@@ -140,7 +142,7 @@ append_chunk_extra(#yessir{name=Name,start_bin=StartBin},
 
 -spec append_chunk_extra(inet_host(), inet_port(),
                    epoch_id(), file_prefix(), chunk(), chunk_size()) ->
-      {ok, chunk_pos()} | {error, error_general()} | {error, term()}.
+      {ok, chunk_pos()}. %%%% | {error, error_general()} | {error, term()}.
 append_chunk_extra(_Host, _TcpPort, EpochID, Prefix, Chunk, ChunkExtra)
   when is_integer(ChunkExtra), ChunkExtra >= 0 ->
     Sock = connect(#p_srvr{proto_mod=?MODULE}),
@@ -291,9 +293,7 @@ get_latest_epoch(Sock, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
     case read_latest_projection(Sock, ProjType) of
         {ok, P} ->
-            {ok, {P#projection_v1.epoch_number, P#projection_v1.epoch_csum}};
-        _ ->
-            {ok, {0, <<"no such checksum">>}}
+            {ok, {P#projection_v1.epoch_number, P#projection_v1.epoch_csum}}
     end.
 
 %% @doc Get the latest epoch number + checksum from the FLU's projection store.
@@ -431,9 +431,7 @@ list_all_projections(Sock, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
     case get_all_projections(Sock, ProjType) of
         {ok, Ps} ->
-            {ok, [P#projection_v1.epoch_number || P <- Ps]};
-        _ ->
-            {error, not_written}
+            {ok, [P#projection_v1.epoch_number || P <- Ps]}
     end.
 
 %% @doc Get all epoch numbers from the FLU's projection store.
@@ -558,7 +556,7 @@ connect(#p_srvr{name=Name, props=Props})->
     %% Add fake dict entries for these files
     [begin
          Prefix = list_to_binary(io_lib:format("fake~w", [X])),
-         {ok, _} = append_chunk_extra(Sock, unused, Prefix, <<>>, FileSize)
+         {ok, _} = append_chunk_extra(Sock, {1,<<"unused">>}, Prefix, <<>>, FileSize)
      end || X <- lists:seq(1, NumFiles)],
 
     Sock.

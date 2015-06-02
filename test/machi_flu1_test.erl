@@ -141,7 +141,8 @@ flu_smoke_test() ->
         {error, bad_arg} = ?FLU_C:trunc_hack(Host, TcpPort,
                                              ?DUMMY_PV1_EPOCH, BadFile),
 
-        ok = ?FLU_C:quit(machi_util:connect(Host, TcpPort))
+        ok = ?FLU_C:quit(?FLU_C:connect(#p_srvr{address=Host,
+                                                port=TcpPort}))
     after
         ok = ?FLU:stop(FLU1)
     end.

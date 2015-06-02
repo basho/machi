@@ -41,6 +41,8 @@ dialyzer: deps compile
 	dialyzer -Wno_return --plt $(PLT) ebin
 
 dialyzer-test: deps compile
+	echo Force rebar to recompile .eunit dir w/o running tests > /dev/null
+	rebar skip_deps=true eunit suite=lamport_clock
 	dialyzer -Wno_return --plt $(PLT) .eunit
 
 clean_plt:
