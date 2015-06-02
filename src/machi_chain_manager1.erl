@@ -896,17 +896,15 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                                     down=P_i#projection_v1.all_members
                                          -- [MyName]}
                           end,
-
                 FinalInnerEpoch =
                     case inner_projection_exists(P_current) of
                         false ->
+                            FinalCreation = P_newprop3#projection_v1.creation_time,
                             AllFlapCounts_epk =
                                 [Epk || {{Epk,_FlTime}, _FlCount} <-
                                             get_all_flap_counts(P_newprop3)],
                             case AllFlapCounts_epk of
                                 [] ->
-                                    %% HRM, distrust?...
-                                    %% P_newprop3#projection_v1.epoch_number;
                                     P_newprop3#projection_v1.epoch_number;
                                 [_|_] ->
                                     lists:max(AllFlapCounts_epk)
@@ -921,8 +919,10 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                                andalso
                                P_oldinner#projection_v1.down ==
                                P_inner#projection_v1.down ->
+                                    FinalCreation = P_oldinner#projection_v1.creation_time,
                                     P_oldinner#projection_v1.epoch_number;
                                true ->
+                                    FinalCreation = P_newprop3#projection_v1.creation_time,
                                     P_oldinner#projection_v1.epoch_number + 1
                             end
                     end,
@@ -932,7 +932,9 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                 %%       up nodes > 1, repair is required there!  In the
                 %%       current simulator, repair is not simulated and
                 %%       finished (and then growing the UPI list).  Fix.
-                P_inner2 = P_inner#projection_v1{epoch_number=FinalInnerEpoch},
+                P_inner2 = machi_projection:update_checksum(
+                           P_inner#projection_v1{epoch_number=FinalInnerEpoch,
+                                                 creation_time=FinalCreation}),
                 InnerInfo = [{inner_summary, machi_projection:make_summary(P_inner2)},
                              {inner_projection, P_inner2}],
                 DbgX = replace(P_newprop3#projection_v1.dbg, InnerInfo),
