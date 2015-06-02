@@ -27,7 +27,9 @@
 -include_lib("eunit/include/eunit.hrl").
 
 
-smoke_test() ->
+smoke_test_() -> {timeout, 1*60, fun() -> smoke_test2() end}.
+
+smoke_test2() ->
     os:cmd("rm -rf ./data.a ./data.b ./data.c"),
     {ok, SupPid} = machi_flu_sup:start_link(),
     error_logger:tty(false),
