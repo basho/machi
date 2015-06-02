@@ -151,7 +151,7 @@ convergence_demo_testfun(NumFLUs) ->
                {e,TcpPort+4,"./data.e"}, {f,TcpPort+5,"./data.f"}],
     FLU_biglist = [X || {X,_,_} <- FluInfo],
     All_list = lists:sublist(FLU_biglist, NumFLUs),
-    io:format(user, "\nSET # of FLus = ~w members ~w).\n",
+    io:format(user, "\nSET # of FLUs = ~w members ~w).\n",
               [NumFLUs, All_list]),
     machi_partition_simulator:start_link({111,222,33}, 0, 100),
     _ = machi_partition_simulator:get(All_list),

@@ -933,11 +933,12 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                 P_inner2 = machi_projection:update_checksum(
                            P_inner#projection_v1{epoch_number=FinalInnerEpoch,
                                                  creation_time=FinalCreation}),
-                InnerInfo = [{inner_summary, machi_projection:make_summary(P_inner2)},
-                             {inner_projection, P_inner2}],
+                InnerInfo = [{inner_summary,
+                              machi_projection:make_summary(P_inner2)}],
                 DbgX = replace(P_newprop3#projection_v1.dbg, InnerInfo),
                 ?REACT({a30, ?LINE, [qqqwww|DbgX]}),
-                {P_newprop3#projection_v1{dbg=DbgX}, S_i};
+                {P_newprop3#projection_v1{dbg=DbgX,
+                                          inner=P_inner2}, S_i};
             _ ->
                 {P_newprop3, S3}
         end,
@@ -1459,8 +1460,6 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
     HosedTransUnion = proplists:get_value(trans_all_hosed, Props),
     TransFlapCounts0 = proplists:get_value(trans_all_flap_counts, Props),
 
-    _Unanimous = proplists:get_value(unanimous_flus, Props),
-    _NotUnanimous = proplists:get_value(not_unanimous_flus, Props),
     %% NOTE: bad_answer_flus are probably due to timeout or some other network
     %%       glitch, i.e., anything other than {ok, P::projection()}
     %%       response from machi_flu0:proj_read_latest().
@@ -1900,20 +1899,17 @@ gimme_random_uniform(N, S) ->
     RunEnv2 = [{seed, Seed2}|lists:keydelete(seed, 1, RunEnv1)],
     {X, S#ch_mgr{runenv=RunEnv2}}.
 
-inner_projection_exists(P) ->
-    case proplists:get_value(inner_projection, P#projection_v1.dbg) of
-        undefined ->
-            false;
-        _ ->
-            true
-    end.
+inner_projection_exists(#projection_v1{inner=undefined}) ->
+    false;
+inner_projection_exists(#projection_v1{inner=_}) ->
+    true.
 
 inner_projection_or_self(P) ->
-    case proplists:get_value(inner_projection, P#projection_v1.dbg) of
-        undefined ->
+    case inner_projection_exists(P) of
+        false ->
             P;
-        P_inner ->
-            P_inner
+        true ->
+            P#projection_v1.inner
     end.
 
 make_chmgr_regname(A) when is_atom(A) ->
