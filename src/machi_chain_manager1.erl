@@ -1798,7 +1798,31 @@ projection_transition_is_sane(
                             %% to:
                             %% {epoch,848},{author,a},{upi,[a]},{repair,[]},
                             %%                                   {down,[b,c,d]}
-                            if UPI_2_suffix == [AuthorServer2] ->
+                            FirstCase_p = UPI_2_suffix == [AuthorServer2],
+
+                            %% Here's another case that's alright:
+                            %%
+                            %% {a,{err,exit,
+                            %%     {upi_2_suffix_error,[c]}, ....
+                            %%
+                            %% from:
+                            %% {epoch,937},{author,a},{upi,[a,b]},{repair,[]},
+                            %%                                       {down,[c]}
+                            %% to:
+                            %% {epoch,943},{author,a},{upi,{a,b,c},{repair,[]},
+                            %%                                        {down,[]}
+
+                            %% The author server doesn't matter.  However,
+                            %% there were two other epochs in between, 939
+                            %% and 941, where there wasn't universal agreement
+                            %% of private projections.  The repair controller
+                            %% at the tail, 'b', had decided that the repair
+                            %% of 'c' was finished @ epoch 941.
+                            SecondCase_p = ((UPI_2_suffix -- Repairing_list1)
+                                            == []),
+                            if FirstCase_p ->
+                                    true;
+                               SecondCase_p ->
                                     true;
                                not RetrospectiveP ->
                                     exit({upi_2_suffix_error, UPI_2_suffix})
