@@ -36,6 +36,13 @@
           props = []      :: list()  % proplist for other related info
          }).
 
+-record(flap_i, {
+          flap_count :: {term(), term()},
+          all_hosed :: list(),
+          all_flap_counts :: list(),
+          bad :: list()
+         }).
+
 -type p_srvr() :: #p_srvr{}.
 -type p_srvr_dict() :: orddict:orddict().
 
@@ -51,6 +58,7 @@
           upi             :: [pv1_server()],
           repairing       :: [pv1_server()],
           down            :: [pv1_server()],
+          flap            :: 'undefined' | #flap_i{},  % flapping information
           dbg             :: list(), %proplist(), is checksummed
           dbg2            :: list(), %proplist(), is not checksummed
           members_dict    :: p_srvr_dict()

@@ -203,7 +203,6 @@ init({MyName, InitMembersDict, MgrOpts}) ->
               {use_partition_simulator, Opt(use_partition_simulator, false)},
               {network_partitions, Opt(network_partitions, [])},
               {network_islands, Opt(network_islands, [])},
-              {flapping_i, Opt(flapping, [])},
               {up_nodes, Opt(up_nodes, not_init_yet)}],
     ActiveP = Opt(active_mode, true),
     S = #ch_mgr{name=MyName,
@@ -252,8 +251,7 @@ handle_call({set_chain_members, MembersDict}, _From,
                                       down=NewDown,
                                       members_dict=MembersDict}),
     %% Reset all flapping state.
-    NewProj2 = NewProj#projection_v1{dbg=replace(NewProj#projection_v1.dbg,
-                                                 [make_flapping_i()])},
+    NewProj2 = NewProj#projection_v1{flap=make_flapping_i()},
     S3 = S2#ch_mgr{proj=NewProj2,
                    proj_history=queue:new()},
     {_QQ, S4} = do_react_to_env(S3),
@@ -1444,8 +1442,7 @@ react_to_env_C310(P_newprop, S) ->
 
 calculate_flaps(P_newprop, _P_current, _FlapLimit,
                 #ch_mgr{name=MyName, proj_history=H, flap_start=FlapStart,
-                        flaps=Flaps, runenv=RunEnv0} = S) ->
-    RunEnv1 = replace(RunEnv0, [{flapping_i, []}]),
+                        flaps=Flaps, runenv=RunEnv1} = S) ->
     HistoryPs = queue:to_list(H),
     Ps = HistoryPs ++ [P_newprop],
     UniqueProposalSummaries = lists:usort([{P#projection_v1.upi,
@@ -1544,11 +1541,6 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
 
     FlappingI = make_flapping_i(NewFlapStart, NewFlaps, AllHosed,
                                 AllFlapCounts, BadFLUs),
-    Dbg2 = [FlappingI|P_newprop#projection_v1.dbg],
-    %% TODO: 2015-03-04: I'm growing increasingly suspicious of
-    %% the 'runenv' variable that's threaded through all this code.
-    %% It isn't doing what I'd originally intended.  Fix it.
-    RunEnv2 = replace(RunEnv1, [FlappingI]),
     %% NOTE: Just because we increment flaps here, there's no correlation
     %%       to successful public proj store writes!  For example,
     %%       if we loop through states C2xx a few times, we would incr
@@ -1560,17 +1552,21 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
     %%       a large local flaps count gives no concrete guarantee that any
     %%       communication has been successful with any other part of the
     %%       cluster.
-    {machi_projection:update_checksum(P_newprop#projection_v1{dbg=Dbg2}),
-     S#ch_mgr{flaps=NewFlaps, flap_start=NewFlapStart, runenv=RunEnv2}}.
+    %% TODO: 2015-03-04: I'm growing increasingly suspicious of
+    %% the 'runenv' variable that's threaded through all this code.
+    %% It isn't doing what I'd originally intended.  Fix it.
+    {machi_projection:update_checksum(P_newprop#projection_v1{
+                                                         flap=FlappingI}),
+     S#ch_mgr{flaps=NewFlaps, flap_start=NewFlapStart, runenv=RunEnv1}}.
 
 make_flapping_i() ->
     make_flapping_i({{epk,-1},?NOT_FLAPPING}, 0, [], [], []).
 
 make_flapping_i(NewFlapStart, NewFlaps, AllHosed, AllFlapCounts, BadFLUs) ->
-    {flapping_i, [{flap_count, {NewFlapStart, NewFlaps}},
-                  {all_hosed, AllHosed},
-                  {all_flap_counts, lists:sort(AllFlapCounts)},
-                  {bad,BadFLUs}]}.
+    #flap_i{flap_count={NewFlapStart, NewFlaps},
+            all_hosed=AllHosed,
+            all_flap_counts=lists:sort(AllFlapCounts),
+            bad=BadFLUs}.
 
 projection_transitions_are_sane(Ps, RelativeToServer) ->
     projection_transitions_are_sane(Ps, RelativeToServer, false).
@@ -1846,17 +1842,23 @@ calc_sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list) ->
                  end,
     MinSleep + (SleepChunk * Index).
 
-get_raw_flapping_i(#projection_v1{dbg=Dbg}) ->
-    proplists:get_value(flapping_i, Dbg, []).
+get_raw_flapping_i(#projection_v1{flap=F}) ->
+    F.
 
 get_flap_count(P) ->
-    proplists:get_value(flap_count, get_raw_flapping_i(P), {0,0}).
+    case get_raw_flapping_i(P) of undefined -> {0, 0};
+                                  F ->         F#flap_i.flap_count
+    end.
 
 get_all_flap_counts(P) ->
-    proplists:get_value(all_flap_counts, get_raw_flapping_i(P), []).
+    case get_raw_flapping_i(P) of undefined -> [];
+                                  F ->         F#flap_i.all_flap_counts
+    end.
 
 get_all_hosed(P) when is_record(P, projection_v1)->
-    proplists:get_value(all_hosed, get_raw_flapping_i(P), []).
+    case get_raw_flapping_i(P) of undefined -> [];
+                                  F ->         F#flap_i.all_hosed
+    end.
 
 merge_flap_counts(FlapCounts) ->
     merge_flap_counts(FlapCounts, orddict:new()).

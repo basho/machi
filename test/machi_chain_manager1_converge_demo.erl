@@ -311,8 +311,8 @@ make_partition_list(All_list) ->
                                        C <- All_list, D <- All_list, C /= D,
                                        X /= A, X /= C, A /= C],
     %% _X_Ys1 ++ _X_Ys2.
-    _X_Ys3.
-    %% _X_Ys1 ++ _X_Ys2 ++ _X_Ys3.
+    %% _X_Ys3.
+    _X_Ys1 ++ _X_Ys2 ++ _X_Ys3.
 
     %% [ [{a,b},{b,d},{c,b}],
     %%   [{a,b},{b,d},{c,b}, {a,b},{b,a},{a,c},{c,a},{a,d},{d,a}],
