@@ -218,7 +218,7 @@ handle_call({{list_all_projections, ProjType}, LC1}, _From, S) ->
 handle_call({set_wedge_notify_pid, NotifyWedgeStateChanges}, _From, S) ->
     {reply, ok, S#state{wedge_notify_pid=NotifyWedgeStateChanges}};
 handle_call(_Request, _From, S) ->
-    Reply = whaaaaaaaaaaaaa,
+    Reply = {whaaaaaaaaaaaaazz, _Request},
     {reply, Reply, S}.
 
 handle_cast(_Msg, S) ->

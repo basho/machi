@@ -61,7 +61,8 @@ unanimous_report(Namez) ->
         lists:usort(lists:flatten(
                       [element(2, ?FLU_PC:list_all_projections(FLU, private)) ||
                           {_FLUName, FLU} <- Namez])),
-    [unanimous_report(Epoch, Namez) || Epoch <- UniquePrivateEs].
+    [unanimous_report(Epoch, Namez) || Epoch <- UniquePrivateEs,
+                                       Epoch /= 0].
 
 unanimous_report(Epoch, Namez) ->
     Projs = [{FLUName,

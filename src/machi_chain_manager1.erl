@@ -578,6 +578,7 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                    end,
     Repairing_list2 = [X || X <- OldRepairing_list, lists:member(X, Up)],
     Simulator_p = proplists:get_value(use_partition_simulator, RunEnv2, false),
+    Repair_done_p = proplists:get_value(repair_always_done, RunEnv2, false),
     {NewUPI_list3, Repairing_list3, RunEnv3} =
         case {NewUp, Repairing_list2} of
             {[], []} ->
@@ -594,7 +595,7 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                 SameEpoch_p = check_latest_private_projections_same_epoch(
                                 tl(NewUPI_list) ++ Repairing_list2,
                                 S#ch_mgr.proj, Partitions, S),
-                if Simulator_p andalso SameEpoch_p ->
+                if Simulator_p andalso (SameEpoch_p orelse Repair_done_p) ->
                         D_foo=[{repair_airquote_done, {we_agree, (S#ch_mgr.proj)#projection_v1.epoch_number}}],
                         {NewUPI_list ++ [H], T, RunEnv2};
                    not Simulator_p
@@ -1223,7 +1224,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                                  {newprop_flap_count, P_newprop_flap_count},
                                  {flap_limit, FlapLimit}]}),
             _B10Hack = get(b10_hack),
-            io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_flap_count]),
+            io:format(user, "{FLAP: ~w flaps ~w}!  ", [S#ch_mgr.name, P_newprop_flap_count]),
 
             if
                 %% MEANWHILE, we have learned some things about this

@@ -38,7 +38,7 @@
 -compile({pulse_replace_module, [{application, pulse_application}]}).
 %% The following functions contains side_effects but are run outside
 %% PULSE, i.e. PULSE needs to leave them alone
--compile({pulse_skip,[{prop_pulse_test_,0}]}).
+-compile({pulse_skip,[{prop_pulse_test_,0}, {shutdown_hard,0}]}).
 -compile({pulse_no_side_effect,[{file,'_','_'}, {erlang, now, 0}]}).
 
 %% Used for output within EUnit...
@@ -51,6 +51,7 @@
 
 -define(MGR, machi_chain_manager1).
 -define(MGRTEST, machi_chain_manager1_test).
+-define(FLU_PC, machi_proxy_flu1_client).
 
 -record(state, {
           step=0,
@@ -63,7 +64,7 @@ initial_state() ->
     #state{}.
 
 gen_num_pids() ->
-    choose(2, 5).
+    choose(2, length(all_list_extra())).
 
 gen_seed() ->
     noshrink({choose(1, 10000), choose(1, 10000), choose(1, 10000)}).
@@ -81,7 +82,7 @@ command(S) ->
                { 1, {call, ?MODULE, change_partitions,
                      [gen_old_threshold(), gen_no_partition_threshold()]}},
                {50, {call, ?MODULE, do_ticks,
-                     [choose(5, 100), S#state.pids,
+                     [choose(5, 200), S#state.pids,
                       gen_old_threshold(), gen_no_partition_threshold()]}}
               ]).
 
@@ -102,42 +103,71 @@ postcondition(_S, {call, _, _Func, _Args}, _Res) ->
     true.
 
 all_list_extra() ->
-    [  {a, 7400, "./data.pulse.a"}
-     , {b, 7401, "./data.pulse.b"}
-     , {c, 7402, "./data.pulse.c"}
-     %% , {d, 7403, "./data.pulse.d"}
-     %% , {e, 7404, "./data.pulse.e"}
-     %% , {f, 7405, "./data.pulse.f"}
-     %% , {g, 7405, "./data.pulse.g"}
-     %% , {h, 7406, "./data.pulse.h"}
+    [ %% Genenerators assume that this list is at least 2 items
+       {#p_srvr{name=a, address="localhost", port=7400,
+                props=[{chmgr, a_chmgr}]}, "./data.pulse.a"}
+     , {#p_srvr{name=b, address="localhost", port=7401,
+                props=[{chmgr, b_chmgr}]}, "./data.pulse.b"}
+     , {#p_srvr{name=c, address="localhost", port=7402,
+                props=[{chmgr, c_chmgr}]}, "./data.pulse.c"}
+     , {#p_srvr{name=d, address="localhost", port=7403,
+                props=[{chmgr, d_chmgr}]}, "./data.pulse.d"}
+     , {#p_srvr{name=e, address="localhost", port=7404,
+                props=[{chmgr, e_chmgr}]}, "./data.pulse.e"}
     ].
 
 all_list() ->
-    [Name || {Name, _Port, _Dir} <- all_list_extra()].
+    [P#p_srvr.name || {P, _Dir} <- all_list_extra()].
 
-setup(_Num, Seed) ->
-    ?QC_FMT("\nsetup,", []),
-    All_list = all_list(),
-    _ = machi_partition_simulator:start_link(Seed, 0, 100),
+setup(Num, Seed) ->
+    ?QC_FMT("\nsetup(~w", [Num]),
+    error_logger:tty(false),
+    All_list = lists:sublist(all_list(), Num),
+    All_listE = lists:sublist(all_list_extra(), Num),
+    %% shutdown_hard() has taken care of killing all relevant procs.
+    [machi_flu1_test:clean_up_data_dir(Dir) || {_P, Dir} <- All_listE],
+
+    %% Start partition simulator
+    {ok, PSimPid} = machi_partition_simulator:start_link(Seed, 0, 100),
     _Partitions = machi_partition_simulator:get(All_list),
 
-    FLU_pids = [begin
-                    {ok, FLUPid} = machi_flu1:start_link([StartTuple]),
-                    FLUPid
-                end || StartTuple <- all_list_extra()],
-    Namez = lists:zip(All_list, FLU_pids),
-    Mgr_pids = [begin
-                    {ok, Mgr} = ?MGR:start_link(Name, All_list, FLU_pid),
-                    Mgr
-                end || {Name, FLU_pid} <- Namez],
-    timer:sleep(1),
-    {ok, P1} = ?MGR:test_calc_projection(hd(Mgr_pids), false),
-    P1Epoch = P1#projection_v1.epoch_number,
-    [ok = machi_flu0:proj_write(FLU, P1Epoch, public, P1) || FLU <- FLU_pids],
-    [?MGR:test_react_to_env(Mgr) || Mgr <- Mgr_pids],
+    %% Start FLUs and their associated procs
+    {ok, SupPid} = machi_flu_sup:start_link(),
+    FluOpts = [{use_partition_simulator, true}, {active_mode, false},
+               %% TODO: Move repair_always_done to ETS table and reset
+               %% after setup?
+               {repair_always_done, true}],
+    [begin
+         #p_srvr{name=Name, port=Port} = P,
+         {ok, _} = machi_flu_psup:start_flu_package(Name, Port, Dir, FluOpts)
+     end || {P, Dir} <- All_listE],
+    %% Set up the chain
+    Dict = orddict:from_list([{P#p_srvr.name, P} || {P, _Dir} <- All_listE]),
+    [machi_chain_manager1:set_chain_members(get_chmgr(P), Dict) ||
+        {P, _Dir} <- All_listE],
+    %% Trigger some environment reactions for humming consensus: first
+    %% do all the same server first, then round-robin evenly across
+    %% servers.
+    [begin
+         _QQa = machi_chain_manager1:test_react_to_env(get_chmgr(P))
+     end || {P, _Dir} <- All_listE, _I <- lists:seq(1,20), _Repeat <- [1,2]],
+    [begin
+         _QQa = machi_chain_manager1:test_react_to_env(get_chmgr(P))
+     end || _I <- lists:seq(1,20), {P, _Dir} <- All_listE, _Repeat <- [1,2]],
+    %% %% All chain managers & projection stores should be using the
+    %% %% same projection which is max projection in each store.
+    %% ChMgrs = [get_chmgr(P) || {P, _Dir} <- All_listE],
+    %% {no_change,_,Epoch_m} = machi_chain_manager1:test_react_to_env(
+    %%                           hd(ChMgrs)),
+    %% [{Epoch_m,{no_change,_,Epoch_m}} = 
+    %%      {Epoch_m, machi_chain_manager1:test_react_to_env(
+    %%                            ChMgr)} || ChMgr <- ChMgrs],
 
-    Res = {FLU_pids, Mgr_pids},
+    ProxiesDict = ?FLU_PC:start_proxies(Dict),
+
+    Res = {PSimPid, SupPid, ProxiesDict, All_listE},
     put(manager_pids_hack, Res),
+    ?QC_FMT("),", []),
     Res.
 
 change_partitions(OldThreshold, NoPartitionThreshold) ->
@@ -147,9 +177,9 @@ change_partitions(OldThreshold, NoPartitionThreshold) ->
 always_last_partitions() ->
     machi_partition_simulator:always_last_partitions().
 
-private_stable_check(FLUs) ->
-    {_FLU_pids, Mgr_pids} = get(manager_pids_hack),
-    Res = private_projections_are_stable_check(FLUs, Mgr_pids),
+private_stable_check() ->
+    {_PSimPid, _SupPid, ProxiesDict, All_listE} = get(manager_pids_hack),
+    Res = private_projections_are_stable_check(ProxiesDict, All_listE),
     if not Res ->
             io:format(user, "BUMMER: private stable check failed!\n", []);
        true ->
@@ -159,52 +189,57 @@ private_stable_check(FLUs) ->
 
 do_ticks(Num, PidsMaybe, OldThreshold, NoPartitionThreshold) ->
     io:format(user, "~p,~p,~p|", [Num, OldThreshold, NoPartitionThreshold]),
-    {_FLU_pids, Mgr_pids} = case PidsMaybe of
-                                undefined -> get(manager_pids_hack);
-                                _         -> PidsMaybe
-                            end,
+    {_PSimPid, _SupPid, ProxiesDict, All_listE} =
+        case PidsMaybe of
+            undefined -> get(manager_pids_hack);
+            _         -> PidsMaybe
+        end,
     if is_integer(OldThreshold) ->
             machi_partition_simulator:reset_thresholds(OldThreshold,
                                                        NoPartitionThreshold);
        true ->
-            ?QC_FMT("{e=~w},", [get_biggest_private_epoch_number()]),
+            ?QC_FMT("{e=~w},", [get_biggest_private_epoch_number(ProxiesDict)]),
             machi_partition_simulator:no_partitions()
     end,
-    Res = exec_ticks(Num, Mgr_pids),
+    Res = exec_ticks(Num, All_listE),
     if not is_integer(OldThreshold) ->
-            ?QC_FMT("{e=~w},", [get_biggest_private_epoch_number()]);
+            ?QC_FMT("{e=~w},", [get_biggest_private_epoch_number(ProxiesDict)]);
        true ->
             ok
     end,
     Res.
 
-get_biggest_private_epoch_number() ->
+get_biggest_private_epoch_number(ProxiesDict) ->
     lists:last(
       lists:usort(
         lists:flatten(
-          [machi_flu0:proj_list_all(FLU, private) ||
-              FLU <- all_list()]))).
+          [begin
+               {ok, {Epoch, _}} = ?FLU_PC:get_latest_epochid(Proxy, private),
+               Epoch
+           end || {_Name, Proxy} <- orddict:to_list(ProxiesDict)]))).
 
 dump_state() ->
   try
     ?QC_FMT("dump_state(", []),
-    {FLU_pids, _Mgr_pids} = get(manager_pids_hack),
-    Namez = zip(all_list(), FLU_pids),
-    Report = ?MGRTEST:unanimous_report(Namez),
+    {_PSimPid, _SupPid, ProxiesDict, _AlE} = get(manager_pids_hack),
+    Report = ?MGRTEST:unanimous_report(ProxiesDict),
+    Namez = ProxiesDict,
     %% ?QC_FMT("Report ~p\n", [Report]),
 
-    Diag1 = [begin
-                 Ps = machi_flu0:proj_get_all(FLU, Type),
-                 [io_lib:format("~p ~p ~p: ~w\n", [FLUName, Type, P#projection_v1.epoch_number, ?MGR:make_projection_summary(P)]) || P <- Ps]
-             end || {FLUName, FLU} <- Namez,
-                    Type <- [public] ],
+    %% Diag1 = [begin
+    %%              {ok, Ps} = ?FLU_PC:get_all_projections(Proxy, Type),
+    %%              [io_lib:format("~p ~p ~p: ~w\n", [FLUName, Type, P#projection_v1.epoch_number, machi_projection:make_summary(P)]) || P <- Ps]
+    %%          end || {FLUName, Proxy} <- orddict:to_list(ProxiesDict),
+    %%                 Type <- [public] ],
 
     UniquePrivateEs =
         lists:usort(lists:flatten(
-                      [machi_flu0:proj_list_all(FLU, private) ||
-                          {_FLUName, FLU} <- Namez])),
-    P_lists0 = [{FLUName, Type, machi_flu0:proj_get_all(FLUPid, Type)} ||
-                   {FLUName, FLUPid} <- Namez, Type <- [public,private]],
+                      [element(2,?FLU_PC:list_all_projections(Proxy,private)) ||
+                          {_FLUName, Proxy} <- orddict:to_list(ProxiesDict)])),
+    P_lists0 = [{FLUName, Type,
+                 element(2,?FLU_PC:get_all_projections(Proxy, Type))} ||
+                   {FLUName, Proxy} <- orddict:to_list(ProxiesDict),
+                   Type <- [public,private]],
     P_lists = [{FLUName, Type, P} || {FLUName, Type, Ps} <- P_lists0,
                                      P <- Ps],
     AllDict = lists:foldl(fun({FLU, Type, P}, D) ->
@@ -218,25 +253,22 @@ dump_state() ->
                             {ok, T} -> T;
                             error   -> error_unwritten
                         end;
-                        %% case machi_flu0:proj_read(FLU, E, private) of
-                        %%     {ok, T} -> T;
-                        %%     Else    -> Else
-                        %% end;
                    (_E, Acc) ->
                         Acc
                 end
         end,
-    Diag2 = [[
-                io_lib:format("~p private: ~w\n",
-                              [FLUName,
-                               ?MGR:make_projection_summary(
-                                  lists:foldl(DumbFinderBackward(FLUName),
-                                              error_unwritten,
-                                              lists:seq(Epoch, 0, -1)))])
-              || {FLUName, _FLU} <- Namez]
-             || Epoch <- UniquePrivateEs],
+    %% Diag2 = [[
+    %%             io_lib:format("~p private: ~w\n",
+    %%                           [FLUName,
+    %%                            machi_projection:make_summary(
+    %%                               lists:foldl(DumbFinderBackward(FLUName),
+    %%                                           error_unwritten,
+    %%                                           lists:seq(Epoch, 0, -1)))])
+    %%           || {FLUName, _FLU} <- Namez]
+    %%          || Epoch <- UniquePrivateEs],
 
     ?QC_FMT(")", []),
+    Diag1 = Diag2 = "skip_diags",
     {Report, lists:flatten([Diag1, Diag2])}
   catch XX:YY ->
         ?QC_FMT("OUCH: ~p ~p @ ~p\n", [XX, YY, erlang:get_stacktrace()])
@@ -255,9 +287,9 @@ prop_pulse() ->
         Stabilize1 = [{set,{var,99999995},
                       {call, ?MODULE, always_last_partitions, []}}],
         Stabilize2 = [{set,{var,99999996},
-                       {call, ?MODULE, private_stable_check, [all_list()]}}],
+                       {call, ?MODULE, private_stable_check, []}}],
         LastTriggerTicks = {set,{var,99999997},
-                            {call, ?MODULE, do_ticks, [25, undefined, no, no]}},
+                            {call, ?MODULE, do_ticks, [123, undefined, no, no]}},
         Cmds1 = lists:duplicate(2, LastTriggerTicks),
         %% Cmds1 = lists:duplicate(length(all_list())*2, LastTriggerTicks),
         Cmds = Cmds0 ++
@@ -272,7 +304,13 @@ prop_pulse() ->
                                  {strategy, unfair}]),
         ok = shutdown_hard(),
 
-        ?QC_FMT("S2 ~p\n", [S2]),
+        %% ?QC_FMT("S2 ~p\n", [S2]),
+        case S2#state.dump_state of
+            undefined ->
+                ?QC_FMT("BUMMER Cmds = ~p\n", [Cmds]);
+            _ ->
+                ok
+        end,
         {Report, Diag} = S2#state.dump_state,
 
         %% Report is ordered by Epoch.  For each private projection
@@ -312,6 +350,7 @@ prop_pulse() ->
 
         ?WHENFAIL(
         begin
+            ?QC_FMT("Cmds = ~p\n", [Cmds]),
             ?QC_FMT("Res = ~p\n", [Res]),
             ?QC_FMT("Diag = ~s\n", [Diag]),
             ?QC_FMT("Report = ~p\n", [Report]),
@@ -342,49 +381,59 @@ prop_pulse_test_() ->
      end}.
 
 shutdown_hard() ->
-    (catch machi_partition_simulator:stop()),
-    [(catch machi_flu0:stop(X)) || X <- all_list()],
+    (catch unlink(whereis(machi_partition_simulator))),
+    [begin
+         Pid = whereis(X),
+         (catch X:stop()), timer:sleep(1),
+         (catch unlink(Pid)),
+         timer:sleep(10),
+         (catch exit(Pid, shutdown)),
+         timer:sleep(1),
+         (catch exit(Pid, kill))
+     end || X <- [machi_partition_simulator, machi_flu_sup] ],
     timer:sleep(1),
-    (catch exit(whereis(machi_partition_simulator), kill)),
-    [(catch exit(whereis(X), kill)) || X <- all_list()],
-    erlang:yield(),
+    (catch machi_partition_simulator:stop()),
+    timer:sleep(1),
     ok.
 
-exec_ticks(Num, Mgr_pids) ->
+exec_ticks(Num, All_listE) ->
     Parent = self(),
     Pids = [spawn_link(fun() ->
                           [begin
                                erlang:yield(),
+                               M_name = P#p_srvr.name,
                                Max = 10,
                                Elapsed =
                                    ?MGR:sleep_ranked_order(1, Max, M_name, all_list()),
-                               Res = ?MGR:test_react_to_env(MMM),
+                               Res = ?MGR:test_react_to_env(get_chmgr(P)),
                                timer:sleep(erlang:max(0, Max - Elapsed)),
                                Res=Res %% ?D({self(), Res})
                            end || _ <- lists:seq(1,Num)],
                           Parent ! done
-                  end) || {M_name, MMM} <- lists:zip(all_list(), Mgr_pids) ],
+                  end) || {P, _Dir} <- All_listE],
     [receive
          done ->
              ok
-     after 5000 ->
-             exit(icky_timeout)
-     end || _ <- Pids],    
+     %% after 500*1000 ->
+     %%         exit(icky_timeout)
+     end || _Pid <- Pids],    
     ok.
 
-private_projections_are_stable_check(All_list, Mgr_pids) ->
+private_projections_are_stable_check(ProxiesDict, All_listE) ->
     %% TODO: extend the check to look not only for latest num, but
     %% also check for flapping, and if yes, to see if all_hosed are
     %% all exactly equal.
 
-    _ = exec_ticks(40, Mgr_pids),
-    Private1 = [machi_flu0:proj_get_latest_num(FLU, private) ||
-                   FLU <- All_list],
-    _ = exec_ticks(5, Mgr_pids),
-    Private2 = [machi_flu0:proj_get_latest_num(FLU, private) ||
-                   FLU <- All_list],
+    _ = exec_ticks(40, All_listE),
+    Private1 = [?FLU_PC:get_latest_epochid(Proxy, private) ||
+                   {_FLU, Proxy} <- orddict:to_list(ProxiesDict)],
+    _ = exec_ticks(5, All_listE),
+    Private2 = [?FLU_PC:get_latest_epochid(Proxy, private) ||
+                   {_FLU, Proxy} <- orddict:to_list(ProxiesDict)],
 
     (Private1 == Private2).
 
+get_chmgr(#p_srvr{props=Ps}) ->
+    proplists:get_value(chmgr, Ps).
 
 -endif. % PULSE
