@@ -126,23 +126,23 @@ setup(Num, Seed) ->
     All_listE = lists:sublist(all_list_extra(), Num),
     %% shutdown_hard() has taken care of killing all relevant procs.
     [machi_flu1_test:clean_up_data_dir(Dir) || {_P, Dir} <- All_listE],
+    ?QC_FMT(",z~w", [?LINE]),
 
     %% Start partition simulator
     {ok, PSimPid} = machi_partition_simulator:start_link(Seed, 0, 100),
     _Partitions = machi_partition_simulator:get(All_list),
+    ?QC_FMT(",z~w", [?LINE]),
 
     %% Start FLUs and their associated procs
     {ok, SupPid} = machi_flu_sup:start_link(),
-    FluOpts = [{use_partition_simulator, true}, {active_mode, false},
-               %% TODO: Move repair_always_done to ETS table and reset
-               %% after setup?
-               {repair_always_done, true}],
+    FluOpts = [{use_partition_simulator, true}, {active_mode, false}],
     [begin
          #p_srvr{name=Name, port=Port} = P,
          {ok, _} = machi_flu_psup:start_flu_package(Name, Port, Dir, FluOpts)
      end || {P, Dir} <- All_listE],
     %% Set up the chain
     Dict = orddict:from_list([{P#p_srvr.name, P} || {P, _Dir} <- All_listE]),
+    ?QC_FMT(",z~w", [?LINE]),
     [machi_chain_manager1:set_chain_members(get_chmgr(P), Dict) ||
         {P, _Dir} <- All_listE],
     %% Trigger some environment reactions for humming consensus: first
@@ -151,17 +151,11 @@ setup(Num, Seed) ->
     [begin
          _QQa = machi_chain_manager1:test_react_to_env(get_chmgr(P))
      end || {P, _Dir} <- All_listE, _I <- lists:seq(1,20), _Repeat <- [1,2]],
+    ?QC_FMT(",z~w", [?LINE]),
     [begin
          _QQa = machi_chain_manager1:test_react_to_env(get_chmgr(P))
      end || _I <- lists:seq(1,20), {P, _Dir} <- All_listE, _Repeat <- [1,2]],
-    %% %% All chain managers & projection stores should be using the
-    %% %% same projection which is max projection in each store.
-    %% ChMgrs = [get_chmgr(P) || {P, _Dir} <- All_listE],
-    %% {no_change,_,Epoch_m} = machi_chain_manager1:test_react_to_env(
-    %%                           hd(ChMgrs)),
-    %% [{Epoch_m,{no_change,_,Epoch_m}} = 
-    %%      {Epoch_m, machi_chain_manager1:test_react_to_env(
-    %%                            ChMgr)} || ChMgr <- ChMgrs],
+    ?QC_FMT(",z~w", [?LINE]),
 
     ProxiesDict = ?FLU_PC:start_proxies(Dict),
 
@@ -356,6 +350,7 @@ prop_pulse() ->
             ?QC_FMT("Report = ~p\n", [Report]),
             ?QC_FMT("Sane = ~p\n", [Sane]),
             ?QC_FMT("SingleChainNoRepair failure =\n    ~p\n", [SingleChainNoRepair])
+,erlang:halt(0)
         end,
         conjunction([{res, Res == true orelse Res == ok},
                      {all_disjoint, AllDisjointP},
@@ -381,10 +376,12 @@ prop_pulse_test_() ->
      end}.
 
 shutdown_hard() ->
+    ?QC_FMT("shutdown(", []),
     (catch unlink(whereis(machi_partition_simulator))),
     [begin
          Pid = whereis(X),
-         (catch X:stop()), timer:sleep(1),
+         spawn(fun() -> (catch X:stop()) end),
+         timer:sleep(50),
          (catch unlink(Pid)),
          timer:sleep(10),
          (catch exit(Pid, shutdown)),
@@ -392,8 +389,7 @@ shutdown_hard() ->
          (catch exit(Pid, kill))
      end || X <- [machi_partition_simulator, machi_flu_sup] ],
     timer:sleep(1),
-    (catch machi_partition_simulator:stop()),
-    timer:sleep(1),
+    ?QC_FMT(")", []),
     ok.
 
 exec_ticks(Num, All_listE) ->

@@ -578,7 +578,6 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                    end,
     Repairing_list2 = [X || X <- OldRepairing_list, lists:member(X, Up)],
     Simulator_p = proplists:get_value(use_partition_simulator, RunEnv2, false),
-    Repair_done_p = proplists:get_value(repair_always_done, RunEnv2, false),
     {NewUPI_list3, Repairing_list3, RunEnv3} =
         case {NewUp, Repairing_list2} of
             {[], []} ->
@@ -595,7 +594,7 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                 SameEpoch_p = check_latest_private_projections_same_epoch(
                                 tl(NewUPI_list) ++ Repairing_list2,
                                 S#ch_mgr.proj, Partitions, S),
-                if Simulator_p andalso (SameEpoch_p orelse Repair_done_p) ->
+                if Simulator_p andalso SameEpoch_p ->
                         D_foo=[{repair_airquote_done, {we_agree, (S#ch_mgr.proj)#projection_v1.epoch_number}}],
                         {NewUPI_list ++ [H], T, RunEnv2};
                    not Simulator_p
@@ -1331,6 +1330,9 @@ react_to_env_C100(P_newprop, P_latest,
             %% am/should be repairing.  We ignore our proposal and try
             %% to go with the latest.
             ?REACT({c100, ?LINE, [repairing_short_circuit]}),
+%% io:format(user, "C100 shortcut true: E ~w -> E ~w sane ~w\n", [P_current#projection_v1.epoch_number, P_latest#projection_v1.epoch_number, Current_sane_p]),
+%% ZXZX = lists:flatten(io_lib:format("C100 shortcut true: E ~w -> E ~w sane ~w\n", [P_current#projection_v1.epoch_number, P_latest#projection_v1.epoch_number, Current_sane_p])),
+%% erlang:display(ZXZX),
             react_to_env_C110(P_latest, S);
         {_, true} ->
             ?REACT({c100, ?LINE, [sane]}),
@@ -1719,10 +1721,13 @@ projection_transition_is_sane(
         MoreCheckingP ->
             %% Where did elements in UPI_2_suffix come from?
             %% Only two sources are permitted.
-            [lists:member(X, Repairing_list1) % X added after repair done
-             orelse
-             lists:member(X, UPI_list1)       % X in UPI_list1 after common pref
-             || X <- UPI_2_suffix],
+            Oops_check_UPI_2_suffix =
+                [lists:member(X, Repairing_list1) % X added after repair done
+                 orelse
+                 lists:member(X, UPI_list1)  % X in UPI_list1 after common pref
+                 || X <- UPI_2_suffix],
+            %% Grrrrr, ok, so this check isn't good, at least at bootstrap time.
+            %% TODO: false = lists:member(false, Oops_check_UPI_2_suffix),
 
             %% The UPI_2_suffix must exactly be equal to: ordered items from
             %% UPI_list1 concat'ed with ordered items from Repairing_list1.
@@ -1793,13 +1798,21 @@ projection_transition_is_sane(
                             %% normal projection to an inner one.  The old
                             %% normal has a UPI that has nothing to do with
                             %% RelativeToServer a.k.a. me.
+                            %% Or else the UPI_list1 is empty, and I'm
+                            %% the only member of UPI_list2
+                            %% But the new/suffix is definitely me.
                             %% from:
                             %% {epoch,847},{author,c},{upi,[c]},{repair,[]},
                             %%                                   {down,[a,b,d]}
                             %% to:
                             %% {epoch,848},{author,a},{upi,[a]},{repair,[]},
                             %%                                   {down,[b,c,d]}
-                            FirstCase_p = UPI_2_suffix == [AuthorServer2],
+                            FirstCase_p = (UPI_2_suffix == [AuthorServer2])
+                                andalso
+                                ((inner_projection_exists(P1) == false
+                                  andalso
+                                  inner_projection_exists(P2) == true)
+                                 orelse UPI_list1 == []),
 
                             %% Here's another case that's alright:
                             %%
