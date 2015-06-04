@@ -1314,15 +1314,15 @@ react_to_env_C100(P_newprop, P_latest,
     I_am_UPI_in_newprop_p = lists:member(MyName, P_newprop#projection_v1.upi),
     I_am_Repairing_in_latest_p = lists:member(MyName,
                                              P_latest#projection_v1.repairing),
-    ShortCircuit_p =
-        P_latest#projection_v1.epoch_number > P_current#projection_v1.epoch_number
-        andalso
-        I_am_UPI_in_newprop_p
-        andalso
-        I_am_Repairing_in_latest_p,
-
+    %% TODO: ShortCircuit_p was a bad idea, I'm nearly sure. Get rid of it.
+    ShortCircuit_p = false,
     Current_sane_p = projection_transition_is_sane(P_current, P_latest,
                                                    MyName),
+    put(xxx_hack, [{p_current, machi_projection:make_summary(P_current)},
+                   {epoch_compare, P_latest#projection_v1.epoch_number > P_current#projection_v1.epoch_number},
+                   {i_am_upi_in_newprop_p, I_am_UPI_in_newprop_p},
+                   {i_am_repairing_in_latest_p, I_am_Repairing_in_latest_p},
+                   {shortcircuit_p, ShortCircuit_p}]),
     case {ShortCircuit_p, Current_sane_p} of
         _ when P_current#projection_v1.epoch_number == 0 ->
             %% Epoch == 0 is reserved for first-time, just booting conditions.
@@ -1351,7 +1351,8 @@ react_to_env_C100(P_newprop, P_latest,
 
 react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     ?REACT(c110),
-    Extra_todo = [],
+    %% Extra_todo = [],
+    Extra_todo = get(xxx_hack),
     %% Extra_todo = [{hee, lists:reverse(get(react))}],
     P_latest2 = machi_projection:update_dbg2(P_latest, Extra_todo),
 
@@ -1888,7 +1889,6 @@ projection_transition_is_sane(
                                     %% If there's no overlap at all between
                                     %% UPI_list1 & UPI_list2, then we're OK
                                     %% here.
-                                    io:format(user, "QQQ Oops_check_UPI_2_suffix=~w, ", [Oops_check_UPI_2_suffix]),
                                     true;
                                true ->
                                     exit({upi_2_suffix_error, UPI_2_suffix})
