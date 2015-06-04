@@ -1669,7 +1669,8 @@ projection_transition_is_sane(
 
     %% Additions to the UPI chain may only be at the tail
     UPI_common_prefix = find_common_prefix(UPI_list1, UPI_list2),
-    if UPI_common_prefix == [] ->
+    true =
+     if UPI_common_prefix == [] ->
             if UPI_list1 == [] orelse UPI_list2 == [] ->
                     %% If the common prefix is empty, then one of the
                     %% inputs must be empty.
@@ -1695,7 +1696,7 @@ projection_transition_is_sane(
                             %% []                  [b]
                             %% 
                             %% ... where RelativeToServer=b.  In this case, b
-                            %% has been partitions for a while and has only
+                            %% has been partitioned for a while and has only
                             %% now just learned of several epoch transitions.
                             %% If the author of both is also in the UPI of
                             %% both, then those authors would not have allowed
