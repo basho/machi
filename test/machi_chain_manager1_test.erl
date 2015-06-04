@@ -99,7 +99,7 @@ unanimous_report(Epoch, Namez) ->
                              {not_agreed, {UPI, Repairing}, Else2}
                      end;
                  _Else ->
-                     exit({UPI, not_unique, Epoch, _Else})
+                     {not_agreed, {undefined, undefined}, Projs}
              end
          end || UPI <- UniqueUPIs],
     AgreedResUPI_Rs = [UPI++Repairing ||
@@ -128,7 +128,7 @@ chain_to_projection(MyName, Epoch, UPI_list, Repairing_list, All_list) ->
                                        FLU <- All_list]),
     machi_projection:new(Epoch, MyName, MemberDict,
                          All_list -- (UPI_list ++ Repairing_list),
-                         UPI_list, Repairing_list, []).
+                         UPI_list, Repairing_list, [{artificial_by, ?MODULE}]).
 
 -ifndef(PULSE).
 

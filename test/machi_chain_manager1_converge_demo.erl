@@ -251,35 +251,21 @@ convergence_demo_testfun(NumFLUs) ->
       %% unique chains are disjoint.
       true = machi_chain_manager1_test:all_reports_are_disjoint(Report),
 
-      %% Given the report, we flip it around so that we observe the
-      %% sets of chain transitions relative to each FLU.
-      %% R_Chains's type is: list({RelativeFlu, list({Epoch, UPI, Repairing})})
-      %% For example:
-      %%          [{a,[{3,[a],[b,c]},
-      %%               {7,[a,b],[c]},
-      %%               {14,[a,b,c],[]},
-      %%               {83,[a],[]},
-      %%               {164,[c],[a,b]},
-      %%               {218,[a],[]},
-      %%               {226,[a],[b,c]},
-      %%               {228,[a],[b,c]},
-      %%               ....
-      R_Chains = [machi_chain_manager1_test:extract_chains_relative_to_flu(
-                    FLU, Report) || FLU <- All_list],
-      %% ?D(R_Chains),
-      R_Projs = [{FLU, [machi_chain_manager1_test:chain_to_projection(
-                          FLU, Epoch, UPI, Repairing, All_list) ||
-                           {Epoch, UPI, Repairing} <- E_Chains]} ||
-                    {FLU, E_Chains} <- R_Chains],
-
       %% For each chain transition experienced by a particular FLU,
       %% confirm that each state transition is OK.
+      PrivProjs = [{Name, begin
+                              {ok, Ps9} = ?FLU_PC:get_all_projections(FLU,
+                                                                      private),
+                              [P || P <- Ps9,
+                                    P#projection_v1.epoch_number /= 0]
+                          end} || {Name, FLU} <- Namez],
       try
-          [{FLU, true} = {FLU, ?MGR:projection_transitions_are_sane(Psx, FLU)} ||
-              {FLU, Psx} <- R_Projs],
+          [{FLU, true} = {FLU, ?MGR:projection_transitions_are_sane_retrospective(Psx, FLU)} ||
+              {FLU, Psx} <- PrivProjs],
           io:format(user, "\nAll sanity checks pass, hooray!\n", [])
       catch _Err:_What ->
               io:format(user, "Report ~p\n", [Report]),
+              io:format(user, "PrivProjs ~p\n", [PrivProjs]),
               exit({line, ?LINE, _Err, _What})
       end,
       %% ?D(R_Projs),
@@ -311,9 +297,10 @@ make_partition_list(All_list) ->
                                        A <- All_list, B <- All_list, A /= B,
                                        C <- All_list, D <- All_list, C /= D,
                                        X /= A, X /= C, A /= C],
-    %% _X_Ys1 ++ _X_Ys2.
-    %% _X_Ys3.
-    _X_Ys1 ++ _X_Ys2 ++ _X_Ys3.
+    %% Concat = _X_Ys1 ++ _X_Ys2.
+    %% Concat = _X_Ys3.
+    Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
+    lists:usort([lists:sort(L) || L <- Concat]).
 
     %% [ [{a,b},{b,d},{c,b}],
     %%   [{a,b},{b,d},{c,b}, {a,b},{b,a},{a,c},{c,a},{a,d},{d,a}],

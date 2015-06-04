@@ -110,10 +110,10 @@ all_list_extra() ->
                 props=[{chmgr, b_chmgr}]}, "./data.pulse.b"}
      , {#p_srvr{name=c, address="localhost", port=7402,
                 props=[{chmgr, c_chmgr}]}, "./data.pulse.c"}
-     , {#p_srvr{name=d, address="localhost", port=7403,
-                props=[{chmgr, d_chmgr}]}, "./data.pulse.d"}
-     , {#p_srvr{name=e, address="localhost", port=7404,
-                props=[{chmgr, e_chmgr}]}, "./data.pulse.e"}
+     %% , {#p_srvr{name=d, address="localhost", port=7403,
+     %%            props=[{chmgr, d_chmgr}]}, "./data.pulse.d"}
+     %% , {#p_srvr{name=e, address="localhost", port=7404,
+     %%            props=[{chmgr, e_chmgr}]}, "./data.pulse.e"}
     ].
 
 all_list() ->
@@ -261,11 +261,21 @@ dump_state() ->
     %%           || {FLUName, _FLU} <- Namez]
     %%          || Epoch <- UniquePrivateEs],
 
+    PrivProjs = [{Name, begin
+                            {ok, Ps} = ?FLU_PC:get_all_projections(Proxy,
+                                                                   private),
+                            [P || P <- Ps,
+                                  P#projection_v1.epoch_number /= 0]
+                        end} || {Name, Proxy} <- ProxiesDict],
+
     ?QC_FMT(")", []),
     Diag1 = Diag2 = "skip_diags",
-    {Report, lists:flatten([Diag1, Diag2])}
+    {Report, PrivProjs, lists:flatten([Diag1, Diag2])}
   catch XX:YY ->
-        ?QC_FMT("OUCH: ~p ~p @ ~p\n", [XX, YY, erlang:get_stacktrace()])
+        ?QC_FMT("OUCH: ~p ~p @ ~p\n", [XX, YY, erlang:get_stacktrace()]),
+        ?QC_FMT("Exiting now to move to manual post-mortem....\n", []),
+        erlang:halt(0),
+        false
   end.
 
 prop_pulse() ->
@@ -296,8 +306,6 @@ prop_pulse() ->
                                    {_H, _S, _R} = run_commands(?MODULE, Cmds)
                            end, [{seed, Seed},
                                  {strategy, unfair}]),
-        ok = shutdown_hard(),
-
         %% ?QC_FMT("S2 ~p\n", [S2]),
         case S2#state.dump_state of
             undefined ->
@@ -305,7 +313,7 @@ prop_pulse() ->
             _ ->
                 ok
         end,
-        {Report, Diag} = S2#state.dump_state,
+        {Report, PrivProjs, Diag} = S2#state.dump_state,
 
         %% Report is ordered by Epoch.  For each private projection
         %% written during any given epoch, confirm that all chain
@@ -313,21 +321,12 @@ prop_pulse() ->
         %% unique chains are disjoint.
         AllDisjointP = ?MGRTEST:all_reports_are_disjoint(Report),
 
-        %% Given the report, we flip it around so that we observe the
-        %% sets of chain transitions relative to each FLU.
-        R_Chains = [?MGRTEST:extract_chains_relative_to_flu(FLU, Report) ||
-                       FLU <- all_list()],
-        R_Projs = [{FLU, [?MGRTEST:chain_to_projection(
-                             FLU, Epoch, UPI, Repairing, all_list()) ||
-                             {Epoch, UPI, Repairing} <- E_Chains]} ||
-                      {FLU, E_Chains} <- R_Chains],
-
         %% For each chain transition experienced by a particular FLU,
         %% confirm that each state transition is OK.
         Sane =
           [{FLU,_SaneRes} = {FLU,?MGR:projection_transitions_are_sane_retrospective(
                                     Ps, FLU)} ||
-              {FLU, Ps} <- R_Projs],
+              {FLU, Ps} <- PrivProjs],
         SaneP = lists:all(fun({_FLU, SaneRes}) -> SaneRes == true end, Sane),
 
         %% The final report item should say that all are agreed_membership.
@@ -342,12 +341,14 @@ prop_pulse() ->
                                       LastRepXs
                               end,
 
+        ok = shutdown_hard(),
         ?WHENFAIL(
         begin
             ?QC_FMT("Cmds = ~p\n", [Cmds]),
             ?QC_FMT("Res = ~p\n", [Res]),
             ?QC_FMT("Diag = ~s\n", [Diag]),
             ?QC_FMT("Report = ~p\n", [Report]),
+            ?QC_FMT("PrivProjs = ~p\n", [PrivProjs]),
             ?QC_FMT("Sane = ~p\n", [Sane]),
             ?QC_FMT("SingleChainNoRepair failure =\n    ~p\n", [SingleChainNoRepair])
 ,erlang:halt(0)

@@ -1352,6 +1352,7 @@ react_to_env_C100(P_newprop, P_latest,
 react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     ?REACT(c110),
     Extra_todo = [],
+    %% Extra_todo = [{hee, lists:reverse(get(react))}],
     P_latest2 = machi_projection:update_dbg2(P_latest, Extra_todo),
 
     MyNamePid = proxy_pid(MyName, S),
@@ -1446,6 +1447,7 @@ react_to_env_C310(P_newprop, S) ->
     ?REACT({c310, ?LINE,
             [{newprop, machi_projection:make_summary(P_newprop)},
             {write_result, WriteRes}]}),
+%%    io:format(user, "HEE310 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(get(react))]),
     react_to_env_A10(S2).
 
 calculate_flaps(P_newprop, _P_current, _FlapLimit,
@@ -1721,6 +1723,35 @@ projection_transition_is_sane(
         not (lists:member(RelativeToServer, Down_list2) orelse
              lists:member(RelativeToServer, Repairing_list2)),
     
+    UPIs_are_disjointP = ordsets:is_disjoint(ordsets:from_list(UPI_list1),
+                                             ordsets:from_list(UPI_list2)),
+    case UPI_2_suffix -- UPI_list1 of
+        [] ->
+            true;
+        [_|_] = _Added_by_2 ->
+            if RetrospectiveP ->
+                    %% Any servers added to the UPI must be added from the
+                    %% repairing list ... but in retrospective mode (where
+                    %% we're checking only the transitions where all
+                    %% UPI+repairing participants have unanimous private
+                    %% projections!), and if we're under asymmetric
+                    %% partition/churn, then we may not see the repairing
+                    %% list.  So we will not check that condition here.
+                    true;
+               not RetrospectiveP ->
+                    %% We're not retrospective.  So, if some server was
+                    %% added by to the UPI, then that means that it was
+                    %% added by repair.  And repair is coordinated by the
+                    %% UPI tail/last.
+%io:format(user, "g: UPI_list1=~w, UPI_list2=~w, UPI_2_suffix=~w, ",
+%          [UPI_list1, UPI_list2, UPI_2_suffix]),
+%io:format(user, "g", []),
+                    true = UPI_list1 == [] orelse
+                           UPIs_are_disjointP orelse
+                           (lists:last(UPI_list1) == AuthorServer2)
+            end
+    end,
+
     if not MoreCheckingP ->
             ok;
         MoreCheckingP ->
@@ -1788,16 +1819,26 @@ projection_transition_is_sane(
                             %% The retrospective view by
                             %% machi_chain_manager1_pulse.erl just can't
                             %% reason correctly about this situation.  We
-                            %% will instead rely on the non-introspective
+                            %% will instead rely on the non-retrospective
                             %% sanity checking that each FLU does before it
                             %% writes to its private projection store and
                             %% then adopts that projection (and unwedges
                             %% itself, etc etc).
 
-                            exit({todo, revisit, ?MODULE, ?LINE}),
-                            io:format(user, "|~p,~p TODO revisit|",
-                                      [?MODULE, ?LINE]),
-                            ok;
+                            if UPIs_are_disjointP ->
+                                    true;
+                               true ->
+                                    exit({todo, revisit, ?MODULE, ?LINE,
+                                          [
+                                           {oops_check_UPI_2_suffix, Oops_check_UPI_2_suffix},
+                                           {upi_2_suffix, UPI_2_suffix},
+                                           {upi_2_concat, UPI_2_concat},
+                                           {retrospectivep, RetrospectiveP}
+                                          ]}),
+                                    io:format(user, "|~p,~p TODO revisit|",
+                                              [?MODULE, ?LINE]),
+                                    ok
+                            end;
                        true ->
                             %% The following is OK: We're shifting from a
                             %% normal projection to an inner one.  The old
@@ -1843,7 +1884,13 @@ projection_transition_is_sane(
                                     true;
                                SecondCase_p ->
                                     true;
-                               not RetrospectiveP ->
+                               UPIs_are_disjointP ->
+                                    %% If there's no overlap at all between
+                                    %% UPI_list1 & UPI_list2, then we're OK
+                                    %% here.
+                                    io:format(user, "QQQ Oops_check_UPI_2_suffix=~w, ", [Oops_check_UPI_2_suffix]),
+                                    true;
+                               true ->
                                     exit({upi_2_suffix_error, UPI_2_suffix})
                             end
                     end
