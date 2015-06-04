@@ -592,7 +592,7 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
 
                 %% TODO create a real API call for fetching this info?
                 SameEpoch_p = check_latest_private_projections_same_epoch(
-                                tl(NewUPI_list) ++ Repairing_list2,
+                                NewUPI_list ++ Repairing_list2,
                                 S#ch_mgr.proj, Partitions, S),
                 if Simulator_p andalso SameEpoch_p ->
                         D_foo=[{repair_airquote_done, {we_agree, (S#ch_mgr.proj)#projection_v1.epoch_number}}],
@@ -634,6 +634,10 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
     {P, S#ch_mgr{runenv=RunEnv3}}.
 
 check_latest_private_projections_same_epoch(FLUs, MyProj, Partitions, S) ->
+    %% NOTE: The caller must provide us with the FLUs list for all
+    %%       FLUs that must be up & available right now.  So any
+    %%       failure of perhaps_call_t() means that we must return
+    %%       false.
     FoldFun = fun(_FLU, false) ->
                       false;
                  (FLU, true) ->
