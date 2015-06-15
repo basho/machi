@@ -1319,34 +1319,21 @@ react_to_env_C100(P_newprop, P_latest,
     I_am_UPI_in_newprop_p = lists:member(MyName, P_newprop#projection_v1.upi),
     I_am_Repairing_in_latest_p = lists:member(MyName,
                                              P_latest#projection_v1.repairing),
-    %% TODO: ShortCircuit_p was a bad idea, I'm nearly sure. Get rid of it.
-    ShortCircuit_p = false,
     Current_sane_p = projection_transition_is_sane(P_current, P_latest,
                                                    MyName),
     put(xxx_hack, [{p_current, machi_projection:make_summary(P_current)},
                    {epoch_compare, P_latest#projection_v1.epoch_number > P_current#projection_v1.epoch_number},
                    {i_am_upi_in_newprop_p, I_am_UPI_in_newprop_p},
-                   {i_am_repairing_in_latest_p, I_am_Repairing_in_latest_p},
-                   {shortcircuit_p, ShortCircuit_p}]),
-    case {ShortCircuit_p, Current_sane_p} of
+                   {i_am_repairing_in_latest_p, I_am_Repairing_in_latest_p}]),
+    case Current_sane_p of
         _ when P_current#projection_v1.epoch_number == 0 ->
             %% Epoch == 0 is reserved for first-time, just booting conditions.
             ?REACT({c100, ?LINE, [first_write]}),
             react_to_env_C110(P_latest, S);
-        {true, _} ->
-            %% Someone else believes that I am repairing.  We assume
-            %% that nobody is being Byzantine, so we'll believe that I
-            %% am/should be repairing.  We ignore our proposal and try
-            %% to go with the latest.
-            ?REACT({c100, ?LINE, [repairing_short_circuit]}),
-%% io:format(user, "C100 shortcut true: E ~w -> E ~w sane ~w\n", [P_current#projection_v1.epoch_number, P_latest#projection_v1.epoch_number, Current_sane_p]),
-%% ZXZX = lists:flatten(io_lib:format("C100 shortcut true: E ~w -> E ~w sane ~w\n", [P_current#projection_v1.epoch_number, P_latest#projection_v1.epoch_number, Current_sane_p])),
-%% erlang:display(ZXZX),
-            react_to_env_C110(P_latest, S);
-        {_, true} ->
+        true ->
             ?REACT({c100, ?LINE, [sane]}),
             react_to_env_C110(P_latest, S);
-        {_, _AnyOtherReturnValue} ->
+        _AnyOtherReturnValue ->
             %% P_latest is not sane.
             %% By process of elimination, P_newprop is best,
             %% so let's write it.
