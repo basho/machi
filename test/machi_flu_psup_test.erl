@@ -102,7 +102,7 @@ partial_stop_restart2() ->
         {_,_,_} = machi_chain_manager1:test_react_to_env(hd(ChMgrs)),
         [begin
              _QQa = machi_chain_manager1:test_react_to_env(ChMgr)
-         end || _ <- lists:seq(1,25), ChMgr <- ChMgrs],
+         end || _ <- lists:seq(1,125), ChMgr <- ChMgrs],
 
         %% All chain managers & projection stores should be using the
         %% same projection which is max projection in each store.
@@ -113,8 +113,10 @@ partial_stop_restart2() ->
         {ok, Proj_m} = machi_projection_store:read_latest_projection(
                          hd(PStores), public),
         [begin
-             {ok, Proj_m} = machi_projection_store:read_latest_projection(
-                              PStore, ProjType)
+             {ok, Proj_m2} = machi_projection_store:read_latest_projection(
+                               PStore, ProjType),
+             true = (machi_projection:update_dbg2(Proj_m, []) ==
+                     machi_projection:update_dbg2(Proj_m2, []))
          end || ProjType <- [public, private], PStore <- PStores ],
         Epoch_m = Proj_m#projection_v1.epoch_number,
         %% Confirm that all FLUs are *not* wedged, with correct proj & epoch
@@ -131,8 +133,10 @@ partial_stop_restart2() ->
         ok = machi_flu_psup:stop_flu_package(FluName_a),
         {ok, _} = Start(hd(Ps)),
         %% Remember: 'a' is not in active mode.
-        {ok, Proj_m} = machi_projection_store:read_latest_projection(
-                         hd(PStores), private),
+        {ok, Proj_m3} = machi_projection_store:read_latest_projection(
+                          hd(PStores), private),
+        true = (machi_projection:update_dbg2(Proj_m, []) ==
+                    machi_projection:update_dbg2(Proj_m, [])),
         %% Confirm that 'a' is wedged
         {error, wedged} = Append(hd(Ps)),
         {_, #p_srvr{address=Addr_a, port=TcpPort_a}} = hd(Ps),
