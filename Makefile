@@ -29,7 +29,7 @@ edoc-clean:
 
 pulse: compile
 	env USE_PULSE=1 $(REBAR_BIN) skip_deps=true clean compile
-	env USE_PULSE=1 $(REBAR_BIN) skip_deps=true -D PULSE eunit
+	env USE_PULSE=1 $(REBAR_BIN) skip_deps=true -D PULSE eunit -v
 
 APPS = kernel stdlib sasl erts ssl compiler eunit crypto
 PLT = $(HOME)/.machi_dialyzer_plt
@@ -41,6 +41,8 @@ dialyzer: deps compile
 	dialyzer -Wno_return --plt $(PLT) ebin
 
 dialyzer-test: deps compile
+	echo Force rebar to recompile .eunit dir w/o running tests > /dev/null
+	rebar skip_deps=true eunit suite=lamport_clock
 	dialyzer -Wno_return --plt $(PLT) .eunit
 
 clean_plt:

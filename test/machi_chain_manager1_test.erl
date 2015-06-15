@@ -45,18 +45,33 @@
 -include_lib("eunit/include/eunit.hrl").
 -compile(export_all).
 
+%% Example:
+%%   [{1,{ok_disjoint,[{agreed_membership,{[a],[b,c]}}]}},
+%%    {3,{ok_disjoint,[{agreed_membership,{[a],[b,c]}}]}},
+%%    {8,
+%%     {ok_disjoint,[{not_agreed,{[a],[b,c]},
+%%                               [{b,not_in_this_epoch},
+%%                                <<65,159,66,113,232,15,156,244,197,
+%%                                  210,39,82,229,84,192,19,27,45,161,38>>]}]}},
+%%    {10,{ok_disjoint,[{agreed_membership,{[c],[]}}]}},
+%%    ...]
+
 unanimous_report(Namez) ->
     UniquePrivateEs =
         lists:usort(lists:flatten(
                       [element(2, ?FLU_PC:list_all_projections(FLU, private)) ||
                           {_FLUName, FLU} <- Namez])),
-    [unanimous_report(Epoch, Namez) || Epoch <- UniquePrivateEs].
+    [unanimous_report(Epoch, Namez) || Epoch <- UniquePrivateEs,
+                                       Epoch /= 0].
 
 unanimous_report(Epoch, Namez) ->
-    Projs = [{FLUName, case ?FLU_PC:read_projection(FLU, private, Epoch) of
-                           {ok, T} -> T;
-                           _Else   -> not_in_this_epoch
-                       end} || {FLUName, FLU} <- Namez],
+    Projs = [{FLUName,
+              case ?FLU_PC:read_projection(FLU, private, Epoch) of
+                  {ok, T} ->
+                      machi_chain_manager1:inner_projection_or_self(T);
+                  _Else ->
+                      {FLUName, not_in_this_epoch}
+              end} || {FLUName, FLU} <- Namez],
     UPI_R_Sums = [{Proj#projection_v1.upi, Proj#projection_v1.repairing,
                    Proj#projection_v1.epoch_csum} ||
                      {_FLUname, Proj} <- Projs,
@@ -71,31 +86,12 @@ unanimous_report(Epoch, Namez) ->
                      %% that all FLUs are in agreement.
                      {UPI, Repairing, _CSum} =
                          lists:keyfind(UPI, 1, UPI_R_Sums),
-                     %% TODO: make certain that this subtlety doesn't get
-                     %%       last in later implementations.
-
-                     %% So, this is a bit of a tricky thing.  If we're at
-                     %% upi=[c] and repairing=[a,b], then the transition
-                     %% (eventually!) to upi=[c,a] does not currently depend
-                     %% on b being an active participant in the repair.
-                     %%
-                     %% Yes, b's state is very important for making certain
-                     %% that all repair operations succeed both to a & b.
-                     %% However, in this simulation, we only consider that
-                     %% the head(Repairing) is sane.  Therefore, we use only
-                     %% the "HeadOfRepairing" in our considerations here.
-                     HeadOfRepairing = case Repairing of
-                                          [H_Rep|_] ->
-                                              [H_Rep];
-                                          _ ->
-                                              []
-                                      end,
                      Tmp = [{FLU, case proplists:get_value(FLU, Projs) of
                                       P when is_record(P, projection_v1) ->
                                           P#projection_v1.epoch_csum;
                                       Else ->
                                           Else
-                                  end} || FLU <- UPI ++ HeadOfRepairing],
+                                  end} || FLU <- UPI ++ Repairing],
                      case lists:usort([CSum || {_FLU, CSum} <- Tmp]) of
                          [_] ->
                              {agreed_membership, {UPI, Repairing}};
@@ -103,7 +99,7 @@ unanimous_report(Epoch, Namez) ->
                              {not_agreed, {UPI, Repairing}, Else2}
                      end;
                  _Else ->
-                     {UPI, not_unique, Epoch, _Else}
+                     {not_agreed, {undefined, undefined}, Projs}
              end
          end || UPI <- UniqueUPIs],
     AgreedResUPI_Rs = [UPI++Repairing ||
@@ -128,10 +124,11 @@ extract_chains_relative_to_flu(FLU, Report) ->
               lists:member(FLU, UPI) orelse lists:member(FLU, Repairing)]}.
 
 chain_to_projection(MyName, Epoch, UPI_list, Repairing_list, All_list) ->
-    exit({todo_broken_fixme,?MODULE,?LINE}),
-    machi_projection:new(Epoch, MyName, All_list,
+    MemberDict = orddict:from_list([{FLU, #p_srvr{name=FLU}} ||
+                                       FLU <- All_list]),
+    machi_projection:new(Epoch, MyName, MemberDict,
                          All_list -- (UPI_list ++ Repairing_list),
-                         UPI_list, Repairing_list, []).
+                         UPI_list, Repairing_list, [{artificial_by, ?MODULE}]).
 
 -ifndef(PULSE).
 
@@ -260,5 +257,5 @@ nonunanimous_setup_and_fix_test() ->
         ok = machi_partition_simulator:stop()
     end.
 
--endif. % not PULSE
+-endif. % !PULSE
 -endif. % TEST

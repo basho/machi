@@ -98,8 +98,8 @@ init([FluName, TcpPort, DataDir, Props0]) ->
     SupFlags = {RestartStrategy, MaxRestarts, MaxSecondsBetweenRestarts},
 
     ProjRegName = make_proj_supname(FluName),
-    Props = [{projection_store_registered_name, ProjRegName},
-             {use_partition_simulator,false}|Props0],
+    Props = Props0 ++ [{projection_store_registered_name, ProjRegName},
+                       {use_partition_simulator,false}],
     ProjSpec = {ProjRegName,
                {machi_projection_store, start_link,
                 [ProjRegName, DataDir, FluName]},

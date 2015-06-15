@@ -22,12 +22,22 @@
 -compile(export_all).
 
 -ifdef(TEST).
+
 -include("machi.hrl").
 -include("machi_projection.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 -define(FLU, machi_flu1).
 -define(FLU_C, machi_flu1_client).
+
+clean_up_data_dir(DataDir) ->
+    [begin
+         Fs = filelib:wildcard(DataDir ++ Glob),
+         [file:delete(F) || F <- Fs],
+         [file:del_dir(F) || F <- Fs]
+     end || Glob <- ["*/*/*/*", "*/*/*", "*/*", "*"] ],
+    _ = file:del_dir(DataDir),
+    ok.
 
 setup_test_flu(RegName, TcpPort, DataDir) ->
     setup_test_flu(RegName, TcpPort, DataDir, []).
@@ -47,6 +57,8 @@ setup_test_flu(RegName, TcpPort, DataDir, DbgProps) ->
     %% "prevention".
     timer:sleep(10),
     FLU1.
+
+-ifndef(PULSE).
 
 flu_smoke_test() ->
     Host = "localhost",
@@ -141,7 +153,8 @@ flu_smoke_test() ->
         {error, bad_arg} = ?FLU_C:trunc_hack(Host, TcpPort,
                                              ?DUMMY_PV1_EPOCH, BadFile),
 
-        ok = ?FLU_C:quit(machi_util:connect(Host, TcpPort))
+        ok = ?FLU_C:quit(?FLU_C:connect(#p_srvr{address=Host,
+                                                port=TcpPort}))
     after
         ok = ?FLU:stop(FLU1)
     end.
@@ -197,13 +210,5 @@ bad_checksum_test() ->
         ok = ?FLU:stop(FLU1)
     end.
 
-clean_up_data_dir(DataDir) ->
-    [begin
-         Fs = filelib:wildcard(DataDir ++ Glob),
-         [file:delete(F) || F <- Fs],
-         [file:del_dir(F) || F <- Fs]
-     end || Glob <- ["*/*/*/*", "*/*/*", "*/*", "*"] ],
-    _ = file:del_dir(DataDir),
-    ok.
-
+-endif. % !PULSE
 -endif. % TEST

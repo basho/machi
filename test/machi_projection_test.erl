@@ -21,6 +21,8 @@
 -module(machi_projection_test).
 
 -ifdef(TEST).
+-ifndef(PULSE).
+
 -compile(export_all).
 
 -include("machi_projection.hrl").
@@ -83,4 +85,5 @@ try_it(MyName, All_list, UPI_list, Down_list, Repairing_list, Ps) ->
             false
     end.
 
+-endif. % !PULSE
 -endif. % TEST

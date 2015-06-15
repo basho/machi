@@ -203,7 +203,6 @@ init({MyName, InitMembersDict, MgrOpts}) ->
               {use_partition_simulator, Opt(use_partition_simulator, false)},
               {network_partitions, Opt(network_partitions, [])},
               {network_islands, Opt(network_islands, [])},
-              {flapping_i, Opt(flapping, [])},
               {up_nodes, Opt(up_nodes, not_init_yet)}],
     ActiveP = Opt(active_mode, true),
     S = #ch_mgr{name=MyName,
@@ -252,8 +251,7 @@ handle_call({set_chain_members, MembersDict}, _From,
                                       down=NewDown,
                                       members_dict=MembersDict}),
     %% Reset all flapping state.
-    NewProj2 = NewProj#projection_v1{dbg=replace(NewProj#projection_v1.dbg,
-                                                 [make_flapping_i()])},
+    NewProj2 = NewProj#projection_v1{flap=make_flapping_i()},
     S3 = S2#ch_mgr{proj=NewProj2,
                    proj_history=queue:new()},
     {_QQ, S4} = do_react_to_env(S3),
@@ -594,7 +592,7 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
 
                 %% TODO create a real API call for fetching this info?
                 SameEpoch_p = check_latest_private_projections_same_epoch(
-                                tl(NewUPI_list) ++ Repairing_list2,
+                                NewUPI_list ++ Repairing_list2,
                                 S#ch_mgr.proj, Partitions, S),
                 if Simulator_p andalso SameEpoch_p ->
                         D_foo=[{repair_airquote_done, {we_agree, (S#ch_mgr.proj)#projection_v1.epoch_number}}],
@@ -636,6 +634,10 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
     {P, S#ch_mgr{runenv=RunEnv3}}.
 
 check_latest_private_projections_same_epoch(FLUs, MyProj, Partitions, S) ->
+    %% NOTE: The caller must provide us with the FLUs list for all
+    %%       FLUs that must be up & available right now.  So any
+    %%       failure of perhaps_call_t() means that we must return
+    %%       false.
     FoldFun = fun(_FLU, false) ->
                       false;
                  (FLU, true) ->
@@ -896,17 +898,15 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                                     down=P_i#projection_v1.all_members
                                          -- [MyName]}
                           end,
-
                 FinalInnerEpoch =
                     case inner_projection_exists(P_current) of
                         false ->
+                            FinalCreation = P_newprop3#projection_v1.creation_time,
                             AllFlapCounts_epk =
                                 [Epk || {{Epk,_FlTime}, _FlCount} <-
                                             get_all_flap_counts(P_newprop3)],
                             case AllFlapCounts_epk of
                                 [] ->
-                                    %% HRM, distrust?...
-                                    %% P_newprop3#projection_v1.epoch_number;
                                     P_newprop3#projection_v1.epoch_number;
                                 [_|_] ->
                                     lists:max(AllFlapCounts_epk)
@@ -921,8 +921,10 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                                andalso
                                P_oldinner#projection_v1.down ==
                                P_inner#projection_v1.down ->
+                                    FinalCreation = P_oldinner#projection_v1.creation_time,
                                     P_oldinner#projection_v1.epoch_number;
                                true ->
+                                    FinalCreation = P_newprop3#projection_v1.creation_time,
                                     P_oldinner#projection_v1.epoch_number + 1
                             end
                     end,
@@ -932,12 +934,15 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                 %%       up nodes > 1, repair is required there!  In the
                 %%       current simulator, repair is not simulated and
                 %%       finished (and then growing the UPI list).  Fix.
-                P_inner2 = P_inner#projection_v1{epoch_number=FinalInnerEpoch},
-                InnerInfo = [{inner_summary, machi_projection:make_summary(P_inner2)},
-                             {inner_projection, P_inner2}],
+                P_inner2 = machi_projection:update_checksum(
+                           P_inner#projection_v1{epoch_number=FinalInnerEpoch,
+                                                 creation_time=FinalCreation}),
+                InnerInfo = [{inner_summary,
+                              machi_projection:make_summary(P_inner2)}],
                 DbgX = replace(P_newprop3#projection_v1.dbg, InnerInfo),
                 ?REACT({a30, ?LINE, [qqqwww|DbgX]}),
-                {P_newprop3#projection_v1{dbg=DbgX}, S_i};
+                {P_newprop3#projection_v1{dbg=DbgX,
+                                          inner=P_inner2}, S_i};
             _ ->
                 {P_newprop3, S3}
         end,
@@ -1222,7 +1227,12 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                                  {newprop_flap_count, P_newprop_flap_count},
                                  {flap_limit, FlapLimit}]}),
             _B10Hack = get(b10_hack),
-            io:format(user, "{FLAP: ~w flaps ~w}!\n", [S#ch_mgr.name, P_newprop_flap_count]),
+            case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
+                true ->
+                    io:format(user, "{FLAP: ~w flaps ~w}!  ", [S#ch_mgr.name, P_newprop_flap_count]);
+                _ ->
+                    ok
+            end,
 
             if
                 %% MEANWHILE, we have learned some things about this
@@ -1309,31 +1319,21 @@ react_to_env_C100(P_newprop, P_latest,
     I_am_UPI_in_newprop_p = lists:member(MyName, P_newprop#projection_v1.upi),
     I_am_Repairing_in_latest_p = lists:member(MyName,
                                              P_latest#projection_v1.repairing),
-    ShortCircuit_p =
-        P_latest#projection_v1.epoch_number > P_current#projection_v1.epoch_number
-        andalso
-        I_am_UPI_in_newprop_p
-        andalso
-        I_am_Repairing_in_latest_p,
-
     Current_sane_p = projection_transition_is_sane(P_current, P_latest,
                                                    MyName),
-    case {ShortCircuit_p, Current_sane_p} of
+    put(xxx_hack, [{p_current, machi_projection:make_summary(P_current)},
+                   {epoch_compare, P_latest#projection_v1.epoch_number > P_current#projection_v1.epoch_number},
+                   {i_am_upi_in_newprop_p, I_am_UPI_in_newprop_p},
+                   {i_am_repairing_in_latest_p, I_am_Repairing_in_latest_p}]),
+    case Current_sane_p of
         _ when P_current#projection_v1.epoch_number == 0 ->
             %% Epoch == 0 is reserved for first-time, just booting conditions.
             ?REACT({c100, ?LINE, [first_write]}),
             react_to_env_C110(P_latest, S);
-        {true, _} ->
-            %% Someone else believes that I am repairing.  We assume
-            %% that nobody is being Byzantine, so we'll believe that I
-            %% am/should be repairing.  We ignore our proposal and try
-            %% to go with the latest.
-            ?REACT({c100, ?LINE, [repairing_short_circuit]}),
-            react_to_env_C110(P_latest, S);
-        {_, true} ->
+        true ->
             ?REACT({c100, ?LINE, [sane]}),
             react_to_env_C110(P_latest, S);
-        {_, _AnyOtherReturnValue} ->
+        _AnyOtherReturnValue ->
             %% P_latest is not sane.
             %% By process of elimination, P_newprop is best,
             %% so let's write it.
@@ -1343,7 +1343,9 @@ react_to_env_C100(P_newprop, P_latest,
 
 react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     ?REACT(c110),
-    Extra_todo = [],
+    %% Extra_todo = [],
+    Extra_todo = get(xxx_hack),
+    %% Extra_todo = [{hee, lists:reverse(get(react))}],
     P_latest2 = machi_projection:update_dbg2(P_latest, Extra_todo),
 
     MyNamePid = proxy_pid(MyName, S),
@@ -1362,14 +1364,24 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
             {HH,MM,SS} = time(),
             case inner_projection_exists(P_latest2) of
                 false ->
-                    io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses plain: ~w\n",
+                    case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
+                        true ->
+                            io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses plain: ~w\n",
                               [HH,MM,SS,MSec, S#ch_mgr.name,
                                machi_projection:make_summary(P_latest2)]);
+                        _ ->
+                            ok
+                    end;
                 true ->
-                    P_inner = inner_projection_or_self(P_latest2),
-                    io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w\n",
+                    case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
+                        true ->
+                            P_inner = inner_projection_or_self(P_latest2),
+                            io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w\n",
                               [HH,MM,SS,MSec, S#ch_mgr.name,
-                               machi_projection:make_summary(P_inner)])
+                               machi_projection:make_summary(P_inner)]);
+                        _ ->
+                            ok
+                    end
             end;
         _ ->
             ok
@@ -1438,12 +1450,12 @@ react_to_env_C310(P_newprop, S) ->
     ?REACT({c310, ?LINE,
             [{newprop, machi_projection:make_summary(P_newprop)},
             {write_result, WriteRes}]}),
+%%    io:format(user, "HEE310 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(get(react))]),
     react_to_env_A10(S2).
 
 calculate_flaps(P_newprop, _P_current, _FlapLimit,
                 #ch_mgr{name=MyName, proj_history=H, flap_start=FlapStart,
-                        flaps=Flaps, runenv=RunEnv0} = S) ->
-    RunEnv1 = replace(RunEnv0, [{flapping_i, []}]),
+                        flaps=Flaps, runenv=RunEnv1} = S) ->
     HistoryPs = queue:to_list(H),
     Ps = HistoryPs ++ [P_newprop],
     UniqueProposalSummaries = lists:usort([{P#projection_v1.upi,
@@ -1460,8 +1472,6 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
     HosedTransUnion = proplists:get_value(trans_all_hosed, Props),
     TransFlapCounts0 = proplists:get_value(trans_all_flap_counts, Props),
 
-    _Unanimous = proplists:get_value(unanimous_flus, Props),
-    _NotUnanimous = proplists:get_value(not_unanimous_flus, Props),
     %% NOTE: bad_answer_flus are probably due to timeout or some other network
     %%       glitch, i.e., anything other than {ok, P::projection()}
     %%       response from machi_flu0:proj_read_latest().
@@ -1542,11 +1552,6 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
 
     FlappingI = make_flapping_i(NewFlapStart, NewFlaps, AllHosed,
                                 AllFlapCounts, BadFLUs),
-    Dbg2 = [FlappingI|P_newprop#projection_v1.dbg],
-    %% TODO: 2015-03-04: I'm growing increasingly suspicious of
-    %% the 'runenv' variable that's threaded through all this code.
-    %% It isn't doing what I'd originally intended.  Fix it.
-    RunEnv2 = replace(RunEnv1, [FlappingI]),
     %% NOTE: Just because we increment flaps here, there's no correlation
     %%       to successful public proj store writes!  For example,
     %%       if we loop through states C2xx a few times, we would incr
@@ -1558,17 +1563,21 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
     %%       a large local flaps count gives no concrete guarantee that any
     %%       communication has been successful with any other part of the
     %%       cluster.
-    {machi_projection:update_checksum(P_newprop#projection_v1{dbg=Dbg2}),
-     S#ch_mgr{flaps=NewFlaps, flap_start=NewFlapStart, runenv=RunEnv2}}.
+    %% TODO: 2015-03-04: I'm growing increasingly suspicious of
+    %% the 'runenv' variable that's threaded through all this code.
+    %% It isn't doing what I'd originally intended.  Fix it.
+    {machi_projection:update_checksum(P_newprop#projection_v1{
+                                                         flap=FlappingI}),
+     S#ch_mgr{flaps=NewFlaps, flap_start=NewFlapStart, runenv=RunEnv1}}.
 
 make_flapping_i() ->
     make_flapping_i({{epk,-1},?NOT_FLAPPING}, 0, [], [], []).
 
 make_flapping_i(NewFlapStart, NewFlaps, AllHosed, AllFlapCounts, BadFLUs) ->
-    {flapping_i, [{flap_count, {NewFlapStart, NewFlaps}},
-                  {all_hosed, AllHosed},
-                  {all_flap_counts, lists:sort(AllFlapCounts)},
-                  {bad,BadFLUs}]}.
+    #flap_i{flap_count={NewFlapStart, NewFlaps},
+            all_hosed=AllHosed,
+            all_flap_counts=lists:sort(AllFlapCounts),
+            bad=BadFLUs}.
 
 projection_transitions_are_sane(Ps, RelativeToServer) ->
     projection_transitions_are_sane(Ps, RelativeToServer, false).
@@ -1665,7 +1674,8 @@ projection_transition_is_sane(
 
     %% Additions to the UPI chain may only be at the tail
     UPI_common_prefix = find_common_prefix(UPI_list1, UPI_list2),
-    if UPI_common_prefix == [] ->
+    true =
+     if UPI_common_prefix == [] ->
             if UPI_list1 == [] orelse UPI_list2 == [] ->
                     %% If the common prefix is empty, then one of the
                     %% inputs must be empty.
@@ -1691,7 +1701,7 @@ projection_transition_is_sane(
                             %% []                  [b]
                             %% 
                             %% ... where RelativeToServer=b.  In this case, b
-                            %% has been partitions for a while and has only
+                            %% has been partitioned for a while and has only
                             %% now just learned of several epoch transitions.
                             %% If the author of both is also in the UPI of
                             %% both, then those authors would not have allowed
@@ -1716,15 +1726,47 @@ projection_transition_is_sane(
         not (lists:member(RelativeToServer, Down_list2) orelse
              lists:member(RelativeToServer, Repairing_list2)),
     
+    UPIs_are_disjointP = ordsets:is_disjoint(ordsets:from_list(UPI_list1),
+                                             ordsets:from_list(UPI_list2)),
+    case UPI_2_suffix -- UPI_list1 of
+        [] ->
+            true;
+        [_|_] = _Added_by_2 ->
+            if RetrospectiveP ->
+                    %% Any servers added to the UPI must be added from the
+                    %% repairing list ... but in retrospective mode (where
+                    %% we're checking only the transitions where all
+                    %% UPI+repairing participants have unanimous private
+                    %% projections!), and if we're under asymmetric
+                    %% partition/churn, then we may not see the repairing
+                    %% list.  So we will not check that condition here.
+                    true;
+               not RetrospectiveP ->
+                    %% We're not retrospective.  So, if some server was
+                    %% added by to the UPI, then that means that it was
+                    %% added by repair.  And repair is coordinated by the
+                    %% UPI tail/last.
+%io:format(user, "g: UPI_list1=~w, UPI_list2=~w, UPI_2_suffix=~w, ",
+%          [UPI_list1, UPI_list2, UPI_2_suffix]),
+%io:format(user, "g", []),
+                    true = UPI_list1 == [] orelse
+                           UPIs_are_disjointP orelse
+                           (lists:last(UPI_list1) == AuthorServer2)
+            end
+    end,
+
     if not MoreCheckingP ->
             ok;
         MoreCheckingP ->
             %% Where did elements in UPI_2_suffix come from?
             %% Only two sources are permitted.
-            [lists:member(X, Repairing_list1) % X added after repair done
-             orelse
-             lists:member(X, UPI_list1)       % X in UPI_list1 after common pref
-             || X <- UPI_2_suffix],
+            Oops_check_UPI_2_suffix =
+                [lists:member(X, Repairing_list1) % X added after repair done
+                 orelse
+                 lists:member(X, UPI_list1)  % X in UPI_list1 after common pref
+                 || X <- UPI_2_suffix],
+            %% Grrrrr, ok, so this check isn't good, at least at bootstrap time.
+            %% TODO: false = lists:member(false, Oops_check_UPI_2_suffix),
 
             %% The UPI_2_suffix must exactly be equal to: ordered items from
             %% UPI_list1 concat'ed with ordered items from Repairing_list1.
@@ -1780,30 +1822,77 @@ projection_transition_is_sane(
                             %% The retrospective view by
                             %% machi_chain_manager1_pulse.erl just can't
                             %% reason correctly about this situation.  We
-                            %% will instead rely on the non-introspective
+                            %% will instead rely on the non-retrospective
                             %% sanity checking that each FLU does before it
                             %% writes to its private projection store and
                             %% then adopts that projection (and unwedges
                             %% itself, etc etc).
 
-                            exit({todo, revisit, ?MODULE, ?LINE}),
-                            io:format(user, "|~p,~p TODO revisit|",
-                                      [?MODULE, ?LINE]),
-                            ok;
+                            if UPIs_are_disjointP ->
+                                    true;
+                               true ->
+                                    exit({todo, revisit, ?MODULE, ?LINE,
+                                          [
+                                           {oops_check_UPI_2_suffix, Oops_check_UPI_2_suffix},
+                                           {upi_2_suffix, UPI_2_suffix},
+                                           {upi_2_concat, UPI_2_concat},
+                                           {retrospectivep, RetrospectiveP}
+                                          ]}),
+                                    io:format(user, "|~p,~p TODO revisit|",
+                                              [?MODULE, ?LINE]),
+                                    ok
+                            end;
                        true ->
                             %% The following is OK: We're shifting from a
                             %% normal projection to an inner one.  The old
                             %% normal has a UPI that has nothing to do with
                             %% RelativeToServer a.k.a. me.
+                            %% Or else the UPI_list1 is empty, and I'm
+                            %% the only member of UPI_list2
+                            %% But the new/suffix is definitely me.
                             %% from:
                             %% {epoch,847},{author,c},{upi,[c]},{repair,[]},
                             %%                                   {down,[a,b,d]}
                             %% to:
                             %% {epoch,848},{author,a},{upi,[a]},{repair,[]},
                             %%                                   {down,[b,c,d]}
-                            if UPI_2_suffix == [AuthorServer2] ->
+                            FirstCase_p = (UPI_2_suffix == [AuthorServer2])
+                                andalso
+                                ((inner_projection_exists(P1) == false
+                                  andalso
+                                  inner_projection_exists(P2) == true)
+                                 orelse UPI_list1 == []),
+
+                            %% Here's another case that's alright:
+                            %%
+                            %% {a,{err,exit,
+                            %%     {upi_2_suffix_error,[c]}, ....
+                            %%
+                            %% from:
+                            %% {epoch,937},{author,a},{upi,[a,b]},{repair,[]},
+                            %%                                       {down,[c]}
+                            %% to:
+                            %% {epoch,943},{author,a},{upi,{a,b,c},{repair,[]},
+                            %%                                        {down,[]}
+
+                            %% The author server doesn't matter.  However,
+                            %% there were two other epochs in between, 939
+                            %% and 941, where there wasn't universal agreement
+                            %% of private projections.  The repair controller
+                            %% at the tail, 'b', had decided that the repair
+                            %% of 'c' was finished @ epoch 941.
+                            SecondCase_p = ((UPI_2_suffix -- Repairing_list1)
+                                            == []),
+                            if FirstCase_p ->
                                     true;
-                               not RetrospectiveP ->
+                               SecondCase_p ->
+                                    true;
+                               UPIs_are_disjointP ->
+                                    %% If there's no overlap at all between
+                                    %% UPI_list1 & UPI_list2, then we're OK
+                                    %% here.
+                                    true;
+                               true ->
                                     exit({upi_2_suffix_error, UPI_2_suffix})
                             end
                     end
@@ -1844,17 +1933,23 @@ calc_sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list) ->
                  end,
     MinSleep + (SleepChunk * Index).
 
-get_raw_flapping_i(#projection_v1{dbg=Dbg}) ->
-    proplists:get_value(flapping_i, Dbg, []).
+get_raw_flapping_i(#projection_v1{flap=F}) ->
+    F.
 
 get_flap_count(P) ->
-    proplists:get_value(flap_count, get_raw_flapping_i(P), {0,0}).
+    case get_raw_flapping_i(P) of undefined -> {0, 0};
+                                  F ->         F#flap_i.flap_count
+    end.
 
 get_all_flap_counts(P) ->
-    proplists:get_value(all_flap_counts, get_raw_flapping_i(P), []).
+    case get_raw_flapping_i(P) of undefined -> [];
+                                  F ->         F#flap_i.all_flap_counts
+    end.
 
 get_all_hosed(P) when is_record(P, projection_v1)->
-    proplists:get_value(all_hosed, get_raw_flapping_i(P), []).
+    case get_raw_flapping_i(P) of undefined -> [];
+                                  F ->         F#flap_i.all_hosed
+    end.
 
 merge_flap_counts(FlapCounts) ->
     merge_flap_counts(FlapCounts, orddict:new()).
@@ -1896,20 +1991,17 @@ gimme_random_uniform(N, S) ->
     RunEnv2 = [{seed, Seed2}|lists:keydelete(seed, 1, RunEnv1)],
     {X, S#ch_mgr{runenv=RunEnv2}}.
 
-inner_projection_exists(P) ->
-    case proplists:get_value(inner_projection, P#projection_v1.dbg) of
-        undefined ->
-            false;
-        _ ->
-            true
-    end.
+inner_projection_exists(#projection_v1{inner=undefined}) ->
+    false;
+inner_projection_exists(#projection_v1{inner=_}) ->
+    true.
 
 inner_projection_or_self(P) ->
-    case proplists:get_value(inner_projection, P#projection_v1.dbg) of
-        undefined ->
+    case inner_projection_exists(P) of
+        false ->
             P;
-        P_inner ->
-            P_inner
+        true ->
+            P#projection_v1.inner
     end.
 
 make_chmgr_regname(A) when is_atom(A) ->

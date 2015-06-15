@@ -102,7 +102,7 @@ run(append, KeyGen, ValueGen, #m{conn=Conn}=S) ->
             {ok, S};
         {error, _}=Err ->
             ?ERROR("append ~w bytes to prefix ~w: ~p\n",
-                   [iolist_size(ValueGen), Prefix, Err]),
+                   [iolist_size(Value), Prefix, Err]),
             {error, Err, S}
     end;
 run(read, KeyGen, ValueGen, #m{max_key=undefined}=S) ->

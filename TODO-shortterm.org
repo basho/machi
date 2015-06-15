@@ -41,7 +41,7 @@ func, and pattern match Erlang style in that func.
 ** DONE Add major comment sections to the CR-impl client
 ** DONE Simple basho_bench driver, put some unscientific chalk on the benchtop
 ** TODO Create parallel PULSE test for basic API plus chain manager repair
-** TODO Add client-side vs. server-side checksum type, expand client API?
+** DONE Add client-side vs. server-side checksum type, expand client API?
 ** TODO Add gproc and get rid of registered name rendezvous
 *** TODO Fixes the atom table leak
 *** TODO Fixes the problem of having active sequencer for the same prefix

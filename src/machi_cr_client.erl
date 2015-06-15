@@ -135,7 +135,7 @@
 -define(TIMEOUT, 2*1000).
 -define(DEFAULT_TIMEOUT, 10*1000).
 -define(MAX_RUNTIME, 8*1000).
--define(WORST_PROJ, #projection_v1{epoch_number=-1,epoch_csum= <<>>,
+-define(WORST_PROJ, #projection_v1{epoch_number=0,epoch_csum= <<>>,
                                    members_dict=[]}).
 
 -record(state, {
@@ -433,10 +433,13 @@ do_read_chunk2(File, Offset, Size, Depth, STime,
 %%          UPI+repairing.
 %%          If all FLUs in UPI++Repairing are not_written, then do nothing.
 
-read_repair(ConsistencyMode, ReturnMode, File, Offset, Size, 0=Depth,
-          STime, #state{proj=#projection_v1{upi=[_|_]}}=S) -> % UPI is non-empty
-    read_repair2(ConsistencyMode, ReturnMode, File, Offset, Size, Depth + 1,
-                 STime, S);
+%% Never matches because Depth is always incremented beyond 0 prior to
+%% getting here.
+%%
+%% read_repair(ConsistencyMode, ReturnMode, File, Offset, Size, 0=Depth,
+%%           STime, #state{proj=#projection_v1{upi=[_|_]}}=S) -> % UPI is non-empty
+%%     read_repair2(ConsistencyMode, ReturnMode, File, Offset, Size, Depth + 1,
+%%                  STime, S);
 read_repair(ConsistencyMode, ReturnMode, File, Offset, Size, Depth,
             STime, #state{proj=P}=S) ->
     sleep_a_while(Depth),
@@ -490,7 +493,7 @@ read_repair2(ap_mode=ConsistencyMode,
             ToRepair = mutation_flus(P) -- [GotItFrom],
             read_repair3(ToRepair, ReturnMode, Chunk, [GotItFrom], File,
                          Offset, Size, Depth, STime, S);
-        {ok, BadChunk} ->
+        {ok, BadChunk, _GotItFrom} ->
             exit({todo, bad_chunk_size, ?MODULE, ?LINE, File,
                   Offset, Size, got, byte_size(BadChunk)});
         {error, bad_checksum}=BadCS ->
@@ -510,10 +513,13 @@ read_repair3([], ReturnMode, Chunk, Repaired, File, Offset,
              Size, Depth, STime, S) ->
     read_repair4([], ReturnMode, Chunk, Repaired, File, Offset,
                  Size, Depth, STime, S);
-read_repair3(ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
-             Size, 0=Depth, STime, S) ->
-    read_repair4(ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
-                  Size, Depth + 1, STime, S);
+%% Never matches because Depth is always incremented beyond 0 prior to
+%% getting here.
+%%
+%% read_repair3(ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
+%%              Size, 0=Depth, STime, S) ->
+%%     read_repair4(ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
+%%                   Size, Depth + 1, STime, S);
 read_repair3(ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
              Size, Depth, STime, #state{proj=P}=S) ->
     %% io:format(user, "read_repair3 sleep1,", []),

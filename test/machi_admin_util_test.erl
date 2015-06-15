@@ -22,6 +22,7 @@
 -compile(export_all).
 
 -ifdef(TEST).
+-ifndef(PULSE).
 
 -include_lib("eunit/include/eunit.hrl").
 
@@ -72,5 +73,6 @@ verify_file_checksums_test() ->
         ok = ?FLU:stop(FLU1)
     end.
 
+-endif. % !PULSE
 -endif. % TEST
 
