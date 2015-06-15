@@ -110,10 +110,10 @@ all_list_extra() ->
                 props=[{chmgr, b_chmgr}]}, "./data.pulse.b"}
      , {#p_srvr{name=c, address="localhost", port=7402,
                 props=[{chmgr, c_chmgr}]}, "./data.pulse.c"}
-     %% , {#p_srvr{name=d, address="localhost", port=7403,
-     %%            props=[{chmgr, d_chmgr}]}, "./data.pulse.d"}
-     %% , {#p_srvr{name=e, address="localhost", port=7404,
-     %%            props=[{chmgr, e_chmgr}]}, "./data.pulse.e"}
+     , {#p_srvr{name=d, address="localhost", port=7403,
+                props=[{chmgr, d_chmgr}]}, "./data.pulse.d"}
+     , {#p_srvr{name=e, address="localhost", port=7404,
+                props=[{chmgr, e_chmgr}]}, "./data.pulse.e"}
     ].
 
 all_list() ->

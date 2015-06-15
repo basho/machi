@@ -1227,7 +1227,12 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                                  {newprop_flap_count, P_newprop_flap_count},
                                  {flap_limit, FlapLimit}]}),
             _B10Hack = get(b10_hack),
-            io:format(user, "{FLAP: ~w flaps ~w}!  ", [S#ch_mgr.name, P_newprop_flap_count]),
+            case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
+                true ->
+                    io:format(user, "{FLAP: ~w flaps ~w}!  ", [S#ch_mgr.name, P_newprop_flap_count]);
+                _ ->
+                    ok
+            end,
 
             if
                 %% MEANWHILE, we have learned some things about this
@@ -1372,14 +1377,24 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
             {HH,MM,SS} = time(),
             case inner_projection_exists(P_latest2) of
                 false ->
-                    io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses plain: ~w\n",
+                    case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
+                        true ->
+                            io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses plain: ~w\n",
                               [HH,MM,SS,MSec, S#ch_mgr.name,
                                machi_projection:make_summary(P_latest2)]);
+                        _ ->
+                            ok
+                    end;
                 true ->
-                    P_inner = inner_projection_or_self(P_latest2),
-                    io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w\n",
+                    case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
+                        true ->
+                            P_inner = inner_projection_or_self(P_latest2),
+                            io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w\n",
                               [HH,MM,SS,MSec, S#ch_mgr.name,
-                               machi_projection:make_summary(P_inner)])
+                               machi_projection:make_summary(P_inner)]);
+                        _ ->
+                            ok
+                    end
             end;
         _ ->
             ok

@@ -168,7 +168,8 @@ convergence_demo_testfun(NumFLUs) ->
                  {Name, PPid}
              end || {#p_srvr{name=Name}=P, _Dir} <- PsDirs],
     MembersDict = machi_projection:make_members_dict(Ps),
-    MgrOpts = [private_write_verbose, {active_mode,false},
+    %% MgrOpts = [private_write_verbose, {active_mode,false},
+    MgrOpts = [{active_mode,false},
               {use_partition_simulator, true}],
     MgrNamez =
         [begin
@@ -187,14 +188,15 @@ convergence_demo_testfun(NumFLUs) ->
 
       Parent = self(),
       DoIt = fun(Iters, S_min, S_max) ->
-                     io:format(user, "\nDoIt: top\n\n", []),
+                     %% io:format(user, "\nDoIt: top\n\n", []),
+                     io:format(user, "DoIt, ", []),
                      Pids = [spawn(fun() ->
                                            random:seed(now()),
                                            [begin
                                                 erlang:yield(),
                                                 S_max_rand = random:uniform(
                                                                S_max + 1),
-                                                io:format(user, "{t}", []),
+                                                %% io:format(user, "{t}", []),
                                                 Elapsed =
                                                     ?MGR:sleep_ranked_order(
                                                        S_min, S_max_rand,
@@ -218,16 +220,45 @@ convergence_demo_testfun(NumFLUs) ->
       machi_partition_simulator:reset_thresholds(10, 50),
       io:format(user, "\nLet loose the dogs of war!\n", []),
       DoIt(30, 0, 0),
+      AllPs = make_partition_list(All_list),
+      PartitionCounts = lists:zip(AllPs, lists:seq(1, length(AllPs))),
+      FLUFudge = if NumFLUs < 4 ->
+                         2;
+                    true ->
+                         13
+                 end,
       [begin
            machi_partition_simulator:always_these_partitions(Partition),
-           io:format(user, "\nSET partitions = ~w.\n", [Partition]),
-           [DoIt(40, 10, 50) || _ <- [1,2,3,4,5,6] ],
+           io:format(user, "\nSET partitions = ~w (~w of ~w) at ~w\n",
+                     [Partition, Count, length(AllPs), time()]),
+           [DoIt(40, 10, 50) || _ <- lists:seq(0, trunc(NumFLUs*FLUFudge)) ],
 
            {stable,true} = {stable,private_projections_are_stable(Namez, DoIt)},
            io:format(user, "\nSweet, private projections are stable\n", []),
+io:format(user, "Rolling sanity check ... ", []),
+PrivProjs = [{Name, begin
+                        {ok, Ps8} = ?FLU_PC:get_all_projections(FLU,
+                                                                private),
+                        Ps9 = if length(Ps8) < 5*1000 ->
+                                      Ps8;
+                                 true ->
+                                      io:format(user, "trunc a bit... ", []),
+                                      lists:nthtail(3*1000, Ps8)
+                              end,
+                        [P || P <- Ps9,
+                              P#projection_v1.epoch_number /= 0]
+                    end} || {Name, FLU} <- Namez],
+try
+    [{FLU, true} = {FLU, ?MGR:projection_transitions_are_sane_retrospective(Psx, FLU)} ||
+        {FLU, Psx} <- PrivProjs]
+catch _Err:_What ->
+        io:format(user, "PrivProjs ~p\n", [PrivProjs]),
+        exit({line, ?LINE, _Err, _What})
+end,
+io:format(user, "Yay!\n", []),
            timer:sleep(1250),
            ok
-       end || Partition <- make_partition_list(All_list)
+       end || {Partition, Count} <- PartitionCounts
       ],
        %% exit(end_experiment),
 
@@ -300,7 +331,7 @@ make_partition_list(All_list) ->
     %% Concat = _X_Ys1 ++ _X_Ys2.
     %% Concat = _X_Ys3.
     Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
-    lists:usort([lists:sort(L) || L <- Concat]).
+    random_sort(lists:usort([lists:sort(L) || L <- Concat])).
 
     %% [ [{a,b},{b,d},{c,b}],
     %%   [{a,b},{b,d},{c,b}, {a,b},{b,a},{a,c},{c,a},{a,d},{d,a}],
@@ -378,6 +409,11 @@ get_latest_inner_proj_summ(FLU) ->
     #projection_v1{epoch_number=E, upi=UPI, repairing=Repairing, down=Down} =
         machi_chain_manager1:inner_projection_or_self(Proj),
     {E, UPI, Repairing, Down}.
+
+random_sort(L) ->
+    random:seed(now()),
+    L1 = [{random:uniform(99999), X} || X <- L],
+    [X || {_, X} <- lists:sort(L1)].
 
 -endif. % !PULSE
 -endif. % TEST
