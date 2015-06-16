@@ -250,7 +250,10 @@ duplicate file names can cause correctness violations.\footnote{For
 \label{sub:bit-rot}
 
 Clients may specify a per-write checksum of the data being written,
-e.g., SHA1.  These checksums will be appended to the file's
+e.g., SHA1\footnote{Checksum types must be clear on all checksum
+  metadata, to allow for expansion to other algorithms and checksum
+  value sizes, e.g.~SHA 256 or SHA 512}.
+These checksums will be appended to the file's
 metadata.  Checksums are first-class metadata and is replicated with
 the same consistency and availability guarantees as its corresponding
 file data.
@@ -848,7 +851,7 @@ includes {\tt \{Full\_Filename, Offset\}}.
 
 \item The client sends a write request to the head of the Machi chain:
 {\tt \{write\_req, Full\_Filename, Offset, Bytes, Options\}}.  The
-client-calculated checksum is a recommended option.
+client-calculated checksum is the highly-recommended option.
 
 \item If the head's reply is {\tt ok}, then repeat for all remaining chain
 members in strict chain order.
@@ -1098,7 +1101,10 @@ per-data-chunk metadata is sufficient.
 \label{sub:on-disk-data-format}
 
 {\bf NOTE:} The suggestions in this section are ``strawman quality''
-only.
+only.  Matthew von-Maszewski has suggested that an implementation
+based entirely on file chunk storage within LevelDB could be extremely
+competitive with the strawman proposed here.  An analysis of
+alternative designs and implementations is left for future work.
 
 \begin{figure*}
 \begin{verbatim}
@@ -1190,9 +1196,8 @@ order as the bytes are fed into a checksum or
 hashing function, such as SHA1.
 
 However, a Machi file is not written strictly in order from offset 0
-to some larger offset.  Machi's append-only file guarantee is
-{\em guaranteed in space, i.e., the offset within the file} and is
-definitely {\em not guaranteed in time}.
+to some larger offset.  Machi's write-once file guarantee is a
+guarantee relative to space, i.e., the offset within the file.
 
 The file format proposed in Figure~\ref{fig:file-format-d1}
 contains the checksum of each client write, using the checksum value
@@ -1214,6 +1219,12 @@ mechanism.
 FLUs should also be able to schedule their checksum scrubbing activity
 periodically and limit their activity to certain times, per a
 only-as-complex-as-it-needs-to-be administrative policy.
+
+If a file's average chunk size was very small when initially written
+(e.g. 100 bytes), it may be advantageous to calculate a second set of
+checksums with much larger chunk sizes (e.g. 16 MBytes).  The larger
+chunk checksums only could then be used to accelerate both checksum
+scrub and chain repair operations.
 
 \section{Load balancing read vs. write ops}
 \label{sec:load-balancing}
