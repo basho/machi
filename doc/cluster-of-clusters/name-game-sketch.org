@@ -134,7 +134,7 @@ Assume that we have a random slicing map called ~Map~.  This particular
 | 0.66 - 0.91 | Cluster3   |
 | 0.91 - 1.00 | Cluster4   |
 
-Then, if we had CoC file name ~"foo"~, the hash ~SHA("foo")~ maps to about
+Then, if we had CoC file name ="foo"=, the hash ~SHA("foo")~ maps to about
 0.05 on the unit interval.  So, according to ~Map~, the value of
 ~rs_hash("foo",Map) = Cluster1~.  Similarly, ~SHA("hello")~ is about
 0.67 on the unit interval, so ~rs_hash("hello",Map) = Cluster3~.
@@ -177,7 +177,7 @@ the head of Cluster2 (which the client magically knows how to
 contact), then the result will look something like
 ~{ok,"foo.s923.z47",ByteOffset}~.
 
-So, ~"foo.s923.z47"~ is the file name that any Machi CoC client must use
+So, ="foo.s923.z47"= is the file name that any Machi CoC client must use
 in order to retrieve the CoolData bytes.
 
 *** Problem #1: We want CoC files to move around automatically
@@ -201,12 +201,12 @@ The scheme would also introduce extra round-trips to the servers
 whenever we try to read a file where we do not know the most
 up-to-date cluster ID for.
 
-**** We could store ~"foo.s923.z47"~'s location in an LDAP database!
+**** We could store "foo.s923.z47"'s location in an LDAP database!
 
 Or we could store it in Riak.  Or in another, external database.  We'd
 rather not create such an external dependency, however.
 
-*** Problem #2: ~"foo.s923.z47"~ doesn't always map via random slicing to Cluster2
+*** Problem #2: "foo.s923.z47" doesn't always map via random slicing to Cluster2
 
 ... if we ignore the problem of "CoC files may be redistributed in the
 future", then we still have a problem.
@@ -229,7 +229,7 @@ predictable client-supplied prefix and an opaque suffix, e.g.,
 ... then we propose that all CoC and Machi parties be aware of this
 naming scheme, i.e. that Machi assigns file names based on:
 
-ClientSuppliedPrefix ++ "." ++ SomeOpaqueFileNameSuffix
+~ClientSuppliedPrefix ++ "." ++ SomeOpaqueFileNameSuffix~
 
 The Machi system doesn't care about the file name -- a Machi server
 will treat the entire file name as an opaque thing.  But this document
@@ -239,10 +239,10 @@ What if the CoC client uses a similar scheme?
 
 ** The details: legend
 
-- T   = the target CoC member/Cluster ID chosen at the time of ~append()~
-- p   = file prefix, chosen by the CoC client (This is exactly the Machi client-chosen file prefix).
-- s.z = the Machi file server opaque file name suffix (Which we happen to know is a combination of sequencer ID plus file serial number.)
-- A   = adjustment factor, the subject of this proposal
+- ~T~   = the target CoC member/Cluster ID chosen at the time of ~append()~
+- ~p~   = file prefix, chosen by the CoC client (This is exactly the Machi client-chosen file prefix).
+- ~s.z~ = the Machi file server opaque file name suffix (Which we happen to know is a combination of sequencer ID plus file serial number.)
+- ~A~   = adjustment factor, the subject of this proposal
 
 ** The details: CoC file write
 
