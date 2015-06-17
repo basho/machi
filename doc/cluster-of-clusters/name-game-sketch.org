@@ -256,23 +256,37 @@ thingie.
 -spec rs_hash_with_float(float(), rs_hash:map()) -> rs_hash:cluster_id().
 #+END_SRC
 
+NOTE: Use of floating point terms is not required.  For example,
+integer arithmetic could be used, if using a sufficiently large
+interval to create an even & smooth distribution of hashes across the
+expected maximum number of clusters.
+
+For example, if the maximum CoC cluster size would be 4,000 individual
+Machi clusters, then a minimum of 12 bits of integer space is required
+to assign one integer per Machi cluster.  However, for load balancing
+purposes, a finer grain of (for example) 100 integers per Machi
+cluster would permit file migration to move increments of
+approximately 1% of single Machi cluster's storage capacity.  A
+minimum of 19 bits of hash space would be necessary to accomodate
+these constraints.
+
 ** The details: CoC file write
 
 1. CoC client chooses ~p~ and ~T~ (i.e., the file prefix & target cluster)
-2. CoC client knows the CoC ~Map~
-3. CoC client requests @ cluster ~T~: ~append(p,...) -> {ok,p.s.z,ByteOffset}~
+2. CoC client requests @ cluster ~T~: ~append(p,...) -> {ok,p.s.z,ByteOffset}~
+3. CoC client knows the CoC ~Map~
 4. CoC client calculates a value ~K~ such that ~rs_hash_with_float(K,Map) = T~
 5. CoC stores/uses the file name ~p.s.z.K~.
 
 ** The details: CoC file read
 
-1. CoC client has ~p.s.z.K~ and parses the parts of the name.
-2. Coc calculates ~rs_hash(A,Map) = T~
-3. CoC client requests @ cluster ~T~: ~read(p.s.z,...) ->~ ... success!
+1. CoC client knows the file name ~p.s.z.K~ and parses it to find
+   ~K~'s value.
+2. CoC client knows the CoC ~Map~
+3. Coc calculates ~rs_hash_with_float(K,Map) = T~
+4. CoC client requests @ cluster ~T~: ~read(p.s.z,...) ->~ ... success!
 
 ** The details: calculating 'K', the CoC placement key
-
-*** File write procedure
 
 1. We know ~Map~, the current CoC mapping.
 2. We look inside of ~Map~, and we find all of the unit interval ranges
@@ -285,14 +299,13 @@ thingie.
    of the CoC hash space range intervals in ~MapList~.  For example,
    if ~r=0.5~, then ~K = 0.33 + 0.5*(0.58-0.33) = 0.455~, which is
    exactly in the middle of the ~(0.33,0.58]~ interval.
-6. Encode ~K~ in a file name-friendly manner, e.g., convert it to hexadecimal ASCII digits to create file name ~p.s.z.K~.
+6. If necessary, encode ~K~ in a file name-friendly manner, e.g., convert it to hexadecimal ASCII digits to create file name ~p.s.z.K~.
 
-*** File read procedure
+** The details: calculating 'K', an alternative method
 
-1. We start with a file name, ~p.s.z.K~.  Parse it to find the value
-   of ~K~.
-2. Calculate ~rs_hash_with_float(K,Map) = T~.
-3. Send request @ cluster ~T~: ~read(p.s.z,...) ->~ ... success!
+If the Law of Large Numbers and our random number generator do not create the kind of smooth & even distribution of files across the CoC as we wish, an alternative method of calculating ~K~ follows.
+
+If each server in each Machi cluster keeps track of the CoC ~Map~ and also of all values of ~K~ for all files that it stores, then we can simply ask a cluster member to recommend a value of ~K~ that is least represented by existing files.
 
 * 6. File migration (aka rebalancing/reparitioning/redistribution)
 
