@@ -1,4 +1,5 @@
 prototype/chain-manager/patch.*
+.eqc-info
 .eunit
 deps
 *.plt
@@ -6,3 +7,7 @@ erl_crash.dump
 .concrete/DEV_MODE
 .rebar
 edoc
+
+# PB artifacts for Erlang
+include/*.hrl
+src/machi_pb_messages.erl

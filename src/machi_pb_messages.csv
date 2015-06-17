@@ -1,0 +1,4 @@
+0,MpbErrorResp,machi_pbundefined
+1,MpbPingReq,machi_pbundefined
+2,MpbAppendChunkReq,machi_pbundefined
+3,MpbAppendChunkResp,machi_pbundefined
