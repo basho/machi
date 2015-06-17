@@ -33,12 +33,12 @@ in real-world deployments.
 
 "Cluster of clusters" is clunky and long, but we haven't found a good
 substitute yet.  If you have a good suggestion, please contact us!
-^_^
+~^_^~
 
 Using the [[https://github.com/basho/machi/tree/master/prototype/demo-day-hack][cluster-of-clusters quick-and-dirty prototype]] as an
-architecture sketch, let's now assume that we have N independent Machi
+architecture sketch, let's now assume that we have ~N~ independent Machi
 clusters.  We wish to provide partitioned/distributed file storage
-across all N clusters.  We call the entire collection of N Machi
+across all ~N~ clusters.  We call the entire collection of ~N~ Machi
 clusters a "cluster of clusters", or abbreviated "CoC".
 
 ** Continue CoC prototype's assumption: a Machi cluster is unaware of CoC
@@ -85,7 +85,7 @@ DOI: http://dx.doi.org/10.1145/2632230 (long version, ACM Transactions
 
 We will use a single random slicing map.  This map (called ~Map~ in
 the descriptions below), together with the random slicing hash
-function (called "rs_hash()" below), will be used to map:
+function (called ~rs_hash()~ below), will be used to map:
 
 #+BEGIN_QUOTE
     CoC client-visible file name -> Machi cluster ID/name/thingie
@@ -160,7 +160,7 @@ decomissioned by its owners.  There are many legitimate reasons why a
 file that is initially created on cluster ID X has been moved to
 cluster ID Y.
 
-However, there are legitimate reasons for why the client would want
+However, there are also legitimate reasons for why the client would want
 control over the choice of Machi cluster when the data is first
 written.  The single biggest reason is load balancing.  Assuming that
 the client (or the CoC management layer acting on behalf of the CoC
@@ -170,8 +170,7 @@ under-utilized clusters.
 
 ** Cool!  Except for a couple of problems...
 
-However, this Machi file naming feature is not so helpful in a
-cluster-of-clusters context.  If the client wants to store some data
+If the client wants to store some data
 on Cluster2 and therefore sends an ~append("foo",CoolData)~ request to
 the head of Cluster2 (which the client magically knows how to
 contact), then the result will look something like
@@ -180,7 +179,14 @@ contact), then the result will look something like
 Therefore, the file name "~foo.s923.z47~" must be used by any Machi
 CoC client in order to retrieve the CoolData bytes.
 
-*** Problem #1: We want CoC files to move around automatically
+*** Problem #1: "foo.s923.z47" doesn't always map via random slicing to Cluster2
+
+... if we ignore the problem of "CoC files may be redistributed in the
+future", then we still have a problem.
+
+In fact, the value of ~ps_hash("foo.s923.z47",Map)~ is Cluster1.
+
+*** Problem #2: We want CoC files to move around automatically
 
 If the CoC client stores two pieces of information, the file name
 "~foo.s923.z47~" and the Cluster ID Cluster2, then what happens when the
@@ -201,22 +207,12 @@ The scheme would also introduce extra round-trips to the servers
 whenever we try to read a file where we do not know the most
 up-to-date cluster ID for.
 
-**** We could store "foo.s923.z47"'s location in an LDAP database!
+**** We could store a pointer to file "foo.s923.z47"'s location in an LDAP database!
 
 Or we could store it in Riak.  Or in another, external database.  We'd
-rather not create such an external dependency, however.
-
-*** Problem #2: "foo.s923.z47" doesn't always map via random slicing to Cluster2
-
-... if we ignore the problem of "CoC files may be redistributed in the
-future", then we still have a problem.
-
-In fact, the value of ~ps_hash("foo.s923.z47",Map)~ is Cluster1.
-
-The whole reason using random slicing is to make a very quick,
-easy-to-distribute mapping of file names to cluster IDs.  It would be
-very nice, very helpful if the scheme would actually *work for us*.
-
+rather not create such an external dependency, however.  Furthermore,
+we would also have the same problem of updating this external database
+each time that a file is moved/rebalanced across the CoC.
 
 * 5. Proposal: Break the opacity of Machi file names, slightly
 
@@ -233,7 +229,7 @@ naming scheme, i.e. that Machi assigns file names based on:
 
 The Machi system doesn't care about the file name -- a Machi server
 will treat the entire file name as an opaque thing.  But this document
-is called the "Name Game" for a reason.
+is called the "Name Game" for a reason!
 
 What if the CoC client uses a similar scheme?
 
@@ -248,8 +244,7 @@ What if the CoC client uses a similar scheme?
 
 1. CoC client chooses ~p~ and ~T~ (i.e., the file prefix & target cluster)
 2. CoC client knows the CoC ~Map~
-3. CoC client requests @ cluster ~T~:
-~append(p,...) -> {ok, p.s.z, ByteOffset}~
+3. CoC client requests @ cluster ~T~: ~append(p,...) -> {ok,p.s.z,ByteOffset}~
 4. CoC client calculates a such that ~rs_hash(p.s.z.A,Map) = T~
 5. CoC stores/uses the file name ~p.s.z.A~.
 
