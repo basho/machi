@@ -23,8 +23,8 @@
 \copyrightdata{978-1-nnnn-nnnn-n/yy/mm} 
 \doi{nnnnnnn.nnnnnnn}
 
-\titlebanner{Draft \#0.9, May 2014}
-\preprintfooter{Draft \#0.9, May 2014}
+\titlebanner{Draft \#0.91, June 2014}
+\preprintfooter{Draft \#0.91, June 2014}
 
 \title{Chain Replication metadata management in Machi, an immutable
   file store}
@@ -1256,24 +1256,23 @@ and short:
 A typical approach, as described by Coulouris et al.,[4] is to use a
 quorum-consensus approach. This allows the sub-partition with a
 majority of the votes to remain available, while the remaining
-sub-partitions should fall down to an auto-fencing mode.
+sub-partitions should fall down to an auto-fencing mode.\footnote{Any
+  server on the minority side refuses to operate
+  because it is, so to speak, ``on the wrong side of the fence.''}
 \end{quotation}
 
 This is the same basic technique that
 both Riak Ensemble and ZooKeeper use.  Machi's
-extensive use of write-registers are a big advantage when implementing
+extensive use of write-once registers are a big advantage when implementing
 this technique.  Also very useful is the Machi ``wedge'' mechanism,
 which can automatically implement the ``auto-fencing'' that the
 technique requires.  All Machi servers that can communicate with only
 a minority of other servers will automatically ``wedge'' themselves,
 refuse to author new projections, and
-and refuse all file API requests until communication with the
-majority\footnote{I.e, communication with the majority's collection of
-projection stores.} can be re-established.
+refuse all file API requests until communication with the
+majority can be re-established.
 
 \subsection{The quorum: witness servers vs. real servers}
-
-TODO Proofread for clarity: this is still a young draft.
 
 In any quorum-consensus system, at least $2f+1$ participants are
 required to survive $f$ participant failures.  Machi can borrow an
@@ -1292,7 +1291,7 @@ real Machi server.
 
 A mixed cluster of witness and real servers must still contain at
 least a quorum $f+1$ participants.  However, as few as one of them
-must be a real server,
+may be a real server,
 and the remaining $f$ are witness servers.  In
 such a cluster, any majority quorum must have at least one real server
 participant.
@@ -1303,10 +1302,8 @@ When in CP mode, any server that is on the minority side of a network
 partition and thus cannot calculate a new projection that includes a
 quorum of servers will
 enter wedge state and remain wedged until the network partition
-heals enough to communicate with a quorum of.  This is a nice
-property: we automatically get ``fencing'' behavior.\footnote{Any
-  server on the minority side is wedged and therefore refuses to serve
-  because it is, so to speak, ``on the wrong side of the fence.''}
+heals enough to communicate with a quorum of FLUs.  This is a nice
+property: we automatically get ``fencing'' behavior.
 
 \begin{figure}
 \centering
@@ -1387,28 +1384,6 @@ private projection store's epoch number from a quorum of servers
 safely restart a chain.  In the example above, we must endure the
 worst-case and wait until $S_a$ also returns to service.
 
-\section{Possible problems with Humming Consensus}
-
-There are some unanswered questions about Machi's proposed chain
-management technique.  The problems that we guess are likely/possible
-include:
-
-\begin{itemize}
-
-\item A counter-example is found which nullifies Humming Consensus's
-  safety properties.
-
-\item Coping with rare flapping conditions.
-  It's hoped that the ``best projection'' ranking system
-  will be sufficient to prevent endless flapping of projections, but
-  it isn't yet clear that it will be.
-
-\item CP Mode management via the method proposed in
-  Section~\ref{sec:split-brain-management} may not be sufficient in
-  all cases.
-
-\end{itemize}
-
 \section{File Repair/Synchronization}
 \label{sec:repair-entire-files}
 
@@ -1453,22 +1428,19 @@ $
       \underbrace{T_1}_\textbf{Tail \#1}}^\textbf{Chain \#1 (U.P.~Invariant preserving)}
 \mid
 \overbrace{H_2, M_{21},\ldots,
-      \underbrace{T_2}_\textbf{Tail \#2}}^\textbf{Chain \#2 (repairing)}
-\mid \ldots \mid
-\overbrace{H_n, M_{n1},\ldots,
-      \underbrace{T_n}_\textbf{Tail \#n \& Tail of Tails ($T_{tails}$)}}^\textbf{Chain \#n (repairing)}
+      \underbrace{T_2}_\textbf{Tail \#2 \& Tail of Tails ($T_{tails}$)}}^\textbf{Chain \#2 (repairing)}
 ]
 $
 \caption{A general representation of a ``chain of chains'': a chain prefix of
   Update Propagation Invariant preserving FLUs (``Chain \#1'')
-  with FLUs from an arbitrary $n-1$ other chains under repair.}
+  with FLUs under repair (``Chain \#2'').}
 \label{fig:repair-chain-of-chains}
 \end{figure*}
 
 Both situations can cause data loss if handled incorrectly.
 If a violation of the Update Propagation Invariant (see end of
 Section~\ref{sec:cr-proof}) is permitted, then the strong consistency
-guarantee of Chain Replication is violated.  Machi uses
+guarantee of Chain Replication can be violated.  Machi uses
 write-once registers, so the number of possible strong consistency
 violations is smaller than Chain Replication of mutable registers.
 However, even when using write-once registers,
@@ -1509,10 +1481,9 @@ as the foundation for Machi's data loss prevention techniques.
 \centering
 $
 [\overbrace{\underbrace{H_1}_\textbf{Head}, M_{11}, T_1,
-                        H_2, M_{21}, T_2,
+                        H_2, M_{21},
                         \ldots
-                        H_n, M_{n1},
-                        \underbrace{T_n}_\textbf{Tail}}^\textbf{Chain (U.P.~Invariant preserving)}
+                        \underbrace{T_2}_\textbf{Tail}}^\textbf{Chain (U.P.~Invariant preserving)}
 ]
 $
 \caption{Representation of Figure~\ref{fig:repair-chain-of-chains}
@@ -1523,7 +1494,7 @@ $
 
 Machi's repair process must preserve the Update Propagation
 Invariant.  To avoid data races with data copying from
-``U.P.~Invariant preserving'' servers (i.e. fully repaired with
+``U.P.~Invariant-preserving'' servers (i.e. fully repaired with
 respect to the Update Propagation Invariant)
 to servers of unreliable/unknown state, a
 projection like the one shown in
@@ -1533,7 +1504,7 @@ projection of this type.
 
 \begin{itemize}
 
-\item The system maintains the distinction between ``U.P.~preserving''
+\item The system maintains the distinction between ``U.P.~Invariant-preserving''
   and ``repairing'' FLUs at all times.  This allows the system to
   track exactly which servers are known to preserve the Update
   Propagation Invariant and which servers do not.
@@ -1542,9 +1513,12 @@ projection of this type.
   chain-of-chains.
 
 \item All write operations must flow successfully through the
-  chain-of-chains in order, i.e., from Tail \#1
+  chain-of-chains in order, i.e., from ``head of heads''
   to the ``tail of tails''.  This rule also includes any
   repair operations.
+
+\item All read operations that require strong consistency are directed
+  to Tail \#1, as usual.
 
 \end{itemize}
 
@@ -1558,7 +1532,7 @@ mode of the system.
 In cases where the cluster is operating in CP Mode,
 CORFU's repair method of ``just copy it all'' (from source FLU to repairing
 FLU) is correct, {\em except} for the small problem pointed out in
-Section~\ref{sub:repair-divergence}.  The problem for Machi is one of
+Appendix~\ref{sub:repair-divergence}.  The problem for Machi is one of
 time \& space.  Machi wishes to avoid transferring data that is
 already correct on the repairing nodes.  If a Machi node is storing
 170~TBytes of data, we really do not wish to use 170~TBytes of bandwidth
@@ -1588,10 +1562,9 @@ algorithm proposed is:
 
 \item For chain \#1 members, i.e., the
   leftmost chain relative to Figure~\ref{fig:repair-chain-of-chains},
-  repair files byte ranges for any chain \#1 members that are not members
+  repair all file byte ranges for any chain \#1 members that are not members
   of the {\tt FLU\_List} set.  This will repair any partial
-  writes to chain \#1 that were unsuccessful (e.g., client crashed).
-  (Note however that this step only repairs FLUs in chain \#1.)
+  writes to chain \#1 that were interrupted, e.g., by a client crash.
 
 \item For all file byte ranges $B$ in all files on all FLUs in all repairing
   chains where Tail \#1's value is written, send repair data $B$
@@ -1689,10 +1662,19 @@ paper.
 \section{Acknowledgements}
 
 We wish to thank everyone who has read and/or reviewed this document
-in its really-terrible early drafts and have helped improve it
-immensely: Justin Sheehy, Kota Uenishi, Shunichi Shinohara, Andrew
-Stone, Jon Meredith, Chris Meiklejohn, John Daily, Mark Allen, and Zeeshan
-Lakhani.
+in its really terrible early drafts and have helped improve it
+immensely:
+Mark Allen,
+John Daily,
+Zeeshan Lakhani,
+Chris Meiklejohn,
+Jon Meredith,
+Mark Raugas,
+Justin Sheehy,
+Shunichi Shinohara,
+Andrew Stone,
+and
+Kota Uenishi.
 
 \bibliographystyle{abbrvnat}
 \begin{thebibliography}{}
