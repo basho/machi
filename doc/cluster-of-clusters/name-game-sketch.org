@@ -245,12 +245,23 @@ we need?
   standard GUID string (rendered into ASCII hexadecimal digits) instead.)
 - ~K~   = the CoC placement key
 
+We use a variation of ~rs_hash()~, called ~rs_hash_with_float()~.  The
+former uses a string as its 1st argument; the latter uses a floating
+point number as its 1st argument.  Both return a cluster ID name
+thingie.
+
+#+BEGIN_SRC erlang
+%% type specs, Erlang style
+-spec rs_hash(string(), rs_hash:map()) -> rs_hash:cluster_id().
+-spec rs_hash_with_float(float(), rs_hash:map()) -> rs_hash:cluster_id().
+#+END_SRC
+
 ** The details: CoC file write
 
 1. CoC client chooses ~p~ and ~T~ (i.e., the file prefix & target cluster)
 2. CoC client knows the CoC ~Map~
 3. CoC client requests @ cluster ~T~: ~append(p,...) -> {ok,p.s.z,ByteOffset}~
-4. CoC client calculates a value ~K~ such that ~rs_hash(K,Map) = T~
+4. CoC client calculates a value ~K~ such that ~rs_hash_with_float(K,Map) = T~
 5. CoC stores/uses the file name ~p.s.z.K~.
 
 ** The details: CoC file read
@@ -278,17 +289,9 @@ we need?
 
 *** File read procedure
 
-0. We use a variation of ~rs_hash()~, called ~rs_hash_after_sha()~.
-
-#+BEGIN_SRC erlang
-%% type specs, Erlang style
--spec rs_hash(string(), rs_hash:map()) -> rs_hash:cluster_id().
--spec rs_hash_after_sha(float(), rs_hash:map()) -> rs_hash:cluster_id().
-#+END_SRC
-
 1. We start with a file name, ~p.s.z.K~.  Parse it to find the value
    of ~K~.
-2. Calculate ~rs_hash_after_sha(K,Map) = T~.
+2. Calculate ~rs_hash_with_float(K,Map) = T~.
 3. Send request @ cluster ~T~: ~read(p.s.z,...) ->~ ... success!
 
 * 6. File migration (aka rebalancing/reparitioning/redistribution)
@@ -299,11 +302,11 @@ As discussed in section 5, the client can have good reason for wanting
 to have some control of the initial location of the file within the
 cluster.  However, the cluster manager has an ongoing interest in
 balancing resources throughout the lifetime of the file.  Disks will
-get full, full, hardware will change, read workload will fluctuate,
+get full, hardware will change, read workload will fluctuate,
 etc etc.
 
 This document uses the word "migration" to describe moving data from
-one subcluster to another.  In other systems, this process is
+one CoC cluster to another.  In other systems, this process is
 described with words such as rebalancing, repartitioning, and
 resharding.  For Riak Core applications, the mechanisms are "handoff"
 and "ring resizing". See the [[http://hadoop.apache.org/docs/current/hadoop-project-dist/hadoop-hdfs/HdfsUserGuide.html#Balancer][Hadoop file balancer]] for another example.
@@ -358,14 +361,14 @@ When a new Random Slicing map contains a single submap, then its use
 is identical to the original Random Slicing algorithm.  If the map
 contains multiple submaps, then the access rules change a bit:
 
-- Write operations always go to the latest/largest submap
-- Read operations attempt to read from all unique submaps
+- Write operations always go to the latest/largest submap.
+- Read operations attempt to read from all unique submaps.
   - Skip searching submaps that refer to the same cluster ID.
     - In this example, unit interval value 0.10 is mapped to Cluster1
       by both submaps.
-  - Read from latest/largest submap to oldest/smallest
+  - Read from latest/largest submap to oldest/smallest submap.
   - If not found in any submap, search a second time (to handle races
-    with file copying between submaps)
+    with file copying between submaps).
   - If the requested data is found, optionally copy it directly to the
     latest submap (as a variation of read repair which really simply
     accelerates the migration process and can reduce the number of
@@ -404,10 +407,11 @@ distribute a new map, such as:
 One limitation of HibariDB that I haven't fixed is not being able to
 perform more than one migration at a time.  The trade-off is that such
 migration is difficult enough across two submaps; three or more
-submaps becomes even more complicated.  Fortunately for Hibari, its
-file data is immutable and therefore can easily manage many migrations
-in parallel, i.e., its submap list may be several maps long, each one
-for an in-progress file migration.
+submaps becomes even more complicated.
+
+Fortunately for Machi, its file data is immutable and therefore can
+easily manage many migrations in parallel, i.e., its submap list may
+be several maps long, each one for an in-progress file migration.
 
 * Acknowledgements
 
