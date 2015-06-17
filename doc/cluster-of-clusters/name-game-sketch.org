@@ -134,7 +134,7 @@ Assume that we have a random slicing map called ~Map~.  This particular
 | 0.66 - 0.91 | Cluster3   |
 | 0.91 - 1.00 | Cluster4   |
 
-Then, if we had CoC file name ="foo"=, the hash ~SHA("foo")~ maps to about
+Then, if we had CoC file name "~foo~", the hash ~SHA("foo")~ maps to about
 0.05 on the unit interval.  So, according to ~Map~, the value of
 ~rs_hash("foo",Map) = Cluster1~.  Similarly, ~SHA("hello")~ is about
 0.67 on the unit interval, so ~rs_hash("hello",Map) = Cluster3~.
@@ -177,13 +177,13 @@ the head of Cluster2 (which the client magically knows how to
 contact), then the result will look something like
 ~{ok,"foo.s923.z47",ByteOffset}~.
 
-So, ~ "foo.s923.z47" ~ is the file name that any Machi CoC client must use
-in order to retrieve the CoolData bytes.
+Therefore, the file name "~foo.s923.z47~" must be used by any Machi
+CoC client in order to retrieve the CoolData bytes.
 
 *** Problem #1: We want CoC files to move around automatically
 
 If the CoC client stores two pieces of information, the file name
-~ "foo.s923.z47" ~ and the Cluster ID Cluster2, then what happens when the
+"~foo.s923.z47~" and the Cluster ID Cluster2, then what happens when the
 cluster-of-clusters system decides to rebalance files across all
 machines?  The CoC manager may decide to move our file to Cluster66.
 
@@ -257,7 +257,7 @@ What if the CoC client uses a similar scheme?
 
 1. CoC client has ~p.s.z.A~ and parses the parts of the name.
 2. Coc calculates ~rs_hash(p.s.z.A,Map) = T~
-3. CoC client requests @ cluster ~T~: ~read(p.s.z,...) -> ~ ... success!
+3. CoC client requests @ cluster ~T~: ~read(p.s.z,...) ->~ ... success!
 
 ** The details: calculating 'A', the adjustment factor
 
@@ -300,10 +300,10 @@ easily fixable but just not written yet.
 
 1. We start with a file name, ~p.s.z.A~.  Parse it.
 2. Calculate ~SHA(p.s.z) = H~ and map H onto the unit interval.
-3. Decode A, then calculate M = A - H.  M is a ~float()~ type that is
+3. Decode A, then calculate ~M = A - H~.  ~M~ is a ~float()~ type that is
    now also somewhere in the unit interval.
 4. Calculate ~rs_hash_after_sha(M,Map) = T~.
-5. Send request @ cluster ~T~: ~read(p.s.z,...) -> ~ ... success!
+5. Send request @ cluster ~T~: ~read(p.s.z,...) ->~ ... success!
 
 *** The bad way: file write
 
