@@ -237,8 +237,8 @@ convergence_demo_testfun(NumFLUs) ->
            io:format(user, "\nSweet, private projections are stable\n", []),
 io:format(user, "Rolling sanity check ... ", []),
 PrivProjs = [{Name, begin
-                        {ok, Ps8} = ?FLU_PC:get_all_projections(FLU,
-                                                                private),
+                        {ok, Ps8} = ?FLU_PC:get_all_projections(FLU, private,
+                                                                infinity),
                         Ps9 = if length(Ps8) < 5*1000 ->
                                       Ps8;
                                  true ->
