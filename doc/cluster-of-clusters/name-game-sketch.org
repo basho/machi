@@ -177,13 +177,13 @@ the head of Cluster2 (which the client magically knows how to
 contact), then the result will look something like
 ~{ok,"foo.s923.z47",ByteOffset}~.
 
-So, ="foo.s923.z47"= is the file name that any Machi CoC client must use
+So, ~ "foo.s923.z47" ~ is the file name that any Machi CoC client must use
 in order to retrieve the CoolData bytes.
 
 *** Problem #1: We want CoC files to move around automatically
 
 If the CoC client stores two pieces of information, the file name
-~"foo.s923.z47"~ and the Cluster ID Cluster2, then what happens when the
+~ "foo.s923.z47" ~ and the Cluster ID Cluster2, then what happens when the
 cluster-of-clusters system decides to rebalance files across all
 machines?  The CoC manager may decide to move our file to Cluster66.
 
