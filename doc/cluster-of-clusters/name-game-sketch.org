@@ -21,7 +21,7 @@ background assumed by the rest of this document.
 This isn't yet well-defined (April 2015).  However, it's clear from
 the [[https://github.com/basho/machi/blob/master/doc/high-level-machi.pdf][Machi high level design document]] that Machi alone does not support
 any kind of file partitioning/distribution/sharding across multiple
-machines.  There must be another layer above a Machi cluster to
+small Machi clusters.  There must be another layer above a Machi cluster to
 provide such partitioning services.
 
 The name "cluster of clusters" orignated within Basho to avoid
@@ -50,7 +50,7 @@ cluster-of-clusters layer.
 We may need to break this assumption sometime in the future?  It isn't
 quite clear yet, sorry.
 
-** Analogy: "neighborhood : city :: Machi :: cluster-of-clusters"
+** Analogy: "neighborhood : city :: Machi : cluster-of-clusters"
 
 Analogy: The word "machi" in Japanese means small town or
 neighborhood.  As the Tokyo Metropolitan Area is built from many
@@ -83,7 +83,7 @@ DOI: http://dx.doi.org/10.1145/2632230 (long version, ACM Transactions
 
 ** We use random slicing to map CoC file names -> Machi cluster ID/name
 
-We will use a single random slicing map.  This map (called "Map" in
+We will use a single random slicing map.  This map (called ~Map~ in
 the descriptions below), together with the random slicing hash
 function (called "rs_hash()" below), will be used to map:
 
@@ -122,8 +122,8 @@ image, and the use license is OK.)
 
 [[./migration-4.png]]
 
-Assume that we have a random slicing map called Map.  This particular
-Map maps the unit interval onto 4 Machi clusters:
+Assume that we have a random slicing map called ~Map~.  This particular
+~Map~ maps the unit interval onto 4 Machi clusters:
 
 | Hash range  | Cluster ID |
 |-------------+------------|
@@ -134,10 +134,10 @@ Map maps the unit interval onto 4 Machi clusters:
 | 0.66 - 0.91 | Cluster3   |
 | 0.91 - 1.00 | Cluster4   |
 
-Then, if we had CoC file name "foo", the hash SHA("foo") maps to about
-0.05 on the unit interval.  So, according to Map, the value of
-rs_hash("foo",Map) = Cluster1.  Similarly, SHA("hello") is about
-0.67 on the unit interval, so rs_hash("hello",Map) = Cluster3.
+Then, if we had CoC file name ~"foo"~, the hash ~SHA("foo")~ maps to about
+0.05 on the unit interval.  So, according to ~Map~, the value of
+~rs_hash("foo",Map) = Cluster1~.  Similarly, ~SHA("hello")~ is about
+0.67 on the unit interval, so ~rs_hash("hello",Map) = Cluster3~.
 
 * 4. An additional assumption: clients will want some control over file placement
 
@@ -172,18 +172,18 @@ under-utilized clusters.
 
 However, this Machi file naming feature is not so helpful in a
 cluster-of-clusters context.  If the client wants to store some data
-on Cluster2 and therefore sends an append("foo",CoolData) request to
+on Cluster2 and therefore sends an ~append("foo",CoolData)~ request to
 the head of Cluster2 (which the client magically knows how to
 contact), then the result will look something like
-{ok,"foo.s923.z47",ByteOffset}.
+~{ok,"foo.s923.z47",ByteOffset}~.
 
-So, "foo.s923.z47" is the file name that any Machi CoC client must use
+So, ~"foo.s923.z47"~ is the file name that any Machi CoC client must use
 in order to retrieve the CoolData bytes.
 
 *** Problem #1: We want CoC files to move around automatically
 
 If the CoC client stores two pieces of information, the file name
-"foo.s923.z47" and the Cluster ID Cluster2, then what happens when the
+~"foo.s923.z47"~ and the Cluster ID Cluster2, then what happens when the
 cluster-of-clusters system decides to rebalance files across all
 machines?  The CoC manager may decide to move our file to Cluster66.
 
@@ -201,17 +201,17 @@ The scheme would also introduce extra round-trips to the servers
 whenever we try to read a file where we do not know the most
 up-to-date cluster ID for.
 
-**** We could store "foo.s923.z47"'s location in an LDAP database!
+**** We could store ~"foo.s923.z47"~'s location in an LDAP database!
 
 Or we could store it in Riak.  Or in another, external database.  We'd
 rather not create such an external dependency, however.
 
-*** Problem #2: "foo.s923.z47" doesn't always map via random slicing to Cluster2
+*** Problem #2: ~"foo.s923.z47"~ doesn't always map via random slicing to Cluster2
 
 ... if we ignore the problem of "CoC files may be redistributed in the
 future", then we still have a problem.
 
-In fact, the value of ps_hash("foo.s923.z47",Map) is Cluster1.
+In fact, the value of ~ps_hash("foo.s923.z47",Map)~ is Cluster1.
 
 The whole reason using random slicing is to make a very quick,
 easy-to-distribute mapping of file names to cluster IDs.  It would be
@@ -221,10 +221,10 @@ very nice, very helpful if the scheme would actually *work for us*.
 * 5. Proposal: Break the opacity of Machi file names, slightly
 
 Assuming that Machi keeps the scheme of creating file names (in
-response to append() and sequencer_new_range() calls) based on a
+response to ~append()~ and ~sequencer_new_range()~ calls) based on a
 predictable client-supplied prefix and an opaque suffix, e.g.,
 
-append("foo",CoolData) -> {ok,"foo.s923.z47",ByteOffset}.
+~append("foo",CoolData) -> {ok,"foo.s923.z47",ByteOffset}.~
 
 ... then we propose that all CoC and Machi parties be aware of this
 naming scheme, i.e. that Machi assigns file names based on:
@@ -239,24 +239,25 @@ What if the CoC client uses a similar scheme?
 
 ** The details: legend
 
-- T   = the target CoC member/Cluster ID
+- T   = the target CoC member/Cluster ID chosen at the time of ~append()~
 - p   = file prefix, chosen by the CoC client (This is exactly the Machi client-chosen file prefix).
 - s.z = the Machi file server opaque file name suffix (Which we happen to know is a combination of sequencer ID plus file serial number.)
 - A   = adjustment factor, the subject of this proposal
 
 ** The details: CoC file write
 
-1. CoC client chooses p, T (file prefix, target cluster)
-2. CoC client knows the CoC Map
-3. CoC client requests @ cluster T: append(p,...) -> {ok, p.s.z, ByteOffset}
-4. CoC client calculates a such that rs_hash(p.s.z.A,Map) = T
-5. CoC stores/uses the file name p.s.z.A.
+1. CoC client chooses ~p~ and ~T~ (i.e., the file prefix & target cluster)
+2. CoC client knows the CoC ~Map~
+3. CoC client requests @ cluster ~T~:
+~append(p,...) -> {ok, p.s.z, ByteOffset}~
+4. CoC client calculates a such that ~rs_hash(p.s.z.A,Map) = T~
+5. CoC stores/uses the file name ~p.s.z.A~.
 
 ** The details: CoC file read
 
-1. CoC client has p.s.z.A and parses the parts of the name.
-2. Coc calculates rs_hash(p.s.z.A,Map) = T
-3. CoC client requests @ cluster T: read(p.s.z,...) -> hooray!
+1. CoC client has ~p.s.z.A~ and parses the parts of the name.
+2. Coc calculates ~rs_hash(p.s.z.A,Map) = T~
+3. CoC client requests @ cluster ~T~: ~read(p.s.z,...) -> ~ ... success!
 
 ** The details: calculating 'A', the adjustment factor
 
@@ -266,30 +267,30 @@ NOTE: This algorithm will bias/weight its placement badly.  TODO it's
 easily fixable but just not written yet.
 
 1. During the file writing stage, at step #4, we know that we asked
-   cluster T for an append() operation using file prefix p, and that
-   the file name that Machi cluster T gave us a longer name, p.s.z.
-2. We calculate sha(p.s.z) = H.
-3. We know Map, the current CoC mapping.
-4. We look inside of Map, and we find all of the unit interval ranges
+   cluster T for an ~append()~ operation using file prefix p, and that
+   the file name that Machi cluster T gave us a longer name, ~p.s.z~.
+2. We calculate ~sha(p.s.z) = H~.
+3. We know ~Map~, the current CoC mapping.
+4. We look inside of ~Map~, and we find all of the unit interval ranges
    that map to our desired target cluster T.  Let's call this list
-   MapList = [Range1=(start,end],Range2=(start,end],...].
-5. In our example, T=Cluster2.  The example Map contains a single unit
-   interval range for Cluster2, [(0.33,0.58]].
-6. Find the entry in MapList, (Start,End], where the starting range
-   interval Start is larger than T, i.e., Start > T.
+   ~MapList = [Range1=(start,end],Range2=(start,end],...]~.
+5. In our example, ~T=Cluster2~.  The example ~Map~ contains a single unit
+   interval range for ~Cluster2~, ~[(0.33,0.58]]~.
+6. Find the entry in ~MapList~, ~(Start,End]~, where the starting range
+   interval ~Start~ is larger than ~T~, i.e., ~Start > T~.
 7. For step #6, we "wrap around" to the beginning of the list, if no
    such starting point can be found.
 8. This is a Basho joint, of course there's a ring in it somewhere!
-9. Pick a random number M somewhere in the interval, i.e., Start <= M
-   and M <= End.
-10. Let A = M - H.
+9. Pick a random number ~M~ somewhere in the interval, i.e., ~Start <= M~
+   and ~M <= End~.
+10. Let ~A = M - H~.
 11. Encode a in a file name-friendly manner, e.g., convert it to
     hexadecimal ASCII digits (while taking care of A's signed nature)
-    to create file name p.s.z.A.
+    to create file name ~p.s.z.A~.
 
 *** The good way: file read
 
-0. We use a variation of rs_hash(), called rs_hash_after_sha().
+0. We use a variation of ~rs_hash()~, called ~rs_hash_after_sha()~.
 
 #+BEGIN_SRC erlang
 %% type specs, Erlang style
@@ -297,16 +298,16 @@ easily fixable but just not written yet.
 -spec rs_hash_after_sha(float(), rs_hash:map()) -> rs_hash:cluster_id().
 #+END_SRC
 
-1. We start with a file name, p.s.z.A.  Parse it.
-2. Calculate SHA(p.s.z) = H and map H onto the unit interval.
-3. Decode A, then calculate M = A - H.  M is a float() type that is
+1. We start with a file name, ~p.s.z.A~.  Parse it.
+2. Calculate ~SHA(p.s.z) = H~ and map H onto the unit interval.
+3. Decode A, then calculate M = A - H.  M is a ~float()~ type that is
    now also somewhere in the unit interval.
-4. Calculate rs_hash_after_sha(M,Map) = T.
-5. Send request @ cluster T: read(p.s.z,...) -> hooray!
+4. Calculate ~rs_hash_after_sha(M,Map) = T~.
+5. Send request @ cluster ~T~: ~read(p.s.z,...) -> ~ ... success!
 
 *** The bad way: file write
 
-1. Once we know p.s.z, we iterate in a loop:
+1. Once we know ~p.s.z~, we iterate in a loop:
 
 #+BEGIN_SRC pseudoBorne
 a = 0
@@ -323,7 +324,7 @@ done
 A very hasty measurement of SHA on a single 40 byte ASCII value
 required about 13 microseconds/call.  If we had a cluster of 500
 machines, 84 disks per machine, one Machi file server per disk, and 8
-chains per Machi file server, and if each chain appeared in Map only
+chains per Machi file server, and if each chain appeared in ~Map~ only
 once using equal weighting (i.e., all assigned the same fraction of
 the unit interval), then it would probably require roughly 4.4 seconds
 on average to find a SHA collision that fell inside T's portion of the
@@ -422,7 +423,7 @@ The cluster-of-clusters manager is responsible for:
   delete it from the old cluster.
 
 In example map #7, the CoC manager will copy files with unit interval
-assignments in (0.25,0.33], (0.58,0.66], and (0.91,1.00] from their
+assignments in ~(0.25,0.33]~, ~(0.58,0.66]~, and ~(0.91,1.00]~ from their
 old locations in cluster IDs Cluster1/2/3 to their new cluster,
 Cluster4.  When the CoC manager is satisfied that all such files have
 been copied to Cluster4, then the CoC manager can create and
