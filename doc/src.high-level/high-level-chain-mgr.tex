@@ -1256,24 +1256,23 @@ and short:
 A typical approach, as described by Coulouris et al.,[4] is to use a
 quorum-consensus approach. This allows the sub-partition with a
 majority of the votes to remain available, while the remaining
-sub-partitions should fall down to an auto-fencing mode.
+sub-partitions should fall down to an auto-fencing mode.\footnote{Any
+  server on the minority side refuses to operate
+  because it is, so to speak, ``on the wrong side of the fence.''}
 \end{quotation}
 
 This is the same basic technique that
 both Riak Ensemble and ZooKeeper use.  Machi's
-extensive use of write-registers are a big advantage when implementing
+extensive use of write-once registers are a big advantage when implementing
 this technique.  Also very useful is the Machi ``wedge'' mechanism,
 which can automatically implement the ``auto-fencing'' that the
 technique requires.  All Machi servers that can communicate with only
 a minority of other servers will automatically ``wedge'' themselves,
 refuse to author new projections, and
-and refuse all file API requests until communication with the
-majority\footnote{I.e, communication with the majority's collection of
-projection stores.} can be re-established.
+refuse all file API requests until communication with the
+majority can be re-established.
 
 \subsection{The quorum: witness servers vs. real servers}
-
-TODO Proofread for clarity: this is still a young draft.
 
 In any quorum-consensus system, at least $2f+1$ participants are
 required to survive $f$ participant failures.  Machi can borrow an
@@ -1292,7 +1291,7 @@ real Machi server.
 
 A mixed cluster of witness and real servers must still contain at
 least a quorum $f+1$ participants.  However, as few as one of them
-must be a real server,
+may be a real server,
 and the remaining $f$ are witness servers.  In
 such a cluster, any majority quorum must have at least one real server
 participant.
@@ -1303,10 +1302,8 @@ When in CP mode, any server that is on the minority side of a network
 partition and thus cannot calculate a new projection that includes a
 quorum of servers will
 enter wedge state and remain wedged until the network partition
-heals enough to communicate with a quorum of.  This is a nice
-property: we automatically get ``fencing'' behavior.\footnote{Any
-  server on the minority side is wedged and therefore refuses to serve
-  because it is, so to speak, ``on the wrong side of the fence.''}
+heals enough to communicate with a quorum of FLUs.  This is a nice
+property: we automatically get ``fencing'' behavior.
 
 \begin{figure}
 \centering
@@ -1386,28 +1383,6 @@ private projection store's epoch number from a quorum of servers
 (including witnesses) gives sufficient information to know how to
 safely restart a chain.  In the example above, we must endure the
 worst-case and wait until $S_a$ also returns to service.
-
-\section{Possible problems with Humming Consensus}
-
-There are some unanswered questions about Machi's proposed chain
-management technique.  The problems that we guess are likely/possible
-include:
-
-\begin{itemize}
-
-\item A counter-example is found which nullifies Humming Consensus's
-  safety properties.
-
-\item Coping with rare flapping conditions.
-  It's hoped that the ``best projection'' ranking system
-  will be sufficient to prevent endless flapping of projections, but
-  it isn't yet clear that it will be.
-
-\item CP Mode management via the method proposed in
-  Section~\ref{sec:split-brain-management} may not be sufficient in
-  all cases.
-
-\end{itemize}
 
 \section{File Repair/Synchronization}
 \label{sec:repair-entire-files}
@@ -1538,7 +1513,7 @@ projection of this type.
   chain-of-chains.
 
 \item All write operations must flow successfully through the
-  chain-of-chains in order, i.e., from Tail \#1
+  chain-of-chains in order, i.e., from ``head of heads''
   to the ``tail of tails''.  This rule also includes any
   repair operations.
 
