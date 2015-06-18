@@ -3,6 +3,8 @@
 #+AUTHOR: Scott
 #+STARTUP: lognotedone hidestars indent showall inlineimages
 #+SEQ_TODO: TODO WORKING WAITING DONE
+#+COMMENT: M-x visual-line-mode
+#+COMMENT: Also, disable auto-fill-mode
 
 * 1. "Name Games" with random-slicing style consistent hashing
 
@@ -273,18 +275,18 @@ these constraints.
 ** The details: CoC file write
 
 1. CoC client chooses ~p~ and ~T~ (i.e., the file prefix & target cluster)
-2. CoC client requests @ cluster ~T~: ~append(p,...) -> {ok,p.s.z,ByteOffset}~
-3. CoC client knows the CoC ~Map~
-4. CoC client calculates a value ~K~ such that ~rs_hash_with_float(K,Map) = T~
-5. CoC stores/uses the file name ~p.s.z.K~.
+2. CoC client knows the CoC ~Map~
+3. CoC client calculates a value ~K~ such that ~rs_hash_with_float(K,Map) = T~, using the method described below.
+4. CoC client requests @ cluster ~T~: ~append_chunk(p,...) -> {ok,p.K.s.z,ByteOffset}~
+5. CoC stores/uses the file name ~p.K.s.z~.
 
 ** The details: CoC file read
 
-1. CoC client knows the file name ~p.s.z.K~ and parses it to find
+1. CoC client knows the file name ~p.K.s.z~ and parses it to find
    ~K~'s value.
 2. CoC client knows the CoC ~Map~
 3. Coc calculates ~rs_hash_with_float(K,Map) = T~
-4. CoC client requests @ cluster ~T~: ~read(p.s.z,...) ->~ ... success!
+4. CoC client requests @ cluster ~T~: ~read_chunk(p.K.s.z,...) ->~ ... success!
 
 ** The details: calculating 'K', the CoC placement key
 
@@ -299,7 +301,7 @@ these constraints.
    of the CoC hash space range intervals in ~MapList~.  For example,
    if ~r=0.5~, then ~K = 0.33 + 0.5*(0.58-0.33) = 0.455~, which is
    exactly in the middle of the ~(0.33,0.58]~ interval.
-6. If necessary, encode ~K~ in a file name-friendly manner, e.g., convert it to hexadecimal ASCII digits to create file name ~p.s.z.K~.
+6. If necessary, encode ~K~ in a file name-friendly manner, e.g., convert it to hexadecimal ASCII digits to create file name ~p.K.s.z~.
 
 ** The details: calculating 'K', an alternative method
 
