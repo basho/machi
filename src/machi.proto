@@ -48,12 +48,6 @@ enum MpbCSumType {
      CSUM_TAG_SERVER_REGEN = 3;
 }
 
-// Error response - may be generated for any Req
-message MpbErrorResp {
-    required bytes errmsg = 1;
-    required uint32 errcode = 2;
-}
-
 // chunk_pos() type
 message MpbChunkPos {
     required uint32 offset = 1;
@@ -68,14 +62,20 @@ message MpbChunkCSum {
 }
 
 // epoch_id() type
-message MbpEpochId {
+message MpbEpochId {
     required uint32 epoch_num = 1;
     required MpbChunkCSum epoch_csum = 2;
 }
 
+// Error response - may be generated for any Req
+message MpbErrorResp {
+    required bytes errmsg = 1;
+    required uint32 errcode = 2;
+}
+
 // append_chunk() request
 message MpbAppendChunkReq {
-    required bytes prefix = 1;
+    required string prefix = 1;
     optional bytes placement_key = 2;
     required bytes chunk = 3;
     optional uint32 chunk_extra = 4;
@@ -93,3 +93,5 @@ message MpbAuthReq {
     required bytes user = 1;
     required bytes password = 2;
 }
+
+
