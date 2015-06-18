@@ -88,7 +88,7 @@ csv_to_tuples(String) ->
           [Code, Message, Proto] = string:tokens(Line, ","),
           {list_to_integer(Code), string:to_lower(Message), Proto ++ "_pb"}
       end
-     || Line <- Lines].
+     || Line <- Lines, length(Line) > 0 andalso hd(Line) /= $#].
 
 generate_module(Name, Tuples) ->
     %% TODO: Add generated doc comment at the top

@@ -50,9 +50,9 @@ enum MpbCSumType {
 
 // chunk_pos() type
 message MpbChunkPos {
-    required uint32 offset = 1;
-    required uint32 chunk_size = 2;
-    required bytes file_name = 3;
+    required uint64 offset = 1;
+    required uint64 chunk_size = 2;
+    required string file_name = 3;
 }
 
 // chunk_csum() type
@@ -69,8 +69,18 @@ message MpbEpochId {
 
 // Error response - may be generated for any Req
 message MpbErrorResp {
-    required bytes errmsg = 1;
+    required string errmsg = 1;
     required uint32 errcode = 2;
+}
+
+// ping() request
+
+message MpbEchoReq {
+    optional string message = 1;
+}
+
+message MpbEchoResp {
+    optional string message = 1;
 }
 
 // append_chunk() request
@@ -94,4 +104,9 @@ message MpbAuthReq {
     required bytes password = 2;
 }
 
+// Dummy authentication request, not used!  Included for demo purposes only.
+message MpbDummyAuthReq {
+    required bytes user = 1;
+    required bytes password = 2;
+}
 

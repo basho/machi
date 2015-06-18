@@ -1,7 +1,43 @@
+# Comments begin with pound/hash/octothorpe
+# Blank lines are permitted, but the line must be truly blank (no
+# hidden whitespace)!
+
+# https://developers.google.com/protocol-buffers/docs/proto3
+#
+# The machi.proto file defines the message types, but it doesn't
+# define how the wire format will distinguish between different kinds
+# of messages.  For example:
+#
+# 38> Dummy = list_to_binary(machi_pb:encode_mpbdummyauthreq({mpbdummyauthreq, <<"dummy-u">>, <<"dummy-p">>})).
+# <<10,7,100,117,109,109,121,45,117,18,7,100,117,109,109,121,45,112>>
+#
+# 39> machi_pb:decode_mpbauthreq(Dummy).
+#{mpbauthreq,<<"dummy-u">>,<<"dummy-p">>}         
+#
+# The above demonstrates that we cannot tell the difference between a
+# MpbAuthReq message and a MpbDummyAuthReq message because their
+# Protocol Buffers encodings are identical.
+#
+# Basho's Riak KV uses the following conventions to create a working
+# message passing service.
+#
+# 1. Use the first 4 bytes to describe the length of the message that
+#    follows.  This is analogous to Erlang/OTP's use of {packet,4} style
+#    PDU boundaries.  This length includes the bytes from items #2 and #3
+#    below.
+# 2. Use the next one byte defined below to tag a particular Protocol Buffer
+#    message type.
+# 3. The encoded Protocol Buffer message bytes follow.
+#
+# We will adopt the same convention for Machi's PB interface.
+
 0,MpbErrorResp,machi_pbundefined
-1,MpbPingReq,machi_pbundefined
-2,MpbAuthReq,machi_pbundefined
-3,MpbAuthResp,machi_pbundefined
-4,MpbPingResp,machi_pbundefined
+
+1,MpbEchoReq,machi_pbundefined
+2,MpbEchoResp,machi_pbundefined
+
+3,MpbAuthReq,machi_pbundefined
+4,MpbAuthResp,machi_pbundefined
+
 5,MpbAppendChunkReq,machi_pbundefined
 6,MpbAppendChunkResp,machi_pbundefined
