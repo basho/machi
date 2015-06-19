@@ -35,7 +35,7 @@ option java_outer_classname = "MachiPB";
 //
 //////////////////////////////////////////
 
-enum MpbGeneralStatusCode {
+enum Mpb_GeneralStatusCode {
      OK = 0;
      BAD_ARG = 1;
      WEDGED = 2;
@@ -43,7 +43,7 @@ enum MpbGeneralStatusCode {
 }
 
 // Must match with machi.hrl's values!
-enum MpbCSumType {
+enum Mpb_CSumType {
      CSUM_TAG_NONE = 0;
      CSUM_TAG_CLIENT_GEN = 1;
      CSUM_TAG_SERVER_GEN = 2;
@@ -57,28 +57,22 @@ enum MpbCSumType {
 //////////////////////////////////////////
 
 // chunk_pos() type
-message MpbChunkPos {
+message Mpb_ChunkPos {
     required uint64 offset = 1;
     required uint64 chunk_size = 2;
     required string file_name = 3;
 }
 
 // chunk_csum() type
-message MpbChunkCSum {
-    required MpbCSumType type = 1;
+message Mpb_ChunkCSum {
+    required Mpb_CSumType type = 1;
     required bytes csum = 2;
 }
 
 // epoch_id() type
-message MpbEpochId {
+message Mpb_EpochId {
     required uint32 epoch_num = 1;
-    required MpbChunkCSum epoch_csum = 2;
-}
-
-// Error response - may be generated for any Req
-message MpbErrorResp {
-    required string errmsg = 1;
-    required uint32 errcode = 2;
+    required Mpb_ChunkCSum epoch_csum = 2;
 }
 
 //////////////////////////////////////////
@@ -87,40 +81,48 @@ message MpbErrorResp {
 //
 //////////////////////////////////////////
 
+// Error response - may be generated for any Req
+message Mpb_ErrorResp {
+    // Free-form (depends on server, which is probably a bad idea TODO)
+    required int32 code = 1;
+    required string msg = 2;
+    optional bytes extra = 3;
+}
+
 // ping() request & response
 
-message MpbEchoReq {
+message Mpb_EchoReq {
     optional string message = 1;
 }
 
-message MpbEchoResp {
+message Mpb_EchoResp {
     optional string message = 1;
 }
 
 // Authentication request & response
 
-message MpbAuthReq {
+message Mpb_AuthReq {
     required bytes user = 1;
     required bytes password = 2;
 }
 
-message MpbAuthResp {
+message Mpb_AuthResp {
     required uint32 code = 1;
     // TODO: not implemented yet
 }
 
 // append_chunk() request & response
 
-message MpbAppendChunkReq {
+message Mpb_AppendChunkReq {
     required string prefix = 1;
     optional bytes placement_key = 2;
     required bytes chunk = 3;
     optional uint32 chunk_extra = 4;
 }
 
-message MpbAppendChunkResp {
-    required MpbGeneralStatusCode status = 1;
-    optional MpbChunkPos chunk_pos = 2;
+message Mpb_AppendChunkResp {
+    required Mpb_GeneralStatusCode status = 1;
+    optional Mpb_ChunkPos chunk_pos = 2;
     optional MbpGeneralError = 3;
 }
 
@@ -130,7 +132,7 @@ message MpbAppendChunkResp {
 //
 //////////////////////////////////////////
 
-message MpbRequest_v1 {
+message Mpb_Request {
     // TODO: If we wish to support pipelined requests sometime in the
     // future, this is the placeholder to do it.
     required bytes req_id = 1;
@@ -141,12 +143,12 @@ message MpbRequest_v1 {
     // NOTE: The erlang protobuffs compiler doesn't support 'oneof'.
     //       But 'oneof' appears to be a very tiny memory optimization
     //       that not all languages might care about?  (Erlang doesn't)
-    optional MpbEchoReq echo = 10;
-    optional MpbAuthReq auth = 11;
-    optional MpbAppendChunkReq append_chunk = 12;
+    optional Mpb_EchoReq echo = 10;
+    optional Mpb_AuthReq auth = 11;
+    optional Mpb_AppendChunkReq append_chunk = 12;
 }
 
-message MpbResponse_v1 {
+message Mpb_Response {
     // TODO: If we wish to support pipelined requests sometime in the
     // future, this is the placeholder to do it.
     required bytes req_id = 1;
@@ -157,10 +159,10 @@ message MpbResponse_v1 {
     // bad/unexpected happened within the server.
     // Clients should always check this response and, if defined,
     // ignroe any request-specific response at codes 10+.
-    optional MpbErrorResp = 2;
+    optional Mpb_ErrorResp generic = 2;
 
     // Specific responses.
-    optional MpbEchoResp echo = 10;
-    optional MpbAuthResp auth = 11;
-    optional MpbAppendChunkResp append_chunk = 12;
+    optional Mpb_EchoResp echo = 10;
+    optional Mpb_AuthResp auth = 11;
+    optional Mpb_AppendChunkResp append_chunk = 12;
 }
