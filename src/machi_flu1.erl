@@ -75,6 +75,7 @@
 -include_lib("kernel/include/file.hrl").
 
 -include("machi.hrl").
+-include("machi_pb.hrl").
 -include("machi_projection.hrl").
 
 -define(SERVER_CMD_READ_TIMEOUT, 600*1000).
@@ -343,6 +344,10 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                     http_server_hack(FluName, PutLine, Sock, S);
                 <<"GET ", _/binary>>=PutLine ->
                     http_server_hack(FluName, PutLine, Sock, S);
+                <<"PROTOCOL-BUFFERS\n">> ->
+                    ok = gen_tcp:send(Sock, <<"OK\n">>),
+                    ok = inet:setopts(Sock, [{packet, 4}]),
+                    protocol_buffers_loop(Sock, S);
                 _ ->
                     machi_util:verb("Else Got: ~p\n", [Line]),
                     io:format(user, "TODO: Else Got: ~p\n", [Line]),
@@ -1008,6 +1013,20 @@ http_harvest_headers({error, _}, _Sock, _Acc) ->
 http_harvest_headers({ok, Hdr}, Sock, Acc) ->
     http_harvest_headers(gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT),
                          Sock, [Hdr|Acc]).
+
+protocol_buffers_loop(Sock, S) ->
+    case gen_tcp:recv(Sock, 0) of
+        {ok, _Bin} ->
+            R = #mpb_response{req_id= <<"not paying any attention">>,
+                              generic=#mpb_errorresp{code=-6,
+                                                     msg="not implemented"}},
+            Resp = machi_pb:encode_mpb_response(R),
+            ok = gen_tcp:send(Sock, Resp),
+            protocol_buffers_loop(Sock, S);
+        {error, _} ->
+            (catch gen_tcp:close(Sock)),
+            exit(normal)
+    end.
 
 digest_header_goop([], G) ->
     G;
