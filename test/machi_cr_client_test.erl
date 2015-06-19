@@ -135,6 +135,29 @@ smoke_test2() ->
         %% Exactly one file right now
         {ok, [_]} = machi_cr_client:list_files(C1),
 
+        %% Go back and test append_chunk_extra() and write_chunk()
+        Chunk10 = <<"It's a different chunk!">>,
+        Size10 = byte_size(Chunk10),
+        Extra10 = 5,
+        {ok, {Off10,Size10,File10}} =
+            machi_cr_client:append_chunk_extra(C1, Prefix, Chunk10,
+                                               Extra10 * Size10),
+        {ok, Chunk10} = machi_cr_client:read_chunk(C1, File10, Off10, Size10),
+        [begin
+             Offx = Off10 + (Seq * Size10),
+             %% TODO: uncomment written/not_written enforcement is available.
+             %% {error,not_written} = machi_cr_client:read_chunk(C1, File10,
+             %%                                                  Offx, Size10),
+             {ok, {Offx,Size10,File10}} =
+                 machi_cr_client:write_chunk(C1, File10, Offx, Chunk10),
+             {ok, Chunk10} = machi_cr_client:read_chunk(C1, File10, Offx,
+                                                        Size10)
+         end || Seq <- lists:seq(1, Extra10)],
+        {ok, {Off11,Size11,File11}} =
+            machi_cr_client:append_chunk(C1, Prefix, Chunk10),
+        %% Double-check that our reserved extra bytes were really honored!
+        true = (Off11 > (Off10 + (Extra10 * Size10))),
+
         ok
     after
         error_logger:tty(true),
