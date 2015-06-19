@@ -1,0 +1,8 @@
+####################### patterns for general errors in dep modules:
+^leexinc\.hrl:[0-9][0-9]*: 
+^machi_pb\.erl:[0-9][0-9]*: 
+^pokemon_pb\.erl:[0-9][0-9]*: 
+####################### patterns for unknown functions:
+^  basho_bench_config:get/2
+^  erl_prettypr:format/1
+^  erl_syntax:form_list/1

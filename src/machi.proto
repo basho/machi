@@ -40,6 +40,7 @@ enum Mpb_GeneralStatusCode {
      BAD_ARG = 1;
      WEDGED = 2;
      BAD_CHECKSUM = 3;
+     PARTITION = 4;
 }
 
 // Must match with machi.hrl's values!
@@ -122,8 +123,22 @@ message Mpb_AppendChunkReq {
 
 message Mpb_AppendChunkResp {
     required Mpb_GeneralStatusCode status = 1;
+    // If OK, then chunk_pos is defined.
     optional Mpb_ChunkPos chunk_pos = 2;
-    optional MbpGeneralError = 3;
+}
+
+// write_chunk() request & response
+
+message Mpb_WriteChunkReq {
+    required string file = 1;
+    required uint64 offset = 2;
+    required bytes chunk = 3;
+}
+
+message Mpb_WriteChunkResp {
+    required Mpb_GeneralStatusCode status = 1;
+    // If OK, then chunk_pos is defined.
+    optional Mpb_ChunkPos chunk_pos = 2;
 }
 
 //////////////////////////////////////////
@@ -146,6 +161,7 @@ message Mpb_Request {
     optional Mpb_EchoReq echo = 10;
     optional Mpb_AuthReq auth = 11;
     optional Mpb_AppendChunkReq append_chunk = 12;
+    optional Mpb_WriteChunkReq write_chunk = 13;
 }
 
 message Mpb_Response {
@@ -165,4 +181,5 @@ message Mpb_Response {
     optional Mpb_EchoResp echo = 10;
     optional Mpb_AuthResp auth = 11;
     optional Mpb_AppendChunkResp append_chunk = 12;
+    optional Mpb_WriteChunkResp write_chunk = 13;
 }
