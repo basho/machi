@@ -31,16 +31,15 @@
 -include("machi.hrl").
 -include("machi_projection.hrl").
 
--define(T, machi_dt).
 -define(FLU_C, machi_flu1_client).
 
--spec verify_file_checksums_local(port(), ?T:epoch_id(), binary()|list()) ->
+-spec verify_file_checksums_local(port(), machi_dt:epoch_id(), binary()|list()) ->
       {ok, [tuple()]} | {error, term()}.
 verify_file_checksums_local(Sock1, EpochID, Path) when is_port(Sock1) ->
     verify_file_checksums_local2(Sock1, EpochID, Path).
 
--spec verify_file_checksums_local(?T:inet_host(), ?T:inet_port(),
-                                  ?T:epoch_id(), binary()|list()) ->
+-spec verify_file_checksums_local(machi_dt:inet_host(), machi_dt:inet_port(),
+                                  machi_dt:epoch_id(), binary()|list()) ->
       {ok, [tuple()]} | {error, term()}.
 verify_file_checksums_local(Host, TcpPort, EpochID, Path) ->
     Sock1 = ?FLU_C:connect(#p_srvr{address=Host, port=TcpPort}),
@@ -50,13 +49,13 @@ verify_file_checksums_local(Host, TcpPort, EpochID, Path) ->
         catch ?FLU_C:disconnect(Sock1)
     end.
 
--spec verify_file_checksums_remote(port(), ?T:epoch_id(), binary()|list()) ->
+-spec verify_file_checksums_remote(port(), machi_dt:epoch_id(), binary()|list()) ->
       {ok, [tuple()]} | {error, term()}.
 verify_file_checksums_remote(Sock1, EpochID, File) when is_port(Sock1) ->
     verify_file_checksums_remote2(Sock1, EpochID, File).
 
--spec verify_file_checksums_remote(?T:inet_host(), ?T:inet_port(),
-                                   ?T:epoch_id(), binary()|list()) ->
+-spec verify_file_checksums_remote(machi_dt:inet_host(), machi_dt:inet_port(),
+                                   machi_dt:epoch_id(), binary()|list()) ->
       {ok, [tuple()]} | {error, term()}.
 verify_file_checksums_remote(Host, TcpPort, EpochID, File) ->
     Sock1 = ?FLU_C:connect(#p_srvr{address=Host, port=TcpPort}),

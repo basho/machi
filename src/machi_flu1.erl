@@ -83,8 +83,6 @@
          update_wedge_state/3]).
 -export([make_listener_regname/1, make_projection_server_regname/1]).
 
--define(T, machi_dt).
-
 -record(state, {
           flu_name        :: atom(),
           proj_store      :: pid(),
@@ -93,7 +91,7 @@
           data_dir        :: string(),
           wedged = true   :: boolean(),
           etstab          :: ets:tid(),
-          epoch_id        :: 'undefined' | ?T:epoch_id(),
+          epoch_id        :: 'undefined' | machi_dt:epoch_id(),
           dbg_props = []  :: list(), % proplist
           props = []      :: list()  % proplist
          }).
