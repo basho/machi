@@ -9,5 +9,4 @@ erl_crash.dump
 edoc
 
 # PB artifacts for Erlang
-include/*.hrl
-src/machi_pb_messages.erl
+include/machi_pb.hrl
