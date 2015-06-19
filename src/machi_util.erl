@@ -48,7 +48,7 @@
 %% @doc Create a registered name atom for FLU sequencer internal
 %% rendezvous/message passing use.
 
--spec make_regname(binary()|list()) ->
+-spec make_regname(binary()|string()) ->
       atom().
 make_regname(Prefix) when is_binary(Prefix) ->
     erlang:binary_to_atom(Prefix, latin1);
@@ -231,13 +231,13 @@ make_tagged_csum(server_regen, SHA) ->
 
 %% @doc Log a verbose message.
 
--spec verb(string()) -> term().
+-spec verb(string()) -> ok.
 verb(Fmt) ->
     verb(Fmt, []).
 
 %% @doc Log a verbose message.
 
--spec verb(string(), list()) -> term().
+-spec verb(string(), list()) -> ok.
 verb(Fmt, Args) ->
     case application:get_env(kernel, verbose) of
         {ok, true} -> io:format(Fmt, Args);

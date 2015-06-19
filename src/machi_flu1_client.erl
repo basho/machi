@@ -85,47 +85,24 @@
          trunc_hack/3, trunc_hack/4
         ]).
 
-%% TODO: Hrm, this kind of API use ... is it a bad idea?  We really want to
-%% encourage client-side checksums; thus it ought to be dead easy.
--type chunk()       :: chunk_bin() | {chunk_csum(), chunk_bin()}.
--type chunk_bin()   :: binary() | iolist().    % client can use either
--type chunk_csum()  :: binary().               % 1 byte tag, N-1 bytes checksum
--type chunk_summary() :: {file_offset(), chunk_size(), binary()}.
--type chunk_s()     :: binary().               % server always uses binary()
--type chunk_pos()   :: {file_offset(), chunk_size(), file_name_s()}.
--type chunk_size()  :: non_neg_integer().
--type error_general() :: 'bad_arg' | 'wedged' | 'bad_checksum'.
--type epoch_csum()  :: binary().
--type epoch_num()   :: -1 | non_neg_integer().
--type epoch_id()    :: {epoch_num(), epoch_csum()}.
--type file_info()   :: {file_size(), file_name_s()}.
--type file_name()   :: binary() | list().
--type file_name_s() :: binary().                % server reply
--type file_offset() :: non_neg_integer().
--type file_size()   :: non_neg_integer().
--type file_prefix() :: binary() | list().
--type inet_host()   :: inet:ip_address() | inet:hostname().
--type inet_port()   :: inet:port_number().
--type port_wrap()   :: {w,atom(),term()}.
--type projection()      :: #projection_v1{}.
--type projection_type() :: 'public' | 'private'.
+-define(T, machi_dt).
 
--export_type([epoch_id/0]).
+-type port_wrap()   :: {w,atom(),term()}.
 
 %% @doc Append a chunk (binary- or iolist-style) of data to a file
 %% with `Prefix'.
 
--spec append_chunk(port_wrap(), epoch_id(), file_prefix(), chunk()) ->
-      {ok, chunk_pos()} | {error, error_general()} | {error, term()}.
+-spec append_chunk(port_wrap(), ?T:epoch_id(), ?T:file_prefix(), ?T:chunk()) ->
+      {ok, ?T:chunk_pos()} | {error, ?T:error_general()} | {error, term()}.
 append_chunk(Sock, EpochID, Prefix, Chunk) ->
     append_chunk2(Sock, EpochID, Prefix, Chunk, 0).
 
 %% @doc Append a chunk (binary- or iolist-style) of data to a file
 %% with `Prefix'.
 
--spec append_chunk(inet_host(), inet_port(),
-                   epoch_id(), file_prefix(), chunk()) ->
-      {ok, chunk_pos()} | {error, error_general()} | {error, term()}.
+-spec append_chunk(?T:inet_host(), ?T:inet_port(),
+                   ?T:epoch_id(), ?T:file_prefix(), ?T:chunk()) ->
+      {ok, ?T:chunk_pos()} | {error, ?T:error_general()} | {error, term()}.
 append_chunk(Host, TcpPort, EpochID, Prefix, Chunk) ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
@@ -142,8 +119,8 @@ append_chunk(Host, TcpPort, EpochID, Prefix, Chunk) ->
 %% be reserved by the file sequencer for later write(s) by the
 %% `write_chunk()' API.
 
--spec append_chunk_extra(port_wrap(), epoch_id(), file_prefix(), chunk(), chunk_size()) ->
-      {ok, chunk_pos()} | {error, error_general()} | {error, term()}.
+-spec append_chunk_extra(port_wrap(), ?T:epoch_id(), ?T:file_prefix(), ?T:chunk(), ?T:chunk_size()) ->
+      {ok, ?T:chunk_pos()} | {error, ?T:error_general()} | {error, term()}.
 append_chunk_extra(Sock, EpochID, Prefix, Chunk, ChunkExtra)
   when is_integer(ChunkExtra), ChunkExtra >= 0 ->
     append_chunk2(Sock, EpochID, Prefix, Chunk, ChunkExtra).
@@ -156,9 +133,9 @@ append_chunk_extra(Sock, EpochID, Prefix, Chunk, ChunkExtra)
 %% be reserved by the file sequencer for later write(s) by the
 %% `write_chunk()' API.
 
--spec append_chunk_extra(inet_host(), inet_port(),
-                   epoch_id(), file_prefix(), chunk(), chunk_size()) ->
-      {ok, chunk_pos()} | {error, error_general()} | {error, term()}.
+-spec append_chunk_extra(?T:inet_host(), ?T:inet_port(),
+               ?T:epoch_id(), ?T:file_prefix(), ?T:chunk(), ?T:chunk_size()) ->
+      {ok, ?T:chunk_pos()} | {error, ?T:error_general()} | {error, term()}.
 append_chunk_extra(Host, TcpPort, EpochID, Prefix, Chunk, ChunkExtra)
   when is_integer(ChunkExtra), ChunkExtra >= 0 ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
@@ -170,9 +147,9 @@ append_chunk_extra(Host, TcpPort, EpochID, Prefix, Chunk, ChunkExtra)
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
--spec read_chunk(port_wrap(), epoch_id(), file_name(), file_offset(), chunk_size()) ->
-      {ok, chunk_s()} |
-      {error, error_general() | 'not_written' | 'partial_read'} |
+-spec read_chunk(port_wrap(), ?T:epoch_id(), ?T:file_name(), ?T:file_offset(), ?T:chunk_size()) ->
+      {ok, ?T:chunk_s()} |
+      {error, ?T:error_general() | 'not_written' | 'partial_read'} |
       {error, term()}.
 read_chunk(Sock, EpochID, File, Offset, Size)
   when Offset >= ?MINIMUM_OFFSET, Size >= 0 ->
@@ -180,10 +157,10 @@ read_chunk(Sock, EpochID, File, Offset, Size)
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
--spec read_chunk(inet_host(), inet_port(), epoch_id(),
-                 file_name(), file_offset(), chunk_size()) ->
-      {ok, chunk_s()} |
-      {error, error_general() | 'not_written' | 'partial_read'} |
+-spec read_chunk(?T:inet_host(), ?T:inet_port(), ?T:epoch_id(),
+                 ?T:file_name(), ?T:file_offset(), ?T:chunk_size()) ->
+      {ok, ?T:chunk_s()} |
+      {error, ?T:error_general() | 'not_written' | 'partial_read'} |
       {error, term()}.
 read_chunk(Host, TcpPort, EpochID, File, Offset, Size)
   when Offset >= ?MINIMUM_OFFSET, Size >= 0 ->
@@ -196,18 +173,18 @@ read_chunk(Host, TcpPort, EpochID, File, Offset, Size)
 
 %% @doc Fetch the list of chunk checksums for `File'.
 
--spec checksum_list(port_wrap(), epoch_id(), file_name()) ->
-      {ok, [chunk_summary()]} |
-      {error, error_general() | 'no_such_file' | 'partial_read'} |
+-spec checksum_list(port_wrap(), ?T:epoch_id(), ?T:file_name()) ->
+      {ok, [?T:chunk_summary()]} |
+      {error, ?T:error_general() | 'no_such_file' | 'partial_read'} |
       {error, term()}.
 checksum_list(Sock, EpochID, File) ->
     checksum_list2(Sock, EpochID, File).
 
 %% @doc Fetch the list of chunk checksums for `File'.
 
--spec checksum_list(inet_host(), inet_port(), epoch_id(), file_name()) ->
-      {ok, [chunk_summary()]} |
-      {error, error_general() | 'no_such_file'} | {error, term()}.
+-spec checksum_list(?T:inet_host(), ?T:inet_port(), ?T:epoch_id(), ?T:file_name()) ->
+      {ok, [?T:chunk_summary()]} |
+      {error, ?T:error_general() | 'no_such_file'} | {error, term()}.
 checksum_list(Host, TcpPort, EpochID, File) when is_integer(TcpPort) ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
@@ -218,15 +195,15 @@ checksum_list(Host, TcpPort, EpochID, File) when is_integer(TcpPort) ->
 
 %% @doc Fetch the list of all files on the remote FLU.
 
--spec list_files(port_wrap(), epoch_id()) ->
-      {ok, [file_info()]} | {error, term()}.
+-spec list_files(port_wrap(), ?T:epoch_id()) ->
+      {ok, [?T:file_info()]} | {error, term()}.
 list_files(Sock, EpochID) ->
     list2(Sock, EpochID).
 
 %% @doc Fetch the list of all files on the remote FLU.
 
--spec list_files(inet_host(), inet_port(), epoch_id()) ->
-      {ok, [file_info()]} | {error, term()}.
+-spec list_files(?T:inet_host(), ?T:inet_port(), ?T:epoch_id()) ->
+      {ok, [?T:file_info()]} | {error, term()}.
 list_files(Host, TcpPort, EpochID) when is_integer(TcpPort) ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
@@ -238,15 +215,15 @@ list_files(Host, TcpPort, EpochID) when is_integer(TcpPort) ->
 %% @doc Fetch the wedge status from the remote FLU.
 
 -spec wedge_status(port_wrap()) ->
-      {ok, {boolean(), pv1_epoch()}} | {error, term()}.
+      {ok, {boolean(), ?T:epoch_id()}} | {error, term()}.
 
 wedge_status(Sock) ->
     wedge_status2(Sock).
 
 %% @doc Fetch the wedge status from the remote FLU.
 
--spec wedge_status(inet_host(), inet_port()) ->
-      {ok, {boolean(), pv1_epoch()}} | {error, term()}.
+-spec wedge_status(?T:inet_host(), ?T:inet_port()) ->
+      {ok, {boolean(), ?T:epoch_id()}} | {error, term()}.
 wedge_status(Host, TcpPort) when is_integer(TcpPort) ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
@@ -257,16 +234,16 @@ wedge_status(Host, TcpPort) when is_integer(TcpPort) ->
 
 %% @doc Get the latest epoch number + checksum from the FLU's projection store.
 
--spec get_latest_epochid(port_wrap(), projection_type()) ->
-      {ok, epoch_id()} | {error, term()}.
+-spec get_latest_epochid(port_wrap(), ?T:projection_type()) ->
+      {ok, ?T:epoch_id()} | {error, term()}.
 get_latest_epochid(Sock, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
     get_latest_epochid2(Sock, ProjType).
 
 %% @doc Get the latest epoch number + checksum from the FLU's projection store.
 
--spec get_latest_epochid(inet_host(), inet_port(), projection_type()) ->
-      {ok, epoch_id()} | {error, term()}.
+-spec get_latest_epochid(?T:inet_host(), ?T:inet_port(), ?T:projection_type()) ->
+      {ok, ?T:epoch_id()} | {error, term()}.
 get_latest_epochid(Host, TcpPort, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
@@ -278,17 +255,17 @@ get_latest_epochid(Host, TcpPort, ProjType)
 
 %% @doc Get the latest projection from the FLU's projection store for `ProjType'
 
--spec read_latest_projection(port_wrap(), projection_type()) ->
-      {ok, projection()} | {error, not_written} | {error, term()}.
+-spec read_latest_projection(port_wrap(), ?T:projection_type()) ->
+      {ok, ?T:projection()} | {error, not_written} | {error, term()}.
 read_latest_projection(Sock, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
     read_latest_projection2(Sock, ProjType).
 
 %% @doc Get the latest projection from the FLU's projection store for `ProjType'
 
--spec read_latest_projection(inet_host(), inet_port(),
-                       projection_type()) ->
-      {ok, projection()} | {error, not_written} | {error, term()}.
+-spec read_latest_projection(?T:inet_host(), ?T:inet_port(),
+                             ?T:projection_type()) ->
+      {ok, ?T:projection()} | {error, not_written} | {error, term()}.
 read_latest_projection(Host, TcpPort, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
@@ -300,17 +277,17 @@ read_latest_projection(Host, TcpPort, ProjType)
 
 %% @doc Read a projection `Proj' of type `ProjType'.
 
--spec read_projection(port_wrap(), projection_type(), epoch_num()) ->
-      {ok, projection()} | {error, not_written} | {error, term()}.
+-spec read_projection(port_wrap(), ?T:projection_type(), ?T:epoch_num()) ->
+      {ok, ?T:projection()} | {error, not_written} | {error, term()}.
 read_projection(Sock, ProjType, Epoch)
   when ProjType == 'public' orelse ProjType == 'private' ->
     read_projection2(Sock, ProjType, Epoch).
 
 %% @doc Read a projection `Proj' of type `ProjType'.
 
--spec read_projection(inet_host(), inet_port(),
-                       projection_type(), epoch_num()) ->
-      {ok, projection()} | {error, not_written} | {error, term()}.
+-spec read_projection(?T:inet_host(), ?T:inet_port(),
+                      ?T:projection_type(), ?T:epoch_num()) ->
+      {ok, ?T:projection()} | {error, not_written} | {error, term()}.
 read_projection(Host, TcpPort, ProjType, Epoch)
   when ProjType == 'public' orelse ProjType == 'private' ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
@@ -322,7 +299,7 @@ read_projection(Host, TcpPort, ProjType, Epoch)
 
 %% @doc Write a projection `Proj' of type `ProjType'.
 
--spec write_projection(port_wrap(), projection_type(), projection()) ->
+-spec write_projection(port_wrap(), ?T:projection_type(), ?T:projection()) ->
       'ok' | {error, 'written'} | {error, term()}.
 write_projection(Sock, ProjType, Proj)
   when ProjType == 'public' orelse ProjType == 'private',
@@ -331,8 +308,8 @@ write_projection(Sock, ProjType, Proj)
 
 %% @doc Write a projection `Proj' of type `ProjType'.
 
--spec write_projection(inet_host(), inet_port(),
-                       projection_type(), projection()) ->
+-spec write_projection(?T:inet_host(), ?T:inet_port(),
+                       ?T:projection_type(), ?T:projection()) ->
       'ok' | {error, 'written'} | {error, term()}.
 write_projection(Host, TcpPort, ProjType, Proj)
   when ProjType == 'public' orelse ProjType == 'private',
@@ -346,17 +323,16 @@ write_projection(Host, TcpPort, ProjType, Proj)
 
 %% @doc Get all projections from the FLU's projection store.
 
--spec get_all_projections(port_wrap(), projection_type()) ->
-      {ok, [projection()]} | {error, term()}.
+-spec get_all_projections(port_wrap(), ?T:projection_type()) ->
+      {ok, [?T:projection()]} | {error, term()}.
 get_all_projections(Sock, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
     get_all_projections2(Sock, ProjType).
 
 %% @doc Get all projections from the FLU's projection store.
 
--spec get_all_projections(inet_host(), inet_port(),
-               projection_type()) ->
-      {ok, [projection()]} | {error, term()}.
+-spec get_all_projections(?T:inet_host(), ?T:inet_port(), ?T:projection_type()) ->
+      {ok, [?T:projection()]} | {error, term()}.
 get_all_projections(Host, TcpPort, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
@@ -368,7 +344,7 @@ get_all_projections(Host, TcpPort, ProjType)
 
 %% @doc Get all epoch numbers from the FLU's projection store.
 
--spec list_all_projections(port_wrap(), projection_type()) ->
+-spec list_all_projections(port_wrap(), ?T:projection_type()) ->
       {ok, [non_neg_integer()]} | {error, term()}.
 list_all_projections(Sock, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
@@ -376,8 +352,7 @@ list_all_projections(Sock, ProjType)
 
 %% @doc Get all epoch numbers from the FLU's projection store.
 
--spec list_all_projections(inet_host(), inet_port(),
-                       projection_type()) ->
+-spec list_all_projections(?T:inet_host(), ?T:inet_port(), ?T:projection_type()) ->
       {ok, [non_neg_integer()]} | {error, term()}.
 list_all_projections(Host, TcpPort, ProjType)
   when ProjType == 'public' orelse ProjType == 'private' ->
@@ -419,8 +394,8 @@ disconnect(_) ->
 %% @doc Restricted API: Write a chunk of already-sequenced data to
 %% `File' at `Offset'.
 
--spec write_chunk(port_wrap(), epoch_id(), file_name(), file_offset(), chunk()) ->
-      ok | {error, error_general()} | {error, term()}.
+-spec write_chunk(port_wrap(), ?T:epoch_id(), ?T:file_name(), ?T:file_offset(), ?T:chunk()) ->
+      ok | {error, ?T:error_general()} | {error, term()}.
 write_chunk(Sock, EpochID, File, Offset, Chunk)
   when Offset >= ?MINIMUM_OFFSET ->
     write_chunk2(Sock, EpochID, File, Offset, Chunk).
@@ -428,9 +403,9 @@ write_chunk(Sock, EpochID, File, Offset, Chunk)
 %% @doc Restricted API: Write a chunk of already-sequenced data to
 %% `File' at `Offset'.
 
--spec write_chunk(inet_host(), inet_port(),
-                  epoch_id(), file_name(), file_offset(), chunk()) ->
-      ok | {error, error_general()} | {error, term()}.
+-spec write_chunk(?T:inet_host(), ?T:inet_port(),
+                  ?T:epoch_id(), ?T:file_name(), ?T:file_offset(), ?T:chunk()) ->
+      ok | {error, ?T:error_general()} | {error, term()}.
 write_chunk(Host, TcpPort, EpochID, File, Offset, Chunk)
   when Offset >= ?MINIMUM_OFFSET ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
@@ -443,16 +418,16 @@ write_chunk(Host, TcpPort, EpochID, File, Offset, Chunk)
 %% @doc Restricted API: Delete a file after it has been successfully
 %% migrated.
 
--spec delete_migration(port_wrap(), epoch_id(), file_name()) ->
-      ok | {error, error_general() | 'no_such_file'} | {error, term()}.
+-spec delete_migration(port_wrap(), ?T:epoch_id(), ?T:file_name()) ->
+      ok | {error, ?T:error_general() | 'no_such_file'} | {error, term()}.
 delete_migration(Sock, EpochID, File) ->
     delete_migration2(Sock, EpochID, File).
 
 %% @doc Restricted API: Delete a file after it has been successfully
 %% migrated.
 
--spec delete_migration(inet_host(), inet_port(), epoch_id(), file_name()) ->
-      ok | {error, error_general() | 'no_such_file'} | {error, term()}.
+-spec delete_migration(?T:inet_host(), ?T:inet_port(), ?T:epoch_id(), ?T:file_name()) ->
+      ok | {error, ?T:error_general() | 'no_such_file'} | {error, term()}.
 delete_migration(Host, TcpPort, EpochID, File) when is_integer(TcpPort) ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
@@ -464,16 +439,16 @@ delete_migration(Host, TcpPort, EpochID, File) when is_integer(TcpPort) ->
 %% @doc Restricted API: Truncate a file after it has been successfully
 %% erasure coded.
 
--spec trunc_hack(port_wrap(), epoch_id(), file_name()) ->
-      ok | {error, error_general() | 'no_such_file'} | {error, term()}.
+-spec trunc_hack(port_wrap(), ?T:epoch_id(), ?T:file_name()) ->
+      ok | {error, ?T:error_general() | 'no_such_file'} | {error, term()}.
 trunc_hack(Sock, EpochID, File) ->
     trunc_hack2(Sock, EpochID, File).
 
 %% @doc Restricted API: Truncate a file after it has been successfully
 %% erasure coded.
 
--spec trunc_hack(inet_host(), inet_port(), epoch_id(), file_name()) ->
-      ok | {error, error_general() | 'no_such_file'} | {error, term()}.
+-spec trunc_hack(?T:inet_host(), ?T:inet_port(), ?T:epoch_id(), ?T:file_name()) ->
+      ok | {error, ?T:error_general() | 'no_such_file'} | {error, term()}.
 trunc_hack(Host, TcpPort, EpochID, File) when is_integer(TcpPort) ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try

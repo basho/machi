@@ -67,9 +67,9 @@
 -define(ETS_TAB, machi_keys).
 -define(THE_TIMEOUT, 60*1000).
 
--define(INFO(Str, Args), lager:info(Str, Args)).
--define(WARN(Str, Args), lager:warning(Str, Args)).
--define(ERROR(Str, Args), lager:error(Str, Args)).
+-define(INFO(Str, Args), (_ = lager:info(Str, Args))).
+-define(WARN(Str, Args), (_ = lager:warning(Str, Args))).
+-define(ERROR(Str, Args), (_ = lager:error(Str, Args))).
 
 new(Id) ->
     Ps = find_server_info(Id),
