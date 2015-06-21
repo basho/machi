@@ -21,7 +21,7 @@ doc](./doc/high-level-machi.pdf) for further references.)
 (*) Capable of operating in "AP mode" or "CP mode" relative to the
   CAP Theorem.
 
-## Status: early May 2015: work is underway
+## Status: mid-June 2015: work is underway
 
 The two major design documents for Machi are now ready or nearly ready
 for internal Basho and external party review.  Please see the
@@ -34,25 +34,23 @@ The work of implementing first draft of Machi is now underway.  The
 code from the [prototype/demo-day-hack](prototype/demo-day-hack/) directory is
 being used as the initial scaffolding.
 
-* The chain manager is nearly ready for "AP mode" use in eventual
-  consistency use cases.  The remaining major item is file repair,
-  i.e., (re)syncing file data to replicas that have been offline (due
-  to crashes or network partition) or added to the cluster for the
-  first time.
+* The chain manager is ready for "AP mode" use in eventual
+  consistency use cases.
 
 * The Machi client/server protocol is still the hand-crafted,
   artisanal, bogus protocol that I hacked together for a "demo day"
   back in January and appears in the
   [prototype/demo-day-hack](prototype/demo-day-hack/) code.
     * Today: the only client language supported is Erlang.
-    * Plan: replace the current protocol to something based on Protocol Buffers
-    * Plan: add a protocol handler that is HTTP-like but probably not
-      exactly 100% REST'ish.  Unless someone who really cares about an
+    * Today: an HTTP interface that, at the moment, is a big kludge.
+      If someone who really cares about an
       HTTP interface that is 100% REST-ful cares to contribute some
-      code.  (Contributions are welcome!)
-    * Plan: if you'd like to work on a protocol such as Thrift, UBF,
-      msgpack over UDP, or some other protocol, let us know by
-      [opening an issue](./issues/new) to discuss it.
+      code ... contributions are welcome!
+    * Work in progress now: replace the current protocol to something
+      based on Protocol Buffers 
+        * If you'd like to work on a protocol such as Thrift, UBF,
+          msgpack over UDP, or some other protocol, let us know by
+          [opening an issue](./issues/new) to discuss it.
 
 ## Contributing to Machi: source code, documentation, etc.
 
@@ -71,6 +69,9 @@ We invite all contributors to review the
 working with the Basho development team.
 
 ## A brief survey of this directories in this repository
+
+* A list of Frequently Asked Questions, a.k.a.
+  [the Machi FAQ](./FAQ.md).
 
 * The [doc](./doc/) directory: home for major documents about Machi:
   high level design documents as well as exploration of features still

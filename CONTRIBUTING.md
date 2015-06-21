@@ -11,7 +11,14 @@ hands on in this process, reach out to
 
 Thank you for being part of the community! We love you for it. 
 
-## General process
+## If you have a question or wish to provide design feedback/criticism
+
+Please
+[open a support ticket at GitHub](https://github.com/basho/machi/issues/new)
+to ask questions and to provide feedback about Machi's
+design/documentation/source code.
+
+## General development process
 
 Machi is still a very young project within Basho, with a small team of
 developers; please bear with us as we grow out of "toddler" stage into
