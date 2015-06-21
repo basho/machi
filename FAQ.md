@@ -208,7 +208,7 @@ under the [Apache Public License version 2](https://github.com/basho/machi/LICEN
 
 All Machi source code and documentation can be found at GitHub:
 [https://github.com/basho/machi](https://github.com/basho/machi).
-The full URL for this FAQ is [https://github.com/basho/machi/FAQ.md](https://github.com/basho/machi/FAQ.md).
+The full URL for this FAQ is [https://github.com/basho/machi/blob/master/FAQ.md](https://github.com/basho/machi/blob/master/FAQ.md).
 
 There are several "README" files in the source repository.  We hope
 they provide useful guidance for first-time readers.
