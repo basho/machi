@@ -78,7 +78,7 @@ Machi can provide file writes during arbitrary network partitions and
 later merge all results together safely when the cluster recovers.
 
 For a much longer answer, please see the
-[Machi high level design doc](https://github.com/basho/machi/doc/high-level-machi.pdf).
+[Machi high level design doc](https://github.com/basho/machi/tree/master/doc/high-level-machi.pdf).
 
 <a name="n1.2">
 ### 1.2.  What is a Machi "cluster of clusters"?
@@ -107,6 +107,15 @@ Though the cluster-of-clusters manager has not yet been implemented,
 its design is fully decentralized and capable of operating despite
 multiple partial failure of its member clusters.  We expect this
 design to scale easily to at least one thousand servers.
+
+Please see the
+[Machi source repository's 'doc' directory for more details](https://github.com/basho/machi/tree/master/doc/high-level-chain-mgr.pdf).
+
+### This "cluster of clusters" thing needs a better name, right?
+
+Yes.  Please help us: we are bad at naming things.
+See also:
+[http://martinfowler.com/bliki/TwoHardThings.html](http://martinfowler.com/bliki/TwoHardThings.html)
 
 <a name="n1.3">
 ### 1.3.  What is Machi like when operating in "eventually consistent"/"AP mode"?
@@ -166,7 +175,7 @@ Machi's design can provide the illusion of quorum minority write
 availability if the cluster is configured to operate with "witness
 servers".  (This feaure is not implemented yet, as of June 2015.)
 See Section 11 of
-[Machi chain manager high level design doc](https://github.com/basho/machi/doc/high-level-chain-mgr.pdf)
+[Machi chain manager high level design doc](https://github.com/basho/machi/tree/master/doc/high-level-chain-mgr.pdf)
 for more details.
 
 <a name="n1.5">
@@ -193,7 +202,7 @@ healed.
 Internally, there is a more complex protocol used by individual
 cluster members to manage file contents and to repair damaged/missing
 files.  See Figure 3 in
-[Machi high level design doc](https://github.com/basho/machi/doc/high-level-machi.pdf)
+[Machi high level design doc](https://github.com/basho/machi/tree/master/doc/high-level-machi.pdf)
 for more details.
 
 <a name="n1.6">
@@ -438,7 +447,7 @@ server rather than the client).
 
 See also: the "Recommended reading & related work" and "References"
 sections of the
-[Machi high level design doc](https://github.com/basho/machi/doc/high-level-machi.pdf)
+[Machi high level design doc](https://github.com/basho/machi/tree/master/doc/high-level-machi.pdf)
 for pointers to the MSR papers related to CORFU.
 
 Machi does not implement Tango directly.  (Not yet, at least.)
@@ -482,7 +491,7 @@ contents of the projection store are maintained by a new technique
 called "humming consensus".
 
 Humming consensus is described in the
-[Machi chain manager high level design doc](https://github.com/basho/machi/doc/high-level-chain-mgr.pdf).
+[Machi chain manager high level design doc](https://github.com/basho/machi/tree/master/doc/high-level-chain-mgr.pdf).
 
 <a name="n3.3">
 ### 3.3.  Is it true that there's an allegory written to describe humming consensus?
