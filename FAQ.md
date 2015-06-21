@@ -16,7 +16,8 @@
     + [1.4 What is Machi like when operating in "strongly consistent"/"CP mode"?](#n1.4)
     + [1.5 What does Machi's API look like?](#n1.5)
     + [1.6 What licensing terms are used by Machi?](#n1.6)
-    + [1.7 What is Machi's expected release schedule, packaging, and operating system/OS distribution support?](#n1.7)
+    + [1.7 Where can I find the Machi source code and documentation?  Can I contribute?](#n1.7)
+    + [1.8 What is Machi's expected release schedule, packaging, and operating system/OS distribution support?](#n1.8)
 + [2 Questions about Machi relative to {{something else}}](#n2)
     + [2.1 How is Machi better than Hadoop?](#n2.1)
     + [2.2 How does Machi differ from HadoopFS/HDFS?](#n2.2)
@@ -26,12 +27,13 @@
 + [3 Machi's specifics](#n3)
     + [3.1 What technique is used to replicate Machi's files?  Can other techniques be used?](#n3.1)
     + [3.2 Does Machi have a reliance on a coordination service such as ZooKeeper or etcd?](#n3.2)
-    + [3.3 How is Machi tested?](#n3.3)
-    + [3.4 Does Machi require shared disk storage? e.g. iSCSI, NBD (Network Block Device), Fibre Channel disks](#n3.4)
-    + [3.5 Does Machi require or assume that servers with large numbers of disks must use RAID-0/1/5/6/10/50/60 to create a single block device?](#n3.5)
-    + [3.6 What language(s) is Machi written in?](#n3.6)
-    + [3.7 Does Machi use the Erlang/OTP network distribution system (aka "disterl")?](#n3.7)
-    + [3.8 Can I use HTTP to write/read stuff into/from Machi?](#n3.8)
+    + [3.3 Is it true that there's an allegory written to describe humming consensus?](#n3.3)
+    + [3.4 How is Machi tested?](#n3.4)
+    + [3.5 Does Machi require shared disk storage? e.g. iSCSI, NBD (Network Block Device), Fibre Channel disks](#n3.5)
+    + [3.6 Does Machi require or assume that servers with large numbers of disks must use RAID-0/1/5/6/10/50/60 to create a single block device?](#n3.6)
+    + [3.7 What language(s) is Machi written in?](#n3.7)
+    + [3.8 Does Machi use the Erlang/OTP network distribution system (aka "disterl")?](#n3.8)
+    + [3.9 Can I use HTTP to write/read stuff into/from Machi?](#n3.9)
 
 <!-- ENDOUTLINE -->
 
@@ -202,7 +204,22 @@ All Machi source code and documentation is licensed by
 under the [Apache Public License version 2](https://github.com/basho/machi/LICENSE).
 
 <a name="n1.7">
-### 1.7.  What is Machi's expected release schedule, packaging, and operating system/OS distribution support?
+### 1.7.  Where can I find the Machi source code and documentation?  Can I contribute?
+
+All Machi source code and documentation can be found at GitHub:
+[https://github.com/basho/machi](https://github.com/basho/machi).
+The full URL for this FAQ is [https://github.com/basho/machi/FAQ.md](https://github.com/basho/machi/FAQ.md).
+
+There are several "README" files in the source repository.  We hope
+they provide useful guidance for first-time readers.
+
+If you're interested in contributing code or documentation or
+ideas for improvement, please see our contributing & collaboration
+guidelines at
+[https://github.com/basho/machi/blob/master/CONTRIBUTING.md](https://github.com/basho/machi/blob/master/CONTRIBUTING.md).
+
+<a name="n1.8">
+### 1.8.  What is Machi's expected release schedule, packaging, and operating system/OS distribution support?
 
 Basho expects that Machi's first release will take place near the end
 of calendar year 2015.
@@ -468,7 +485,19 @@ Humming consensus is described in the
 [Machi chain manager high level design doc](https://github.com/basho/machi/doc/high-level-chain-mgr.pdf).
 
 <a name="n3.3">
-### 3.3.  How is Machi tested?
+### 3.3.  Is it true that there's an allegory written to describe humming consensus?
+
+Yes.  In homage to Leslie Lamport's original paper about the Paxos
+protocol, "The Part-time Parliamant", there is an allegorical story
+that describes humming consensus as method to coordinate
+many composers to write a single piece of music.
+The full story, full of wonder and mystery, is called
+["On “Humming Consensus”, an allegory"](http://www.snookles.com/slf-blog/2015/03/01/on-humming-consensus-an-allegory/).
+There is also a
+[short followup blog posting](http://www.snookles.com/slf-blog/2015/03/20/on-humming-consensus-an-allegory-part-2/).
+
+<a name="n3.4">
+### 3.4.  How is Machi tested?
 
 While not formally proven yet, Machi's implementation of Chain
 Replication and of humming consensus have been extensively tested with
@@ -493,16 +522,16 @@ change several times during any single test case) and a random series
 of cluster operations, an event trace of all cluster activity is used
 to verify that no safety-critical rules have been violated.
 
-<a name="n3.4">
-### 3.4.  Does Machi require shared disk storage? e.g. iSCSI, NBD (Network Block Device), Fibre Channel disks
+<a name="n3.5">
+### 3.5.  Does Machi require shared disk storage? e.g. iSCSI, NBD (Network Block Device), Fibre Channel disks
 
 No, Machi's design assumes that each Machi server is a fully
 independent hardware and assumes only standard local disks (Winchester
 and/or SSD style) with local-only interfaces (e.g. SATA, SCSI, PCI) in
 each machine.
 
-<a name="n3.5">
-### 3.5.  Does Machi require or assume that servers with large numbers of disks must use RAID-0/1/5/6/10/50/60 to create a single block device?
+<a name="n3.6">
+### 3.6.  Does Machi require or assume that servers with large numbers of disks must use RAID-0/1/5/6/10/50/60 to create a single block device?
 
 No.  When used with servers with multiple disks, the intent is to
 deploy multiple Machi servers per machine: one Machi server per disk.
@@ -520,8 +549,8 @@ deploy multiple Machi servers per machine: one Machi server per disk.
   placement relative to 12 servers is smaller than a placement problem
   of managing 264 seprate disks (if each of 12 servers has 22 disks).
 
-<a name="n3.6">
-### 3.6.  What language(s) is Machi written in?
+<a name="n3.7">
+### 3.7.  What language(s) is Machi written in?
 
 So far, Machi is written in 100% Erlang.
 
@@ -532,8 +561,8 @@ in C, Java, or other "gotta go fast fast FAST!!"  programming
 language.  We expect that the Chain Replication manager and other
 critical "control plane" software will remain in Erlang.
 
-<a name="n3.7">
-### 3.7.  Does Machi use the Erlang/OTP network distribution system (aka "disterl")?
+<a name="n3.8">
+### 3.8.  Does Machi use the Erlang/OTP network distribution system (aka "disterl")?
 
 No, Machi doesn't use Erlang/OTP's built-in distributed message
 passing system.  The code would be *much* simpler if we did use
@@ -551,8 +580,8 @@ uses a hand-crafted, artisanal, mostly ASCII protocol as part of a
 to replace that protocol gradually with a well-structured,
 well-documented protocol based on Protocol Buffers data serialization.
 
-<a name="n3.8">
-### 3.8.  Can I use HTTP to write/read stuff into/from Machi?
+<a name="n3.9">
+### 3.9.  Can I use HTTP to write/read stuff into/from Machi?
 
 Yes, sort of.  For as long as the legacy of
 [Machi's first internal protocol](#artisanal-protocol) code still
