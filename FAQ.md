@@ -12,6 +12,7 @@
 + [1 Questions about Machi in general](#n1)
     + [1.1 What is Machi?](#n1.1)
     + [1.2 What is a Machi "cluster of clusters"?](#n1.2)
+        + [1.2.1 This "cluster of clusters" idea needs a better name, don't you agree?](#n1.2.1)
     + [1.3 What is Machi like when operating in "eventually consistent"/"AP mode"?](#n1.3)
     + [1.4 What is Machi like when operating in "strongly consistent"/"CP mode"?](#n1.4)
     + [1.5 What does Machi's API look like?](#n1.5)
@@ -109,12 +110,13 @@ multiple partial failure of its member clusters.  We expect this
 design to scale easily to at least one thousand servers.
 
 Please see the
-[Machi source repository's 'doc' directory for more details](https://github.com/basho/machi/tree/master/doc/high-level-chain-mgr.pdf).
+[Machi source repository's 'doc' directory for more details](https://github.com/basho/machi/tree/master/doc/).
 
-### This "cluster of clusters" thing needs a better name, right?
+<a name="n1.2.1">
+#### 1.2.1.  This "cluster of clusters" idea needs a better name, don't you agree?
 
 Yes.  Please help us: we are bad at naming things.
-See also:
+For proof that naming things is hard, see
 [http://martinfowler.com/bliki/TwoHardThings.html](http://martinfowler.com/bliki/TwoHardThings.html)
 
 <a name="n1.3">
@@ -210,7 +212,7 @@ for more details.
 
 All Machi source code and documentation is licensed by
 [Basho Technologies, Inc.](http://www.basho.com/)
-under the [Apache Public License version 2](https://github.com/basho/machi/LICENSE).
+under the [Apache Public License version 2](https://github.com/basho/machi/tree/master/LICENSE).
 
 <a name="n1.7">
 ### 1.7.  Where can I find the Machi source code and documentation?  Can I contribute?
@@ -593,7 +595,7 @@ well-documented protocol based on Protocol Buffers data serialization.
 ### 3.9.  Can I use HTTP to write/read stuff into/from Machi?
 
 Yes, sort of.  For as long as the legacy of
-[Machi's first internal protocol](#artisanal-protocol) code still
+Machi's first internal protocol & code still
 survives, it's possible to use a
 [primitive/hack'y HTTP interface that is described in this source code commit log](https://github.com/basho/machi/commit/6cebf397232cba8e63c5c9a0a8c02ba391b20fef).
 
