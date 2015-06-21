@@ -1,0 +1,12 @@
+####################### patterns for general errors in dep modules:
+^protobuffs\.erl:
+^protobuffs_[a-z_]*\.erl:
+^leexinc\.hrl:[0-9][0-9]*: 
+^machi_chain_manager1.erl:[0-9][0-9]*: Guard test RetrospectiveP::'false' =:= 'true' can never succeed
+^machi_pb\.erl:[0-9][0-9]*: 
+^pokemon_pb\.erl:[0-9][0-9]*: 
+####################### patterns for unknown functions:
+^  basho_bench_config:get/2
+^  erl_prettypr:format/1
+^  erl_syntax:form_list/1
+^  machi_partition_simulator:get/1

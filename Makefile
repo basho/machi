@@ -37,13 +37,18 @@ PLT = $(HOME)/.machi_dialyzer_plt
 build_plt: deps compile
 	dialyzer --build_plt --output_plt $(PLT) --apps $(APPS) deps/*/ebin
 
+DIALYZER_DEP_APPS = ebin/machi_pb.beam deps/protobuffs/ebin
+DIALYZER_FLAGS = -Wno_return -Wrace_conditions -Wunderspecs
+
 dialyzer: deps compile
-	dialyzer -Wno_return --plt $(PLT) ebin
+	dialyzer $(DIALYZER_FLAGS) --plt $(PLT) ebin $(DIALYZER_DEP_APPS) | \
+            egrep -v -f ./filter-dialyzer-dep-warnings
 
 dialyzer-test: deps compile
 	echo Force rebar to recompile .eunit dir w/o running tests > /dev/null
 	rebar skip_deps=true eunit suite=lamport_clock
-	dialyzer -Wno_return --plt $(PLT) .eunit
+	dialyzer $(DIALYZER_FLAGS) --plt $(PLT) .eunit $(DIALYZER_DEP_APPS) | \
+            egrep -v -f ./filter-dialyzer-dep-warnings
 
 clean_plt:
 	rm $(PLT)

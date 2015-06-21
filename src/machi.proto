@@ -1,0 +1,185 @@
+/* -------------------------------------------------------------------
+**
+** machi.proto: Protocol Buffers definition for Machi
+**
+** Copyright (c) 2014-2015 Basho Technologies, Inc.  All Rights Reserved.
+**
+** This file is provided to you under the Apache License,
+** Version 2.0 (the "License"); you may not use this file
+** except in compliance with the License.  You may obtain
+** a copy of the License at
+**
+**   http://www.apache.org/licenses/LICENSE-2.0
+**
+** Unless required by applicable law or agreed to in writing,
+** software distributed under the License is distributed on an
+** "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+** KIND, either express or implied.  See the License for the
+** specific language governing permissions and limitations
+** under the License.
+**
+** -------------------------------------------------------------------
+*/
+
+/*
+** Revision: 0.1
+*/
+
+// Java package specifiers
+option java_package = "com.basho.machi.protobuf";
+option java_outer_classname = "MachiPB";
+
+//////////////////////////////////////////
+//
+// enums
+//
+//////////////////////////////////////////
+
+enum Mpb_GeneralStatusCode {
+     OK = 0;
+     BAD_ARG = 1;
+     WEDGED = 2;
+     BAD_CHECKSUM = 3;
+     PARTITION = 4;
+}
+
+// Must match with machi.hrl's values!
+enum Mpb_CSumType {
+     CSUM_TAG_NONE = 0;
+     CSUM_TAG_CLIENT_GEN = 1;
+     CSUM_TAG_SERVER_GEN = 2;
+     CSUM_TAG_SERVER_REGEN = 3;
+}
+
+//////////////////////////////////////////
+//
+// basic data types
+//
+//////////////////////////////////////////
+
+// chunk_pos() type
+message Mpb_ChunkPos {
+    required uint64 offset = 1;
+    required uint64 chunk_size = 2;
+    required string file_name = 3;
+}
+
+// chunk_csum() type
+message Mpb_ChunkCSum {
+    required Mpb_CSumType type = 1;
+    required bytes csum = 2;
+}
+
+// epoch_id() type
+message Mpb_EpochId {
+    required uint32 epoch_num = 1;
+    required Mpb_ChunkCSum epoch_csum = 2;
+}
+
+//////////////////////////////////////////
+//
+// requests & responses
+//
+//////////////////////////////////////////
+
+// Error response - may be generated for any Req
+message Mpb_ErrorResp {
+    // Free-form (depends on server, which is probably a bad idea TODO)
+    required int32 code = 1;
+    required string msg = 2;
+    optional bytes extra = 3;
+}
+
+// ping() request & response
+
+message Mpb_EchoReq {
+    optional string message = 1;
+}
+
+message Mpb_EchoResp {
+    optional string message = 1;
+}
+
+// Authentication request & response
+
+message Mpb_AuthReq {
+    required bytes user = 1;
+    required bytes password = 2;
+}
+
+message Mpb_AuthResp {
+    required uint32 code = 1;
+    // TODO: not implemented yet
+}
+
+// append_chunk() request & response
+
+message Mpb_AppendChunkReq {
+    required string prefix = 1;
+    optional bytes placement_key = 2;
+    required bytes chunk = 3;
+    optional uint32 chunk_extra = 4;
+}
+
+message Mpb_AppendChunkResp {
+    required Mpb_GeneralStatusCode status = 1;
+    // If OK, then chunk_pos is defined.
+    optional Mpb_ChunkPos chunk_pos = 2;
+}
+
+// write_chunk() request & response
+
+message Mpb_WriteChunkReq {
+    required string file = 1;
+    required uint64 offset = 2;
+    required bytes chunk = 3;
+}
+
+message Mpb_WriteChunkResp {
+    required Mpb_GeneralStatusCode status = 1;
+    // If OK, then chunk_pos is defined.
+    optional Mpb_ChunkPos chunk_pos = 2;
+}
+
+//////////////////////////////////////////
+//
+// request & response wrapper
+//
+//////////////////////////////////////////
+
+message Mpb_Request {
+    // TODO: If we wish to support pipelined requests sometime in the
+    // future, this is the placeholder to do it.
+    required bytes req_id = 1;
+
+    // The client should only define one request message.  If the client
+    // includes multiple requests here, the server may pick/choose an
+    // arbitrary one.
+    // NOTE: The erlang protobuffs compiler doesn't support 'oneof'.
+    //       But 'oneof' appears to be a very tiny memory optimization
+    //       that not all languages might care about?  (Erlang doesn't)
+    optional Mpb_EchoReq echo = 10;
+    optional Mpb_AuthReq auth = 11;
+    optional Mpb_AppendChunkReq append_chunk = 12;
+    optional Mpb_WriteChunkReq write_chunk = 13;
+}
+
+message Mpb_Response {
+    // TODO: If we wish to support pipelined requests sometime in the
+    // future, this is the placeholder to do it.
+    required bytes req_id = 1;
+
+    // The server will define only one of the optional responses below.
+
+    // Generic error response, typically used when something quite
+    // bad/unexpected happened within the server.
+    // Clients should always check this response and, if defined,
+    // ignroe any request-specific response at codes 10+.
+    optional Mpb_ErrorResp generic = 2;
+
+    // Specific responses.
+    optional Mpb_EchoResp echo = 10;
+    optional Mpb_AuthResp auth = 11;
+    optional Mpb_AppendChunkResp append_chunk = 12;
+    optional Mpb_WriteChunkResp write_chunk = 13;
+}

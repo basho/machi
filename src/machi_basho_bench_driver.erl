@@ -26,7 +26,7 @@
 %% use basho_bench to measure its performance under a certain
 %% workload.  Machi is a bit different than most KV stores in that the
 %% client has no direct control over the keys -- Machi servers always
-%% assign the keys.  The schemes typically used by basho_bench & YCSB
+%% assign the keys.  The schemes typically used by basho_bench &amp; YCSB
 %% to use/mimic key naming conventions used internally ... are
 %% difficult to adapt to Machi.
 %%
@@ -50,7 +50,7 @@
 %%
 %% TODO: As an alternate idea, if we know that the chunks written are
 %% always the same size, and if we don't care about CRC checking, then
-%% all we need to know are the file names & file sizes on the server:
+%% all we need to know are the file names &amp; file sizes on the server:
 %% we can then pick any valid offset within that file.  That would
 %% certainly be more scalable than the zillion-row-ETS-table, which is
 %% definitely RAM-hungry.
@@ -67,9 +67,9 @@
 -define(ETS_TAB, machi_keys).
 -define(THE_TIMEOUT, 60*1000).
 
--define(INFO(Str, Args), lager:info(Str, Args)).
--define(WARN(Str, Args), lager:warning(Str, Args)).
--define(ERROR(Str, Args), lager:error(Str, Args)).
+-define(INFO(Str, Args), (_ = lager:info(Str, Args))).
+-define(WARN(Str, Args), (_ = lager:warning(Str, Args))).
+-define(ERROR(Str, Args), (_ = lager:error(Str, Args))).
 
 new(Id) ->
     Ps = find_server_info(Id),
