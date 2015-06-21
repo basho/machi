@@ -126,7 +126,7 @@ appended to.
 <td> Has concepts of users, directories, and ACLs.
 
 <tr>
-<td> Machi oes not allow clients to name their own files or to specify data
+<td> Machi does not allow clients to name their own files or to specify data
 placement/offset within a file.
 <td> While not POSIX compliant, HDFS allows a fairly flexible API for
 managing file names and file writing position within a file (during a
