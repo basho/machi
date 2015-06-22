@@ -30,7 +30,8 @@
 
 -export([start_link/1, quit/1,
          connected_p/1,
-         echo/2, echo/3]).
+         echo/2, echo/3,
+         auth/3, auth/4]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -55,6 +56,15 @@ echo(PidSpec, String) ->
 
 echo(PidSpec, String, Timeout) ->
     send_sync(PidSpec, {echo, String}, Timeout).
+
+%% TODO: auth() is not implemented.  Auth requires SSL, and this client
+%% doesn't support SSL yet.  This is just a placeholder & reminder.
+
+auth(PidSpec, User, Pass) ->
+    auth(PidSpec, User, Pass, ?DEFAULT_TIMEOUT).
+
+auth(PidSpec, User, Pass, Timeout) ->
+    send_sync(PidSpec, {auth, User, Pass}, Timeout).
 
 send_sync(PidSpec, Cmd, Timeout) ->
     gen_server:call(PidSpec, {send_sync, Cmd}, Timeout).
@@ -132,8 +142,30 @@ do_send_sync({echo, String}, #state{sock=Sock}=S) ->
         ok = gen_tcp:send(Sock, Bin1a),
         {ok, Bin1B} = gen_tcp:recv(Sock, 0),
         case (catch machi_pb:decode_mpb_response(Bin1B)) of
-            #mpb_response{req_id=ReqID, echo=Echo} = _R1b ->
-                {Echo#mpb_echoresp.message, S}
+            #mpb_response{req_id=ReqID, echo=Echo} when Echo /= undefined ->
+                {Echo#mpb_echoresp.message, S};
+            #mpb_response{req_id=ReqID, generic=G} when G /= undefined ->
+                #mpb_errorresp{code=Code, msg=Msg, extra=Extra} = G,
+                {{error, {Code, Msg, Extra}}, S}
+        end
+    catch X:Y ->
+            Res = {bummer, {X, Y, erlang:get_stacktrace()}},
+            {Res, S}
+    end;
+do_send_sync({auth, User, Pass}, #state{sock=Sock}=S) ->
+    try
+        ReqID = <<0>>,
+        R1a = #mpb_request{req_id=ReqID,
+                           auth=#mpb_authreq{user=User, password=Pass}},
+        Bin1a = machi_pb:encode_mpb_request(R1a),
+        ok = gen_tcp:send(Sock, Bin1a),
+        {ok, Bin1B} = gen_tcp:recv(Sock, 0),
+        case (catch machi_pb:decode_mpb_response(Bin1B)) of
+            #mpb_response{req_id=ReqID, auth=Auth} when Auth /= undefined ->
+                {Auth#mpb_authresp.code, S};
+            #mpb_response{req_id=ReqID, generic=G} when G /= undefined ->
+                #mpb_errorresp{code=Code, msg=Msg, extra=Extra} = G,
+                {{error, {Code, Msg, Extra}}, S}
         end
     catch X:Y ->
             Res = {bummer, {X, Y, erlang:get_stacktrace()}},

@@ -52,6 +52,10 @@ smoke_test2() ->
             true = ?C:connected_p(Clnt),
             String = "yo, dawg",
             String = ?C:echo(Clnt, String),
+            %% TODO: auth() is not implemented.  Auth requires SSL.
+            %% Probably ought to put client stuff that relies on SSL into
+            %% a separate test module?  Or separate test func?
+            {error, _} = ?C:auth(Clnt, "foo", "bar"),
 
             ok
         after
