@@ -458,6 +458,10 @@ source tree.  See
 [the prototype/tango source code directory](https://github.com/basho/machi/tree/master/prototype/tango)
 for details.
 
+Also, it's worth adding that the original MSR code behind the research
+papers is now available at GitHub:
+[https://github.com/CorfuDB/CorfuDB](https://github.com/CorfuDB/CorfuDB).
+
 <a name="n3">
 ## 3.  Machi's specifics
 
