@@ -50,7 +50,7 @@ smoke_test2() ->
         {ok, Clnt} = ?C:start_link(Ps),
         try
             true = ?C:connected_p(Clnt),
-            String = <<"yo, dawg">>,
+            String = "yo, dawg",
             String = ?C:echo(Clnt, String),
 
             ok

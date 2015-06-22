@@ -1017,10 +1017,11 @@ http_harvest_headers({ok, Hdr}, Sock, Acc) ->
 
 protocol_buffers_loop(Sock, S) ->
     case gen_tcp:recv(Sock, 0) of
-        {ok, _Bin} ->
-            R = #mpb_response{req_id= <<"not paying any attention">>,
-                              generic=#mpb_errorresp{code=-6,
-                                                     msg="not implemented"}},
+        {ok, Bin} ->
+            R = do_pb_request(catch machi_pb:decode_mpb_request(Bin)),
+            %% R = #mpb_response{req_id= <<"not paying any attention">>,
+            %%                   generic=#mpb_errorresp{code=-6,
+            %%                                          msg="not implemented"}},
             Resp = machi_pb:encode_mpb_response(R),
             ok = gen_tcp:send(Sock, Resp),
             protocol_buffers_loop(Sock, S);
@@ -1048,3 +1049,21 @@ split_uri_options(OpsBin) ->
          [<<"size">>, Bin] ->
              {size, binary_to_integer(Bin)}
      end || X <- L].
+
+do_pb_request(#mpb_request{req_id=ReqID,
+                           echo=#mpb_echoreq{message=Msg}}) ->
+    #mpb_response{req_id=ReqID,
+                  echo=#mpb_echoresp{message=Msg}};
+do_pb_request(#mpb_request{req_id=ReqID,
+                           auth=#mpb_authreq{}}) ->
+    #mpb_response{req_id=ReqID,
+                  generic=#mpb_errorresp{code=1,
+                                         msg="AUTH not implemented"}};
+do_pb_request(#mpb_request{req_id=ReqID}) ->
+    #mpb_response{req_id=ReqID,
+                  generic=#mpb_errorresp{code=66,
+                                         msg="Unknown request"}};
+do_pb_request(_Else) ->
+    #mpb_response{req_id= <<>>,
+                  generic=#mpb_errorresp{code=67,
+                                         msg="Unknown PB request"}}.

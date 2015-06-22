@@ -123,8 +123,6 @@ do_connect_to_pb_listener(P) ->
             bummer
     end.
 
-%% {Reply, S2} = do_send_sync(Cmd, S),
-
 do_send_sync({echo, String}, #state{sock=Sock}=S) ->
     try
         ReqID = <<0>>,
@@ -135,7 +133,6 @@ do_send_sync({echo, String}, #state{sock=Sock}=S) ->
         {ok, Bin1B} = gen_tcp:recv(Sock, 0),
         case (catch machi_pb:decode_mpb_response(Bin1B)) of
             #mpb_response{req_id=ReqID, echo=Echo} = _R1b ->
-                io:format(user, "do_send_sync ~p\n", [_R1b]),
                 {Echo#mpb_echoresp.message, S}
         end
     catch X:Y ->
