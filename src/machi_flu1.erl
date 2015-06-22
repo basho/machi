@@ -346,7 +346,8 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                     http_server_hack(FluName, PutLine, Sock, S);
                 <<"PROTOCOL-BUFFERS\n">> ->
                     ok = gen_tcp:send(Sock, <<"OK\n">>),
-                    ok = inet:setopts(Sock, [{packet, 4}]),
+                    ok = inet:setopts(Sock, [{packet, 4},
+                                             {packet_size, 33*1024*1024}]),
                     protocol_buffers_loop(Sock, S);
                 _ ->
                     machi_util:verb("Else Got: ~p\n", [Line]),
