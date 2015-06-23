@@ -223,7 +223,7 @@ do_send_sync({append_chunk, PlacementKey, Prefix, Chunk, CSum, ChunkExtra},
         PK = if PlacementKey == <<>> -> undefined;
                 true                 -> PlacementKey
              end,
-        CSumT = convert_csum_req(CSum),
+        CSumT = convert_csum_req(CSum, Chunk),
         Req = #mpb_appendchunkreq{placement_key=PK,
                                   prefix=Prefix,
                                   chunk=Chunk,
@@ -250,7 +250,7 @@ do_send_sync({write_chunk, File, Offset, Chunk, CSum},
              #state{sock=Sock, sock_id=Index, count=Count}=S) ->
     try
         ReqID = <<Index:64/big, Count:64/big>>,
-        CSumT = convert_csum_req(CSum),
+        CSumT = convert_csum_req(CSum, Chunk),
         Req = #mpb_writechunkreq{file=File,
                                  offset=Offset,
                                  chunk=Chunk,
@@ -341,10 +341,10 @@ do_send_sync({list_files},
             {Res, S#state{count=Count+1}}
     end.
 
-convert_csum_req(none) ->
-    #mpb_chunkcsum{type='CSUM_TAG_NONE',
-                   csum=undefined};
-convert_csum_req({client_sha, CSumBin}) ->
+convert_csum_req(none, Chunk) ->
+    #mpb_chunkcsum{type='CSUM_TAG_CLIENT_SHA',
+                   csum=machi_util:checksum_chunk(Chunk)};
+convert_csum_req({client_sha, CSumBin}, _Chunk) ->
     #mpb_chunkcsum{type='CSUM_TAG_CLIENT_SHA',
                    csum=CSumBin}.
 
