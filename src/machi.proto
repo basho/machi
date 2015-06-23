@@ -41,14 +41,15 @@ enum Mpb_GeneralStatusCode {
      WEDGED = 2;
      BAD_CHECKSUM = 3;
      PARTITION = 4;
+     BAD_JOSS = 255;    // Only for testing by the Taipan
 }
 
 // Must match with machi.hrl's values!
 enum Mpb_CSumType {
      CSUM_TAG_NONE = 0;
-     CSUM_TAG_CLIENT_GEN = 1;
-     CSUM_TAG_SERVER_GEN = 2;
-     CSUM_TAG_SERVER_REGEN = 3;
+     CSUM_TAG_CLIENT_SHA = 1;
+     CSUM_TAG_SERVER_SHA = 2;
+     CSUM_TAG_SERVER_REGEN_SHA = 3;
 }
 
 //////////////////////////////////////////
@@ -67,7 +68,7 @@ message Mpb_ChunkPos {
 // chunk_csum() type
 message Mpb_ChunkCSum {
     required Mpb_CSumType type = 1;
-    required bytes csum = 2;
+    optional bytes csum = 2;
 }
 
 // epoch_id() type
@@ -115,10 +116,11 @@ message Mpb_AuthResp {
 // append_chunk() request & response
 
 message Mpb_AppendChunkReq {
-    required string prefix = 1;
-    optional bytes placement_key = 2;
+    optional bytes placement_key = 1;
+    required string prefix = 2;
     required bytes chunk = 3;
-    optional uint32 chunk_extra = 4;
+    required Mpb_ChunkCSum csum = 4;
+    optional uint32 chunk_extra = 5;
 }
 
 message Mpb_AppendChunkResp {

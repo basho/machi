@@ -19,6 +19,12 @@
 %% -------------------------------------------------------------------
 
 %% @doc Machi PB (Protocol Buffers) high-level client (prototype, API TBD)
+%%
+%% At the moment, this is prototype-quality code: the API is not yet
+%% fully specified, there is very little error handling with respect
+%% to a single socket connection, and there is no code to deal with
+%% multiple connections/load balancing/error handling to several/all
+%% Machi cluster servers.
 
 -module(machi_pb_high_client).
 
@@ -31,7 +37,9 @@
 -export([start_link/1, quit/1,
          connected_p/1,
          echo/2, echo/3,
-         auth/3, auth/4]).
+         auth/3, auth/4,
+         append_chunk/6, append_chunk/7
+        ]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -39,7 +47,9 @@
 
 -record(state, {
           server_list :: p_srvr_dict(),
-          sock :: 'undefined' | port()
+          sock        :: 'undefined' | port(),
+          sock_id     :: integer(),
+          count=0     :: non_neg_integer()
          }).
 
 start_link(P_srvr_list) ->
@@ -65,6 +75,12 @@ auth(PidSpec, User, Pass) ->
 
 auth(PidSpec, User, Pass, Timeout) ->
     send_sync(PidSpec, {auth, User, Pass}, Timeout).
+
+append_chunk(PidSpec, PlacementKey, Prefix, Chunk, CSum, ChunkExtra) ->
+    append_chunk(PidSpec, PlacementKey, Prefix, Chunk, CSum, ChunkExtra, ?DEFAULT_TIMEOUT).
+
+append_chunk(PidSpec, PlacementKey, Prefix, Chunk, CSum, ChunkExtra, Timeout) ->
+    send_sync(PidSpec, {append_chunk, PlacementKey, Prefix, Chunk, CSum, ChunkExtra}, Timeout).
 
 send_sync(PidSpec, Cmd, Timeout) ->
     gen_server:call(PidSpec, {send_sync, Cmd}, Timeout).
@@ -115,7 +131,8 @@ try_connect(#state{server_list=Ps}=S) ->
                              do_connect_to_pb_listener(P)
                      end, unused, Ps) of
         Sock when is_port(Sock) ->
-            S#state{sock=Sock};
+            {id, Index} = erlang:port_info(Sock, id),
+            S#state{sock=Sock, sock_id=Index, count=0};
         _Else ->
             S
     end.
@@ -170,6 +187,42 @@ do_send_sync({auth, User, Pass}, #state{sock=Sock}=S) ->
     catch X:Y ->
             Res = {bummer, {X, Y, erlang:get_stacktrace()}},
             {Res, S}
+    end;
+do_send_sync({append_chunk, PlacementKey, Prefix, Chunk, CSum, ChunkExtra},
+             #state{sock=Sock, sock_id=Index, count=Count}=S) ->
+    try
+        ReqID = <<Index:64/big, Count:64/big>>,
+        PK = if PlacementKey == <<>> -> undefined;
+                true                 -> PlacementKey
+             end,
+        CSumT = case CSum of
+                    none ->
+                        #mpb_chunkcsum{type='CSUM_TAG_NONE',
+                                       csum=undefined};
+                    {client_sha, CSumBin} ->
+                        #mpb_chunkcsum{type='CSUM_TAG_CLIENT_SHA',
+                                       csum=CSumBin}
+                end,
+        Req = #mpb_appendchunkreq{placement_key=PK,
+                                  prefix=Prefix,
+                                  chunk=Chunk,
+                                  csum=CSumT,
+                                  chunk_extra=ChunkExtra},
+        R1a = #mpb_request{req_id=ReqID,
+                           append_chunk=Req},
+        Bin1a = machi_pb:encode_mpb_request(R1a),
+        ok = gen_tcp:send(Sock, Bin1a),
+        {ok, Bin1B} = gen_tcp:recv(Sock, 0),
+        case (catch machi_pb:decode_mpb_response(Bin1B)) of
+            #mpb_response{req_id=ReqID, append_chunk=R} when R /= undefined ->
+                {R, S#state{count=Count+1}};
+            #mpb_response{req_id=ReqID, generic=G} when G /= undefined ->
+                #mpb_errorresp{code=Code, msg=Msg, extra=Extra} = G,
+                {{error, {Code, Msg, Extra}}, S#state{count=Count+1}}
+        end
+    catch X:Y ->
+            Res = {bummer, {X, Y, erlang:get_stacktrace()}},
+            {Res, S#state{count=Count+1}}
     end.
 
 

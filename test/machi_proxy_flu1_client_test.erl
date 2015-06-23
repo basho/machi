@@ -71,7 +71,7 @@ api_smoke_test() ->
                 ?MUT:append_chunk_extra(Prox1, FakeEpoch, Prefix,
                                         MyChunk2, 4242, infinity),
             {ok, MyChunk2} = ?MUT:read_chunk(Prox1, FakeEpoch, MyFile2, MyOff2, MySize2),
-            MyChunk_badcs = {<<?CSUM_TAG_CLIENT_GEN:8, 0:(8*20)>>, MyChunk},
+            MyChunk_badcs = {<<?CSUM_TAG_CLIENT_SHA:8, 0:(8*20)>>, MyChunk},
             {error, bad_checksum} = ?MUT:append_chunk(Prox1, FakeEpoch,
                                                       Prefix, MyChunk_badcs),
             {error, bad_checksum} = ?MUT:write_chunk(Prox1, FakeEpoch,

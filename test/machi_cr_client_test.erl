@@ -89,7 +89,7 @@ smoke_test2() ->
         machi_cr_client:append_chunk(C1, Prefix, Chunk1),
         {ok, {Off1,Size1,File1}} =
             machi_cr_client:append_chunk(C1, Prefix, Chunk1),
-        Chunk1_badcs = {<<?CSUM_TAG_CLIENT_GEN:8, 0:(8*20)>>, Chunk1},
+        Chunk1_badcs = {<<?CSUM_TAG_CLIENT_SHA:8, 0:(8*20)>>, Chunk1},
         {error, bad_checksum} =
             machi_cr_client:append_chunk(C1, Prefix, Chunk1_badcs),
         {ok, Chunk1} = machi_cr_client:read_chunk(C1, File1, Off1, Size1),

@@ -404,8 +404,8 @@ do_net_server_append2(FluName, Sock, CSumHex, LenHex, ExtraHex, Prefix) ->
                        %% should be calculated by the head and passed down
                        %% the chain together with the value.
                        CS = machi_util:checksum_chunk(Chunk),
-                       machi_util:make_tagged_csum(server_gen, CS);
-                   <<?CSUM_TAG_CLIENT_GEN:8, ClientCS/binary>> ->
+                       machi_util:make_tagged_csum(server_sha, CS);
+                   <<?CSUM_TAG_CLIENT_SHA:8, ClientCS/binary>> ->
                        CS = machi_util:checksum_chunk(Chunk),
                        if CS == ClientCS ->
                                ClientCSum;
@@ -569,8 +569,8 @@ do_net_server_write2(Sock, CSumHex, OffsetHex, LenHex, FileBin, DataDir, FHc,
                                      %% should be calculated by the head and passed down
                                      %% the chain together with the value.
                                      CS = machi_util:checksum_chunk(Chunk),
-                                     machi_util:make_tagged_csum(server_gen,CS);
-                                 <<?CSUM_TAG_CLIENT_GEN:8, ClientCS/binary>> ->
+                                     machi_util:make_tagged_csum(server_sha,CS);
+                                 <<?CSUM_TAG_CLIENT_SHA:8, ClientCS/binary>> ->
                                      CS = machi_util:checksum_chunk(Chunk),
                                      if CS == ClientCS ->
                                              ClientCSum;
@@ -935,7 +935,7 @@ http_server_hack_put(Sock, G, FluName, MyURI) ->
     try
         CSum = case G#http_goop.x_csum of
                    undefined ->
-                       machi_util:make_tagged_csum(server_gen,  CSum0);
+                       machi_util:make_tagged_csum(server_sha, CSum0);
                    XX when is_binary(XX) ->
                        if XX == CSum0 ->
                                machi_util:make_tagged_csum(client_gen,  CSum0);
@@ -1059,6 +1059,39 @@ do_pb_request(#mpb_request{req_id=ReqID,
     #mpb_response{req_id=ReqID,
                   generic=#mpb_errorresp{code=1,
                                          msg="AUTH not implemented"}};
+do_pb_request(#mpb_request{req_id=ReqID,
+                           append_chunk=AC=#mpb_appendchunkreq{}}) ->
+    #mpb_appendchunkreq{placement_key=____PK,
+                        prefix=Prefix,
+                        chunk=ChunkBin,
+                        csum=#mpb_chunkcsum{type=CSumType, csum=CSum},
+                        chunk_extra=ChunkExtra} = AC,
+    TaggedCSum = case CSumType of
+                     'CSUM_TAG_NONE' ->
+                         C = machi_util:checksum_chunk(ChunkBin),
+                         machi_util:make_tagged_csum(server_sha, C);
+                     'CSUM_TAG_CLIENT_SHA' ->
+                         machi_util:make_tagged_csum(client_sha, CSum)
+                 end,
+    Chunk = {TaggedCSum, ChunkBin},
+    case (catch machi_cr_client:append_chunk(todo_fixme,
+                                             Prefix, Chunk)) of
+        {ok, {Offset, Size, File}} ->
+            make_append_resp(ReqID, 'OK',
+                             #mpb_chunkpos{offset=Offset,
+                                           chunk_size=Size,
+                                           file_name=File});
+        {error, bad_arg} ->
+            make_append_resp(ReqID, 'BAD_ARG');
+        {error, wedged} ->
+            make_append_resp(ReqID, 'WEDGED');
+        {error, bad_checksum} ->
+            make_append_resp(ReqID, 'BAD_CHECKSUM');
+        {error, partition} ->
+            make_append_resp(ReqID, 'PARTITION');
+        _Else ->
+            make_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
+    end;
 do_pb_request(#mpb_request{req_id=ReqID}) ->
     #mpb_response{req_id=ReqID,
                   generic=#mpb_errorresp{code=66,
@@ -1067,3 +1100,17 @@ do_pb_request(_Else) ->
     #mpb_response{req_id= <<>>,
                   generic=#mpb_errorresp{code=67,
                                          msg="Unknown PB request"}}.
+
+make_append_resp(ReqID, Status) ->
+    make_append_resp(ReqID, Status, undefined).
+
+make_append_resp(ReqID, Status, Where) ->
+    #mpb_response{req_id=ReqID,
+                  append_chunk=#mpb_appendchunkresp{status=Status,
+                                                    chunk_pos=Where}}.    
+
+make_error_resp(ReqID, Code, Msg) ->
+    #mpb_response{req_id=ReqID,
+                  generic=#mpb_errorresp{code=Code,
+                                         msg=Msg}}.    
+    
