@@ -372,7 +372,7 @@ do_append_midtail(_RestFLUs, Prefix, File, Offset, Chunk, ChunkExtra,
 do_append_midtail2([], _Prefix, File, Offset, Chunk,
                    _ChunkExtra, _Ws, _Depth, _STime, S) ->
     %% io:format(user, "ok!\n", []),
-    {reply, {ok, {Offset, iolist_size(Chunk), File}}, S};
+    {reply, {ok, {Offset, chunk_wrapper_size(Chunk), File}}, S};
 do_append_midtail2([FLU|RestFLUs]=FLUs, Prefix, File, Offset, Chunk,
                    ChunkExtra, Ws, Depth, STime,
                    #state{epoch_id=EpochID, proxies_dict=PD}=S) ->
@@ -828,3 +828,8 @@ sleep_a_while(1) ->
     ok;
 sleep_a_while(Depth) ->
     timer:sleep(30 + trunc(math:pow(1.9, Depth))).
+
+chunk_wrapper_size({_TaggedCSum, Chunk}) ->
+    iolist_size(Chunk);
+chunk_wrapper_size(Chunk) ->
+    iolist_size(Chunk).

@@ -37,6 +37,7 @@ smoke_test2() ->
     Port = 5720,
     Ps = [#p_srvr{name=a, address="localhost", port=Port, props="./data.a"}
          ],
+    D = orddict:from_list([{P#p_srvr.name, P} || P <- Ps]),
     
     [os:cmd("rm -rf " ++ P#p_srvr.props) || P <- Ps],
     {ok, SupPid} = machi_flu_sup:start_link(),
@@ -45,6 +46,7 @@ smoke_test2() ->
              #p_srvr{name=Name, port=Port, props=Dir} = P,
              {ok, _} = machi_flu_psup:start_flu_package(Name, Port, Dir, [])
          end || P <- Ps],
+        ok = machi_chain_manager1:set_chain_members(a_chmgr, D),
         [machi_chain_manager1:test_react_to_env(a_chmgr) || _ <-lists:seq(1,5)],
 
         {ok, Clnt} = ?C:start_link(Ps),
@@ -61,7 +63,15 @@ smoke_test2() ->
             PK = <<>>,
             Prefix = <<"prefix">>,
             Chunk1 = <<"Hello, chunk!">>,
-            yo = ?C:append_chunk(Clnt, PK, Prefix, Chunk1, none, 0),
+            {ok, {Off1, Size1, File1}} =
+                ?C:append_chunk(Clnt, PK, Prefix, Chunk1, none, 0),
+            Chunk2 = "It's another chunk",
+            CSum2 = {client_sha, machi_util:checksum_chunk(Chunk2)},
+            {ok, {Off2, Size2, File2}} =
+                ?C:append_chunk(Clnt, PK, Prefix, Chunk2, CSum2, 1024),
+            %% Chunk3 = ["This is a ", <<"test,">>, 32, [["Hello, world!"]]],
+            %% {ok, {Off3, Size3, File3}} =
+            %%     ?C:write_chunk(Clnt, File2, Off2+iolist_size(Chunk2), Chunk3),
 
             ok
         after

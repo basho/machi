@@ -215,7 +215,8 @@ do_send_sync({append_chunk, PlacementKey, Prefix, Chunk, CSum, ChunkExtra},
         {ok, Bin1B} = gen_tcp:recv(Sock, 0),
         case (catch machi_pb:decode_mpb_response(Bin1B)) of
             #mpb_response{req_id=ReqID, append_chunk=R} when R /= undefined ->
-                {R, S#state{count=Count+1}};
+                Result = convert_append_chunk_resp(R),
+                {Result, S#state{count=Count+1}};
             #mpb_response{req_id=ReqID, generic=G} when G /= undefined ->
                 #mpb_errorresp{code=Code, msg=Msg, extra=Extra} = G,
                 {{error, {Code, Msg, Extra}}, S#state{count=Count+1}}
@@ -224,5 +225,19 @@ do_send_sync({append_chunk, PlacementKey, Prefix, Chunk, CSum, ChunkExtra},
             Res = {bummer, {X, Y, erlang:get_stacktrace()}},
             {Res, S#state{count=Count+1}}
     end.
+
+convert_append_chunk_resp(#mpb_appendchunkresp{status='OK', chunk_pos=CP}) ->
+    #mpb_chunkpos{offset=Offset, chunk_size=Size, file_name=File} = CP,
+    {ok, {Offset, Size, File}};
+convert_append_chunk_resp(#mpb_appendchunkresp{status='BAD_ARG'}) ->
+    {error, bad_arg};
+convert_append_chunk_resp(#mpb_appendchunkresp{status='WEDGED'}) ->
+    {error, wedged};
+convert_append_chunk_resp(#mpb_appendchunkresp{status='BAD_CHECKSUM'}) ->
+    {error, bad_checksum};
+convert_append_chunk_resp(#mpb_appendchunkresp{status='PARTITION'}) ->
+    {error, partition};
+convert_append_chunk_resp(#mpb_appendchunkresp{status='BAD_JOSS'}) ->
+    throw({error, bad_joss_taipan_fixme}).
 
 

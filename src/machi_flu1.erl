@@ -75,7 +75,6 @@
 -include_lib("kernel/include/file.hrl").
 
 -include("machi.hrl").
--include("machi_pb.hrl").
 -include("machi_projection.hrl").
 
 -define(SERVER_CMD_READ_TIMEOUT, 600*1000).
@@ -348,7 +347,12 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                     ok = gen_tcp:send(Sock, <<"OK\n">>),
                     ok = inet:setopts(Sock, [{packet, 4},
                                              {packet_size, 33*1024*1024}]),
-                    protocol_buffers_loop(Sock, S);
+                    {ok, Proj} = machi_projection_store:read_latest_projection(
+                                   S#state.proj_store, private),
+                    Ps = [P_srvr ||
+                             {_, P_srvr} <- orddict:to_list(
+                                              Proj#projection_v1.members_dict)],
+                    machi_pb_server:run_loop(Sock, Ps);
                 _ ->
                     machi_util:verb("Else Got: ~p\n", [Line]),
                     io:format(user, "TODO: Else Got: ~p\n", [Line]),
@@ -1015,21 +1019,6 @@ http_harvest_headers({ok, Hdr}, Sock, Acc) ->
     http_harvest_headers(gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT),
                          Sock, [Hdr|Acc]).
 
-protocol_buffers_loop(Sock, S) ->
-    case gen_tcp:recv(Sock, 0) of
-        {ok, Bin} ->
-            R = do_pb_request(catch machi_pb:decode_mpb_request(Bin)),
-            %% R = #mpb_response{req_id= <<"not paying any attention">>,
-            %%                   generic=#mpb_errorresp{code=-6,
-            %%                                          msg="not implemented"}},
-            Resp = machi_pb:encode_mpb_response(R),
-            ok = gen_tcp:send(Sock, Resp),
-            protocol_buffers_loop(Sock, S);
-        {error, _} ->
-            (catch gen_tcp:close(Sock)),
-            exit(normal)
-    end.
-
 digest_header_goop([], G) ->
     G;
 digest_header_goop([{http_header, _, 'Content-Length', _, Str}|T], G) ->
@@ -1049,68 +1038,3 @@ split_uri_options(OpsBin) ->
          [<<"size">>, Bin] ->
              {size, binary_to_integer(Bin)}
      end || X <- L].
-
-do_pb_request(#mpb_request{req_id=ReqID,
-                           echo=#mpb_echoreq{message=Msg}}) ->
-    #mpb_response{req_id=ReqID,
-                  echo=#mpb_echoresp{message=Msg}};
-do_pb_request(#mpb_request{req_id=ReqID,
-                           auth=#mpb_authreq{}}) ->
-    #mpb_response{req_id=ReqID,
-                  generic=#mpb_errorresp{code=1,
-                                         msg="AUTH not implemented"}};
-do_pb_request(#mpb_request{req_id=ReqID,
-                           append_chunk=AC=#mpb_appendchunkreq{}}) ->
-    #mpb_appendchunkreq{placement_key=____PK,
-                        prefix=Prefix,
-                        chunk=ChunkBin,
-                        csum=#mpb_chunkcsum{type=CSumType, csum=CSum},
-                        chunk_extra=ChunkExtra} = AC,
-    TaggedCSum = case CSumType of
-                     'CSUM_TAG_NONE' ->
-                         C = machi_util:checksum_chunk(ChunkBin),
-                         machi_util:make_tagged_csum(server_sha, C);
-                     'CSUM_TAG_CLIENT_SHA' ->
-                         machi_util:make_tagged_csum(client_sha, CSum)
-                 end,
-    Chunk = {TaggedCSum, ChunkBin},
-    case (catch machi_cr_client:append_chunk(todo_fixme,
-                                             Prefix, Chunk)) of
-        {ok, {Offset, Size, File}} ->
-            make_append_resp(ReqID, 'OK',
-                             #mpb_chunkpos{offset=Offset,
-                                           chunk_size=Size,
-                                           file_name=File});
-        {error, bad_arg} ->
-            make_append_resp(ReqID, 'BAD_ARG');
-        {error, wedged} ->
-            make_append_resp(ReqID, 'WEDGED');
-        {error, bad_checksum} ->
-            make_append_resp(ReqID, 'BAD_CHECKSUM');
-        {error, partition} ->
-            make_append_resp(ReqID, 'PARTITION');
-        _Else ->
-            make_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
-    end;
-do_pb_request(#mpb_request{req_id=ReqID}) ->
-    #mpb_response{req_id=ReqID,
-                  generic=#mpb_errorresp{code=66,
-                                         msg="Unknown request"}};
-do_pb_request(_Else) ->
-    #mpb_response{req_id= <<>>,
-                  generic=#mpb_errorresp{code=67,
-                                         msg="Unknown PB request"}}.
-
-make_append_resp(ReqID, Status) ->
-    make_append_resp(ReqID, Status, undefined).
-
-make_append_resp(ReqID, Status, Where) ->
-    #mpb_response{req_id=ReqID,
-                  append_chunk=#mpb_appendchunkresp{status=Status,
-                                                    chunk_pos=Where}}.    
-
-make_error_resp(ReqID, Code, Msg) ->
-    #mpb_response{req_id=ReqID,
-                  generic=#mpb_errorresp{code=Code,
-                                         msg=Msg}}.    
-    
