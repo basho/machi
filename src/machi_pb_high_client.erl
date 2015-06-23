@@ -39,7 +39,8 @@
          echo/2, echo/3,
          auth/3, auth/4,
          append_chunk/6, append_chunk/7,
-         write_chunk/5, write_chunk/6
+         write_chunk/5, write_chunk/6,
+         read_chunk/4, read_chunk/5
         ]).
 
 %% gen_server callbacks
@@ -88,6 +89,12 @@ write_chunk(PidSpec, File, Offset, Chunk, CSum) ->
 
 write_chunk(PidSpec, File, Offset, Chunk, CSum, Timeout) ->
     send_sync(PidSpec, {write_chunk, File, Offset, Chunk, CSum}, Timeout).
+
+read_chunk(PidSpec, File, Offset, Size) ->
+    read_chunk(PidSpec, File, Offset, Size, ?DEFAULT_TIMEOUT).
+
+read_chunk(PidSpec, File, Offset, Size, Timeout) ->
+    send_sync(PidSpec, {read_chunk, File, Offset, Size}, Timeout).
 
 send_sync(PidSpec, Cmd, Timeout) ->
     gen_server:call(PidSpec, {send_sync, Cmd}, Timeout).
@@ -250,6 +257,30 @@ do_send_sync({write_chunk, File, Offset, Chunk, CSum},
     catch X:Y ->
             Res = {bummer, {X, Y, erlang:get_stacktrace()}},
             {Res, S#state{count=Count+1}}
+    end;
+do_send_sync({read_chunk, File, Offset, Size},
+             #state{sock=Sock, sock_id=Index, count=Count}=S) ->
+    try
+        ReqID = <<Index:64/big, Count:64/big>>,
+        Req = #mpb_readchunkreq{file=File,
+                                offset=Offset,
+                                size=Size},
+        R1a = #mpb_request{req_id=ReqID,
+                           read_chunk=Req},
+        Bin1a = machi_pb:encode_mpb_request(R1a),
+        ok = gen_tcp:send(Sock, Bin1a),
+        {ok, Bin1B} = gen_tcp:recv(Sock, 0),
+        case (catch machi_pb:decode_mpb_response(Bin1B)) of
+            #mpb_response{req_id=ReqID, read_chunk=R} when R /= undefined ->
+                Result = convert_read_chunk_resp(R),
+                {Result, S#state{count=Count+1}};
+            #mpb_response{req_id=ReqID, generic=G} when G /= undefined ->
+                #mpb_errorresp{code=Code, msg=Msg, extra=Extra} = G,
+                {{error, {Code, Msg, Extra}}, S#state{count=Count+1}}
+        end
+    catch X:Y ->
+            Res = {bummer, {X, Y, erlang:get_stacktrace()}},
+            {Res, S#state{count=Count+1}}
     end.
 
 convert_csum_req(none) ->
@@ -279,4 +310,9 @@ convert_general_status_code('BAD_JOSS') ->
 convert_write_chunk_resp(#mpb_writechunkresp{status='OK'}) ->
     ok;
 convert_write_chunk_resp(#mpb_writechunkresp{status=Status}) ->
+    convert_general_status_code(Status).
+
+convert_read_chunk_resp(#mpb_readchunkresp{status='OK', chunk=Chunk}) ->
+    {ok, Chunk};
+convert_read_chunk_resp(#mpb_readchunkresp{status=Status}) ->
     convert_general_status_code(Status).
