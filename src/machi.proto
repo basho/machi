@@ -161,6 +161,17 @@ message Mpb_ReadChunkResp {
     optional Mpb_ChunkCSum csum = 3;
 }
 
+// read_chunk() request & response
+
+message Mpb_ChecksumListReq {
+    required string file = 1;
+}
+
+message Mpb_ChecksumListResp {
+    required Mpb_GeneralStatusCode status = 1;
+    optional bytes chunk = 2;
+}
+
 //////////////////////////////////////////
 //
 // request & response wrapper
@@ -183,6 +194,7 @@ message Mpb_Request {
     optional Mpb_AppendChunkReq append_chunk = 12;
     optional Mpb_WriteChunkReq write_chunk = 13;
     optional Mpb_ReadChunkReq read_chunk = 14;
+    optional Mpb_ChecksumListReq checksum_list = 15;
 }
 
 message Mpb_Response {
@@ -204,4 +216,5 @@ message Mpb_Response {
     optional Mpb_AppendChunkResp append_chunk = 12;
     optional Mpb_WriteChunkResp write_chunk = 13;
     optional Mpb_ReadChunkResp read_chunk = 14;
+    optional Mpb_ChecksumListResp checksum_list = 15;
 }

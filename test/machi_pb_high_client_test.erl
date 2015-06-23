@@ -70,15 +70,18 @@ smoke_test2() ->
             {ok, {Off2, Size2, File2}} =
                 ?C:append_chunk(Clnt, PK, Prefix, Chunk2, CSum2, 1024),
             Chunk3 = ["This is a ", <<"test,">>, 32, [["Hello, world!"]]],
+            File3 = File2,
             Off3 = Off2 + iolist_size(Chunk2),
             Size3 = iolist_size(Chunk3),
             ok = ?C:write_chunk(Clnt, File2, Off3, Chunk3, none),
 
             Reads = [{iolist_to_binary(Chunk1), File1, Off1, Size1},
                      {iolist_to_binary(Chunk2), File2, Off2, Size2},
-                     {iolist_to_binary(Chunk3), File2, Off3, Size3}],
+                     {iolist_to_binary(Chunk3), File3, Off3, Size3}],
             [{ok, Ch} = ?C:read_chunk(Clnt, Fl, Off, Sz) ||
                 {Ch, Fl, Off, Sz} <- Reads],
+
+            {ok, _} = ?C:checksum_list(Clnt, File1),
 
             ok
         after
