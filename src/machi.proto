@@ -74,7 +74,7 @@ message Mpb_ChunkCSum {
 // epoch_id() type
 message Mpb_EpochId {
     required uint32 epoch_num = 1;
-    required Mpb_ChunkCSum epoch_csum = 2;
+    required bytes epoch_csum = 2;
 }
 
 //////////////////////////////////////////
@@ -135,12 +135,11 @@ message Mpb_WriteChunkReq {
     required string file = 1;
     required uint64 offset = 2;
     required bytes chunk = 3;
+    required Mpb_ChunkCSum csum = 4;
 }
 
 message Mpb_WriteChunkResp {
     required Mpb_GeneralStatusCode status = 1;
-    // If OK, then chunk_pos is defined.
-    optional Mpb_ChunkPos chunk_pos = 2;
 }
 
 //////////////////////////////////////////

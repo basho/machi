@@ -69,9 +69,9 @@ smoke_test2() ->
             CSum2 = {client_sha, machi_util:checksum_chunk(Chunk2)},
             {ok, {Off2, Size2, File2}} =
                 ?C:append_chunk(Clnt, PK, Prefix, Chunk2, CSum2, 1024),
-            %% Chunk3 = ["This is a ", <<"test,">>, 32, [["Hello, world!"]]],
-            %% {ok, {Off3, Size3, File3}} =
-            %%     ?C:write_chunk(Clnt, File2, Off2+iolist_size(Chunk2), Chunk3),
+            Chunk3 = ["This is a ", <<"test,">>, 32, [["Hello, world!"]]],
+            ok = ?C:write_chunk(Clnt, File2, Off2+iolist_size(Chunk2),
+                                Chunk3, none),
 
             ok
         after
