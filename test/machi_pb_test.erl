@@ -53,6 +53,13 @@ smoke_responses_test() ->
                                               extra= <<"bar">>}},
     R1 = encdec_response(R1),
 
+    Files2 = [#mpb_fileinfo{file_size=X, file_name="foo."++integer_to_list(X)}
+              || X <- lists:seq(1, 5)],
+    R2 = #mpb_response{req_id= <<"x">>,
+                       list_files=#mpb_listfilesresp{status='OK',
+                                                     files=Files2}},
+    R2 = encdec_response(R2),
+
     ok.
 
 encdec_request(M) ->

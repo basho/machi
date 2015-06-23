@@ -26,7 +26,7 @@
 
 %% 0th draft of checksum typing with 1st byte.
 -define(CSUM_TAG_NONE, 0).                   % No csum provided by client
--define(CSUM_TAG_CLIENT_GEN, 1).             % Client-generated csum
--define(CSUM_TAG_SERVER_GEN, 2).             % Server-genereated csum
--define(CSUM_TAG_SERVER_REGEN, 3).           % Server-regenerated csum
+-define(CSUM_TAG_CLIENT_SHA, 1).             % Client-generated SHA1
+-define(CSUM_TAG_SERVER_SHA, 2).             % Server-genereated SHA1
+-define(CSUM_TAG_SERVER_REGEN_SHA, 3).       % Server-regenerated SHA1
 

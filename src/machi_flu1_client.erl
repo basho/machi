@@ -468,7 +468,7 @@ append_chunk2(Sock, EpochID, Prefix0, Chunk0, ChunkExtra) ->
                                 Chunk0;
                             XX when is_binary(XX) ->
                                 SHA = machi_util:checksum_chunk(Chunk0),
-                                {<<?CSUM_TAG_CLIENT_GEN:8, SHA/binary>>, Chunk0}
+                                {<<?CSUM_TAG_CLIENT_SHA:8, SHA/binary>>, Chunk0}
                         end,
         Len = iolist_size(Chunk),
         true = (Len =< ?MAX_CHUNK_SIZE),
@@ -703,7 +703,7 @@ write_chunk2(Sock, EpochID, File0, Offset, Chunk0) ->
                                 Chunk0;
                             XX when is_binary(XX) ->
                                 SHA = machi_util:checksum_chunk(Chunk0),
-                                {<<?CSUM_TAG_CLIENT_GEN:8, SHA/binary>>, Chunk0}
+                                {<<?CSUM_TAG_CLIENT_SHA:8, SHA/binary>>, Chunk0}
                         end,
         CSumHex = machi_util:bin_to_hexstr(CSum),
         Len = iolist_size(Chunk),

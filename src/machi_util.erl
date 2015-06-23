@@ -24,7 +24,7 @@
 
 -export([
          checksum_chunk/1,
-         make_tagged_csum/2,
+         make_tagged_csum/1, make_tagged_csum/2,
          hexstr_to_bin/1, bin_to_hexstr/1,
          hexstr_to_int/1, int_to_hexstr/2, int_to_hexbin/2,
          make_binary/1, make_string/1,
@@ -220,14 +220,19 @@ checksum_chunk(Chunk) when is_binary(Chunk); is_list(Chunk) ->
 
 %% @doc Create a tagged checksum
 
-make_tagged_csum(none, SHA) ->
-    <<?CSUM_TAG_NONE:8, SHA/binary>>;
-make_tagged_csum(client_gen, SHA) ->
-    <<?CSUM_TAG_CLIENT_GEN:8, SHA/binary>>;
-make_tagged_csum(server_gen, SHA) ->
-    <<?CSUM_TAG_SERVER_GEN:8, SHA/binary>>;
-make_tagged_csum(server_regen, SHA) ->
-    <<?CSUM_TAG_SERVER_REGEN:8, SHA/binary>>.
+make_tagged_csum(none) ->
+    <<?CSUM_TAG_NONE:8>>;
+make_tagged_csum({Tag, CSum}) ->
+    make_tagged_csum(Tag, CSum).
+
+make_tagged_csum(none, _SHA) ->
+    <<?CSUM_TAG_NONE:8>>;
+make_tagged_csum(client_sha, SHA) ->
+    <<?CSUM_TAG_CLIENT_SHA:8, SHA/binary>>;
+make_tagged_csum(server_sha, SHA) ->
+    <<?CSUM_TAG_SERVER_SHA:8, SHA/binary>>;
+make_tagged_csum(server_regen_sha, SHA) ->
+    <<?CSUM_TAG_SERVER_REGEN_SHA:8, SHA/binary>>.
 
 %% @doc Log a verbose message.
 

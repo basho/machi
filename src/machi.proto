@@ -41,14 +41,15 @@ enum Mpb_GeneralStatusCode {
      WEDGED = 2;
      BAD_CHECKSUM = 3;
      PARTITION = 4;
+     BAD_JOSS = 255;    // Only for testing by the Taipan
 }
 
 // Must match with machi.hrl's values!
 enum Mpb_CSumType {
      CSUM_TAG_NONE = 0;
-     CSUM_TAG_CLIENT_GEN = 1;
-     CSUM_TAG_SERVER_GEN = 2;
-     CSUM_TAG_SERVER_REGEN = 3;
+     CSUM_TAG_CLIENT_SHA = 1;
+     CSUM_TAG_SERVER_SHA = 2;
+     CSUM_TAG_SERVER_REGEN_SHA = 3;
 }
 
 //////////////////////////////////////////
@@ -67,13 +68,19 @@ message Mpb_ChunkPos {
 // chunk_csum() type
 message Mpb_ChunkCSum {
     required Mpb_CSumType type = 1;
-    required bytes csum = 2;
+    optional bytes csum = 2;
 }
 
 // epoch_id() type
 message Mpb_EpochId {
     required uint32 epoch_num = 1;
-    required Mpb_ChunkCSum epoch_csum = 2;
+    required bytes epoch_csum = 2;
+}
+
+// file_info() type
+message Mpb_FileInfo {
+    required uint64 file_size = 1;
+    required string file_name = 2;
 }
 
 //////////////////////////////////////////
@@ -115,10 +122,11 @@ message Mpb_AuthResp {
 // append_chunk() request & response
 
 message Mpb_AppendChunkReq {
-    required string prefix = 1;
-    optional bytes placement_key = 2;
+    optional bytes placement_key = 1;
+    required string prefix = 2;
     required bytes chunk = 3;
-    optional uint32 chunk_extra = 4;
+    required Mpb_ChunkCSum csum = 4;
+    optional uint32 chunk_extra = 5;
 }
 
 message Mpb_AppendChunkResp {
@@ -133,12 +141,52 @@ message Mpb_WriteChunkReq {
     required string file = 1;
     required uint64 offset = 2;
     required bytes chunk = 3;
+    required Mpb_ChunkCSum csum = 4;
 }
 
 message Mpb_WriteChunkResp {
     required Mpb_GeneralStatusCode status = 1;
-    // If OK, then chunk_pos is defined.
-    optional Mpb_ChunkPos chunk_pos = 2;
+}
+
+// read_chunk() request & response
+
+message Mpb_ReadChunkReq {
+    required string file = 1;
+    required uint64 offset = 2;
+    required uint32 size = 3;
+    // Use flag_checksum=non-zero to request the chunk's checksum also
+    optional uint32 flag_checksum = 4 [default=0];
+    // Use flag_no_chunk=non-zero to skip returning the chunk (which
+    // only makes sense if flag_checksum is set).
+    optional uint32 flag_no_chunk = 5 [default=0];
+}
+
+message Mpb_ReadChunkResp {
+    required Mpb_GeneralStatusCode status = 1;
+    optional bytes chunk = 2;
+    optional Mpb_ChunkCSum csum = 3;
+}
+
+// checksum_list() request & response
+
+message Mpb_ChecksumListReq {
+    required string file = 1;
+}
+
+message Mpb_ChecksumListResp {
+    required Mpb_GeneralStatusCode status = 1;
+    optional bytes chunk = 2;
+}
+
+// list_files() request & response
+
+message Mpb_ListFilesReq {
+}
+
+message Mpb_ListFilesResp {
+    required Mpb_GeneralStatusCode status = 1;
+    // Wow, I cannot use optional & repeated together?
+    repeated Mpb_FileInfo files = 2;
 }
 
 //////////////////////////////////////////
@@ -162,6 +210,9 @@ message Mpb_Request {
     optional Mpb_AuthReq auth = 11;
     optional Mpb_AppendChunkReq append_chunk = 12;
     optional Mpb_WriteChunkReq write_chunk = 13;
+    optional Mpb_ReadChunkReq read_chunk = 14;
+    optional Mpb_ChecksumListReq checksum_list = 15;
+    optional Mpb_ListFilesReq list_files = 16;
 }
 
 message Mpb_Response {
@@ -182,4 +233,7 @@ message Mpb_Response {
     optional Mpb_AuthResp auth = 11;
     optional Mpb_AppendChunkResp append_chunk = 12;
     optional Mpb_WriteChunkResp write_chunk = 13;
+    optional Mpb_ReadChunkResp read_chunk = 14;
+    optional Mpb_ChecksumListResp checksum_list = 15;
+    optional Mpb_ListFilesResp list_files = 16;
 }

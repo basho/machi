@@ -197,7 +197,7 @@ bad_checksum_test() ->
     try
         Prefix = <<"some prefix">>,
         Chunk1 = <<"yo yo yo">>,
-        Chunk1_badcs = {<<?CSUM_TAG_CLIENT_GEN:8, 0:(8*20)>>, Chunk1},
+        Chunk1_badcs = {<<?CSUM_TAG_CLIENT_SHA:8, 0:(8*20)>>, Chunk1},
         {error, bad_checksum} = ?FLU_C:append_chunk(Host, TcpPort,
                                                     ?DUMMY_PV1_EPOCH,
                                                     Prefix, Chunk1_badcs),

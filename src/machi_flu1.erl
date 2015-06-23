@@ -75,7 +75,6 @@
 -include_lib("kernel/include/file.hrl").
 
 -include("machi.hrl").
--include("machi_pb.hrl").
 -include("machi_projection.hrl").
 
 -define(SERVER_CMD_READ_TIMEOUT, 600*1000).
@@ -346,8 +345,14 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                     http_server_hack(FluName, PutLine, Sock, S);
                 <<"PROTOCOL-BUFFERS\n">> ->
                     ok = gen_tcp:send(Sock, <<"OK\n">>),
-                    ok = inet:setopts(Sock, [{packet, 4}]),
-                    protocol_buffers_loop(Sock, S);
+                    ok = inet:setopts(Sock, [{packet, 4},
+                                             {packet_size, 33*1024*1024}]),
+                    {ok, Proj} = machi_projection_store:read_latest_projection(
+                                   S#state.proj_store, private),
+                    Ps = [P_srvr ||
+                             {_, P_srvr} <- orddict:to_list(
+                                              Proj#projection_v1.members_dict)],
+                    machi_pb_server:run_loop(Sock, Ps);
                 _ ->
                     machi_util:verb("Else Got: ~p\n", [Line]),
                     io:format(user, "TODO: Else Got: ~p\n", [Line]),
@@ -403,8 +408,8 @@ do_net_server_append2(FluName, Sock, CSumHex, LenHex, ExtraHex, Prefix) ->
                        %% should be calculated by the head and passed down
                        %% the chain together with the value.
                        CS = machi_util:checksum_chunk(Chunk),
-                       machi_util:make_tagged_csum(server_gen, CS);
-                   <<?CSUM_TAG_CLIENT_GEN:8, ClientCS/binary>> ->
+                       machi_util:make_tagged_csum(server_sha, CS);
+                   <<?CSUM_TAG_CLIENT_SHA:8, ClientCS/binary>> ->
                        CS = machi_util:checksum_chunk(Chunk),
                        if CS == ClientCS ->
                                ClientCSum;
@@ -568,8 +573,8 @@ do_net_server_write2(Sock, CSumHex, OffsetHex, LenHex, FileBin, DataDir, FHc,
                                      %% should be calculated by the head and passed down
                                      %% the chain together with the value.
                                      CS = machi_util:checksum_chunk(Chunk),
-                                     machi_util:make_tagged_csum(server_gen,CS);
-                                 <<?CSUM_TAG_CLIENT_GEN:8, ClientCS/binary>> ->
+                                     machi_util:make_tagged_csum(server_sha,CS);
+                                 <<?CSUM_TAG_CLIENT_SHA:8, ClientCS/binary>> ->
                                      CS = machi_util:checksum_chunk(Chunk),
                                      if CS == ClientCS ->
                                              ClientCSum;
@@ -934,10 +939,10 @@ http_server_hack_put(Sock, G, FluName, MyURI) ->
     try
         CSum = case G#http_goop.x_csum of
                    undefined ->
-                       machi_util:make_tagged_csum(server_gen,  CSum0);
+                       machi_util:make_tagged_csum(server_sha, CSum0);
                    XX when is_binary(XX) ->
                        if XX == CSum0 ->
-                               machi_util:make_tagged_csum(client_gen,  CSum0);
+                               machi_util:make_tagged_csum(client_sha,  CSum0);
                           true ->
                                throw({bad_csum, XX})
                        end
@@ -1014,27 +1019,13 @@ http_harvest_headers({ok, Hdr}, Sock, Acc) ->
     http_harvest_headers(gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT),
                          Sock, [Hdr|Acc]).
 
-protocol_buffers_loop(Sock, S) ->
-    case gen_tcp:recv(Sock, 0) of
-        {ok, _Bin} ->
-            R = #mpb_response{req_id= <<"not paying any attention">>,
-                              generic=#mpb_errorresp{code=-6,
-                                                     msg="not implemented"}},
-            Resp = machi_pb:encode_mpb_response(R),
-            ok = gen_tcp:send(Sock, Resp),
-            protocol_buffers_loop(Sock, S);
-        {error, _} ->
-            (catch gen_tcp:close(Sock)),
-            exit(normal)
-    end.
-
 digest_header_goop([], G) ->
     G;
 digest_header_goop([{http_header, _, 'Content-Length', _, Str}|T], G) ->
     digest_header_goop(T, G#http_goop{len=list_to_integer(Str)});
 digest_header_goop([{http_header, _, "X-Checksum", _, Str}|T], G) ->
     SHA = machi_util:hexstr_to_bin(Str),
-    CSum = machi_util:make_tagged_csum(client_gen, SHA),
+    CSum = machi_util:make_tagged_csum(client_sha, SHA),
     digest_header_goop(T, G#http_goop{x_csum=CSum});
 digest_header_goop([_H|T], G) ->
     digest_header_goop(T, G).
