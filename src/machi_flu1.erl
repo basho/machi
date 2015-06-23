@@ -942,7 +942,7 @@ http_server_hack_put(Sock, G, FluName, MyURI) ->
                        machi_util:make_tagged_csum(server_sha, CSum0);
                    XX when is_binary(XX) ->
                        if XX == CSum0 ->
-                               machi_util:make_tagged_csum(client_gen,  CSum0);
+                               machi_util:make_tagged_csum(client_sha,  CSum0);
                           true ->
                                throw({bad_csum, XX})
                        end
@@ -1025,7 +1025,7 @@ digest_header_goop([{http_header, _, 'Content-Length', _, Str}|T], G) ->
     digest_header_goop(T, G#http_goop{len=list_to_integer(Str)});
 digest_header_goop([{http_header, _, "X-Checksum", _, Str}|T], G) ->
     SHA = machi_util:hexstr_to_bin(Str),
-    CSum = machi_util:make_tagged_csum(client_gen, SHA),
+    CSum = machi_util:make_tagged_csum(client_sha, SHA),
     digest_header_goop(T, G#http_goop{x_csum=CSum});
 digest_header_goop([_H|T], G) ->
     digest_header_goop(T, G).

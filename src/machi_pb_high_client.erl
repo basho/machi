@@ -129,7 +129,7 @@ handle_call(connected_p, _From, #state{sock=undefined}=S) ->
 handle_call({send_sync, _Cmd}, _From, #state{sock=undefined}=S) ->
     {reply, not_connected, S};
 handle_call({send_sync, Cmd}, _From, S) ->
-    {Reply, S2} = do_send_sync(Cmd, S),
+    {Reply, S2} = do_send_sync(Cmd, try_connect(S)),
     {reply, Reply, S2};
 handle_call(_Request, _From, S) ->
     Reply = whaaaaaaaaaaaaaaaaaaaa,
