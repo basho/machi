@@ -41,7 +41,8 @@
          append_chunk/6, append_chunk/7,
          write_chunk/5, write_chunk/6,
          read_chunk/4, read_chunk/5,
-         checksum_list/2, checksum_list/3
+         checksum_list/2, checksum_list/3,
+         list_files/1, list_files/2
         ]).
 
 %% gen_server callbacks
@@ -102,6 +103,12 @@ checksum_list(PidSpec, File) ->
 
 checksum_list(PidSpec, File, Timeout) ->
     send_sync(PidSpec, {checksum_list, File}, Timeout).
+
+list_files(PidSpec) ->
+    list_files(PidSpec, ?DEFAULT_TIMEOUT).
+
+list_files(PidSpec, Timeout) ->
+    send_sync(PidSpec, {list_files}, Timeout).
 
 send_sync(PidSpec, Cmd, Timeout) ->
     gen_server:call(PidSpec, {send_sync, Cmd}, Timeout).
@@ -310,6 +317,28 @@ do_send_sync({checksum_list, File},
     catch X:Y ->
             Res = {bummer, {X, Y, erlang:get_stacktrace()}},
             {Res, S#state{count=Count+1}}
+    end;
+do_send_sync({list_files},
+             #state{sock=Sock, sock_id=Index, count=Count}=S) ->
+    try
+        ReqID = <<Index:64/big, Count:64/big>>,
+        Req = #mpb_listfilesreq{},
+        R1a = #mpb_request{req_id=ReqID,
+                           list_files=Req},
+        Bin1a = machi_pb:encode_mpb_request(R1a),
+        ok = gen_tcp:send(Sock, Bin1a),
+        {ok, Bin1B} = gen_tcp:recv(Sock, 0),
+        case (catch machi_pb:decode_mpb_response(Bin1B)) of
+            #mpb_response{req_id=ReqID, list_files=R} when R /= undefined ->
+                Result = convert_list_files_resp(R),
+                {Result, S#state{count=Count+1}};
+            #mpb_response{req_id=ReqID, generic=G} when G /= undefined ->
+                #mpb_errorresp{code=Code, msg=Msg, extra=Extra} = G,
+                {{error, {Code, Msg, Extra}}, S#state{count=Count+1}}
+        end
+    catch X:Y ->
+            Res = {bummer, {X, Y, erlang:get_stacktrace()}},
+            {Res, S#state{count=Count+1}}
     end.
 
 convert_csum_req(none) ->
@@ -349,4 +378,11 @@ convert_read_chunk_resp(#mpb_readchunkresp{status=Status}) ->
 convert_checksum_list_resp(#mpb_checksumlistresp{status='OK', chunk=Chunk}) ->
     {ok, Chunk};
 convert_checksum_list_resp(#mpb_checksumlistresp{status=Status}) ->
+    convert_general_status_code(Status).
+
+convert_list_files_resp(#mpb_listfilesresp{status='OK', files=Files}) ->
+    FileInfo = [{Size, File} || #mpb_fileinfo{file_size=Size,
+                                              file_name=File} <- Files],
+    {ok, FileInfo};
+convert_list_files_resp(#mpb_listfilesresp{status=Status}) ->
     convert_general_status_code(Status).

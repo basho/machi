@@ -82,6 +82,8 @@ smoke_test2() ->
                 {Ch, Fl, Off, Sz} <- Reads],
 
             {ok, _} = ?C:checksum_list(Clnt, File1),
+            {ok, [{File1Size,File1}]} = ?C:list_files(Clnt),
+            true = is_integer(File1Size),
 
             ok
         after

@@ -77,6 +77,12 @@ message Mpb_EpochId {
     required bytes epoch_csum = 2;
 }
 
+// file_info() type
+message Mpb_FileInfo {
+    required uint64 file_size = 1;
+    required string file_name = 2;
+}
+
 //////////////////////////////////////////
 //
 // requests & responses
@@ -161,7 +167,7 @@ message Mpb_ReadChunkResp {
     optional Mpb_ChunkCSum csum = 3;
 }
 
-// read_chunk() request & response
+// checksum_list() request & response
 
 message Mpb_ChecksumListReq {
     required string file = 1;
@@ -170,6 +176,17 @@ message Mpb_ChecksumListReq {
 message Mpb_ChecksumListResp {
     required Mpb_GeneralStatusCode status = 1;
     optional bytes chunk = 2;
+}
+
+// list_files() request & response
+
+message Mpb_ListFilesReq {
+}
+
+message Mpb_ListFilesResp {
+    required Mpb_GeneralStatusCode status = 1;
+    // Wow, I cannot use optional & repeated together?
+    repeated Mpb_FileInfo files = 2;
 }
 
 //////////////////////////////////////////
@@ -195,6 +212,7 @@ message Mpb_Request {
     optional Mpb_WriteChunkReq write_chunk = 13;
     optional Mpb_ReadChunkReq read_chunk = 14;
     optional Mpb_ChecksumListReq checksum_list = 15;
+    optional Mpb_ListFilesReq list_files = 16;
 }
 
 message Mpb_Response {
@@ -217,4 +235,5 @@ message Mpb_Response {
     optional Mpb_WriteChunkResp write_chunk = 13;
     optional Mpb_ReadChunkResp read_chunk = 14;
     optional Mpb_ChecksumListResp checksum_list = 15;
+    optional Mpb_ListFilesResp list_files = 16;
 }
