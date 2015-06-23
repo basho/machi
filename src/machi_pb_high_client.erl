@@ -20,7 +20,7 @@
 
 %% @doc Machi PB (Protocol Buffers) high-level client (prototype, API TBD)
 %%
-%% At the moment, this is prototype-quality code: the API is not yet
+%% At the moment, this is brittle-prototype-quality code: the API is not yet
 %% fully specified, there is very little error handling with respect
 %% to a single socket connection, and there is no code to deal with
 %% multiple connections/load balancing/error handling to several/all
