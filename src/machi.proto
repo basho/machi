@@ -41,6 +41,7 @@ enum Mpb_GeneralStatusCode {
      WEDGED = 2;
      BAD_CHECKSUM = 3;
      PARTITION = 4;
+     NOT_WRITTEN = 5;
      BAD_JOSS = 255;    // Only for testing by the Taipan
 }
 
@@ -367,7 +368,7 @@ message Mpb_LL_GetAllProjectionsReq {
 
 message Mpb_LL_GetAllProjectionsResp {
     required Mpb_GeneralStatusCode status = 1;
-    repeated Mpb_ProjectionV1 proj = 2;
+    repeated Mpb_ProjectionV1 projs = 2;
 }
 
 // Low level API: list_all_projections() request & response

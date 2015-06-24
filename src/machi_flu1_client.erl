@@ -849,7 +849,7 @@ do_projection_common(Sock, Req) ->
                         ok = w_setopts(Sock, [{packet, raw}]),
                         {ok, RespBin} = w_recv(Sock, ResLen),
                         ok = w_setopts(Sock, [{packet, line}]),
-                        Resp = machi_pb:decode_mbp_ll_response(RespBin),
+                        Resp = machi_pb:decode_mpb_ll_response(RespBin),
                         machi_pb_wrap:unmake_projection_resp(Resp);
                     Else ->
                         {error, Else}

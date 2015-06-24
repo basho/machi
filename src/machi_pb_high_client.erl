@@ -365,6 +365,8 @@ convert_general_status_code('BAD_CHECKSUM') ->
     {error, bad_checksum};
 convert_general_status_code('PARTITION') ->
     {error, partition};
+convert_general_status_code('NOT_WRITTEN') ->
+    {error, not_written};
 convert_general_status_code('BAD_JOSS') ->
     throw({error, bad_joss_taipan_fixme}).
 

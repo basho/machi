@@ -35,7 +35,8 @@
 
 -export([enc_p_srvr/1, dec_p_srvr/1,
          enc_projection_v1/1, dec_projection_v1/1,
-         make_projection_req/2, unmake_projection_resp/1]).
+         make_projection_req/2, unmake_projection_req/1,
+         make_projection_resp/3, unmake_projection_resp/1]).
 -ifdef(TEST).
 -compile(export_all).
 -endif. % TEST
@@ -156,6 +157,83 @@ make_projection_req(ID, {list_all_projections, ProjType}) ->
     #mpb_ll_request{req_id=ID,
                     proj_la=#mpb_ll_listallprojectionsreq{type=conv_from_type(ProjType)}}.
 
+unmake_projection_req(
+  #mpb_ll_request{req_id=ID,
+                  proj_gl=#mpb_ll_getlatestepochidreq{type=ProjType}}) ->
+    {ID, {get_latest_epochid, conv_to_type(ProjType)}};
+unmake_projection_req(
+  #mpb_ll_request{req_id=ID,
+                  proj_rl=#mpb_ll_readlatestprojectionreq{type=ProjType}}) ->
+    {ID, {read_latest_projection, conv_to_type(ProjType)}};
+unmake_projection_req(
+  #mpb_ll_request{req_id=ID,
+                  proj_rp=#mpb_ll_readprojectionreq{type=ProjType,
+                                                    epoch_number=Epoch}}) ->
+    {ID, {read_projection, conv_to_type(ProjType), Epoch}};
+unmake_projection_req(
+  #mpb_ll_request{req_id=ID,
+                  proj_wp=#mpb_ll_writeprojectionreq{type=ProjType,
+                                                     proj=ProjM}}) ->
+    Proj = conv_to_projection_v1(ProjM),
+    {ID, {write_projection, conv_to_type(ProjType), Proj}};
+unmake_projection_req(
+  #mpb_ll_request{req_id=ID,
+                  proj_ga=#mpb_ll_getallprojectionsreq{type=ProjType}}) ->
+    {ID, {get_all_projections, conv_to_type(ProjType)}};
+unmake_projection_req(
+  #mpb_ll_request{req_id=ID,
+                  proj_la=#mpb_ll_listallprojectionsreq{type=ProjType}}) ->
+    {ID, {list_all_projections, conv_to_type(ProjType)}}.
+
+make_projection_resp(ID, get_latest_epochid, {ok, {Epoch, CSum}}) ->
+    EID = #mpb_epochid{epoch_number=Epoch, epoch_csum=CSum},
+    #mpb_ll_response{req_id=ID,
+                     proj_gl=#mpb_ll_getlatestepochidresp{
+                       status='OK', epoch_id=EID}};
+make_projection_resp(ID, get_latest_epochid, Status) ->
+    #mpb_ll_response{req_id=ID,
+                     proj_gl=#mpb_ll_getlatestepochidresp{
+                       status=conv_from_status(Status)}};
+make_projection_resp(ID, read_latest_projection, {ok, Proj}) ->
+    ProjM = conv_from_projection_v1(Proj),
+    #mpb_ll_response{req_id=ID,
+                     proj_rl=#mpb_ll_readlatestprojectionresp{
+                       status='OK', proj=ProjM}};
+make_projection_resp(ID, read_latest_projection, Status) ->
+    #mpb_ll_response{req_id=ID,
+                     proj_rl=#mpb_ll_readlatestprojectionresp{
+                       status=conv_from_status(Status)}};
+make_projection_resp(ID, read_projection, {ok, Proj}) ->
+    ProjM = conv_from_projection_v1(Proj),
+    #mpb_ll_response{req_id=ID,
+                     proj_rp=#mpb_ll_readprojectionresp{
+                       status='OK', proj=ProjM}};
+make_projection_resp(ID, read_projection, Status) ->
+    #mpb_ll_response{req_id=ID,
+                     proj_rp=#mpb_ll_readprojectionresp{
+                       status=conv_from_status(Status)}};
+make_projection_resp(ID, write_projection, Status) ->
+    #mpb_ll_response{req_id=ID,
+                     proj_wp=#mpb_ll_writeprojectionresp{
+                       status=conv_from_status(Status)}};
+make_projection_resp(ID, get_all_projections, {ok, Projs}) ->
+    ProjsM = [conv_from_projection_v1(Proj) || Proj <- Projs],
+    #mpb_ll_response{req_id=ID,
+                     proj_ga=#mpb_ll_getallprojectionsresp{
+                       status='OK', projs=ProjsM}};
+make_projection_resp(ID, get_all_projections, Status) ->
+    #mpb_ll_response{req_id=ID,
+                     proj_ga=#mpb_ll_getallprojectionsresp{
+                       status=conv_from_status(Status)}};
+make_projection_resp(ID, list_all_projections, {ok, Epochs}) ->
+    #mpb_ll_response{req_id=ID,
+                     proj_la=#mpb_ll_listallprojectionsresp{
+                       status='OK', epochs=Epochs}};
+make_projection_resp(ID, list_all_projections, Status) ->
+    #mpb_ll_response{req_id=ID,
+                     proj_la=#mpb_ll_listallprojectionsresp{
+                       status=conv_from_status(Status)}}.
+
 unmake_projection_resp(#mpb_ll_response{proj_gl=#mpb_ll_getlatestepochidresp{
         status=Status, epoch_id=EID}}) ->
     case Status of
@@ -183,7 +261,23 @@ unmake_projection_resp(#mpb_ll_response{proj_rp=#mpb_ll_readprojectionresp{
     end;
 unmake_projection_resp(#mpb_ll_response{proj_wp=#mpb_ll_writeprojectionresp{
         status=Status}}) ->
-    machi_pb_high_client:convert_general_status_code(Status).
+    machi_pb_high_client:convert_general_status_code(Status);
+unmake_projection_resp(#mpb_ll_response{proj_ga=#mpb_ll_getallprojectionsresp{
+        status=Status, projs=ProjsM}}) ->
+    case Status of
+        'OK' ->
+            {ok, [conv_to_projection_v1(ProjM) || ProjM <- ProjsM]};
+        _ ->
+            machi_pb_high_client:convert_general_status_code(Status)
+    end;
+unmake_projection_resp(#mpb_ll_response{proj_la=#mpb_ll_listallprojectionsresp{
+        status=Status, epochs=Epochs}}) ->
+    case Status of
+        'OK' ->
+            {ok, Epochs};
+        _ ->
+            machi_pb_high_client:convert_general_status_code(Status)
+    end.
 
 %%%%%%%%%%%%%%%%%%%
 
@@ -258,3 +352,19 @@ conv_from_type(public)  -> 'PUBLIC'.
 
 conv_to_type('PRIVATE') -> private;
 conv_to_type('PUBLIC')  -> public.
+
+conv_from_status(ok) ->
+    'OK';
+conv_from_status({error, bad_arg}) ->
+    'BAD_ARG';
+conv_from_status({error, wedged}) ->
+    'WEDGED';
+conv_from_status({error, bad_checksum}) ->
+    'BAD_CHECKSUM';
+conv_from_status({error, partition}) ->
+    'PARTITION';
+conv_from_status({error, not_written}) ->
+    'NOT_WRITTEN';
+conv_from_status(_OOPS) ->
+    io:format(user, "HEY, ~s:~w got ~w\n", [?MODULE, ?LINE, _OOPS]),
+    'BAD_JOSS'.
