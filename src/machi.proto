@@ -31,7 +31,7 @@ option java_outer_classname = "MachiPB";
 
 //////////////////////////////////////////
 //
-// enums
+// Enums
 //
 //////////////////////////////////////////
 
@@ -52,9 +52,14 @@ enum Mpb_CSumType {
      CSUM_TAG_SERVER_REGEN_SHA = 3;
 }
 
+enum Mpb_ProjType {
+     PRIVATE = 20;
+     PUBLIC = 21;
+}
+
 //////////////////////////////////////////
 //
-// basic data types
+// Basic data types
 //
 //////////////////////////////////////////
 
@@ -72,7 +77,7 @@ message Mpb_ChunkCSum {
 }
 
 // epoch_id() type
-message Mpb_EpochId {
+message Mpb_EpochID {
     required uint32 epoch_num = 1;
     required bytes epoch_csum = 2;
 }
@@ -94,7 +99,7 @@ message Mpb_P_Srvr {
 
 //////////////////////////////////////////
 //
-// requests & responses
+// Requests & responses
 //
 //////////////////////////////////////////
 
@@ -108,7 +113,7 @@ message Mpb_ErrorResp {
 
 //////////////////////////////////////////
 //
-// High Level API requests:
+// High level API requests:
 //
 // echo()          : Mpb_EchoReq and Mpb_EchoResp
 // auth()          : Mpb_AuthReq and Mpb_AuthResp
@@ -214,7 +219,7 @@ message Mpb_ListFilesResp {
 
 //////////////////////////////////////////
 //
-// request & response wrapper
+// High level API request & response wrapper
 //
 //////////////////////////////////////////
 
@@ -248,7 +253,7 @@ message Mpb_Response {
     // Generic error response, typically used when something quite
     // bad/unexpected happened within the server.
     // Clients should always check this response and, if defined,
-    // ignroe any request-specific response at codes 10+.
+    // ignore any request-specific response at codes 10+.
     optional Mpb_ErrorResp generic = 2;
 
     // Specific responses.
@@ -259,4 +264,165 @@ message Mpb_Response {
     optional Mpb_ReadChunkResp read_chunk = 14;
     optional Mpb_ChecksumListResp checksum_list = 15;
     optional Mpb_ListFilesResp list_files = 16;
+}
+
+//////////////////////////////////////////
+//
+// Low level API data types
+//
+//////////////////////////////////////////
+
+enum Mpb_Mode {
+    AP_MODE = 30;
+    CP_MODE = 31;
+}
+
+message Mpb_Now {
+    required uint64 sec = 1;
+    required uint32 usec = 2;
+}
+
+message Mpb_MembersDictEntry {
+    required string key = 1;
+    required Mpb_P_Srvr val = 2;
+}
+
+message Mpb_ProjectionV1 {
+    required uint32 epoch_number = 1;
+    required bytes epoch_csum = 2;
+    required string author_server = 3;
+    repeated string all_members = 4;
+    required Mpb_Now creation_time = 5;
+    required Mpb_Mode mode = 6;
+    repeated string upi = 7;
+    repeated string repairing = 8;
+    repeated string down = 9;
+    optional bytes opaque_flap = 10;
+    optional bytes opaque_inner = 11;
+    required bytes opaque_dbg = 12;
+    required bytes opaque_dbg2 = 13;
+    repeated Mpb_MembersDictEntry members_dict = 14;
+}
+
+//////////////////////////////////////////
+//
+// Low level API requests:
+//
+// echo()          : Mpb_EchoReq and Mpb_EchoResp (reused from high level API)
+// auth()          : Mpb_AuthReq and Mpb_AuthResp (reused from high level API)
+// get_latest_epochid()  : Mpb_GetLatestEpochIDReq and Mpb_GetLatestEpochIDResp
+//
+//////////////////////////////////////////
+
+// Low level API: get_latest_epochid() request & response
+
+message Mpb_LL_GetLatestEpochIDReq {
+    required Mpb_ProjType type = 1;
+}
+
+message Mpb_LL_GetLatestEpochIDResp {
+    required uint32 Mpb_GeneralStatusCode = 1;
+    optional Mpb_EpochID epoch_id = 2;
+}
+
+// Low level API: read_latest_projection() request & response
+
+message Mpb_LL_ReadLatestProjectionReq {
+    required Mpb_ProjType type = 1;
+}
+
+message Mpb_LL_ReadLatestProjectionResp {
+    required uint32 Mpb_GeneralStatusCode = 1;
+    optional Mpb_ProjectionV1 proj = 1;
+}
+
+// Low level API: read_projection() request & response
+
+message Mpb_LL_ReadProjectionReq {
+    required Mpb_ProjType type = 1;
+    required uint32 epoch_number = 2;
+}
+
+message Mpb_LL_ReadProjectionResp {
+    required uint32 Mpb_GeneralStatusCode = 1;
+    optional Mpb_ProjectionV1 proj = 2;
+}
+
+// Low level API: write_projection() request & response
+
+message Mpb_LL_WriteProjectionReq {
+    required Mpb_ProjType type = 1;
+    required Mpb_ProjectionV1 proj = 1;
+}
+
+message Mpb_LL_WriteProjectionResp {
+    required uint32 Mpb_GeneralStatusCode = 1;
+}
+
+// Low level API: get_all_projections() request & response
+
+message Mpb_LL_GetAllProjectionsReq {
+    required Mpb_ProjType type = 1;
+}
+
+message Mpb_LL_GetAllProjectionsResp {
+    required uint32 Mpb_GeneralStatusCode = 1;
+    repeated Mpb_ProjectionV1 proj = 2;
+}
+
+// Low level API: list_all_projections() request & response
+
+message Mpb_LL_ListAllProjectionsReq {
+    required Mpb_ProjType type = 1;
+}
+
+message Mpb_LL_ListAllProjectionsResp {
+    required uint32 Mpb_GeneralStatusCode = 1;
+    repeated uint32 epochs = 2;
+}
+
+//////////////////////////////////////////
+//
+// Low API request & response wrapper
+//
+//////////////////////////////////////////
+
+message Mpb_LL_Request {
+    // TODO: If we wish to support pipelined requests sometime in the
+    // future, this is the placeholder to do it.
+    required bytes req_id = 1;
+
+    // The client should only define one request message.  If the client
+    // includes multiple requests here, the server may pick/choose an
+    // arbitrary one.
+    // NOTE: The erlang protobuffs compiler doesn't support 'oneof'.
+    //       But 'oneof' appears to be a very tiny memory optimization
+    //       that not all languages might care about?  (Erlang doesn't)
+    optional Mpb_EchoReq echo = 10; // Re-use from high level API
+    optional Mpb_AuthReq auth = 11; // Re-use from high level API
+    optional Mpb_LL_GetLatestEpochIDReq = 12;
+    optional Mpb_LL_ReadLatestProjectionReq = 13;
+    optional Mpb_LL_ReadProjectionReq = 14;
+    optional Mpb_LL_WriteProjectionReq = 15;
+    optional Mpb_LL_GetAllProjectionsReq = 16;
+    optional Mpb_LL_ListAllProjectionsReq = 17;
+}
+
+message Mpb_LL_Response {
+    // TODO: If we wish to support pipelined requests sometime in the
+    // future, this is the placeholder to do it.
+    required bytes req_id = 1;
+
+    // The server will define only one of the optional responses below.
+
+    // Generic error response, typically used when something quite
+    // bad/unexpected happened within the server.
+    // Clients should always check this response and, if defined,
+    // ignore any request-specific response at codes 10+.
+    optional Mpb_ErrorResp generic = 2;
+
+    // Specific responses.
+    optional Mpb_EchoResp echo = 10; // Re-use from high level API
+    optional Mpb_AuthResp auth = 11; // Re-use from high level API
+    optional Mpb_LL_GetLatestEpochIDResp = 12;
 }

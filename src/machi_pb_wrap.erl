@@ -30,70 +30,131 @@
 -compile(export_all).
 -endif. % TEST
 
-enc_p_srvr(#p_srvr{name=Name,
+enc_p_srvr(P) ->
+    machi_pb:encode_mpb_p_srvr(conv_from_p_srvr(P)).
+
+dec_p_srvr(Bin) ->
+    conv_to_p_srvr(machi_pb:decode_mpb_p_srvr(Bin)).
+
+conv_from_p_srvr(#p_srvr{name=Name,
                    proto_mod=ProtoMod,
                    address=Address,
                    port=Port,
                    props=Props}) ->
-    machi_pb:encode_mpb_p_srvr(#mpb_p_srvr{name=to_list(Name),
-                                           proto_mod=to_list(ProtoMod),
-                                           address=to_list(Address),
-                                           port=to_list(Port),
-                                           props=todo_enc_opaque(Props)}).
+    #mpb_p_srvr{name=to_list(Name),
+                proto_mod=to_list(ProtoMod),
+                address=to_list(Address),
+                port=to_list(Port),
+                props=enc_sexp(Props)}.
 
-dec_p_srvr(Bin) ->
-    #mpb_p_srvr{name=Name,
-                proto_mod=ProtoMod,
-                address=Address,
-                port=Port,
-                props=Props} = machi_pb:decode_mpb_p_srvr(Bin),
+conv_to_p_srvr(#mpb_p_srvr{name=Name,
+                           proto_mod=ProtoMod,
+                           address=Address,
+                           port=Port,
+                           props=Props}) ->
     #p_srvr{name=to_atom(Name),
             proto_mod=to_atom(ProtoMod),
             address=to_list(Address),
             port=to_integer(Port),
-            props=todo_dec_opaque(Props)}.
+            props=dec_sexp(to_list(Props))}.
 
-enc_projection_v1(#projection_v1{dbg=Dbg,
-                                 dbg2=Dbg2,
-                                 members_dict=MembersDict} = P) ->
-    term_to_binary(P#projection_v1{dbg=enc_sexp(Dbg),
-                                   dbg2=enc_sexp(Dbg2),
-                                   members_dict=enc_members_dict(MembersDict)}).
+enc_projection_v1(P) ->
+    %% Awww, flatten it here
+    list_to_binary(
+      machi_pb:encode_mpb_projectionv1(conv_from_projection_v1(P))).
 
 dec_projection_v1(Bin) ->
-    P = #projection_v1{dbg=Dbg,
-                       dbg2=Dbg2,
-                       members_dict=MembersDict} = binary_to_term(Bin),
-    P#projection_v1{dbg=dec_sexp(Dbg),
-                    dbg2=dec_sexp(Dbg2),
-                    members_dict=dec_members_dict(MembersDict)}.
+    conv_to_projection_v1(machi_pb:decode_mpb_projectionv1(Bin)).
+
+conv_from_projection_v1(#projection_v1{epoch_number=Epoch,
+                                       epoch_csum=CSum,
+                                       author_server=Author,
+                                       all_members=AllMembers,
+                                       creation_time=CTime,
+                                       mode=Mode,
+                                       upi=UPI,
+                                       repairing=Repairing,
+                                       down=Down,
+                                       flap=Flap,
+                                       inner=Inner,
+                                       dbg=Dbg,
+                                       dbg2=Dbg2,
+                                       members_dict=MembersDict}) ->
+    #mpb_projectionv1{epoch_number=Epoch,
+                      epoch_csum=CSum,
+                      author_server=to_list(Author),
+                      all_members=[to_list(X) || X <- AllMembers],
+                      creation_time=conv_from_now(CTime),
+                      mode=conv_from_mode(Mode),
+                      upi=[to_list(X) || X <- UPI],
+                      repairing=[to_list(X) || X <- Repairing],
+                      down=[to_list(X) || X <- Down],
+                      opaque_flap=enc_optional_sexp(Flap),
+                      opaque_inner=enc_optional_sexp(Inner),
+                      opaque_dbg=enc_sexp(Dbg),
+                      opaque_dbg2=enc_sexp(Dbg2),
+                      members_dict=conv_from_members_dict(MembersDict)}.
+
+conv_to_projection_v1(#mpb_projectionv1{epoch_number=Epoch,
+                                        epoch_csum=CSum,
+                                        author_server=Author,
+                                        all_members=AllMembers,
+                                        creation_time=CTime,
+                                        mode=Mode,
+                                        upi=UPI,
+                                        repairing=Repairing,
+                                        down=Down,
+                                        opaque_flap=Flap,
+                                        opaque_inner=Inner,
+                                        opaque_dbg=Dbg,
+                                        opaque_dbg2=Dbg2,
+                                        members_dict=MembersDict}) ->
+    #projection_v1{epoch_number=Epoch,
+                   epoch_csum=CSum,
+                   author_server=to_atom(Author),
+                   all_members=[to_atom(X) || X <- AllMembers],
+                   creation_time=conv_to_now(CTime),
+                   mode=conv_to_mode(Mode),
+                   upi=[to_atom(X) || X <- UPI],
+                   repairing=[to_atom(X) || X <- Repairing],
+                   down=[to_atom(X) || X <- Down],
+                   flap=dec_optional_sexp(Flap),
+                   inner=dec_optional_sexp(Inner),
+                   dbg=dec_sexp(Dbg),
+                   dbg2=dec_sexp(Dbg2),
+                   members_dict=conv_to_members_dict(MembersDict)}.
 
 %%%%%%%%%%%%%%%%%%%
 
 enc_sexp(T) ->
     lists:flatten(io_lib:format("~w.", [T])).
 
-dec_sexp(String) ->
+dec_sexp(Bin) when is_binary(Bin) ->
+    dec_sexp(binary_to_list(Bin));
+dec_sexp(String) when is_list(String) ->
     {ok,Tks,_} = erl_scan:string(String),
     {ok,E} = erl_parse:parse_exprs(Tks),
     {value,Funs,_} = erl_eval:exprs(E,[]),
     Funs.
 
-enc_members_dict(D) ->
+enc_optional_sexp(undefined) ->
+    undefined;
+enc_optional_sexp(T) ->
+    enc_sexp(T).
+
+dec_optional_sexp(undefined) ->
+    undefined;
+dec_optional_sexp(T) ->
+    dec_sexp(T).
+
+conv_from_members_dict(D) ->
     %% Use list_to_binary() here to "flatten" the serialized #p_srvr{}
-    [{K, list_to_binary(enc_p_srvr(V))} || {K, V} <- orddict:to_list(D)].
+    [#mpb_membersdictentry{key=to_list(K), val=conv_from_p_srvr(V)} ||
+        {K, V} <- orddict:to_list(D)].
 
-dec_members_dict(List) ->
-    orddict:from_list([{K, dec_p_srvr(V)} || {K, V} <- List]).
-
-to_binary(X) when is_list(X) ->
-    list_to_binary(X);
-to_binary(X) when is_integer(X) ->
-    list_to_binary(integer_to_list(X));
-to_binary(X) when is_atom(X) ->
-    erlang:atom_to_binary(X, latin1);
-to_binary(X) when is_binary(X) ->
-    X.
+conv_to_members_dict(List) ->
+    orddict:from_list([{to_atom(K), conv_to_p_srvr(V)} ||
+                          #mpb_membersdictentry{key=K, val=V} <- List]).
 
 to_list(X) when is_atom(X) ->
     atom_to_list(X);
@@ -118,8 +179,16 @@ to_integer(X) when is_binary(X) ->
 to_integer(X) when is_integer(X) ->
     X.
 
-todo_enc_opaque(X) ->
-    erlang:term_to_binary(X).
+conv_from_now({A,B,C}) ->
+    #mpb_now{sec=(1000000 * A) + B,
+             usec=C}.
 
-todo_dec_opaque(X) ->
-    erlang:binary_to_term(X).
+conv_to_now(#mpb_now{sec=Sec, usec=USec}) ->
+    {Sec div 1000000, Sec rem 1000000, USec}.
+
+conv_from_mode(ap_mode) -> 'AP_MODE';
+conv_from_mode(cp_mode) -> 'CP_MODE'.
+
+conv_to_mode('AP_MODE') -> ap_mode;
+conv_to_mode('CP_MODE') -> cp_mode.
+
