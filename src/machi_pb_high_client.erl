@@ -44,6 +44,7 @@
          checksum_list/2, checksum_list/3,
          list_files/1, list_files/2
         ]).
+-export([convert_general_status_code/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -354,6 +355,8 @@ convert_append_chunk_resp(#mpb_appendchunkresp{status='OK', chunk_pos=CP}) ->
 convert_append_chunk_resp(#mpb_appendchunkresp{status=Status}) ->
     convert_general_status_code(Status).
 
+convert_general_status_code('OK') ->
+    ok;
 convert_general_status_code('BAD_ARG') ->
     {error, bad_arg};
 convert_general_status_code('WEDGED') ->

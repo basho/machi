@@ -19,13 +19,23 @@
 %% under the License.
 %%
 %% -------------------------------------------------------------------
+
+%% @doc Wrappers for Protocol Buffers encoding, including hacks to fix
+%%      impedance mismatches between Erlang terms and PB encodings.
+%%
+%% TODO: Any use of enc_sexp() and dec_sexp() should be eliminated,
+%%       except for the possibility of items where we are 100% sure
+%%       that a non-Erlang software component can get away with always
+%%       treating that item as an opaque thing.
+
 -module(machi_pb_wrap).
 
 -include("machi_pb.hrl").
 -include("machi_projection.hrl").
 
 -export([enc_p_srvr/1, dec_p_srvr/1,
-        enc_projection_v1/1, dec_projection_v1/1]).
+         enc_projection_v1/1, dec_projection_v1/1,
+         make_projection_req/2, unmake_projection_resp/1]).
 -ifdef(TEST).
 -compile(export_all).
 -endif. % TEST
@@ -124,6 +134,57 @@ conv_to_projection_v1(#mpb_projectionv1{epoch_number=Epoch,
                    dbg2=dec_sexp(Dbg2),
                    members_dict=conv_to_members_dict(MembersDict)}.
 
+make_projection_req(ID, {get_latest_epochid, ProjType}) ->
+    #mpb_ll_request{req_id=ID,
+                    proj_gl=#mpb_ll_getlatestepochidreq{type=conv_from_type(ProjType)}};
+make_projection_req(ID, {read_latest_projection, ProjType}) ->
+    #mpb_ll_request{req_id=ID,
+                    proj_rl=#mpb_ll_readlatestprojectionreq{type=conv_from_type(ProjType)}};
+make_projection_req(ID, {read_projection, ProjType, Epoch}) ->
+    #mpb_ll_request{req_id=ID,
+                    proj_rp=#mpb_ll_readprojectionreq{type=conv_from_type(ProjType),
+                                              epoch_number=Epoch}};
+make_projection_req(ID, {write_projection, ProjType, Proj}) ->
+    ProjM = conv_from_projection_v1(Proj),
+    #mpb_ll_request{req_id=ID,
+                    proj_wp=#mpb_ll_writeprojectionreq{type=conv_from_type(ProjType),
+                                               proj=ProjM}};
+make_projection_req(ID, {get_all_projections, ProjType}) ->
+    #mpb_ll_request{req_id=ID,
+                    proj_ga=#mpb_ll_getallprojectionsreq{type=conv_from_type(ProjType)}};
+make_projection_req(ID, {list_all_projections, ProjType}) ->
+    #mpb_ll_request{req_id=ID,
+                    proj_la=#mpb_ll_listallprojectionsreq{type=conv_from_type(ProjType)}}.
+
+unmake_projection_resp(#mpb_ll_response{proj_gl=#mpb_ll_getlatestepochidresp{
+        status=Status, epoch_id=EID}}) ->
+    case Status of
+        'OK' ->
+            #mpb_epochid{epoch_number=Epoch, epoch_csum=CSum} = EID,
+            {ok, {Epoch, CSum}};
+        _ ->
+            machi_pb_high_client:convert_general_status_code(Status)
+    end;
+unmake_projection_resp(#mpb_ll_response{proj_rl=#mpb_ll_readlatestprojectionresp{
+        status=Status, proj=P}}) ->
+    case Status of
+        'OK' ->
+            {ok, conv_to_projection_v1(P)};
+        _ ->
+            machi_pb_high_client:convert_general_status_code(Status)
+    end;
+unmake_projection_resp(#mpb_ll_response{proj_rp=#mpb_ll_readprojectionresp{
+        status=Status, proj=P}}) ->
+    case Status of
+        'OK' ->
+            {ok, conv_to_projection_v1(P)};
+        _ ->
+            machi_pb_high_client:convert_general_status_code(Status)
+    end;
+unmake_projection_resp(#mpb_ll_response{proj_wp=#mpb_ll_writeprojectionresp{
+        status=Status}}) ->
+    machi_pb_high_client:convert_general_status_code(Status).
+
 %%%%%%%%%%%%%%%%%%%
 
 enc_sexp(T) ->
@@ -192,3 +253,8 @@ conv_from_mode(cp_mode) -> 'CP_MODE'.
 conv_to_mode('AP_MODE') -> ap_mode;
 conv_to_mode('CP_MODE') -> cp_mode.
 
+conv_from_type(private) -> 'PRIVATE';
+conv_from_type(public)  -> 'PUBLIC'.
+
+conv_to_type('PRIVATE') -> private;
+conv_to_type('PUBLIC')  -> public.
