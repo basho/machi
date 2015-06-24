@@ -91,7 +91,7 @@ smoke_test2() ->
         end
     after
         exit(SupPid, normal),
-        [os:cmd("rm -rf " ++ P#p_srvr.props) || {_,P} <- Ps],
+        [os:cmd("rm -rf " ++ P#p_srvr.props) || P <- Ps],
         machi_util:wait_for_death(SupPid, 100),
         ok
     end.
