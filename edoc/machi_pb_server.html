@@ -2,37 +2,26 @@
 <html>
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-<title>Module machi_app</title>
+<title>Module machi_pb_server</title>
 <link rel="stylesheet" type="text/css" href="stylesheet.css" title="EDoc">
 </head>
 <body bgcolor="white">
 <div class="navbar"><a name="#navbar_top"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
 <hr>
 
-<h1>Module machi_app</h1>
-<ul class="index"><li><a href="#description">Description</a></li><li><a href="#index">Function Index</a></li><li><a href="#functions">Function Details</a></li></ul>Start the top-level supervisor for the Machi application.
+<h1>Module machi_pb_server</h1>
+<ul class="index"><li><a href="#index">Function Index</a></li><li><a href="#functions">Function Details</a></li></ul>
 
-<p><b>Behaviours:</b> <a href="application.html"><tt>application</tt></a>.</p>
 
-<h2><a name="description">Description</a></h2><p>Start the top-level supervisor for the Machi application.</p>
- 
-  See <a href="machi_flu_psup.html"><code>machi_flu_psup</code></a> for an illustration of the entire Machi
-  application process structure.
 <h2><a name="index">Function Index</a></h2>
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#start-2">start/2</a></td><td></td></tr>
-<tr><td valign="top"><a href="#stop-1">stop/1</a></td><td></td></tr>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#run_loop-2">run_loop/2</a></td><td></td></tr>
 </table>
 
 <h2><a name="functions">Function Details</a></h2>
 
-<h3 class="function"><a name="start-2">start/2</a></h3>
+<h3 class="function"><a name="run_loop-2">run_loop/2</a></h3>
 <div class="spec">
-<p><tt>start(StartType, StartArgs) -&gt; any()</tt></p>
-</div>
-
-<h3 class="function"><a name="stop-1">stop/1</a></h3>
-<div class="spec">
-<p><tt>stop(State) -&gt; any()</tt></p>
+<p><tt>run_loop(Sock, P_srvr_list) -&gt; any()</tt></p>
 </div>
 <hr>
 

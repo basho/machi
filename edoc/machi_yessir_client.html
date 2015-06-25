@@ -10,92 +10,10 @@
 <hr>
 
 <h1>Module machi_yessir_client</h1>
-<ul class="index"><li><a href="#description">Description</a></li><li><a href="#types">Data Types</a></li><li><a href="#index">Function Index</a></li><li><a href="#functions">Function Details</a></li></ul>"Yes, sir!" style dummy/mock client facade.
+<ul class="index"><li><a href="#description">Description</a></li><li><a href="#index">Function Index</a></li><li><a href="#functions">Function Details</a></li></ul>"Yes, sir!" style dummy/mock client facade.
 
 
 <h2><a name="description">Description</a></h2>"Yes, sir!" style dummy/mock client facade.
-<h2><a name="types">Data Types</a></h2>
-
-<h3 class="typedecl"><a name="type-chunk">chunk()</a></h3>
-<p><tt>chunk() = binary() | iolist()</tt></p>
-<p> client can use either</p>
-
-<h3 class="typedecl"><a name="type-chunk_csum">chunk_csum()</a></h3>
-<p><tt>chunk_csum() = {<a href="#type-file_offset">file_offset()</a>, <a href="#type-chunk_size">chunk_size()</a>, binary()}</tt></p>
-
-
-<h3 class="typedecl"><a name="type-chunk_pos">chunk_pos()</a></h3>
-<p><tt>chunk_pos() = {<a href="#type-file_offset">file_offset()</a>, <a href="#type-chunk_size">chunk_size()</a>, <a href="#type-file_name_s">file_name_s()</a>}</tt></p>
-
-
-<h3 class="typedecl"><a name="type-chunk_s">chunk_s()</a></h3>
-<p><tt>chunk_s() = binary()</tt></p>
-<p> server always uses binary()</p>
-
-<h3 class="typedecl"><a name="type-chunk_size">chunk_size()</a></h3>
-<p><tt>chunk_size() = non_neg_integer()</tt></p>
-
-
-<h3 class="typedecl"><a name="type-epoch_csum">epoch_csum()</a></h3>
-<p><tt>epoch_csum() = binary()</tt></p>
-
-
-<h3 class="typedecl"><a name="type-epoch_id">epoch_id()</a></h3>
-<p><tt>epoch_id() = {<a href="#type-epoch_num">epoch_num()</a>, <a href="#type-epoch_csum">epoch_csum()</a>}</tt></p>
-
-
-<h3 class="typedecl"><a name="type-epoch_num">epoch_num()</a></h3>
-<p><tt>epoch_num() = -1 | non_neg_integer()</tt></p>
-
-
-<h3 class="typedecl"><a name="type-error_general">error_general()</a></h3>
-<p><tt>error_general() = bad_arg | wedged</tt></p>
-
-
-<h3 class="typedecl"><a name="type-file_info">file_info()</a></h3>
-<p><tt>file_info() = {<a href="#type-file_size">file_size()</a>, <a href="#type-file_name_s">file_name_s()</a>}</tt></p>
-
-
-<h3 class="typedecl"><a name="type-file_name">file_name()</a></h3>
-<p><tt>file_name() = binary() | list()</tt></p>
-
-
-<h3 class="typedecl"><a name="type-file_name_s">file_name_s()</a></h3>
-<p><tt>file_name_s() = binary()</tt></p>
-<p> server reply</p>
-
-<h3 class="typedecl"><a name="type-file_offset">file_offset()</a></h3>
-<p><tt>file_offset() = non_neg_integer()</tt></p>
-
-
-<h3 class="typedecl"><a name="type-file_prefix">file_prefix()</a></h3>
-<p><tt>file_prefix() = binary() | list()</tt></p>
-
-
-<h3 class="typedecl"><a name="type-file_size">file_size()</a></h3>
-<p><tt>file_size() = non_neg_integer()</tt></p>
-
-
-<h3 class="typedecl"><a name="type-inet_host">inet_host()</a></h3>
-<p><tt>inet_host() = <a href="inet.html#type-ip_address">inet:ip_address()</a> | <a href="inet.html#type-hostname">inet:hostname()</a></tt></p>
-
-
-<h3 class="typedecl"><a name="type-inet_port">inet_port()</a></h3>
-<p><tt>inet_port() = <a href="inet.html#type-port_number">inet:port_number()</a></tt></p>
-
-
-<h3 class="typedecl"><a name="type-port_wrap">port_wrap()</a></h3>
-<p><tt>port_wrap() = {w, atom(), term()}</tt></p>
-
-
-<h3 class="typedecl"><a name="type-projection">projection()</a></h3>
-<p><tt>projection() = #projection_v1{}</tt></p>
-
-
-<h3 class="typedecl"><a name="type-projection_type">projection_type()</a></h3>
-<p><tt>projection_type() = public | private</tt></p>
-
-
 <h2><a name="index">Function Index</a></h2>
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#append_chunk-4">append_chunk/4</a></td><td>Append a chunk (binary- or iolist-style) of data to a file
   with <code>Prefix</code>.</td></tr>
@@ -147,19 +65,19 @@
 
 <h3 class="function"><a name="append_chunk-4">append_chunk/4</a></h3>
 <div class="spec">
-<p><tt>append_chunk(Sock::<a href="#type-port_wrap">port_wrap()</a>, EpochID::<a href="#type-epoch_id">epoch_id()</a>, Prefix::<a href="#type-file_prefix">file_prefix()</a>, Chunk::<a href="#type-chunk">chunk()</a>) -&gt; {ok, <a href="#type-chunk_pos">chunk_pos()</a>} | {error, <a href="#type-error_general">error_general()</a>} | {error, term()}</tt><br></p>
+<p><tt>append_chunk(Sock, EpochID, Prefix, Chunk) -&gt; any()</tt></p>
 </div><p>Append a chunk (binary- or iolist-style) of data to a file
   with <code>Prefix</code>.</p>
 
 <h3 class="function"><a name="append_chunk-5">append_chunk/5</a></h3>
 <div class="spec">
-<p><tt>append_chunk(Host::<a href="#type-inet_host">inet_host()</a>, TcpPort::<a href="#type-inet_port">inet_port()</a>, EpochID::<a href="#type-epoch_id">epoch_id()</a>, Prefix::<a href="#type-file_prefix">file_prefix()</a>, Chunk::<a href="#type-chunk">chunk()</a>) -&gt; {ok, <a href="#type-chunk_pos">chunk_pos()</a>} | {error, <a href="#type-error_general">error_general()</a>} | {error, term()}</tt><br></p>
+<p><tt>append_chunk(Host, TcpPort, EpochID, Prefix, Chunk) -&gt; any()</tt></p>
 </div><p>Append a chunk (binary- or iolist-style) of data to a file
   with <code>Prefix</code>.</p>
 
 <h3 class="function"><a name="append_chunk_extra-5">append_chunk_extra/5</a></h3>
 <div class="spec">
-<p><tt>append_chunk_extra(Yessir::<a href="#type-port_wrap">port_wrap()</a>, EpochID::<a href="#type-epoch_id">epoch_id()</a>, Prefix::<a href="#type-file_prefix">file_prefix()</a>, Chunk::<a href="#type-chunk">chunk()</a>, ChunkExtra::<a href="#type-chunk_size">chunk_size()</a>) -&gt; {ok, <a href="#type-chunk_pos">chunk_pos()</a>} | {error, <a href="#type-error_general">error_general()</a>} | {error, term()}</tt><br></p>
+<p><tt>append_chunk_extra(Yessir, EpochID, Prefix, Chunk, ChunkExtra) -&gt; any()</tt></p>
 </div><p><p>Append a chunk (binary- or iolist-style) of data to a file
   with <code>Prefix</code> and also request an additional <code>Extra</code> bytes.</p>
  
@@ -170,7 +88,7 @@
 
 <h3 class="function"><a name="append_chunk_extra-6">append_chunk_extra/6</a></h3>
 <div class="spec">
-<p><tt>append_chunk_extra(Host::<a href="#type-inet_host">inet_host()</a>, TcpPort::<a href="#type-inet_port">inet_port()</a>, EpochID::<a href="#type-epoch_id">epoch_id()</a>, Prefix::<a href="#type-file_prefix">file_prefix()</a>, Chunk::<a href="#type-chunk">chunk()</a>, ChunkExtra::<a href="#type-chunk_size">chunk_size()</a>) -&gt; {ok, <a href="#type-chunk_pos">chunk_pos()</a>} | {error, <a href="#type-error_general">error_general()</a>} | {error, term()}</tt><br></p>
+<p><tt>append_chunk_extra(Host, TcpPort, EpochID, Prefix, Chunk, ChunkExtra) -&gt; any()</tt></p>
 </div><p><p>Append a chunk (binary- or iolist-style) of data to a file
   with <code>Prefix</code> and also request an additional <code>Extra</code> bytes.</p>
  
@@ -181,12 +99,12 @@
 
 <h3 class="function"><a name="checksum_list-3">checksum_list/3</a></h3>
 <div class="spec">
-<p><tt>checksum_list(Yessir::<a href="#type-port_wrap">port_wrap()</a>, EpochID::<a href="#type-epoch_id">epoch_id()</a>, File::<a href="#type-file_name">file_name()</a>) -&gt; {ok, [<a href="#type-chunk_csum">chunk_csum()</a>]} | {error, <a href="#type-error_general">error_general()</a> | no_such_file | partial_read} | {error, term()}</tt><br></p>
+<p><tt>checksum_list(Yessir, EpochID, File) -&gt; any()</tt></p>
 </div><p>Fetch the list of chunk checksums for <code>File</code>.</p>
 
 <h3 class="function"><a name="checksum_list-4">checksum_list/4</a></h3>
 <div class="spec">
-<p><tt>checksum_list(Host::<a href="#type-inet_host">inet_host()</a>, TcpPort::<a href="#type-inet_port">inet_port()</a>, EpochID::<a href="#type-epoch_id">epoch_id()</a>, File::<a href="#type-file_name">file_name()</a>) -&gt; {ok, [<a href="#type-chunk_csum">chunk_csum()</a>]} | {error, <a href="#type-error_general">error_general()</a> | no_such_file} | {error, term()}</tt><br></p>
+<p><tt>checksum_list(Host, TcpPort, EpochID, File) -&gt; any()</tt></p>
 </div><p>Fetch the list of chunk checksums for <code>File</code>.</p>
 
 <h3 class="function"><a name="connect-1">connect/1</a></h3>
@@ -201,13 +119,13 @@
 
 <h3 class="function"><a name="delete_migration-3">delete_migration/3</a></h3>
 <div class="spec">
-<p><tt>delete_migration(Yessir::<a href="#type-port_wrap">port_wrap()</a>, EpochID::<a href="#type-epoch_id">epoch_id()</a>, File::<a href="#type-file_name">file_name()</a>) -&gt; ok | {error, <a href="#type-error_general">error_general()</a> | no_such_file} | {error, term()}</tt><br></p>
+<p><tt>delete_migration(Yessir, EpochID, File) -&gt; any()</tt></p>
 </div><p>Restricted API: Delete a file after it has been successfully
   migrated.</p>
 
 <h3 class="function"><a name="delete_migration-4">delete_migration/4</a></h3>
 <div class="spec">
-<p><tt>delete_migration(Host::<a href="#type-inet_host">inet_host()</a>, TcpPort::<a href="#type-inet_port">inet_port()</a>, EpochID::<a href="#type-epoch_id">epoch_id()</a>, File::<a href="#type-file_name">file_name()</a>) -&gt; ok | {error, <a href="#type-error_general">error_general()</a> | no_such_file} | {error, term()}</tt><br></p>
+<p><tt>delete_migration(Host, TcpPort, EpochID, File) -&gt; any()</tt></p>
 </div><p>Restricted API: Delete a file after it has been successfully
   migrated.</p>
 
@@ -218,125 +136,125 @@
 
 <h3 class="function"><a name="get_all_projections-2">get_all_projections/2</a></h3>
 <div class="spec">
-<p><tt>get_all_projections(Yessir::<a href="#type-port_wrap">port_wrap()</a>, ProjType::<a href="#type-projection_type">projection_type()</a>) -&gt; {ok, [<a href="#type-projection">projection()</a>]} | {error, term()}</tt><br></p>
+<p><tt>get_all_projections(Yessir, ProjType) -&gt; any()</tt></p>
 </div><p>Get all projections from the FLU's projection store.</p>
 
 <h3 class="function"><a name="get_all_projections-3">get_all_projections/3</a></h3>
 <div class="spec">
-<p><tt>get_all_projections(Host::<a href="#type-inet_host">inet_host()</a>, TcpPort::<a href="#type-inet_port">inet_port()</a>, ProjType::<a href="#type-projection_type">projection_type()</a>) -&gt; {ok, [<a href="#type-projection">projection()</a>]} | {error, term()}</tt><br></p>
+<p><tt>get_all_projections(Host, TcpPort, ProjType) -&gt; any()</tt></p>
 </div><p>Get all projections from the FLU's projection store.</p>
 
 <h3 class="function"><a name="get_latest_epoch-2">get_latest_epoch/2</a></h3>
 <div class="spec">
-<p><tt>get_latest_epoch(Sock::<a href="#type-port_wrap">port_wrap()</a>, ProjType::<a href="#type-projection_type">projection_type()</a>) -&gt; {ok, <a href="#type-epoch_id">epoch_id()</a>} | {error, term()}</tt><br></p>
+<p><tt>get_latest_epoch(Sock, ProjType) -&gt; any()</tt></p>
 </div><p>Get the latest epoch number + checksum from the FLU's projection store.</p>
 
 <h3 class="function"><a name="get_latest_epoch-3">get_latest_epoch/3</a></h3>
 <div class="spec">
-<p><tt>get_latest_epoch(Host::<a href="#type-inet_host">inet_host()</a>, TcpPort::<a href="#type-inet_port">inet_port()</a>, ProjType::<a href="#type-projection_type">projection_type()</a>) -&gt; {ok, <a href="#type-epoch_id">epoch_id()</a>} | {error, term()}</tt><br></p>
+<p><tt>get_latest_epoch(Host, TcpPort, ProjType) -&gt; any()</tt></p>
 </div><p>Get the latest epoch number + checksum from the FLU's projection store.</p>
 
 <h3 class="function"><a name="list_all_projections-2">list_all_projections/2</a></h3>
 <div class="spec">
-<p><tt>list_all_projections(Sock::<a href="#type-port_wrap">port_wrap()</a>, ProjType::<a href="#type-projection_type">projection_type()</a>) -&gt; {ok, [non_neg_integer()]} | {error, term()}</tt><br></p>
+<p><tt>list_all_projections(Sock, ProjType) -&gt; any()</tt></p>
 </div><p>Get all epoch numbers from the FLU's projection store.</p>
 
 <h3 class="function"><a name="list_all_projections-3">list_all_projections/3</a></h3>
 <div class="spec">
-<p><tt>list_all_projections(Host::<a href="#type-inet_host">inet_host()</a>, TcpPort::<a href="#type-inet_port">inet_port()</a>, ProjType::<a href="#type-projection_type">projection_type()</a>) -&gt; {ok, [non_neg_integer()]} | {error, term()}</tt><br></p>
+<p><tt>list_all_projections(Host, TcpPort, ProjType) -&gt; any()</tt></p>
 </div><p>Get all epoch numbers from the FLU's projection store.</p>
 
 <h3 class="function"><a name="list_files-2">list_files/2</a></h3>
 <div class="spec">
-<p><tt>list_files(Yessir::<a href="#type-port_wrap">port_wrap()</a>, EpochID::<a href="#type-epoch_id">epoch_id()</a>) -&gt; {ok, [<a href="#type-file_info">file_info()</a>]} | {error, term()}</tt><br></p>
+<p><tt>list_files(Yessir, EpochID) -&gt; any()</tt></p>
 </div><p>Fetch the list of all files on the remote FLU.</p>
 
 <h3 class="function"><a name="list_files-3">list_files/3</a></h3>
 <div class="spec">
-<p><tt>list_files(Host::<a href="#type-inet_host">inet_host()</a>, TcpPort::<a href="#type-inet_port">inet_port()</a>, EpochID::<a href="#type-epoch_id">epoch_id()</a>) -&gt; {ok, [<a href="#type-file_info">file_info()</a>]} | {error, term()}</tt><br></p>
+<p><tt>list_files(Host, TcpPort, EpochID) -&gt; any()</tt></p>
 </div><p>Fetch the list of all files on the remote FLU.</p>
 
 <h3 class="function"><a name="quit-1">quit/1</a></h3>
 <div class="spec">
-<p><tt>quit(X1::<a href="#type-port_wrap">port_wrap()</a>) -&gt; ok</tt><br></p>
+<p><tt>quit(X1) -&gt; any()</tt></p>
 </div><p>Quit &amp; close the connection to remote FLU.</p>
 
 <h3 class="function"><a name="read_chunk-5">read_chunk/5</a></h3>
 <div class="spec">
-<p><tt>read_chunk(Yessir::<a href="#type-port_wrap">port_wrap()</a>, EpochID::<a href="#type-epoch_id">epoch_id()</a>, File::<a href="#type-file_name">file_name()</a>, Offset::<a href="#type-file_offset">file_offset()</a>, Size::<a href="#type-chunk_size">chunk_size()</a>) -&gt; {ok, <a href="#type-chunk_s">chunk_s()</a>} | {error, <a href="#type-error_general">error_general()</a> | no_such_file | partial_read} | {error, term()}</tt><br></p>
+<p><tt>read_chunk(Yessir, EpochID, File, Offset, Size) -&gt; any()</tt></p>
 </div><p>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</p>
 
 <h3 class="function"><a name="read_chunk-6">read_chunk/6</a></h3>
 <div class="spec">
-<p><tt>read_chunk(Host::<a href="#type-inet_host">inet_host()</a>, TcpPort::<a href="#type-inet_port">inet_port()</a>, EpochID::<a href="#type-epoch_id">epoch_id()</a>, File::<a href="#type-file_name">file_name()</a>, Offset::<a href="#type-file_offset">file_offset()</a>, Size::<a href="#type-chunk_size">chunk_size()</a>) -&gt; {ok, <a href="#type-chunk_s">chunk_s()</a>} | {error, <a href="#type-error_general">error_general()</a> | no_such_file | partial_read} | {error, term()}</tt><br></p>
+<p><tt>read_chunk(Host, TcpPort, EpochID, File, Offset, Size) -&gt; any()</tt></p>
 </div><p>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</p>
 
 <h3 class="function"><a name="read_latest_projection-2">read_latest_projection/2</a></h3>
 <div class="spec">
-<p><tt>read_latest_projection(Yessir::<a href="#type-port_wrap">port_wrap()</a>, ProjType::<a href="#type-projection_type">projection_type()</a>) -&gt; {ok, <a href="#type-projection">projection()</a>} | {error, not_written} | {error, term()}</tt><br></p>
+<p><tt>read_latest_projection(Yessir, ProjType) -&gt; any()</tt></p>
 </div><p>Get the latest projection from the FLU's projection store for <code>ProjType</code></p>
 
 <h3 class="function"><a name="read_latest_projection-3">read_latest_projection/3</a></h3>
 <div class="spec">
-<p><tt>read_latest_projection(Host::<a href="#type-inet_host">inet_host()</a>, TcpPort::<a href="#type-inet_port">inet_port()</a>, ProjType::<a href="#type-projection_type">projection_type()</a>) -&gt; {ok, <a href="#type-projection">projection()</a>} | {error, not_written} | {error, term()}</tt><br></p>
+<p><tt>read_latest_projection(Host, TcpPort, ProjType) -&gt; any()</tt></p>
 </div><p>Get the latest projection from the FLU's projection store for <code>ProjType</code></p>
 
 <h3 class="function"><a name="read_projection-3">read_projection/3</a></h3>
 <div class="spec">
-<p><tt>read_projection(Yessir::<a href="#type-port_wrap">port_wrap()</a>, ProjType::<a href="#type-projection_type">projection_type()</a>, Epoch::<a href="#type-epoch_num">epoch_num()</a>) -&gt; {ok, <a href="#type-projection">projection()</a>} | {error, not_written} | {error, term()}</tt><br></p>
+<p><tt>read_projection(Yessir, ProjType, Epoch) -&gt; any()</tt></p>
 </div><p>Read a projection <code>Proj</code> of type <code>ProjType</code>.</p>
 
 <h3 class="function"><a name="read_projection-4">read_projection/4</a></h3>
 <div class="spec">
-<p><tt>read_projection(Host::<a href="#type-inet_host">inet_host()</a>, TcpPort::<a href="#type-inet_port">inet_port()</a>, ProjType::<a href="#type-projection_type">projection_type()</a>, Epoch::<a href="#type-epoch_num">epoch_num()</a>) -&gt; {ok, <a href="#type-projection">projection()</a>} | {error, written} | {error, term()}</tt><br></p>
+<p><tt>read_projection(Host, TcpPort, ProjType, Epoch) -&gt; any()</tt></p>
 </div><p>Read a projection <code>Proj</code> of type <code>ProjType</code>.</p>
 
 <h3 class="function"><a name="trunc_hack-3">trunc_hack/3</a></h3>
 <div class="spec">
-<p><tt>trunc_hack(Yessir::<a href="#type-port_wrap">port_wrap()</a>, EpochID::<a href="#type-epoch_id">epoch_id()</a>, File::<a href="#type-file_name">file_name()</a>) -&gt; ok | {error, <a href="#type-error_general">error_general()</a> | no_such_file} | {error, term()}</tt><br></p>
+<p><tt>trunc_hack(Yessir, EpochID, File) -&gt; any()</tt></p>
 </div><p>Restricted API: Truncate a file after it has been successfully
   erasure coded.</p>
 
 <h3 class="function"><a name="trunc_hack-4">trunc_hack/4</a></h3>
 <div class="spec">
-<p><tt>trunc_hack(Host::<a href="#type-inet_host">inet_host()</a>, TcpPort::<a href="#type-inet_port">inet_port()</a>, EpochID::<a href="#type-epoch_id">epoch_id()</a>, File::<a href="#type-file_name">file_name()</a>) -&gt; ok | {error, <a href="#type-error_general">error_general()</a> | no_such_file} | {error, term()}</tt><br></p>
+<p><tt>trunc_hack(Host, TcpPort, EpochID, File) -&gt; any()</tt></p>
 </div><p>Restricted API: Truncate a file after it has been successfully
   erasure coded.</p>
 
 <h3 class="function"><a name="wedge_status-1">wedge_status/1</a></h3>
 <div class="spec">
-<p><tt>wedge_status(Sock::<a href="#type-port_wrap">port_wrap()</a>) -&gt; {ok, {boolean(), <a href="#type-pv1_epoch">pv1_epoch()</a>}} | {error, term()}</tt><br></p>
+<p><tt>wedge_status(Sock) -&gt; any()</tt></p>
 </div><p>Fetch the wedge status from the remote FLU.</p>
 
 <h3 class="function"><a name="wedge_status-2">wedge_status/2</a></h3>
 <div class="spec">
-<p><tt>wedge_status(Host::<a href="#type-inet_host">inet_host()</a>, TcpPort::<a href="#type-inet_port">inet_port()</a>) -&gt; {ok, {boolean(), <a href="#type-pv1_epoch">pv1_epoch()</a>}} | {error, term()}</tt><br></p>
+<p><tt>wedge_status(Host, TcpPort) -&gt; any()</tt></p>
 </div><p>Fetch the wedge status from the remote FLU.</p>
 
 <h3 class="function"><a name="write_chunk-5">write_chunk/5</a></h3>
 <div class="spec">
-<p><tt>write_chunk(Yessir::<a href="#type-port_wrap">port_wrap()</a>, EpochID::<a href="#type-epoch_id">epoch_id()</a>, File::<a href="#type-file_name">file_name()</a>, Offset::<a href="#type-file_offset">file_offset()</a>, Chunk::<a href="#type-chunk">chunk()</a>) -&gt; ok | {error, <a href="#type-error_general">error_general()</a>} | {error, term()}</tt><br></p>
+<p><tt>write_chunk(Yessir, EpochID, File, Offset, Chunk) -&gt; any()</tt></p>
 </div><p>Restricted API: Write a chunk of already-sequenced data to
   <code>File</code> at <code>Offset</code>.</p>
 
 <h3 class="function"><a name="write_chunk-6">write_chunk/6</a></h3>
 <div class="spec">
-<p><tt>write_chunk(Host::<a href="#type-inet_host">inet_host()</a>, TcpPort::<a href="#type-inet_port">inet_port()</a>, EpochID::<a href="#type-epoch_id">epoch_id()</a>, File::<a href="#type-file_name">file_name()</a>, Offset::<a href="#type-file_offset">file_offset()</a>, Chunk::<a href="#type-chunk">chunk()</a>) -&gt; ok | {error, <a href="#type-error_general">error_general()</a>} | {error, term()}</tt><br></p>
+<p><tt>write_chunk(Host, TcpPort, EpochID, File, Offset, Chunk) -&gt; any()</tt></p>
 </div><p>Restricted API: Write a chunk of already-sequenced data to
   <code>File</code> at <code>Offset</code>.</p>
 
 <h3 class="function"><a name="write_projection-3">write_projection/3</a></h3>
 <div class="spec">
-<p><tt>write_projection(Yessir::<a href="#type-port_wrap">port_wrap()</a>, ProjType::<a href="#type-projection_type">projection_type()</a>, Proj::<a href="#type-projection">projection()</a>) -&gt; ok | {error, written} | {error, term()}</tt><br></p>
+<p><tt>write_projection(Yessir, ProjType, Proj) -&gt; any()</tt></p>
 </div><p>Write a projection <code>Proj</code> of type <code>ProjType</code>.</p>
 
 <h3 class="function"><a name="write_projection-4">write_projection/4</a></h3>
 <div class="spec">
-<p><tt>write_projection(Host::<a href="#type-inet_host">inet_host()</a>, TcpPort::<a href="#type-inet_port">inet_port()</a>, ProjType::<a href="#type-projection_type">projection_type()</a>, Proj::<a href="#type-projection">projection()</a>) -&gt; ok | {error, written} | {error, term()}</tt><br></p>
+<p><tt>write_projection(Host, TcpPort, ProjType, Proj) -&gt; any()</tt></p>
 </div><p>Write a projection <code>Proj</code> of type <code>ProjType</code>.</p>
 <hr>
 
 <div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
-<p><i>Generated by EDoc, May 20 2015, 12:58:33.</i></p>
+<p><i>Generated by EDoc, Jun 25 2015, 16:39:10.</i></p>
 </body>
 </html>
