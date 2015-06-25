@@ -56,13 +56,13 @@ conv_from_p_srvr(#p_srvr{name=Name,
                 proto_mod=to_list(ProtoMod),
                 address=to_list(Address),
                 port=to_list(Port),
-                props=enc_sexp(Props)}.
+                opaque_props=enc_sexp(Props)}.
 
 conv_to_p_srvr(#mpb_p_srvr{name=Name,
                            proto_mod=ProtoMod,
                            address=Address,
                            port=Port,
-                           props=Props}) ->
+                           opaque_props=Props}) ->
     #p_srvr{name=to_atom(Name),
             proto_mod=to_atom(ProtoMod),
             address=to_list(Address),

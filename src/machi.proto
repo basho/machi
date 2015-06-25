@@ -96,7 +96,7 @@ message Mpb_P_Srvr {
     required string proto_mod = 2;
     required string address = 3;
     required string port = 4;
-    required bytes props = 5;
+    required bytes opaque_props = 5;
 }
 
 //////////////////////////////////////////

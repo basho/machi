@@ -210,5 +210,42 @@ bad_checksum_test() ->
         ok = ?FLU:stop(FLU1)
     end.
 
+%% The purpose of timing_pb_encoding_test_ and timing_bif_encoding_test_ is
+%% to show the relative speed of the PB encoding of something like a
+%% projection store command is about 35x slower than simply using the Erlang
+%% BIFs term_to_binary() and binary_to_term().  We try to do enough work, at
+%% least a couple of seconds, so that any dynamic CPU voltage adjustment
+%% might kick into highest speed, in theory.
+
+timing_pb_encoding_test_() ->
+    {timeout, 60, fun() -> timing_pb_encoding_test2() end}.
+
+timing_pb_encoding_test2() ->
+    P_a = #p_srvr{name=a, address="localhost", port=4321},
+    P1 = machi_projection:new(1, a, [P_a], [], [a], [], []),
+    DoIt1 = fun() ->
+                    Req = machi_pb_wrap:make_projection_req(
+                            <<1,2,3,4>>, {write_projection, public, P1}),
+                    Bin = list_to_binary(machi_pb:encode_mpb_ll_request(Req)),
+                    ZZ = machi_pb:decode_mpb_ll_request(Bin),
+                    _ = machi_pb_wrap:unmake_projection_req(ZZ)
+            end,
+    XX = lists:seq(1,30*1000),
+    erlang:garbage_collect(),
+    RUN1 = timer:tc(fun() -> begin [_ = DoIt1() || _ <- XX], ok end end),
+    erlang:garbage_collect(),
+
+    DoIt2 = fun() ->
+                   Req = term_to_binary({
+                           <<1,2,3,4>>, {write_projection, public, P1}}),
+                   _ = binary_to_term(Req)
+           end,
+    erlang:garbage_collect(),
+    RUN2 = timer:tc(fun() -> begin [_ = DoIt2() || _ <- XX], ok end end),
+    erlang:garbage_collect(),
+    Factor = (element(1, RUN1) / element(1, RUN2)),
+    io:format(user, " speed factor=~.2f ", [Factor]),
+    ok.
+
 -endif. % !PULSE
 -endif. % TEST
