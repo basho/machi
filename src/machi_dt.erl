@@ -34,7 +34,7 @@
 -type epoch_num()   :: -1 | non_neg_integer().
 -type epoch_id()    :: {epoch_num(), epoch_csum()}.
 -type file_info()   :: {file_size(), file_name_s()}.
--type file_name()   :: float().%%%binary() | list().
+-type file_name()   :: binary() | list().
 -type file_name_s() :: binary().                % server reply
 -type file_offset() :: non_neg_integer().
 -type file_size()   :: non_neg_integer().
