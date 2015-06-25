@@ -335,7 +335,7 @@ message Mpb_LL_ReadLatestProjectionReq {
 
 message Mpb_LL_ReadLatestProjectionResp {
     required Mpb_GeneralStatusCode status = 1;
-    optional Mpb_ProjectionV1 proj = 1;
+    optional Mpb_ProjectionV1 proj = 2;
 }
 
 // Low level API: read_projection() request & response

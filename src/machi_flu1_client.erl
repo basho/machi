@@ -835,7 +835,6 @@ do_projection_common(Sock, Req) ->
     erase(bad_sock),
     try
         ReqBin = list_to_binary(machi_pb:encode_mpb_ll_request(Req)),
-io:format(user, "\nTrying: ~p\n", [machi_pb:decode_mpb_ll_request(ReqBin)]),
         Len = iolist_size(ReqBin),
         true = (Len =< ?MAX_CHUNK_SIZE),
         LenHex = machi_util:int_to_hexbin(Len, 32),
