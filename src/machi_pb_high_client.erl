@@ -73,7 +73,7 @@ echo(PidSpec, String, Timeout) ->
     send_sync(PidSpec, {echo, String}, Timeout).
 
 %% TODO: auth() is not implemented.  Auth requires SSL, and this client
-%% doesn't support SSL yet.  This is just a placeholder & reminder.
+%% doesn't support SSL yet.  This is just a placeholder and reminder.
 
 auth(PidSpec, User, Pass) ->
     auth(PidSpec, User, Pass, ?DEFAULT_TIMEOUT).
