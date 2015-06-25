@@ -802,38 +802,44 @@ trunc_hack2(Sock, EpochID, File) ->
     end.
 
 get_latest_epochid2(Sock, ProjType) ->
-    ProjCmd = {get_latest_epochid, ProjType},
-    do_projection_common(Sock, ProjCmd).
+    Req = machi_pb_wrap:make_projection_req(
+                <<42>>, {get_latest_epochid, ProjType}),
+    do_projection_common(Sock, Req).
 
 read_latest_projection2(Sock, ProjType) ->
-    ProjCmd = {read_latest_projection, ProjType},
-    do_projection_common(Sock, ProjCmd).
+    Req = machi_pb_wrap:make_projection_req(
+                <<42>>, {read_latest_projection, ProjType}),
+    do_projection_common(Sock, Req).
 
 read_projection2(Sock, ProjType, Epoch) ->
-    ProjCmd = {read_projection, ProjType, Epoch},
-    do_projection_common(Sock, ProjCmd).
+    Req = machi_pb_wrap:make_projection_req(
+                <<42>>, {read_projection, ProjType, Epoch}),
+    do_projection_common(Sock, Req).
 
 write_projection2(Sock, ProjType, Proj) ->
-    ProjCmd = {write_projection, ProjType, Proj},
-    do_projection_common(Sock, ProjCmd).
+    Req = machi_pb_wrap:make_projection_req(
+                <<42>>, {write_projection, ProjType, Proj}),
+    do_projection_common(Sock, Req).
 
 get_all_projections2(Sock, ProjType) ->
-    ProjCmd = {get_all_projections, ProjType},
-    do_projection_common(Sock, ProjCmd).
+    Req = machi_pb_wrap:make_projection_req(
+                <<42>>, {get_all_projections, ProjType}),
+    do_projection_common(Sock, Req).
 
 list_all_projections2(Sock, ProjType) ->
-    ProjCmd = {list_all_projections, ProjType},
-    do_projection_common(Sock, ProjCmd).
+    Req = machi_pb_wrap:make_projection_req(
+                <<42>>, {list_all_projections, ProjType}),
+    do_projection_common(Sock, Req).
 
-do_projection_common(Sock, ProjCmd) ->
+do_projection_common(Sock, Req) ->
     erase(bad_sock),
     try
-        ProjCmdBin = term_to_binary(ProjCmd),
-        Len = iolist_size(ProjCmdBin),
+        ReqBin = list_to_binary(machi_pb:encode_mpb_ll_request(Req)),
+        Len = iolist_size(ReqBin),
         true = (Len =< ?MAX_CHUNK_SIZE),
         LenHex = machi_util:int_to_hexbin(Len, 32),
         Cmd = [<<"PROJ ">>, LenHex, <<"\n">>],
-        ok = w_send(Sock, [Cmd, ProjCmdBin]),
+        ok = w_send(Sock, [Cmd, ReqBin]),
         ok = w_setopts(Sock, [{packet, line}]),
         case w_recv(Sock, 0) of
             {ok, Line} ->
@@ -841,9 +847,10 @@ do_projection_common(Sock, ProjCmd) ->
                     <<"OK ", ResLenHex:8/binary, "\n">> ->
                         ResLen = machi_util:hexstr_to_int(ResLenHex),
                         ok = w_setopts(Sock, [{packet, raw}]),
-                        {ok, ResBin} = w_recv(Sock, ResLen),
+                        {ok, RespBin} = w_recv(Sock, ResLen),
                         ok = w_setopts(Sock, [{packet, line}]),
-                        binary_to_term(ResBin);
+                        Resp = machi_pb:decode_mpb_ll_response(RespBin),
+                        machi_pb_wrap:unmake_projection_resp(Resp);
                     Else ->
                         {error, Else}
                 end

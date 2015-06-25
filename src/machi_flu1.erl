@@ -864,11 +864,14 @@ do_projection_command(Sock, LenHex, S) ->
         ok = inet:setopts(Sock, [{packet, raw}]),
         {ok, ProjCmdBin} = gen_tcp:recv(Sock, Len),
         ok = inet:setopts(Sock, [{packet, line}]),
-        ProjCmd = binary_to_term(ProjCmdBin),
+        ProjCmdM = machi_pb:decode_mpb_ll_request(ProjCmdBin),
+        {ID, ProjCmd} = machi_pb_wrap:unmake_projection_req(ProjCmdM),
+        ProjOp = element(1, ProjCmd),
         put(hack, ProjCmd),
         Res = handle_projection_command(ProjCmd, S),
-        ResBin = term_to_binary(Res),
-        ResLenHex = machi_util:int_to_hexbin(byte_size(ResBin), 32),
+        ResM = machi_pb_wrap:make_projection_resp(ID, ProjOp, Res),
+        ResBin = machi_pb:encode_mpb_ll_response(ResM),
+        ResLenHex = machi_util:int_to_hexbin(iolist_size(ResBin), 32),
         ok = gen_tcp:send(Sock, [<<"OK ">>, ResLenHex, <<"\n">>, ResBin])
     catch
         What:Why ->
@@ -896,9 +899,7 @@ handle_projection_command({get_all_projections, ProjType},
     machi_projection_store:get_all_projections(ProjStore, ProjType);
 handle_projection_command({list_all_projections, ProjType},
                           #state{proj_store=ProjStore}) ->
-    machi_projection_store:list_all_projections(ProjStore, ProjType);
-handle_projection_command(Else, _S) ->
-    {error, unknown_cmd, Else}.
+    machi_projection_store:list_all_projections(ProjStore, ProjType).
 
 make_listener_regname(BaseName) ->
     list_to_atom(atom_to_list(BaseName) ++ "_listener").

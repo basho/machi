@@ -22,6 +22,7 @@
 -module(machi_pb_test).
 
 -include("machi_pb.hrl").
+-include("machi_projection.hrl").
 
 -compile(export_all).
 
@@ -60,6 +61,22 @@ smoke_responses_test() ->
                                                      files=Files2}},
     R2 = encdec_response(R2),
 
+    ok.
+
+smoke_p_srvr_test() ->
+    P1 = #p_srvr{name=a, address="localhost", port=5555,
+                 props=[{dir,"./data.a"}]},
+    P1 = machi_pb_wrap:dec_p_srvr(
+           list_to_binary(machi_pb_wrap:enc_p_srvr(P1))),
+    ok.
+
+smoke_projection_v1_test() ->
+    P1 = #p_srvr{name=a, address="localhost", port=5555,
+                 props=[{dir,"./data.a"}]},
+    D = orddict:from_list([ {P1#p_srvr.name, P1} ]),
+    Proj1 = machi_projection:new(a, D, [a], [], [], [{property, 42}]),
+    Proj1 = machi_pb_wrap:dec_projection_v1(
+              machi_pb_wrap:enc_projection_v1(Proj1)),
     ok.
 
 encdec_request(M) ->
