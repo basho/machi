@@ -184,8 +184,10 @@ message Mpb_ReadChunkReq {
     required string file = 1;
     required uint64 offset = 2;
     required uint32 size = 3;
+
     // Use flag_checksum=non-zero to request the chunk's checksum also
     optional uint32 flag_checksum = 4 [default=0];
+
     // Use flag_no_chunk=non-zero to skip returning the chunk (which
     // only makes sense if flag_checksum is set).
     optional uint32 flag_no_chunk = 5 [default=0];
@@ -312,9 +314,137 @@ message Mpb_ProjectionV1 {
 //
 // echo()          : Mpb_EchoReq and Mpb_EchoResp (reused from high level API)
 // auth()          : Mpb_AuthReq and Mpb_AuthResp (reused from high level API)
-// get_latest_epochid()  : Mpb_GetLatestEpochIDReq and Mpb_GetLatestEpochIDResp
+//
+// File-I/O-related:
+//
+// append_chunk()
+// write_chunk()
+// read_chunk()
+// checksum_list()
+// list_files()
+// wedge_status()
+// delete_migration()
+// trunc_hack()
+//
+// Projection-related:
+//
+// get_latest_epochid()
+// read_latest_projection()
+// read_projection()
+// write_projection()
+// get_all_projections()
+// list_all_projections()
 //
 //////////////////////////////////////////
+
+// Low level API: append_chunk()
+
+message Mpb_LL_AppendChunkReq {
+    required Mpb_EpochID epoch_id = 1;
+    optional bytes placement_key = 2;
+    required string prefix = 3;
+    required bytes chunk = 4;
+    required Mpb_ChunkCSum csum = 5;
+    optional uint32 chunk_extra = 6;
+}
+
+message Mpb_LL_AppendChunkResp {
+    required Mpb_GeneralStatusCode status = 1;
+    // If OK, then chunk_pos is defined.
+    optional Mpb_ChunkPos chunk_pos = 2;
+}
+
+// Low level API: write_chunk()
+
+message Mpb_LL_WriteChunkReq {
+    required Mpb_EpochID epoch_id = 1;
+    required string file = 2;
+    required uint64 offset = 3;
+    required bytes chunk = 4;
+    required Mpb_ChunkCSum csum = 5;
+}
+
+message Mpb_LL_WriteChunkResp {
+    required Mpb_GeneralStatusCode status = 1;
+}
+
+// Low level API: read_chunk()
+
+message Mpb_LL_ReadChunkReq {
+    required Mpb_EpochID epoch_id = 1;
+    required string file = 2;
+    required uint64 offset = 3;
+    required uint32 size = 4;
+
+    // Use flag_checksum=non-zero to request the chunk's checksum also
+    optional uint32 flag_checksum = 5 [default=0];
+
+    // Use flag_no_chunk=non-zero to skip returning the chunk (which
+    // only makes sense if flag_checksum is set).
+    optional uint32 flag_no_chunk = 6 [default=0];
+}
+
+message Mpb_LL_ReadChunkResp {
+    required Mpb_GeneralStatusCode status = 1;
+    optional bytes chunk = 2;
+    optional Mpb_ChunkCSum csum = 3;
+}
+
+// Low level API: checksum_list()
+
+message Mpb_LL_ChecksumListReq {
+    required Mpb_EpochID epoch_id = 1;
+    required string file = 2;
+}
+
+message Mpb_LL_ChecksumListResp {
+    required Mpb_GeneralStatusCode status = 1;
+    optional bytes chunk = 2;
+}
+
+// Low level API: list_files()
+
+message Mpb_LL_ListFilesReq {
+    required Mpb_EpochID epoch_id = 1;
+}
+
+message Mpb_LL_ListFilesResp {
+    required Mpb_GeneralStatusCode status = 1;
+    repeated Mpb_FileInfo files = 2;
+}
+
+// Low level API: wedge_status()
+
+message Mpb_LL_WedgeStatusReq {
+    // No options
+}
+
+message Mpb_LL_WedgeStatusResp {
+    required Mpb_EpochID epoch_id = 1;
+    required uint32 wedged_flag = 2;
+}
+
+// Low level API: delete_migration()
+
+message Mpb_LL_DeleteMigrationReq {
+    required Mpb_EpochID epoch_id = 1;
+    required string file = 2;
+}
+
+message Mpb_LL_DeleteMigrationResp {
+    required Mpb_GeneralStatusCode status = 1;
+}
+
+// Low level API: trunc_hack()
+
+message Mpb_LL_TruncHackReq {
+    required Mpb_EpochID epoch_id = 1;
+    required string file = 2;
+}
+
+message Mpb_LL_TruncHackResp {
+    required Mpb_GeneralStatusCode status = 1;
+}
 
 // Low level API: get_latest_epochid() request & response
 
