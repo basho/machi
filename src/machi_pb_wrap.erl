@@ -67,7 +67,7 @@ conv_to_p_srvr(#mpb_p_srvr{name=Name,
             proto_mod=to_atom(ProtoMod),
             address=to_list(Address),
             port=to_integer(Port),
-            props=dec_sexp(to_list(Props))}.
+            props=dec_sexp(Props)}.
 
 enc_projection_v1(P) ->
     %% Awww, flatten it here
@@ -282,15 +282,10 @@ unmake_projection_resp(#mpb_ll_response{proj_la=#mpb_ll_listallprojectionsresp{
 %%%%%%%%%%%%%%%%%%%
 
 enc_sexp(T) ->
-    lists:flatten(io_lib:format("~w.", [T])).
+    term_to_binary(T).
 
 dec_sexp(Bin) when is_binary(Bin) ->
-    dec_sexp(binary_to_list(Bin));
-dec_sexp(String) when is_list(String) ->
-    {ok,Tks,_} = erl_scan:string(String),
-    {ok,E} = erl_parse:parse_exprs(Tks),
-    {value,Funs,_} = erl_eval:exprs(E,[]),
-    Funs.
+    binary_to_term(Bin).
 
 enc_optional_sexp(undefined) ->
     undefined;

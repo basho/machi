@@ -230,7 +230,7 @@ timing_pb_encoding_test2() ->
                     ZZ = machi_pb:decode_mpb_ll_request(Bin),
                     _ = machi_pb_wrap:unmake_projection_req(ZZ)
             end,
-    XX = lists:seq(1,30*1000),
+    XX = lists:seq(1,70*1000),
     erlang:garbage_collect(),
     RUN1 = timer:tc(fun() -> begin [_ = DoIt1() || _ <- XX], ok end end),
     erlang:garbage_collect(),
