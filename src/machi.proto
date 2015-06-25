@@ -42,6 +42,7 @@ enum Mpb_GeneralStatusCode {
      BAD_CHECKSUM = 3;
      PARTITION = 4;
      NOT_WRITTEN = 5;
+     WRITTEN = 6;
      BAD_JOSS = 255;    // Only for testing by the Taipan
 }
 

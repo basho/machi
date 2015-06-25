@@ -365,6 +365,8 @@ conv_from_status({error, partition}) ->
     'PARTITION';
 conv_from_status({error, not_written}) ->
     'NOT_WRITTEN';
+conv_from_status({error, written}) ->
+    'WRITTEN';
 conv_from_status(_OOPS) ->
     io:format(user, "HEY, ~s:~w got ~w\n", [?MODULE, ?LINE, _OOPS]),
     'BAD_JOSS'.
