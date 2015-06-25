@@ -899,9 +899,7 @@ handle_projection_command({get_all_projections, ProjType},
     machi_projection_store:get_all_projections(ProjStore, ProjType);
 handle_projection_command({list_all_projections, ProjType},
                           #state{proj_store=ProjStore}) ->
-    machi_projection_store:list_all_projections(ProjStore, ProjType);
-handle_projection_command(Else, _S) ->
-    {error, unknown_cmd, Else}.
+    machi_projection_store:list_all_projections(ProjStore, ProjType).
 
 make_listener_regname(BaseName) ->
     list_to_atom(atom_to_list(BaseName) ++ "_listener").
