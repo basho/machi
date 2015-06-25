@@ -353,7 +353,7 @@ message Mpb_LL_ReadProjectionResp {
 
 message Mpb_LL_WriteProjectionReq {
     required Mpb_ProjType type = 1;
-    required Mpb_ProjectionV1 proj = 1;
+    required Mpb_ProjectionV1 proj = 2;
 }
 
 message Mpb_LL_WriteProjectionResp {

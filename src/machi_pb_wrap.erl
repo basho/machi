@@ -149,7 +149,7 @@ make_projection_req(ID, {write_projection, ProjType, Proj}) ->
     ProjM = conv_from_projection_v1(Proj),
     #mpb_ll_request{req_id=ID,
                     proj_wp=#mpb_ll_writeprojectionreq{type=conv_from_type(ProjType),
-                                               proj=ProjM}};
+                                                       proj=ProjM}};
 make_projection_req(ID, {get_all_projections, ProjType}) ->
     #mpb_ll_request{req_id=ID,
                     proj_ga=#mpb_ll_getallprojectionsreq{type=conv_from_type(ProjType)}};
