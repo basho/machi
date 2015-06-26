@@ -479,59 +479,12 @@ trunc_hack(Host, TcpPort, EpochID, File) when is_integer(TcpPort) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 read_chunk2(Sock, EpochID, File0, Offset, Size) ->
-    erase(bad_sock),
-    try
-        {EpochNum, EpochCSum} = EpochID,
-        EpochIDHex = machi_util:bin_to_hexstr(
-                       <<EpochNum:(4*8)/big, EpochCSum/binary>>),
-        File = machi_util:make_binary(File0),
-        PrefixHex = machi_util:int_to_hexbin(Offset, 64),
-        SizeHex = machi_util:int_to_hexbin(Size, 32),
-        CmdLF = [$R, 32, EpochIDHex, PrefixHex, SizeHex, File, 10],
-        ok = w_send(Sock, CmdLF),
-        ok = w_setopts(Sock, [{packet, raw}]),
-        case w_recv(Sock, 3) of
-            {ok, <<"OK\n">>} ->
-                {ok, _Chunk}=Res = w_recv(Sock, Size),
-                Res;
-            {ok, Else} ->
-                ok = w_setopts(Sock, [{packet, line}]),
-                {ok, Else2} = w_recv(Sock, 0),
-                case Else of
-                    <<"ERA">> ->
-                        {error, todo_erasure_coded}; %% escript_cc_parse_ec_info(Sock, Line, Else2);
-                    <<"ERR">> ->
-                        case Else2 of
-                            <<"OR NO-SUCH-FILE\n">> ->
-                                {error, not_written};
-                            <<"OR NOT-ERASURE\n">> ->
-                                %% {error, no_such_file};
-                                %% Ignore the fact that the file doesn't exist.
-                                {error, not_written};
-                            <<"OR BAD-ARG\n">> ->
-                                {error, bad_arg};
-                            <<"OR PARTIAL-READ\n">> ->
-                                {error, partial_read};
-                            <<"OR WEDGED", _/binary>> ->
-                                {error, wedged};
-                            _ ->
-                                {error, Else2}
-                        end;
-                    _ ->
-                        {error, {whaaa_todo, <<Else/binary, Else2/binary>>}}
-                end
-        end
-    catch
-        throw:Error ->
-            put(bad_sock, Sock),
-            Error;
-        error:{case_clause,_}=Noo ->
-            put(bad_sock, Sock),
-            {error, {badmatch, Noo, erlang:get_stacktrace()}};
-        error:{badmatch,_}=BadMatch ->
-            put(bad_sock, Sock),
-            {error, {badmatch, BadMatch, erlang:get_stacktrace()}}
-    end.
+    ReqID = <<"id">>,
+    File = machi_util:make_binary(File0),
+    Req = machi_pb_translate:to_pb_request(
+            ReqID,
+            {low_read_chunk, EpochID, File, Offset, Size, []}),
+    do_pb_request_common(Sock, ReqID, Req).
 
 append_chunk2(Sock, EpochID, Prefix0, Chunk0, ChunkExtra) ->
     ReqID = <<"id">>,

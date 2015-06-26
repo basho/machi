@@ -134,7 +134,8 @@ from_pb_request(#mpb_request{req_id=ReqID,
     {ReqID, {high_list_files}};
 from_pb_request(#mpb_request{req_id=ReqID}) ->
     {ReqID, {high_error, 999966, "Unknown request"}};
-from_pb_request(_) ->
+from_pb_request(_Else) ->
+    io:format(user, "\nRRR from_pb_request(~p)\n", [_Else]), timer:sleep(2000),
     {<<>>, {high_error, 999667, "Unknown PB request"}}.
 
 from_pb_response(#mpb_ll_response{
@@ -338,8 +339,8 @@ to_pb_response(ReqID, {low_append_chunk, _EID, _PKey, _Pfx, _Ch, _CST, _CS, _CE}
             #mpb_ll_response{req_id=ReqID,
                              append_chunk=#mpb_ll_appendchunkresp{status='OK',
                                                               chunk_pos=Where}};
-        {error, Status} ->
-            Status = conv_from_status(Status),
+        {error, _}=Error ->
+            Status = conv_from_status(Error),
             #mpb_ll_response{req_id=ReqID,
                            append_chunk=#mpb_ll_appendchunkresp{status=Status}};
         _Else ->
@@ -357,8 +358,8 @@ to_pb_response(ReqID, {low_read_chunk, _EID, _Fl, _Off, _Sz, _Opts}, Resp)->
                              read_chunk=#mpb_ll_readchunkresp{status='OK',
                                                               chunk=Chunk,
                                                               csum=CSum}};
-        {error, Status} ->
-            Status = conv_from_status(Status),
+        {error, _}=Error ->
+            Status = conv_from_status(Error),
             #mpb_ll_response{req_id=ReqID,
                              read_chunk=#mpb_ll_readchunkresp{status=Status}};
         _Else ->
@@ -417,8 +418,8 @@ to_pb_response(ReqID, {high_append_chunk, _TODO, _Prefix, _Chunk, _TSum, _CE}, R
             #mpb_response{req_id=ReqID,
                           append_chunk=#mpb_appendchunkresp{status='OK',
                                                             chunk_pos=Where}};
-        {error, Status} ->
-            Status = conv_from_status(Status),
+        {error, _}=Error ->
+            Status = conv_from_status(Error),
             #mpb_response{req_id=ReqID,
                           append_chunk=#mpb_appendchunkresp{status=Status}};
         _Else ->
@@ -430,8 +431,8 @@ to_pb_response(ReqID, {high_write_chunk, _File, _Offset, _Chunk, _TaggedCSum}, R
             %% machi_cr_client returns ok 2-tuple, convert to simple ok.
             #mpb_response{req_id=ReqID,
                           write_chunk=#mpb_writechunkresp{status='OK'}};
-        {error, Status} ->
-            Status = conv_from_status(Status),
+        {error, _}=Error ->
+            Status = conv_from_status(Error),
             #mpb_response{req_id=ReqID,
                           write_chunk=#mpb_writechunkresp{status=Status}};
         _Else ->
@@ -443,8 +444,8 @@ to_pb_response(ReqID, {high_read_chunk, _File, _Offset, _Size}, Resp) ->
             #mpb_response{req_id=ReqID,
                           read_chunk=#mpb_readchunkresp{status='OK',
                                                         chunk=Chunk}};
-        {error, Status} ->
-            Status = conv_from_status(Status),
+        {error, _}=Error ->
+            Status = conv_from_status(Error),
             #mpb_response{req_id=ReqID,
                           read_chunk=#mpb_readchunkresp{status=Status}};
         _Else ->
@@ -456,8 +457,8 @@ to_pb_response(ReqID, {high_checksum_list, _File}, Resp) ->
             #mpb_response{req_id=ReqID,
                           checksum_list=#mpb_checksumlistresp{status='OK',
                                                               chunk=Chunk}};
-        {error, Status} ->
-            Status = conv_from_status(Status),
+        {error, _}=Error ->
+            Status = conv_from_status(Error),
             #mpb_response{req_id=ReqID,
                           checksum_list=#mpb_checksumlistresp{status=Status}};
         _Else ->
@@ -471,8 +472,8 @@ to_pb_response(ReqID, {high_list_files}, Resp) ->
             #mpb_response{req_id=ReqID,
                           list_files=#mpb_listfilesresp{status='OK',
                                                         files=Files}};
-        {error, Status} ->
-            Status = conv_from_status(Status),
+        {error, _}=Error ->
+            Status = conv_from_status(Error),
             #mpb_response{req_id=ReqID,
                           list_files=#mpb_listfilesresp{status=Status}};
         _Else ->
@@ -655,6 +656,8 @@ conv_from_status({error, written}) ->
     'WRITTEN';
 conv_from_status({error, no_such_file}) ->
     'NO_SUCH_FILE';
+conv_from_status({error, partial_read}) ->
+    'PARTIAL_READ';
 conv_from_status(_OOPS) ->
     io:format(user, "HEY, ~s:~w got ~w\n", [?MODULE, ?LINE, _OOPS]),
     'BAD_JOSS'.

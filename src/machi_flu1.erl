@@ -272,6 +272,7 @@ decode_epoch_id(EpochIDHex) ->
 net_server_loop(Sock, S) ->
     case gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT) of
         {ok, Bin} ->
+    io:format(user, "\nSSS RawReq ~p\n", [catch machi_pb:decode_mpb_ll_request(Bin)]),
             {R, S2} = do_pb_request(catch machi_pb:decode_mpb_ll_request(Bin), S),
             Resp = machi_pb:encode_mpb_ll_response(R),
             ok = gen_tcp:send(Sock, Resp),
@@ -324,10 +325,12 @@ do_pb_request2(EpochID, CMD, S) ->
 
 do_pb_request3({low_echo, _BogusEpochID, Msg}, S) ->
     {Msg, S};
-do_pb_request3({low_append_chunk, EpochID, PKey, Prefix, Chunk, CSum_tag, CSum,
+do_pb_request3({low_append_chunk, _EpochID, PKey, Prefix, Chunk, CSum_tag, CSum,
                 ChunkExtra}, S) ->
     {do_pb_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
                                ChunkExtra, S), S};
+do_pb_request3({low_read_chunk, _EpochID, File, Offset, Size, Opts}, S) ->
+    {do_pb_server_read_chunk(File, Offset, Size, Opts, S), S};
 do_pb_request3({low_checksum_list, _EpochID, File}, S) ->
     {do_pb_server_checksum_listing(File, S), S};
 do_pb_request3({low_list_files, _EpochID}, S) ->
@@ -339,13 +342,13 @@ do_pb_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
                           ChunkExtra, S) ->
     case sanitize_file_string(Prefix) of
         ok ->
-            do_pb_server_append_chunk3(PKey, Prefix, Chunk, CSum_tag, CSum,
+            do_pb_server_append_chunk2(PKey, Prefix, Chunk, CSum_tag, CSum,
                                        ChunkExtra, S);
         _ ->
             {error, bad_arg}
     end.
     
-do_pb_server_append_chunk3(_PKey, Prefix, Chunk, CSum_tag, Client_CSum,
+do_pb_server_append_chunk2(_PKey, Prefix, Chunk, CSum_tag, Client_CSum,
                            ChunkExtra, #state{flu_name=FluName}=_S) ->
     %% TODO: Do anything with PKey?
     try
@@ -392,6 +395,44 @@ do_pb_server_append_chunk3(_PKey, Prefix, Chunk, CSum_tag, Client_CSum,
             {error, bad_arg}
     end.
 
+do_pb_server_read_chunk(File, Offset, Size, _Opts, #state{data_dir=DataDir})->
+    %% TODO: Look inside Opts someday.
+    case sanitize_file_string(File) of
+        ok ->
+            {_, Path} = machi_util:make_data_filename(DataDir, File),
+            case file:open(Path, [read, binary, raw]) of
+                {ok, FH} ->
+                    try
+                        case file:pread(FH, Offset, Size) of
+                            {ok, Bytes} when byte_size(Bytes) == Size ->
+                                {ok, Bytes};
+                            {ok, Bytes} ->
+                                machi_util:verb("ok read but wanted ~p got ~p: ~p @ offset ~p\n",
+                                                [Size,size(Bytes),File,Offset]),
+                                io:format(user, "ok read but wanted ~p got ~p: ~p @ offset ~p\n",
+                                                [Size,size(Bytes),File,Offset]),
+                                {error, partial_read};
+                            eof ->
+                                {error, not_written}; %% TODO perhaps_do_net_server_ec_read(Sock, FH);
+                            _Else2 ->
+                                machi_util:verb("Else2 ~p ~p ~P\n",
+                                                [Offset, Size, _Else2, 20]),
+                                {error, bad_read}
+                        end
+                    after
+                        file:close(FH)
+                    end;
+                {error, enoent} ->
+                    {error, not_written};
+                {error, _Else} ->
+                    io:format(user, "Unexpected ~p at ~p ~p\n",
+                              [_Else, ?MODULE, ?LINE]),
+                    {error, bad_arg}
+            end;
+        _ ->
+            {error, bad_arg}
+    end.
+
 do_pb_server_checksum_listing(File, #state{data_dir=DataDir}=_S) ->
     case sanitize_file_string(File) of
         ok ->
@@ -432,7 +473,7 @@ net_server_loop_old(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
             %% machi_util:verb("Got: ~p\n", [Line]),
             PrefixLenLF = byte_size(Line) - 2 - ?EpochIDSpace - ?CSumSpace
                                                                     - 8 - 8 - 1,
-            FileLenLF = byte_size(Line)   - 2 - ?EpochIDSpace - 16 - 8 - 1,
+            %% FileLenLF = byte_size(Line)   - 2 - ?EpochIDSpace - 16 - 8 - 1,
             CSumFileLenLF = byte_size(Line) - 2 - ?EpochIDSpace - 1,
             WriteFileLenLF = byte_size(Line) - 7 - ?EpochIDSpace - ?CSumSpace
                                                                    - 16 - 8 - 1,
@@ -447,13 +488,13 @@ net_server_loop_old(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                     _EpochID = decode_epoch_id(EpochIDHex),
                     do_net_server_append(FluName, Sock, CSumHex,
                                          LenHex, ExtraHex, Prefix);
-                <<"R ",
-                  EpochIDHex:(?EpochIDSpace)/binary,
-                  OffsetHex:16/binary, LenHex:8/binary,
-                  File:FileLenLF/binary, "\n">> ->
-                    EpochID = decode_epoch_id(EpochIDHex),
-                    do_net_server_read(Sock, OffsetHex, LenHex, File, DataDir,
-                                       EpochID, S);
+                <<"R ", _/binary>> ->
+                  %% EpochIDHex:(?EpochIDSpace)/binary,
+                  %% OffsetHex:16/binary, LenHex:8/binary,
+                  %% File:FileLenLF/binary, "\n">> ->
+                  %%   EpochID = decode_epoch_id(EpochIDHex),
+                    delme; %%do_net_server_read(Sock, OffsetHex, LenHex, File, DataDir,
+                             %%          EpochID, S);
                 <<"L ", EpochIDHex:(?EpochIDSpace)/binary, "\n">> ->
                     _EpochID = decode_epoch_id(EpochIDHex),
                     delme; %% do_net_server_listing(Sock, DataDir, S);
@@ -613,28 +654,6 @@ do_wedge_status(FluName, Sock) ->
             end,
     ok = gen_tcp:send(Sock, Reply).
 
-do_net_server_read(Sock, OffsetHex, LenHex, FileBin, DataDir,
-                   EpochID, S) ->
-    {Wedged_p, CurrentEpochId} = ets:lookup_element(S#state.etstab, epoch, 2),
-    DoItFun = fun(FH, Offset, Len) ->
-                      case file:pread(FH, Offset, Len) of
-                          {ok, Bytes} when byte_size(Bytes) == Len ->
-                              gen_tcp:send(Sock, ["OK\n", Bytes]);
-                          {ok, Bytes} ->
-                              machi_util:verb("ok read but wanted ~p  got ~p: ~p @ offset ~p\n",
-                                  [Len, size(Bytes), FileBin, Offset]),
-                              ok = gen_tcp:send(Sock, "ERROR PARTIAL-READ\n");
-                          eof ->
-                              perhaps_do_net_server_ec_read(Sock, FH);
-                          _Else2 ->
-                              machi_util:verb("Else2 ~p ~p ~P\n",
-                                              [Offset, Len, _Else2, 20]),
-                              ok = gen_tcp:send(Sock, "ERROR BAD-READ\n")
-                      end
-              end,
-    do_net_server_readwrite_common(Sock, OffsetHex, LenHex, FileBin, DataDir,
-                                   [read, binary, raw], DoItFun,
-                                   EpochID, Wedged_p, CurrentEpochId).
 
 do_net_server_readwrite_common(Sock, OffsetHex, LenHex, FileBin, DataDir,
                                FileOpts, DoItFun,
