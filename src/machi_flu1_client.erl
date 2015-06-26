@@ -648,13 +648,13 @@ wedge_status2(Sock) ->
 
 echo2(Sock, Message) ->
     ReqID = <<"id">>,
-    Req = machi_pb_translate:to_pb(
+    Req = machi_pb_translate:to_pb_request(
             ReqID, {low_echo, Message}),
     do_pb_request_common(Sock, ReqID, Req).
 
 checksum_list2(Sock, EpochID, File) ->
     ReqID = <<"id">>,
-    Req = machi_pb_translate:to_pb(
+    Req = machi_pb_translate:to_pb_request(
             ReqID, {low_checksum_list, EpochID, File}),
     do_pb_request_common(Sock, ReqID, Req).
 
@@ -843,7 +843,7 @@ io:format(user, "\nCCC Req ~p\n", [Req]),
             {ok, RespBin} ->
                 Resp = machi_pb:decode_mpb_ll_response(RespBin),
                 io:format(user, "\nCCC Resp ~p\n", [Resp]),
-                {ReqID2, Reply} = machi_pb_translate:from_pb(Resp),
+                {ReqID2, Reply} = machi_pb_translate:from_pb_response(Resp),
                 io:format(user, "\nCCC ReqID2 ~p Reply ~p\n", [ReqID2, Reply]),
                 true = (ReqID == ReqID2 orelse ReqID2 == <<>>),
                 Reply;

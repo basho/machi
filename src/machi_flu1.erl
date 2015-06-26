@@ -288,7 +288,7 @@ io:format(user, "\nSSS SockError ~p\n", [SockError]),
     end.
 
 do_pb_request(PB_request, S) ->
-    Req = machi_pb_translate:from_pb(PB_request),
+    Req = machi_pb_translate:from_pb_request(PB_request),
 io:format(user, "\nSSS Req ~p\n", [Req]),
     {ReqID, Cmd, Result, S2} = 
         case Req of
@@ -301,7 +301,7 @@ io:format(user, "\nSSS Req ~p\n", [Req]),
             nope ->
                 {foo, bar, baz}
         end,
-    {machi_pb_translate:to_pb(ReqID, Cmd, Result), S2}.
+    {machi_pb_translate:to_pb_response(ReqID, Cmd, Result), S2}.
 
 net_server_loop_old(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
     %% TODO: Add testing control knob to adjust this timeout and/or inject

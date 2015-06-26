@@ -53,7 +53,7 @@ protocol_buffers_loop(Sock, Clnt) ->
 
 do_pb_request(PB_request, Clnt) ->
     {ReqID, Cmd, Result} = 
-        case machi_pb_translate:from_pb(PB_request) of
+        case machi_pb_translate:from_pb_request(PB_request) of
             {RqID, {high_echo, Msg}=CMD} ->
                 Rs = Msg,
                 {RqID, CMD, Rs};
@@ -83,4 +83,4 @@ do_pb_request(PB_request, Clnt) ->
                 Rs = {ErrCode, ErrMsg},
                 {RqID, CMD, Rs}
         end,
-    machi_pb_translate:to_pb(ReqID, Cmd, Result).
+    machi_pb_translate:to_pb_response(ReqID, Cmd, Result).
