@@ -230,11 +230,12 @@ timing_pb_encoding_test2() ->
     P_a = #p_srvr{name=a, address="localhost", port=4321},
     P1 = machi_projection:new(1, a, [P_a], [], [a], [], []),
     DoIt1 = fun() ->
-                    Req = machi_pb_wrap:make_projection_req(
-                            <<1,2,3,4>>, {write_projection, public, P1}),
+                    Req = machi_pb_translate:to_pb_request(
+                            <<1,2,3,4>>,
+                            {low_proj, {write_projection, public, P1}}),
                     Bin = list_to_binary(machi_pb:encode_mpb_ll_request(Req)),
                     ZZ = machi_pb:decode_mpb_ll_request(Bin),
-                    _ = machi_pb_wrap:unmake_projection_req(ZZ)
+                    _ = machi_pb_translate:from_pb_request(ZZ)
             end,
     XX = lists:seq(1,70*1000),
     erlang:garbage_collect(),
