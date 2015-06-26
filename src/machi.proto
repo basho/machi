@@ -147,7 +147,7 @@ message Mpb_AuthReq {
 }
 
 message Mpb_AuthResp {
-    required uint32 code = 1;
+    required int32 code = 1;
     // TODO: not implemented yet
 }
 

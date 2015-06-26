@@ -411,9 +411,9 @@ to_pb_response(ReqID, {low_echo, _BogusEpochID, _Msg}, Resp) ->
                 req_id=ReqID,
                 echo=#mpb_echoresp{message=Resp}};
 to_pb_response(ReqID, {low_auth, _, _, _}, Resp) ->
-    #mpb_ll_response{
-                req_id=ReqID,
-                auth=#mpb_authresp{code=Resp}};
+    #mpb_ll_response{req_id=ReqID,
+                     generic=#mpb_errorresp{code=1,
+                                            msg="AUTH not implemented"}};
 to_pb_response(ReqID, {low_append_chunk, _EID, _PKey, _Pfx, _Ch, _CST, _CS, _CE}, Resp)->
     case Resp of
         {ok, {Offset, Size, File}} ->

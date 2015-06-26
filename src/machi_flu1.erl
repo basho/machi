@@ -334,6 +334,8 @@ io:format(user, "LINE ~s ~p\n", [?MODULE, ?LINE]),
 
 do_pb_request3({low_echo, _BogusEpochID, Msg}, S) ->
     {Msg, S};
+do_pb_request3({low_auth, _BogusEpochID, _User, _Pass}, S) ->
+    {-6, S};
 do_pb_request3({low_append_chunk, _EpochID, PKey, Prefix, Chunk, CSum_tag,
                 CSum, ChunkExtra}, S) ->
     {do_pb_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
