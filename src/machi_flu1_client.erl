@@ -504,6 +504,23 @@ append_chunk2(Sock, EpochID, Prefix0, Chunk0, ChunkExtra) ->
              ChunkExtra}),
     do_pb_request_common(Sock, ReqID, Req).
 
+write_chunk2(Sock, EpochID, File0, Offset, Chunk0) ->
+    ReqID = <<"id">>,
+    File = machi_util:make_binary(File0),
+    true = (Offset >= ?MINIMUM_OFFSET),
+    {Chunk, CSum_tag, CSum} =
+        case Chunk0 of
+            X when is_binary(X) ->
+                {Chunk0, ?CSUM_TAG_NONE, <<>>};
+            {ChunkCSum, Chk} ->
+                {Tag, CS} = machi_util:unmake_tagged_csum(ChunkCSum),
+                {Chk, Tag, CS}
+        end,
+    Req = machi_pb_translate:to_pb_request(
+            ReqID,
+            {low_write_chunk, EpochID, File, Offset, Chunk, CSum_tag, CSum}),
+    do_pb_request_common(Sock, ReqID, Req).
+
 list2(Sock, EpochID) ->
     ReqID = <<"id">>,
     Req = machi_pb_translate:to_pb_request(
@@ -552,54 +569,6 @@ checksum_list_finish(Chunks) ->
           machi_util:hexstr_to_bin(CSum)}
      end || Line <- re:split(Bin, "\n", [{return, binary}]),
             Line /= <<>>].
-
-write_chunk2(Sock, EpochID, File0, Offset, Chunk0) ->
-    erase(bad_sock),
-    try
-        {EpochNum, EpochCSum} = EpochID,
-        EpochIDHex = machi_util:bin_to_hexstr(
-                       <<EpochNum:(4*8)/big, EpochCSum/binary>>),
-        %% TODO: add client-side checksum to the server's protocol
-        %% _ = machi_util:checksum_chunk(Chunk),
-        File = machi_util:make_binary(File0),
-        true = (Offset >= ?MINIMUM_OFFSET),
-        OffsetHex = machi_util:int_to_hexbin(Offset, 64),
-        {CSum, Chunk} = case Chunk0 of
-                            {_,_} ->
-                                Chunk0;
-                            XX when is_binary(XX) ->
-                                SHA = machi_util:checksum_chunk(Chunk0),
-                                {<<?CSUM_TAG_CLIENT_SHA:8, SHA/binary>>, Chunk0}
-                        end,
-        CSumHex = machi_util:bin_to_hexstr(CSum),
-        Len = iolist_size(Chunk),
-        true = (Len =< ?MAX_CHUNK_SIZE),
-        LenHex = machi_util:int_to_hexbin(Len, 32),
-        Cmd = [<<"W-repl ">>, EpochIDHex, CSumHex, OffsetHex,
-               LenHex, File, <<"\n">>],
-        ok = w_send(Sock, [Cmd, Chunk]),
-        {ok, Line} = w_recv(Sock, 0),
-        PathLen = byte_size(Line) - 3 - 16 - 1 - 1,
-        case Line of
-            <<"OK\n">> ->
-                ok;
-            <<"ERROR BAD-ARG", _/binary>> ->
-                {error, bad_arg};
-            <<"ERROR WEDGED", _/binary>> ->
-                {error, wedged};
-            <<"ERROR BAD-CHECKSUM", _/binary>> ->
-                {error, bad_checksum};
-            <<"ERROR ", _/binary>>=Else ->
-                {error, {server_said, Else}}
-        end
-    catch
-        throw:Error ->
-            put(bad_sock, Sock),
-            Error;
-        error:{badmatch,_}=BadMatch ->
-            put(bad_sock, Sock),
-            {error, {badmatch, BadMatch, erlang:get_stacktrace()}}
-    end.
 
 delete_migration2(Sock, EpochID, File) ->
     erase(bad_sock),

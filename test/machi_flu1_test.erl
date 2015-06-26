@@ -147,7 +147,7 @@ io:format(user, "LINE ~s ~p\n", [?MODULE, ?LINE]),
         Chunk2 = <<"yo yo">>,
         Len2 = byte_size(Chunk2),
         Off2 = ?MINIMUM_OFFSET + 77,
-        File2 = "smoke-prefix",
+        File2 = "smoke-whole-file",
 io:format(user, "LINE ~s ~p\n", [?MODULE, ?LINE]),
         ok = ?FLU_C:write_chunk(Host, TcpPort, ?DUMMY_PV1_EPOCH,
                                 File2, Off2, Chunk2),
@@ -179,11 +179,15 @@ io:format(user, "LINE ~s ~p\n", [?MODULE, ?LINE]),
 
         %% We know that File2 still exists.  Pretend that we've done a
         %% migration and exercise the trunc_hack() API.
+io:format(user, "LINE ~s ~p\n", [?MODULE, ?LINE]),
         ok = ?FLU_C:trunc_hack(Host, TcpPort, ?DUMMY_PV1_EPOCH, File2),
+io:format(user, "LINE ~s ~p\n", [?MODULE, ?LINE]),
         ok = ?FLU_C:trunc_hack(Host, TcpPort, ?DUMMY_PV1_EPOCH, File2),
+io:format(user, "LINE ~s ~p\n", [?MODULE, ?LINE]),
         {error, bad_arg} = ?FLU_C:trunc_hack(Host, TcpPort,
                                              ?DUMMY_PV1_EPOCH, BadFile),
 
+io:format(user, "LINE ~s ~p\n", [?MODULE, ?LINE]),
         ok = ?FLU_C:quit(?FLU_C:connect(#p_srvr{address=Host,
                                                 port=TcpPort}))
     after

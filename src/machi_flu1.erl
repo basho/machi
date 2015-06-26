@@ -325,10 +325,13 @@ do_pb_request2(EpochID, CMD, S) ->
 
 do_pb_request3({low_echo, _BogusEpochID, Msg}, S) ->
     {Msg, S};
-do_pb_request3({low_append_chunk, _EpochID, PKey, Prefix, Chunk, CSum_tag, CSum,
-                ChunkExtra}, S) ->
+do_pb_request3({low_append_chunk, _EpochID, PKey, Prefix, Chunk, CSum_tag,
+                CSum, ChunkExtra}, S) ->
     {do_pb_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
                                ChunkExtra, S), S};
+do_pb_request3({low_write_chunk, _EpochID, File, Offset, Chunk, CSum_tag,
+                CSum}, S) ->
+    {do_pb_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum, S), S};
 do_pb_request3({low_read_chunk, _EpochID, File, Offset, Size, Opts}, S) ->
     {do_pb_server_read_chunk(File, Offset, Size, Opts, S), S};
 do_pb_request3({low_checksum_list, _EpochID, File}, S) ->
@@ -368,7 +371,8 @@ do_pb_server_append_chunk2(_PKey, Prefix, Chunk, CSum_tag, Client_CSum,
                    ?CSUM_TAG_CLIENT_SHA ->
                        CS = machi_util:checksum_chunk(Chunk),
                        if CS == Client_CSum ->
-                               Client_CSum;
+                               machi_util:make_tagged_csum(server_sha,
+                                                           Client_CSum);
                           true ->
                                throw({bad_csum, CS})
                        end
@@ -376,16 +380,87 @@ do_pb_server_append_chunk2(_PKey, Prefix, Chunk, CSum_tag, Client_CSum,
         FluName ! {seq_append, self(), Prefix, Chunk, CSum, ChunkExtra},
         receive
             {assignment, Offset, File} ->
-                Size = if is_binary(Chunk) ->
-                               byte_size(Chunk);
-                          is_list(Chunk) ->
-                               iolist_size(Chunk)
-                       end,
+                Size = iolist_size(Chunk),
                 {ok, {Offset, Size, File}};
             wedged ->
                 {error, wedged}
         after 10*1000 ->
                 {error, partition}
+        end
+    catch
+        throw:{bad_csum, _CS} ->
+            {error, bad_checksum};
+        error:badarg ->
+            error_logger:error_msg("Message send to ~p gave badarg, make certain server is running with correct registered name\n", [?MODULE]),
+            {error, bad_arg}
+    end.
+
+do_pb_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum,
+                        #state{data_dir=DataDir}=S) ->
+    case sanitize_file_string(File) of
+        ok ->
+            CSumPath = machi_util:make_checksum_filename(DataDir, File),
+                case file:open(CSumPath, [write, read, binary, raw]) of
+                    {ok, FHc} ->
+                        Path = DataDir ++ "/data/" ++
+                            machi_util:make_string(File),
+                        {ok, FHd} = file:open(Path, [write, binary, raw]),
+                        try
+                            do_pb_server_write_chunk2(
+                              File, Offset, Chunk, CSum_tag, CSum, DataDir,
+                              FHc, FHd)
+                        after
+                            (catch file:close(FHc)),
+                            (catch file:close(FHd))
+                        end;
+                    {error, enoent} ->
+                        ok = filelib:ensure_dir(CSumPath),
+                        do_pb_server_write_chunk(File, Offset, Chunk, CSum_tag,
+                                                 CSum, S)
+                end;
+        _ ->
+            {error, bad_arg}
+    end.
+
+do_pb_server_write_chunk2(_File, Offset, Chunk, CSum_tag,
+                          Client_CSum, _DataDir, FHc, FHd) ->
+    try
+        CSum = case CSum_tag of
+                   ?CSUM_TAG_NONE ->
+                       %% TODO: If the client was foolish enough to use
+                       %% this type of non-checksum, then the client gets
+                       %% what it deserves wrt data integrity, alas.  In
+                       %% the client-side Chain Replication method, each
+                       %% server will calculated this independently, which
+                       %% isn't exactly what ought to happen for best data
+                       %% integrity checking.  In server-side CR, the csum
+                       %% should be calculated by the head and passed down
+                       %% the chain together with the value.
+                       CS = machi_util:checksum_chunk(Chunk),
+                       machi_util:make_tagged_csum(server_sha,CS);
+                   ?CSUM_TAG_CLIENT_SHA ->
+                       CS = machi_util:checksum_chunk(Chunk),
+                       if CS == Client_CSum ->
+                               machi_util:make_tagged_csum(server_sha,
+                                                           Client_CSum);
+                          true ->
+                               throw({bad_csum, CS})
+                       end
+               end,
+        Size = iolist_size(Chunk),
+        case file:pwrite(FHd, Offset, Chunk) of
+            ok ->
+                OffsetHex = machi_util:bin_to_hexstr(<<Offset:64/big>>),
+                LenHex = machi_util:bin_to_hexstr(<<Size:32/big>>),
+                CSumHex2 = machi_util:bin_to_hexstr(CSum),
+                CSum_info = [OffsetHex, 32, LenHex, 32,
+                             CSumHex2, 10],
+                ok = file:write(FHc, CSum_info),
+                ok;
+            _Else3 ->
+                machi_util:verb("Else3 ~p ~p ~p\n",
+                                [Offset, Size, _Else3]),
+                {error, bad_arg}
         end
     catch
         throw:{bad_csum, _CS} ->
@@ -510,15 +585,15 @@ net_server_loop_old(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                     catch gen_tcp:close(Sock),
                     exit(normal);
                 %% For "internal" replication only.
-                <<"W-repl ",
-                  EpochIDHex:(?EpochIDSpace)/binary,
-                  CSumHex:(?CSumSpace)/binary,
-                  OffsetHex:16/binary, LenHex:8/binary,
-                  File:WriteFileLenLF/binary, "\n">> ->
-                    _EpochID = decode_epoch_id(EpochIDHex),
-                    do_net_server_write(Sock, CSumHex, OffsetHex, LenHex,
-                                        File, DataDir,
-                                        <<"fixme1">>, false, <<"fixme2">>);
+                %% <<"W-repl ",
+                %%   EpochIDHex:(?EpochIDSpace)/binary,
+                %%   CSumHex:(?CSumSpace)/binary,
+                %%   OffsetHex:16/binary, LenHex:8/binary,
+                %%   File:WriteFileLenLF/binary, "\n">> ->
+                %%     _EpochID = decode_epoch_id(EpochIDHex),
+                %%     do_net_server_write(Sock, CSumHex, OffsetHex, LenHex,
+                %%                         File, DataDir,
+                %%                         <<"fixme1">>, false, <<"fixme2">>);
                 %% For data migration only.
                 <<"DEL-migration ",
                   EpochIDHex:(?EpochIDSpace)/binary,
@@ -713,67 +788,6 @@ do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin, DataDir,
             ok = BadIoFun(Sock)
     end.
 
-do_net_server_write(Sock, CSumHex, OffsetHex, LenHex, FileBin, DataDir,
-                    EpochID, Wedged_p, CurrentEpochId) ->
-    CSumPath = machi_util:make_checksum_filename(DataDir, FileBin),
-    case file:open(CSumPath, [append, raw, binary, delayed_write]) of
-        {ok, FHc} ->
-            do_net_server_write2(Sock, CSumHex, OffsetHex, LenHex, FileBin,
-                                 DataDir, FHc, EpochID, Wedged_p,
-                                 CurrentEpochId);
-        {error, enoent} ->
-            ok = filelib:ensure_dir(CSumPath),
-            do_net_server_write(Sock, CSumHex, OffsetHex, LenHex, FileBin,
-                                DataDir, EpochID, Wedged_p,
-                                CurrentEpochId)
-    end.
-
-do_net_server_write2(Sock, CSumHex, OffsetHex, LenHex, FileBin, DataDir, FHc,
-                     EpochID, Wedged_p, CurrentEpochId) ->
-    ClientCSum = machi_util:hexstr_to_bin(CSumHex),
-    DoItFun = fun(FHd, Offset, Len) ->
-                      ok = inet:setopts(Sock, [{packet, raw}]),
-                      {ok, Chunk} = gen_tcp:recv(Sock, Len),
-                      CSum = case ClientCSum of
-                                 <<?CSUM_TAG_NONE:8, _/binary>> ->
-                                     %% TODO: If the client was foolish enough to use
-                                     %% this type of non-checksum, then the client gets
-                                     %% what it deserves wrt data integrity, alas.  In
-                                     %% the client-side Chain Replication method, each
-                                     %% server will calculated this independently, which
-                                     %% isn't exactly what ought to happen for best data
-                                     %% integrity checking.  In server-side CR, the csum
-                                     %% should be calculated by the head and passed down
-                                     %% the chain together with the value.
-                                     CS = machi_util:checksum_chunk(Chunk),
-                                     machi_util:make_tagged_csum(server_sha,CS);
-                                 <<?CSUM_TAG_CLIENT_SHA:8, ClientCS/binary>> ->
-                                     CS = machi_util:checksum_chunk(Chunk),
-                                     if CS == ClientCS ->
-                                             ClientCSum;
-                                        true ->
-                                             throw({bad_csum, CS})
-                                     end;
-                                 _ ->
-                                     ClientCSum
-                             end,
-                      case file:pwrite(FHd, Offset, Chunk) of
-                          ok ->
-                              CSumHex2 = machi_util:bin_to_hexstr(CSum),
-                              CSum_info = [OffsetHex, 32, LenHex, 32,
-                                           CSumHex2, 10],
-                              ok = file:write(FHc, CSum_info),
-                              ok = file:close(FHc),
-                              gen_tcp:send(Sock, <<"OK\n">>);
-                          _Else3 ->
-                              machi_util:verb("Else3 ~p ~p ~p\n",
-                                              [Offset, Len, _Else3]),
-                              ok = gen_tcp:send(Sock, "ERROR BAD-PWRITE\n")
-                      end
-              end,
-    do_net_server_readwrite_common(Sock, OffsetHex, LenHex, FileBin, DataDir,
-                                   [write, read, binary, raw], DoItFun,
-                                   EpochID, Wedged_p, CurrentEpochId).
 
 perhaps_do_net_server_ec_read(Sock, FH) ->
     case file:pread(FH, 0, ?MINIMUM_OFFSET) of
