@@ -234,6 +234,9 @@ make_tagged_csum(server_sha, SHA) ->
 make_tagged_csum(server_regen_sha, SHA) ->
     <<?CSUM_TAG_SERVER_REGEN_SHA:8, SHA/binary>>.
 
+unmake_tagged_csum(<<Tag:8, Rest/binary>>) ->
+    {Tag, Rest}.
+
 %% @doc Log a verbose message.
 
 -spec verb(string()) -> ok.

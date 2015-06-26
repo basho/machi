@@ -42,8 +42,34 @@ from_pb_request(#mpb_ll_request{
     {ReqID, {low_auth, User, Pass}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
-                   checksum_list=#mpb_ll_checksumlistreq{epoch_id=PB_EpochID,
-                                                         file=File}}) ->
+                   append_chunk=#mpb_ll_appendchunkreq{
+                     epoch_id=PB_EpochID,
+                     placement_key=PKey,
+                     prefix=Prefix,
+                     chunk=Chunk,
+                     csum=#mpb_chunkcsum{type=CSum_type, csum=CSum},
+                     chunk_extra=ChunkExtra}}) ->
+    EpochID = conv_to_epoch_id(PB_EpochID),
+    CSum_tag = conv_to_csum_tag(CSum_type),
+    {ReqID, {low_append_chunk, EpochID, PKey, Prefix, Chunk, CSum_tag, CSum,
+             ChunkExtra}};
+from_pb_request(#mpb_ll_request{
+                   req_id=ReqID,
+                   write_chunk=#mpb_ll_writechunkreq{
+                     epoch_id=PB_EpochID,
+                     file=File,
+                     offset=Offset,
+                     chunk=Chunk,
+                     csum=#mpb_chunkcsum{type=CSum_type, csum=CSum}}}) ->
+    EpochID = conv_to_epoch_id(PB_EpochID),
+    CSum_tag = conv_to_csum_tag(CSum_type),
+    {ReqID, {low_write_chunk, EpochID, File, Offset, Chunk, CSum_tag, CSum}};
+%%qqq
+from_pb_request(#mpb_ll_request{
+                   req_id=ReqID,
+                   checksum_list=#mpb_ll_checksumlistreq{
+                     epoch_id=PB_EpochID,
+                     file=File}}) ->
     EpochID = conv_to_epoch_id(PB_EpochID),
     {ReqID, {low_checksum_list, EpochID, File}};
 from_pb_request(#mpb_request{req_id=ReqID,
@@ -56,20 +82,20 @@ from_pb_request(#mpb_request{req_id=ReqID,
                              append_chunk=IR=#mpb_appendchunkreq{}}) ->
     #mpb_appendchunkreq{placement_key=__todoPK,
                         prefix=Prefix,
-                        chunk=ChunkBin,
+                        chunk=Chunk,
                         csum=CSum,
                         chunk_extra=ChunkExtra} = IR,
-    TaggedCSum = make_tagged_csum(CSum, ChunkBin),
-    {ReqID, {high_append_chunk, __todoPK, Prefix, ChunkBin, TaggedCSum,
+    TaggedCSum = make_tagged_csum(CSum, Chunk),
+    {ReqID, {high_append_chunk, __todoPK, Prefix, Chunk, TaggedCSum,
              ChunkExtra}};
 from_pb_request(#mpb_request{req_id=ReqID,
                              write_chunk=IR=#mpb_writechunkreq{}}) ->
     #mpb_writechunkreq{file=File,
                        offset=Offset,
-                       chunk=ChunkBin,
+                       chunk=Chunk,
                        csum=CSum} = IR,
-    TaggedCSum = make_tagged_csum(CSum, ChunkBin),
-    {ReqID, {high_write_chunk, File, Offset, ChunkBin, TaggedCSum}};
+    TaggedCSum = make_tagged_csum(CSum, Chunk),
+    {ReqID, {high_write_chunk, File, Offset, Chunk, TaggedCSum}};
 from_pb_request(#mpb_request{req_id=ReqID,
                              read_chunk=IR=#mpb_readchunkreq{}}) ->
     #mpb_readchunkreq{file=File,
@@ -92,6 +118,28 @@ from_pb_response(#mpb_ll_response{
                     req_id=ReqID,
                     echo=#mpb_echoresp{message=Msg}}) ->
     {ReqID, Msg};
+from_pb_response(#mpb_ll_response{
+                    req_id=ReqID,
+                    auth=#mpb_authresp{code=Code}}) ->
+    {ReqID, Code};
+from_pb_response(#mpb_ll_response{
+                    req_id=ReqID,
+                    append_chunk=#mpb_ll_appendchunkresp{status=Status,
+                                                        chunk_pos=ChunkPos}}) ->
+    case Status of
+        'OK' ->
+            #mpb_chunkpos{offset=Offset,
+                          chunk_size=Size,
+                          file_name=File} = ChunkPos,
+            {ReqID, {ok, {Offset, Size, File}}};
+        _ ->
+            {ReqID, machi_pb_high_client:convert_general_status_code(Status)}
+    end;
+from_pb_response(#mpb_ll_response{
+                    req_id=ReqID,
+                    write_chunk=#mpb_ll_writechunkresp{status=Status}}) ->
+    {ReqID, machi_pb_high_client:convert_general_status_code(Status)};
+%%qqq
 from_pb_response(#mpb_ll_response{
                     req_id=ReqID,
                     checksum_list=#mpb_ll_checksumlistresp{
@@ -159,26 +207,90 @@ from_pb_response(#mpb_ll_response{
             {ReqID< machi_pb_high_client:convert_general_status_code(Status)}
     end.
 
+%% TODO: move the #mbp_* record making code from
+%%       machi_pb_high_client:do_send_sync() clauses into to_pb_request().
+
 to_pb_request(ReqID, {low_echo, Msg}) ->
     #mpb_ll_request{
                req_id=ReqID,
                echo=#mpb_echoreq{message=Msg}};
+to_pb_request(ReqID, {low_auth, User, Pass}) ->
+    #mpb_ll_request{
+               req_id=ReqID,
+               auth=#mpb_authreq{user=User, password=Pass}};
+to_pb_request(ReqID, {low_append_chunk, EpochID, PKey, Prefix, Chunk,
+                      CSum_tag, CSum, ChunkExtra}) ->
+    PB_EpochID = conv_from_epoch_id(EpochID),
+    CSum_type = conv_from_csum_tag(CSum_tag),
+    PB_CSum = #mpb_chunkcsum{type=CSum_type, csum=CSum},
+    #mpb_ll_request{
+               req_id=ReqID,
+               append_chunk=#mpb_ll_appendchunkreq{
+                 epoch_id=PB_EpochID,
+                 placement_key=PKey,
+                 prefix=Prefix,
+                 chunk=Chunk,
+                 csum=PB_CSum,
+                 chunk_extra=ChunkExtra}};
+to_pb_request(ReqID, {low_write_chunk, EpochID, File, Offset, Chunk, CSum_tag, CSum}) ->
+    PB_EpochID = conv_from_epoch_id(EpochID),
+    CSum_type = conv_from_csum_tag(CSum_tag),
+    PB_CSum = #mpb_chunkcsum{type=CSum_type, csum=CSum},
+    #mpb_ll_request{
+               req_id=ReqID,
+               write_chunk=#mpb_ll_writechunkreq{
+                 epoch_id=PB_EpochID,
+                 prefix=File,
+                 offset=Offset,
+                 chunk=Chunk,
+                 csum=PB_CSum}};
+%%qqq
 to_pb_request(ReqID, {low_checksum_list, EpochID, File}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     #mpb_ll_request{
                      req_id=ReqID,
                      checksum_list=#mpb_ll_checksumlistreq{epoch_id=PB_EpochID,
                                                            file=File}}.
+
 to_pb_response(ReqID, {low_echo, _Msg}, Resp) ->
     #mpb_ll_response{
                 req_id=ReqID,
                 echo=#mpb_echoresp{message=Resp}};
+to_pb_response(ReqID, {low_auth, _, _}, Resp) ->
+    #mpb_ll_response{
+                req_id=ReqID,
+                auth=#mpb_authresp{code=Resp}};
+to_pb_response(ReqID, {low_append_chunk, _EID, _PKey, _Pfx, _Ch, _CST, _CS, _CE}, Resp)->
+    case Resp of
+        {ok, {Offset, Size, File}} ->
+            Where = #mpb_chunkpos{offset=Offset,
+                                  chunk_size=Size,
+                                  file_name=File},
+            #mpb_ll_response{req_id=ReqID,
+                             append_chunk=#mpb_ll_appendchunkresp{status='OK',
+                                                              chunk_pos=Where}};
+        {error, Status} ->
+            Status = conv_from_status(Status),
+            #mpb_ll_response{req_id=ReqID,
+                           append_chunk=#mpb_ll_appendchunkresp{status=Status}};
+        _Else ->
+            make_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
+    end;
+to_pb_response(ReqID, {low_write_chunk, _EID, _Fl, _Off, _Ch, _CST, _CS},Resp)->
+    Status = conv_from_status(Status),
+    #mpb_ll_response{req_id=ReqID,
+                     write_chunk=#mpb_ll_writechunkresp{status=Status}};
+%%qqq
 to_pb_response(ReqID, {low_checksum_list, _EpochID, _File}, Resp) ->
     case Resp of
-        {ok, _Chunk}=OK ->
-            make_ll_checksum_list_resp(ReqID, OK);
+        {ok, Chunk} ->
+            #mpb_ll_response{req_id=ReqID,
+                           checksum_list=#mpb_ll_checksumlistresp{status='OK',
+                                                                  chunk=Chunk}};
         {error, _}=Error ->
-            make_ll_checksum_list_resp(ReqID, Error);
+            Status = conv_from_status(Error),
+            #mpb_ll_response{req_id=ReqID,
+                         checksum_list=#mpb_ll_checksumlistresp{status=Status}};
         _Else ->
             make_ll_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
@@ -190,104 +302,89 @@ to_pb_response(ReqID, {high_auth, _User, _Pass}, _Resp) ->
     #mpb_response{req_id=ReqID,
                   generic=#mpb_errorresp{code=1,
                                          msg="AUTH not implemented"}};
-to_pb_response(ReqID, {high_append_chunk, _TODO, _Prefix, _ChunkBin, _TSum, _CE}, Resp)->
+to_pb_response(ReqID, {high_append_chunk, _TODO, _Prefix, _Chunk, _TSum, _CE}, Resp)->
     case Resp of
         {ok, {Offset, Size, File}} ->
-            make_append_resp(ReqID, 'OK',
-                             #mpb_chunkpos{offset=Offset,
-                                           chunk_size=Size,
-                                           file_name=File});
+            Where = #mpb_chunkpos{offset=Offset,
+                                  chunk_size=Size,
+                                  file_name=File},
+            #mpb_response{req_id=ReqID,
+                          append_chunk=#mpb_appendchunkresp{status='OK',
+                                                            chunk_pos=Where}};
         {error, Status} ->
-            make_append_resp(ReqID, conv_from_status(Status), undefined);
+            Status = conv_from_status(Status),
+            #mpb_response{req_id=ReqID,
+                          append_chunk=#mpb_appendchunkresp{status=Status}};
         _Else ->
             make_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
-to_pb_response(ReqID, {high_write_chunk, _File, _Offset, _ChunkBin, _TaggedCSum}, Resp) ->
+to_pb_response(ReqID, {high_write_chunk, _File, _Offset, _Chunk, _TaggedCSum}, Resp) ->
     case Resp of
         {ok, {_,_,_}} ->
             %% machi_cr_client returns ok 2-tuple, convert to simple ok.
-            make_write_resp(ReqID, 'OK');
+            #mpb_response{req_id=ReqID,
+                          write_chunk=#mpb_writechunkresp{status='OK'}};
         {error, Status} ->
-            make_write_resp(ReqID, conv_from_status(Status));
+            Status = conv_from_status(Status),
+            #mpb_response{req_id=ReqID,
+                          write_chunk=#mpb_writechunkresp{status=Status}};
         _Else ->
             make_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
 to_pb_response(ReqID, {high_read_chunk, _File, _Offset, _Size}, Resp) ->
     case Resp of
         {ok, Chunk} ->
-            make_read_resp(ReqID, 'OK', Chunk);
+            #mpb_response{req_id=ReqID,
+                          read_chunk=#mpb_readchunkresp{status='OK',
+                                                        chunk=Chunk}};
         {error, Status} ->
-            make_read_resp(ReqID, conv_from_status(Status), undefined);
+            Status = conv_from_status(Status),
+            #mpb_response{req_id=ReqID,
+                          read_chunk=#mpb_readchunkresp{status=Status}};
         _Else ->
             make_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
 to_pb_response(ReqID, {high_checksum_list, _File}, Resp) ->
     case Resp of
         {ok, Chunk} ->
-            make_checksum_list_resp(ReqID, 'OK', Chunk);
+            #mpb_response{req_id=ReqID,
+                          checksum_list=#mpb_checksumlistresp{status='OK',
+                                                              chunk=Chunk}};
         {error, Status} ->
-            make_checksum_list_resp(ReqID, conv_from_status(Status), undefined);
+            Status = conv_from_status(Status),
+            #mpb_response{req_id=ReqID,
+                          checksum_list=#mpb_checksumlistresp{status=Status}};
         _Else ->
             make_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
 to_pb_response(ReqID, {high_list_files}, Resp) ->
     case Resp of
         {ok, FileInfo} ->
-            make_list_files_resp(ReqID, 'OK', FileInfo);
+            Files = [#mpb_fileinfo{file_size=Size, file_name=Name} ||
+                        {Size, Name} <- FileInfo],
+            #mpb_response{req_id=ReqID,
+                          list_files=#mpb_listfilesresp{status='OK',
+                                                        files=Files}};
         {error, Status} ->
-            make_list_files_resp(ReqID, conv_from_status(Status), []);
+            Status = conv_from_status(Status),
+            #mpb_response{req_id=ReqID,
+                          list_files=#mpb_listfilesresp{status=Status}};
         _Else ->
             make_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
 to_pb_response(ReqID, {high_error, _, _}, {ErrCode, ErrMsg}) ->
     make_error_resp(ReqID, ErrCode, ErrMsg).
 
-make_tagged_csum(#mpb_chunkcsum{type='CSUM_TAG_NONE'}, ChunkBin) ->
-    C = machi_util:checksum_chunk(ChunkBin),
+make_tagged_csum(#mpb_chunkcsum{type='CSUM_TAG_NONE'}, Chunk) ->
+    C = machi_util:checksum_chunk(Chunk),
     machi_util:make_tagged_csum(server_sha, C);
 make_tagged_csum(#mpb_chunkcsum{type='CSUM_TAG_CLIENT_SHA', csum=CSum}, _CB) ->
     machi_util:make_tagged_csum(client_sha, CSum).
-
-make_ll_checksum_list_resp(ReqID, {ok, Chunk}) ->
-    #mpb_ll_response{req_id=ReqID,
-                     checksum_list=#mpb_ll_checksumlistresp{status='OK',
-                                                            chunk=Chunk}};
-make_ll_checksum_list_resp(ReqID, Error) ->
-    Status = conv_from_status(Error),
-    #mpb_ll_response{req_id=ReqID,
-                     checksum_list=#mpb_ll_checksumlistresp{status=Status}}.
 
 make_ll_error_resp(ReqID, Code, Msg) ->
     #mpb_ll_response{req_id=ReqID,
                      generic=#mpb_errorresp{code=Code,
                                             msg=Msg}}.    
-
-make_append_resp(ReqID, Status, Where) ->
-    #mpb_response{req_id=ReqID,
-                  append_chunk=#mpb_appendchunkresp{status=Status,
-                                                    chunk_pos=Where}}.
-
-make_write_resp(ReqID, Status) ->
-    #mpb_response{req_id=ReqID,
-                  write_chunk=#mpb_writechunkresp{status=Status}}.
-
-make_read_resp(ReqID, Status, Chunk) ->
-    #mpb_response{req_id=ReqID,
-                  read_chunk=#mpb_readchunkresp{status=Status,
-                                                chunk=Chunk}}.
-
-make_checksum_list_resp(ReqID, Status, __todo__Chunk) ->
-    Chunk = <<"TODO item: refactor the checksum_list op to return simply the text file representation of the checksums?">>,
-    #mpb_response{req_id=ReqID,
-                  checksum_list=#mpb_checksumlistresp{status=Status,
-                                                      chunk=Chunk}}.
-
-make_list_files_resp(ReqID, Status, FileInfo) ->
-    Files = [#mpb_fileinfo{file_size=Size, file_name=Name} ||
-                {Size, Name} <- FileInfo],
-    #mpb_response{req_id=ReqID,
-                  list_files=#mpb_listfilesresp{status=Status,
-                                                files=Files}}.
 
 make_error_resp(ReqID, Code, Msg) ->
     #mpb_response{req_id=ReqID,
@@ -400,6 +497,22 @@ to_integer(X) when is_binary(X) ->
     list_to_binary(binary_to_list(X));
 to_integer(X) when is_integer(X) ->
     X.
+
+conv_from_csum_tag(CSum_tag) ->
+    case CSum_tag of
+        ?CSUM_TAG_NONE -> 'CSUM_TAG_NONE';
+        ?CSUM_TAG_CLIENT_SHA -> 'CSUM_TAG_CLIENT_SHA';
+        ?CSUM_TAG_SERVER_SHA -> 'CSUM_TAG_SERVER_SHA';
+        ?CSUM_TAG_SERVER_REGEN_SHA -> 'CSUM_TAG_SERVER_REGEN_SHA'
+    end.
+
+conv_to_csum_tag(Type) ->
+    case Type of
+        'CSUM_TAG_NONE' -> ?CSUM_TAG_NONE;
+        'CSUM_TAG_CLIENT_SHA' -> ?CSUM_TAG_CLIENT_SHA;
+        'CSUM_TAG_SERVER_SHA' -> ?CSUM_TAG_SERVER_SHA;
+        'CSUM_TAG_SERVER_REGEN_SHA' -> ?CSUM_TAG_SERVER_REGEN_SHA
+    end.
 
 conv_from_now({A,B,C}) ->
     #mpb_now{sec=(1000000 * A) + B,
