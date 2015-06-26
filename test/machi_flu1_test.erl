@@ -70,6 +70,8 @@ flu_smoke_test() ->
     W_props = [{initial_wedged, false}],
     FLU1 = setup_test_flu(smoke_flu, TcpPort, DataDir, W_props),
     try
+        Msg = "Hello, world!",
+        Msg = ?FLU_C:echo(Host, TcpPort, Msg),
         {error, no_such_file} = ?FLU_C:checksum_list(Host, TcpPort,
                                                      ?DUMMY_PV1_EPOCH,
                                                      "does-not-exist"),

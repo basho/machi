@@ -51,6 +51,7 @@
 -module(machi_flu1_client).
 
 -include("machi.hrl").
+-include("machi_pb.hrl").
 -include("machi_projection.hrl").
 
 -define(HARD_TIMEOUT, 2500).
@@ -73,6 +74,7 @@
          list_all_projections/2, list_all_projections/3,
 
          %% Common API
+         echo/2, echo/3,
          quit/1,
 
          %% Connection management API
@@ -361,6 +363,25 @@ list_all_projections(Host, TcpPort, ProjType)
         disconnect(Sock)
     end.
 
+%% @doc Echo -- test protocol round-trip.
+
+-spec echo(port_wrap(), string()) ->
+      string() | {error, term()}.
+echo(Sock, String) when is_list(String) ->
+    echo2(Sock, String).
+
+%% @doc Get all epoch numbers from the FLU's projection store.
+
+-spec echo(machi_dt:inet_host(), machi_dt:inet_port(), string()) ->
+      {ok, [non_neg_integer()]} | {error, term()}.
+echo(Host, TcpPort, String) when is_list(String) ->
+    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
+    try
+        echo2(Sock, String)
+    after
+        disconnect(Sock)
+    end.
+
 %% @doc Quit &amp; close the connection to remote FLU.
 
 -spec quit(port_wrap()) ->
@@ -625,42 +646,17 @@ wedge_status2(Sock) ->
             {error, {badmatch, BadMatch}}
     end.
 
+echo2(Sock, Message) ->
+    ReqID = <<"id">>,
+    Req = machi_pb_translate:to_pb(
+            ReqID, {low_echo, Message}),
+    do_pb_request_common(Sock, ReqID, Req).
+
 checksum_list2(Sock, EpochID, File) ->
-    erase(bad_sock),
-    try
-        {EpochNum, EpochCSum} = EpochID,
-        EpochIDHex = machi_util:bin_to_hexstr(
-                       <<EpochNum:(4*8)/big, EpochCSum/binary>>),
-        ok = w_send(Sock, [<<"C ">>, EpochIDHex, File, <<"\n">>]),
-        ok = w_setopts(Sock, [{packet, line}]),
-        case w_recv(Sock, 0) of
-            {ok, <<"OK ", Rest/binary>> = Line} ->
-                put(status, ok),                    % may be unset later
-                RestLen = byte_size(Rest) - 1,
-                <<LenHex:RestLen/binary, _:1/binary>> = Rest,
-                <<Len:64/big>> = machi_util:hexstr_to_bin(LenHex),
-                ok = w_setopts(Sock, [{packet, raw}]),
-                {ok, checksum_list_finish(checksum_list_fast(Sock, Len))};
-            {ok, <<"ERROR NO-SUCH-FILE", _/binary>>} ->
-                {error, no_such_file};
-            {ok, <<"ERROR BAD-ARG", _/binary>>} ->
-                {error, bad_arg};
-            {ok, <<"ERROR WEDGED", _/binary>>} ->
-                {error, wedged};
-            {ok, Else} ->
-                throw({server_protocol_error, Else})
-        end
-    catch
-        throw:Error ->
-            put(bad_sock, Sock),
-            Error;
-        error:{case_clause,_}=Noo ->
-            put(bad_sock, Sock),
-            {error, {badmatch, Noo, erlang:get_stacktrace()}};
-        error:{badmatch,_}=BadMatch ->
-            put(bad_sock, Sock),
-            {error, {badmatch, BadMatch}}
-    end.
+    ReqID = <<"id">>,
+    Req = machi_pb_translate:to_pb(
+            ReqID, {low_checksum_list, EpochID, File}),
+    do_pb_request_common(Sock, ReqID, Req).
 
 checksum_list_fast(Sock, 0) ->
     {ok, <<".\n">> = _Line} = w_recv(Sock, 2),
@@ -802,58 +798,57 @@ trunc_hack2(Sock, EpochID, File) ->
     end.
 
 get_latest_epochid2(Sock, ProjType) ->
+    ReqID = <<42>>,
     Req = machi_pb_wrap:make_projection_req(
-                <<42>>, {get_latest_epochid, ProjType}),
-    do_projection_common(Sock, Req).
+                ReqID, {get_latest_epochid, ProjType}),
+    do_pb_request_common(Sock, ReqID, Req).
 
 read_latest_projection2(Sock, ProjType) ->
+    ReqID = <<42>>,
     Req = machi_pb_wrap:make_projection_req(
-                <<42>>, {read_latest_projection, ProjType}),
-    do_projection_common(Sock, Req).
+                ReqID, {read_latest_projection, ProjType}),
+    do_pb_request_common(Sock, ReqID, Req).
 
 read_projection2(Sock, ProjType, Epoch) ->
+    ReqID = <<42>>,
     Req = machi_pb_wrap:make_projection_req(
-                <<42>>, {read_projection, ProjType, Epoch}),
-    do_projection_common(Sock, Req).
+                ReqID, {read_projection, ProjType, Epoch}),
+    do_pb_request_common(Sock, ReqID, Req).
 
 write_projection2(Sock, ProjType, Proj) ->
+    ReqID = <<42>>,
     Req = machi_pb_wrap:make_projection_req(
-                <<42>>, {write_projection, ProjType, Proj}),
-    do_projection_common(Sock, Req).
+                ReqID, {write_projection, ProjType, Proj}),
+    do_pb_request_common(Sock, ReqID, Req).
 
 get_all_projections2(Sock, ProjType) ->
+    ReqID = <<42>>,
     Req = machi_pb_wrap:make_projection_req(
-                <<42>>, {get_all_projections, ProjType}),
-    do_projection_common(Sock, Req).
+                ReqID, {get_all_projections, ProjType}),
+    do_pb_request_common(Sock, ReqID, Req).
 
 list_all_projections2(Sock, ProjType) ->
+    ReqID = <<42>>,
     Req = machi_pb_wrap:make_projection_req(
-                <<42>>, {list_all_projections, ProjType}),
-    do_projection_common(Sock, Req).
+                ReqID, {list_all_projections, ProjType}),
+    do_pb_request_common(Sock, ReqID, Req).
 
-do_projection_common(Sock, Req) ->
+do_pb_request_common(Sock, ReqID, Req) ->
     erase(bad_sock),
     try
         ReqBin = list_to_binary(machi_pb:encode_mpb_ll_request(Req)),
-        Len = iolist_size(ReqBin),
-        true = (Len =< ?MAX_CHUNK_SIZE),
-        LenHex = machi_util:int_to_hexbin(Len, 32),
-        Cmd = [<<"PROJ ">>, LenHex, <<"\n">>],
-        ok = w_send(Sock, [Cmd, ReqBin]),
-        ok = w_setopts(Sock, [{packet, line}]),
+io:format(user, "\nCCC Req ~p\n", [Req]),
+        ok = w_send(Sock, ReqBin),
         case w_recv(Sock, 0) of
-            {ok, Line} ->
-                case Line of
-                    <<"OK ", ResLenHex:8/binary, "\n">> ->
-                        ResLen = machi_util:hexstr_to_int(ResLenHex),
-                        ok = w_setopts(Sock, [{packet, raw}]),
-                        {ok, RespBin} = w_recv(Sock, ResLen),
-                        ok = w_setopts(Sock, [{packet, line}]),
-                        Resp = machi_pb:decode_mpb_ll_response(RespBin),
-                        machi_pb_wrap:unmake_projection_resp(Resp);
-                    Else ->
-                        {error, Else}
-                end
+            {ok, RespBin} ->
+                Resp = machi_pb:decode_mpb_ll_response(RespBin),
+                io:format(user, "\nCCC Resp ~p\n", [Resp]),
+                {ReqID2, Reply} = machi_pb_translate:from_pb(Resp),
+                io:format(user, "\nCCC ReqID2 ~p Reply ~p\n", [ReqID2, Reply]),
+                true = (ReqID == ReqID2 orelse ReqID2 == <<>>),
+                Reply;
+            Else ->
+                {error, Else}
         end
     catch
         throw:Error ->
@@ -874,6 +869,7 @@ w_connect(#p_srvr{proto_mod=?MODULE, address=Host, port=Port, props=Props})->
         case proplists:get_value(session_proto, Props, tcp) of
             tcp ->
                 Sock = machi_util:connect(Host, Port, ?HARD_TIMEOUT),
+                ok = inet:setopts(Sock, ?PB_PACKET_OPTS),
                 {w,tcp,Sock};
             %% sctp ->
             %%     %% TODO: not implemented

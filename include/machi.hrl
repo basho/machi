@@ -30,3 +30,6 @@
 -define(CSUM_TAG_SERVER_SHA, 2).             % Server-genereated SHA1
 -define(CSUM_TAG_SERVER_REGEN_SHA, 3).       % Server-regenerated SHA1
 
+%% Protocol Buffers goop
+-define(PB_MAX_MSG_SIZE, (33*1024*1024)).
+-define(PB_PACKET_OPTS, [{packet, 4}, {packet_size, ?PB_MAX_MSG_SIZE}]).

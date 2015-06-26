@@ -169,10 +169,8 @@ try_connect(#state{server_list=Ps}=S) ->
 do_connect_to_pb_listener(P) ->
     try
         {ok, Sock} = gen_tcp:connect(P#p_srvr.address, P#p_srvr.port,
-                                     [{packet, line}, binary, {active, false}]),
-        ok = gen_tcp:send(Sock, <<"PROTOCOL-BUFFERS\n">>),
-        {ok, <<"OK\n">>} = gen_tcp:recv(Sock, 0),
-        ok = inet:setopts(Sock, [{packet,4}]),
+                                     ?PB_PACKET_OPTS ++
+                                     [binary, {active, false}]),
         Sock
     catch _X:_Y ->
             io:format(user, "\n~p ~p @ ~p\n", [_X, _Y, erlang:get_stacktrace()]),
@@ -369,6 +367,8 @@ convert_general_status_code('NOT_WRITTEN') ->
     {error, not_written};
 convert_general_status_code('WRITTEN') ->
     {error, written};
+convert_general_status_code('NO_SUCH_FILE') ->
+    {error, no_such_file};
 convert_general_status_code('BAD_JOSS') ->
     throw({error, bad_joss_taipan_fixme}).
 

@@ -75,6 +75,7 @@
 -include_lib("kernel/include/file.hrl").
 
 -include("machi.hrl").
+-include("machi_pb.hrl").
 -include("machi_projection.hrl").
 
 -define(SERVER_CMD_READ_TIMEOUT, 600*1000).
@@ -207,8 +208,8 @@ start_append_server(S, AckPid) ->
 
 run_listen_server(#state{flu_name=FluName, tcp_port=TcpPort}=S) ->
     register(make_listener_regname(FluName), self()),
-    SockOpts = [{reuseaddr, true},
-                {mode, binary}, {active, false}, {packet, line}],
+    SockOpts = ?PB_PACKET_OPTS ++
+        [{reuseaddr, true}, {mode, binary}, {active, false}],
     case gen_tcp:listen(TcpPort, SockOpts) of
         {ok, LSock} ->
             listen_server_loop(LSock, S);
@@ -268,8 +269,41 @@ decode_epoch_id(EpochIDHex) ->
         machi_util:hexstr_to_bin(EpochIDHex),
     {EpochNum, EpochCSum}.
 
-net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
-    ok = inet:setopts(Sock, [{packet, line}]),
+net_server_loop(Sock, S) ->
+    case gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT) of
+        {ok, Bin} ->
+            {R, S2} = do_pb_request(catch machi_pb:decode_mpb_ll_request(Bin), S),
+            Resp = machi_pb:encode_mpb_ll_response(R),
+            ok = gen_tcp:send(Sock, Resp),
+            net_server_loop(Sock, S2);
+        {error, SockError} ->
+            Msg = io_lib:format("Socket error ~w", [SockError]),
+io:format(user, "\nSSS SockError ~p\n", [SockError]),
+            R = #mpb_ll_response{req_id= <<>>,
+                                 generic=#mpb_errorresp{code=1, msg=Msg}},
+            Resp = machi_pb:encode_mpb_ll_response(R),
+            _ = (catch gen_tcp:send(Sock, Resp)),
+            (catch gen_tcp:close(Sock)),
+            exit(normal)
+    end.
+
+do_pb_request(PB_request, S) ->
+    Req = machi_pb_translate:from_pb(PB_request),
+io:format(user, "\nSSS Req ~p\n", [Req]),
+    {ReqID, Cmd, Result, S2} = 
+        case Req of
+            {RqID, {low_echo, Msg}=CMD} ->
+                Rs = Msg,
+                {RqID, CMD, Rs, S};
+            {RqID, {low_checksum_list, EpochID, File}=CMD} ->
+                Rs = do_pb_server_checksum_listing(File, S),
+                {RqID, CMD, Rs, S};
+            nope ->
+                {foo, bar, baz}
+        end,
+    {machi_pb_translate:to_pb(ReqID, Cmd, Result), S2}.
+
+net_server_loop_old(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
     %% TODO: Add testing control knob to adjust this timeout and/or inject
     %% timeout condition.
     case gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT) of
@@ -345,8 +379,7 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                     http_server_hack(FluName, PutLine, Sock, S);
                 <<"PROTOCOL-BUFFERS\n">> ->
                     ok = gen_tcp:send(Sock, <<"OK\n">>),
-                    ok = inet:setopts(Sock, [{packet, 4},
-                                             {packet_size, 33*1024*1024}]),
+                    ok = inet:setopts(Sock, ?PB_PACKET_OPTS),
                     {ok, Proj} = machi_projection_store:read_latest_projection(
                                    S#state.proj_store, private),
                     Ps = [P_srvr ||
@@ -360,7 +393,7 @@ net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                     catch gen_tcp:close(Sock),
                     exit(normal)
             end,
-            net_server_loop(Sock, S);
+            net_server_loop_old(Sock, S);
         _ ->
             catch gen_tcp:close(Sock),
             exit(normal)
@@ -658,6 +691,28 @@ do_net_server_checksum_listing(Sock, File, DataDir, S) ->
             do_net_server_checksum_listing2(Sock, File, DataDir);
         _ ->
             ok = gen_tcp:send(Sock, <<"ERROR BAD-ARG\n">>)
+    end.
+
+do_pb_server_checksum_listing(File, #state{data_dir=DataDir}=S) ->
+    {Wedged_p, _CurrentEpochId} = ets:lookup_element(S#state.etstab, epoch, 2),
+    case {Wedged_p, sanitize_file_string(File)} of
+        {true, _} ->
+            {error, wedged};
+        {false, ok} ->
+            ok = sync_checksum_file(File),
+
+            CSumPath = machi_util:make_checksum_filename(DataDir, File),
+            %% case file:open(CSumPath, [read, raw, binary]) of
+            case file:read_file(CSumPath) of
+                {ok, Bin} ->
+                    {ok, Bin};
+                {error, enoent} ->
+                    {error, no_such_file};
+                {error, _} ->
+                    {error, bad_arg}
+            end;
+        _ ->
+            {error, bad_arg}
     end.
 
 do_net_server_checksum_listing2(Sock, File, DataDir) ->

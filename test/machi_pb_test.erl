@@ -63,22 +63,6 @@ smoke_responses_test() ->
 
     ok.
 
-smoke_p_srvr_test() ->
-    P1 = #p_srvr{name=a, address="localhost", port=5555,
-                 props=[{dir,"./data.a"}]},
-    P1 = machi_pb_wrap:dec_p_srvr(
-           list_to_binary(machi_pb_wrap:enc_p_srvr(P1))),
-    ok.
-
-smoke_projection_v1_test() ->
-    P1 = #p_srvr{name=a, address="localhost", port=5555,
-                 props=[{dir,"./data.a"}]},
-    D = orddict:from_list([ {P1#p_srvr.name, P1} ]),
-    Proj1 = machi_projection:new(a, D, [a], [], [], [{property, 42}]),
-    Proj1 = machi_pb_wrap:dec_projection_v1(
-              machi_pb_wrap:enc_projection_v1(Proj1)),
-    ok.
-
 encdec_request(M) ->
     machi_pb:decode_mpb_request(
       list_to_binary(machi_pb:encode_mpb_request(M))).

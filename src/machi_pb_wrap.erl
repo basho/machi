@@ -33,10 +33,12 @@
 -include("machi_pb.hrl").
 -include("machi_projection.hrl").
 
+-ifdef(COMMENT_DELME).
+
 -export([enc_p_srvr/1, dec_p_srvr/1,
          enc_projection_v1/1, dec_projection_v1/1,
          make_projection_req/2, unmake_projection_req/1,
-         make_projection_resp/3, unmake_projection_resp/1]).
+         make_projection_resp/3]).
 -ifdef(TEST).
 -compile(export_all).
 -endif. % TEST
@@ -75,7 +77,8 @@ enc_projection_v1(P) ->
       machi_pb:encode_mpb_projectionv1(conv_from_projection_v1(P))).
 
 dec_projection_v1(Bin) ->
-    conv_to_projection_v1(machi_pb:decode_mpb_projectionv1(Bin)).
+    delme.
+    %% conv_to_projection_v1(machi_pb:decode_mpb_projectionv1(Bin)).
 
 conv_from_projection_v1(#projection_v1{epoch_number=Epoch,
                                        epoch_csum=CSum,
@@ -105,35 +108,6 @@ conv_from_projection_v1(#projection_v1{epoch_number=Epoch,
                       opaque_dbg=enc_sexp(Dbg),
                       opaque_dbg2=enc_sexp(Dbg2),
                       members_dict=conv_from_members_dict(MembersDict)}.
-
-conv_to_projection_v1(#mpb_projectionv1{epoch_number=Epoch,
-                                        epoch_csum=CSum,
-                                        author_server=Author,
-                                        all_members=AllMembers,
-                                        creation_time=CTime,
-                                        mode=Mode,
-                                        upi=UPI,
-                                        repairing=Repairing,
-                                        down=Down,
-                                        opaque_flap=Flap,
-                                        opaque_inner=Inner,
-                                        opaque_dbg=Dbg,
-                                        opaque_dbg2=Dbg2,
-                                        members_dict=MembersDict}) ->
-    #projection_v1{epoch_number=Epoch,
-                   epoch_csum=CSum,
-                   author_server=to_atom(Author),
-                   all_members=[to_atom(X) || X <- AllMembers],
-                   creation_time=conv_to_now(CTime),
-                   mode=conv_to_mode(Mode),
-                   upi=[to_atom(X) || X <- UPI],
-                   repairing=[to_atom(X) || X <- Repairing],
-                   down=[to_atom(X) || X <- Down],
-                   flap=dec_optional_sexp(Flap),
-                   inner=dec_optional_sexp(Inner),
-                   dbg=dec_sexp(Dbg),
-                   dbg2=dec_sexp(Dbg2),
-                   members_dict=conv_to_members_dict(MembersDict)}.
 
 make_projection_req(ID, {get_latest_epochid, ProjType}) ->
     #mpb_ll_request{req_id=ID,
@@ -174,7 +148,7 @@ unmake_projection_req(
   #mpb_ll_request{req_id=ID,
                   proj_wp=#mpb_ll_writeprojectionreq{type=ProjType,
                                                      proj=ProjM}}) ->
-    Proj = conv_to_projection_v1(ProjM),
+    Proj = delme, %% conv_to_projection_v1(ProjM),
     {ID, {write_projection, conv_to_type(ProjType), Proj}};
 unmake_projection_req(
   #mpb_ll_request{req_id=ID,
@@ -234,50 +208,6 @@ make_projection_resp(ID, list_all_projections, Status) ->
                      proj_la=#mpb_ll_listallprojectionsresp{
                        status=conv_from_status(Status)}}.
 
-unmake_projection_resp(#mpb_ll_response{proj_gl=#mpb_ll_getlatestepochidresp{
-        status=Status, epoch_id=EID}}) ->
-    case Status of
-        'OK' ->
-            #mpb_epochid{epoch_number=Epoch, epoch_csum=CSum} = EID,
-            {ok, {Epoch, CSum}};
-        _ ->
-            machi_pb_high_client:convert_general_status_code(Status)
-    end;
-unmake_projection_resp(#mpb_ll_response{proj_rl=#mpb_ll_readlatestprojectionresp{
-        status=Status, proj=P}}) ->
-    case Status of
-        'OK' ->
-            {ok, conv_to_projection_v1(P)};
-        _ ->
-            machi_pb_high_client:convert_general_status_code(Status)
-    end;
-unmake_projection_resp(#mpb_ll_response{proj_rp=#mpb_ll_readprojectionresp{
-        status=Status, proj=P}}) ->
-    case Status of
-        'OK' ->
-            {ok, conv_to_projection_v1(P)};
-        _ ->
-            machi_pb_high_client:convert_general_status_code(Status)
-    end;
-unmake_projection_resp(#mpb_ll_response{proj_wp=#mpb_ll_writeprojectionresp{
-        status=Status}}) ->
-    machi_pb_high_client:convert_general_status_code(Status);
-unmake_projection_resp(#mpb_ll_response{proj_ga=#mpb_ll_getallprojectionsresp{
-        status=Status, projs=ProjsM}}) ->
-    case Status of
-        'OK' ->
-            {ok, [conv_to_projection_v1(ProjM) || ProjM <- ProjsM]};
-        _ ->
-            machi_pb_high_client:convert_general_status_code(Status)
-    end;
-unmake_projection_resp(#mpb_ll_response{proj_la=#mpb_ll_listallprojectionsresp{
-        status=Status, epochs=Epochs}}) ->
-    case Status of
-        'OK' ->
-            {ok, Epochs};
-        _ ->
-            machi_pb_high_client:convert_general_status_code(Status)
-    end.
 
 %%%%%%%%%%%%%%%%%%%
 
@@ -329,39 +259,4 @@ to_integer(X) when is_binary(X) ->
 to_integer(X) when is_integer(X) ->
     X.
 
-conv_from_now({A,B,C}) ->
-    #mpb_now{sec=(1000000 * A) + B,
-             usec=C}.
-
-conv_to_now(#mpb_now{sec=Sec, usec=USec}) ->
-    {Sec div 1000000, Sec rem 1000000, USec}.
-
-conv_from_mode(ap_mode) -> 'AP_MODE';
-conv_from_mode(cp_mode) -> 'CP_MODE'.
-
-conv_to_mode('AP_MODE') -> ap_mode;
-conv_to_mode('CP_MODE') -> cp_mode.
-
-conv_from_type(private) -> 'PRIVATE';
-conv_from_type(public)  -> 'PUBLIC'.
-
-conv_to_type('PRIVATE') -> private;
-conv_to_type('PUBLIC')  -> public.
-
-conv_from_status(ok) ->
-    'OK';
-conv_from_status({error, bad_arg}) ->
-    'BAD_ARG';
-conv_from_status({error, wedged}) ->
-    'WEDGED';
-conv_from_status({error, bad_checksum}) ->
-    'BAD_CHECKSUM';
-conv_from_status({error, partition}) ->
-    'PARTITION';
-conv_from_status({error, not_written}) ->
-    'NOT_WRITTEN';
-conv_from_status({error, written}) ->
-    'WRITTEN';
-conv_from_status(_OOPS) ->
-    io:format(user, "HEY, ~s:~w got ~w\n", [?MODULE, ?LINE, _OOPS]),
-    'BAD_JOSS'.
+-endif. % COMMENT_DELME
