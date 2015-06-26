@@ -310,8 +310,11 @@ do_pb_request(PB_request, S) ->
 do_pb_request2(EpochID, CMD, S) ->
     {Wedged_p, CurrentEpochID} = ets:lookup_element(S#state.etstab, epoch, 2),
     if Wedged_p == true ->
+io:format(user, "LINE ~s ~p : ~p\n", [?MODULE, ?LINE, ets:lookup_element(S#state.etstab, epoch, 2)]),
             {{error, wedged}, S};
-       EpochID /= undefined andalso EpochID /= CurrentEpochID ->
+       not (EpochID == undefined orelse EpochID == ?DUMMY_PV1_EPOCH)
+       andalso
+       EpochID /= CurrentEpochID ->
             {Epoch, _} = EpochID,
             {CurrentEpoch, _} = CurrentEpochID,
             if Epoch < CurrentEpoch ->
@@ -322,8 +325,10 @@ do_pb_request2(EpochID, CMD, S) ->
                     io:format(user, "\n\nTODO: wedge myself!\n\n", []),
                     todo_wedge_myself
             end,
+io:format(user, "LINE ~s ~p\n", [?MODULE, ?LINE]),
             {{error, bad_epoch}, S};
        true ->
+io:format(user, "LINE ~s ~p\n", [?MODULE, ?LINE]),
             do_pb_request3(CMD, S)
     end.
 

@@ -198,7 +198,8 @@ bad_checksum_test() ->
     TcpPort = 32960,
     DataDir = "./data",
 
-    FLU1 = setup_test_flu(projection_test_flu, TcpPort, DataDir),
+    Opts = [{initial_wedged, false}],
+    FLU1 = setup_test_flu(projection_test_flu, TcpPort, DataDir, Opts),
     try
         Prefix = <<"some prefix">>,
         Chunk1 = <<"yo yo yo">>,
