@@ -547,6 +547,8 @@ message Mpb_LL_Request {
     optional Mpb_LL_ChecksumListReq checksum_list = 33;
     optional Mpb_LL_ListFilesReq list_files = 34;
     optional Mpb_LL_WedgeStatusReq wedge_status = 35;
+    optional Mpb_LL_DeleteMigrationReq delete_migration = 36;
+    optional Mpb_LL_TruncHackReq trunc_hack = 37;
 }
 
 message Mpb_LL_Response {
@@ -578,4 +580,6 @@ message Mpb_LL_Response {
     optional Mpb_LL_ChecksumListResp checksum_list = 33;
     optional Mpb_LL_ListFilesResp list_files = 34;
     optional Mpb_LL_WedgeStatusResp wedge_status = 35;
+    optional Mpb_LL_DeleteMigrationResp delete_migration = 36;
+    optional Mpb_LL_TruncHackResp trunc_hack = 37;
 }

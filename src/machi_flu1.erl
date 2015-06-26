@@ -339,7 +339,11 @@ do_pb_request3({low_checksum_list, _EpochID, File}, S) ->
 do_pb_request3({low_list_files, _EpochID}, S) ->
     {do_pb_server_list_files(S), S};
 do_pb_request3({low_wedge_status, _EpochID}, S) ->
-    {do_pb_server_wedge_status(S), S}.
+    {do_pb_server_wedge_status(S), S};
+do_pb_request3({low_delete_migration, _EpochID, File}, S) ->
+    {do_pb_server_delete_migration(File, S), S};
+do_pb_request3({low_trunc_hack, _EpochID, File}, S) ->
+    {do_pb_server_trunc_hack(File, S), S}.
 
 do_pb_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
                           ChunkExtra, S) ->
@@ -539,6 +543,45 @@ do_pb_server_list_files(#state{data_dir=DataDir}=_S) ->
 do_pb_server_wedge_status(S) ->
     {Wedged_p, CurrentEpochID} = ets:lookup_element(S#state.etstab, epoch, 2),
     {Wedged_p, CurrentEpochID}.
+
+do_pb_server_delete_migration(File, #state{data_dir=DataDir}=_S) ->
+    case sanitize_file_string(File) of
+        ok ->
+            {_, Path} = machi_util:make_data_filename(DataDir, File),
+            case file:delete(Path) of
+                ok ->
+                    ok;
+                {error, enoent} ->
+                    {error, no_such_file};
+                _ ->
+                    {error, bad_arg}
+            end;
+        _ ->
+            {error, bad_arg}
+    end.
+
+do_pb_server_trunc_hack(File, #state{data_dir=DataDir}=_S) ->
+    case sanitize_file_string(File) of
+        ok ->
+            {_, Path} = machi_util:make_data_filename(DataDir, File),
+            case file:open(Path, [read, write, binary, raw]) of
+                {ok, FH} ->
+                    try
+                        {ok, ?MINIMUM_OFFSET} = file:position(FH,
+                                                              ?MINIMUM_OFFSET),
+                        ok = file:truncate(FH),
+                        ok
+                    after
+                        file:close(FH)
+                    end;
+                {error, enoent} ->
+                    {error, no_such_file};
+                _ ->
+                    {error, bad_arg}
+            end;
+        _ ->
+            {error, bad_arg}
+    end.
 
 net_server_loop_old(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
     %% TODO: Add testing control knob to adjust this timeout and/or inject

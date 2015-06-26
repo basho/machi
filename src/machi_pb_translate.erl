@@ -94,6 +94,20 @@ from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    wedge_status=#mpb_ll_wedgestatusreq{}}) ->
     {ReqID, {low_wedge_status, undefined}};
+from_pb_request(#mpb_ll_request{
+                   req_id=ReqID,
+                   delete_migration=#mpb_ll_deletemigrationreq{
+                    epoch_id=PB_EpochID,
+                    file=File}}) ->
+    EpochID = conv_to_epoch_id(PB_EpochID),
+    {ReqID, {low_delete_migration, EpochID, File}};
+from_pb_request(#mpb_ll_request{
+                   req_id=ReqID,
+                   trunc_hack=#mpb_ll_trunchackreq{
+                    epoch_id=PB_EpochID,
+                    file=File}}) ->
+    EpochID = conv_to_epoch_id(PB_EpochID),
+    {ReqID, {low_trunc_hack, EpochID, File}};
 %%qqq
 from_pb_request(#mpb_request{req_id=ReqID,
                              echo=#mpb_echoreq{message=Msg}}) ->
@@ -205,6 +219,16 @@ from_pb_response(#mpb_ll_response{
                   PB_Wedged == 0 -> false
                end,
     {ReqID, {ok, {Wedged_p, EpochID}}};
+from_pb_response(#mpb_ll_response{
+                    req_id=ReqID,
+                    delete_migration=#mpb_ll_deletemigrationresp{
+                      status=Status}}) ->
+    {ReqID, machi_pb_high_client:convert_general_status_code(Status)};
+from_pb_response(#mpb_ll_response{
+                    req_id=ReqID,
+                    trunc_hack=#mpb_ll_trunchackresp{
+                      status=Status}}) ->
+    {ReqID, machi_pb_high_client:convert_general_status_code(Status)};
 %%qqq
 from_pb_response(#mpb_ll_response{
                     req_id=ReqID,
@@ -309,17 +333,29 @@ to_pb_request(ReqID, {low_read_chunk, EpochID, File, Offset, Size, _Opts}) ->
                  size=Size}};
 to_pb_request(ReqID, {low_checksum_list, EpochID, File}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
-    #mpb_ll_request{
-                     req_id=ReqID,
-                     checksum_list=#mpb_ll_checksumlistreq{epoch_id=PB_EpochID,
-                                                           file=File}};
+    #mpb_ll_request{req_id=ReqID,
+                    checksum_list=#mpb_ll_checksumlistreq{
+                      epoch_id=PB_EpochID,
+                      file=File}};
 to_pb_request(ReqID, {low_list_files, EpochID}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     #mpb_ll_request{req_id=ReqID,
                     list_files=#mpb_ll_listfilesreq{epoch_id=PB_EpochID}};
 to_pb_request(ReqID, {low_wedge_status, _BogusEpochID}) ->
     #mpb_ll_request{req_id=ReqID,
-                    wedge_status=#mpb_ll_wedgestatusreq{}}.
+                    wedge_status=#mpb_ll_wedgestatusreq{}};
+to_pb_request(ReqID, {low_delete_migration, EpochID, File}) ->
+    PB_EpochID = conv_from_epoch_id(EpochID),
+    #mpb_ll_request{req_id=ReqID,
+                    delete_migration=#mpb_ll_deletemigrationreq{
+                     epoch_id=PB_EpochID,
+                      file=File}};
+to_pb_request(ReqID, {low_trunc_hack, EpochID, File}) ->
+    PB_EpochID = conv_from_epoch_id(EpochID),
+    #mpb_ll_request{req_id=ReqID,
+                    trunc_hack=#mpb_ll_trunchackreq{
+                     epoch_id=PB_EpochID,
+                      file=File}}.
 %%qqq
 
 to_pb_response(ReqID, {low_echo, _BogusEpochID, _Msg}, Resp) ->
@@ -400,6 +436,14 @@ to_pb_response(ReqID, {low_wedge_status, _BogusEpochID}, Resp) ->
     #mpb_ll_response{req_id=ReqID,
                      wedge_status=#mpb_ll_wedgestatusresp{epoch_id=PB_EpochID,
                                                         wedged_flag=PB_Wedged}};
+to_pb_response(ReqID, {low_delete_migration, _EID, _Fl}, Resp)->
+    Status = conv_from_status(Resp),
+    #mpb_ll_response{req_id=ReqID,
+                   delete_migration=#mpb_ll_deletemigrationresp{status=Status}};
+to_pb_response(ReqID, {low_trunc_hack, _EID, _Fl}, Resp)->
+    Status = conv_from_status(Resp),
+    #mpb_ll_response{req_id=ReqID,
+                     trunc_hack=#mpb_ll_trunchackresp{status=Status}};
 %%qqq
 to_pb_response(ReqID, {high_echo, _Msg}, Resp) ->
     Msg = Resp,

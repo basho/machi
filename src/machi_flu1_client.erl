@@ -571,70 +571,16 @@ checksum_list_finish(Chunks) ->
             Line /= <<>>].
 
 delete_migration2(Sock, EpochID, File) ->
-    erase(bad_sock),
-    try
-        {EpochNum, EpochCSum} = EpochID,
-        EpochIDHex = machi_util:bin_to_hexstr(
-                       <<EpochNum:(4*8)/big, EpochCSum/binary>>),
-        Cmd = [<<"DEL-migration ">>, EpochIDHex, File, <<"\n">>],
-        ok = w_send(Sock, Cmd),
-        ok = w_setopts(Sock, [{packet, line}]),
-        case w_recv(Sock, 0) of
-            {ok, <<"OK\n">>} ->
-                ok;
-            {ok, <<"ERROR NO-SUCH-FILE", _/binary>>} ->
-                {error, no_such_file};
-            {ok, <<"ERROR BAD-ARG", _/binary>>} ->
-                {error, bad_arg};
-            {ok, <<"ERROR WEDGED", _/binary>>} ->
-                {error, wedged};
-            {ok, Else} ->
-                throw({server_protocol_error, Else})
-        end
-    catch
-        throw:Error ->
-            put(bad_sock, Sock),
-            Error;
-        error:{case_clause,_}=Noo ->
-            put(bad_sock, Sock),
-            {error, {badmatch, Noo, erlang:get_stacktrace()}};
-        error:{badmatch,_}=BadMatch ->
-            put(bad_sock, Sock),
-            {error, {badmatch, BadMatch}}
-    end.
+    ReqID = <<"id">>,
+    Req = machi_pb_translate:to_pb_request(
+            ReqID, {low_delete_migration, EpochID, File}),
+    do_pb_request_common(Sock, ReqID, Req).
 
 trunc_hack2(Sock, EpochID, File) ->
-    erase(bad_sock),
-    try
-        {EpochNum, EpochCSum} = EpochID,
-        EpochIDHex = machi_util:bin_to_hexstr(
-                       <<EpochNum:(4*8)/big, EpochCSum/binary>>),
-        Cmd = [<<"TRUNC-hack--- ">>, EpochIDHex, File, <<"\n">>],
-        ok = w_send(Sock, Cmd),
-        ok = w_setopts(Sock, [{packet, line}]),
-        case w_recv(Sock, 0) of
-            {ok, <<"OK\n">>} ->
-                ok;
-            {ok, <<"ERROR NO-SUCH-FILE", _/binary>>} ->
-                {error, no_such_file};
-            {ok, <<"ERROR BAD-ARG", _/binary>>} ->
-                {error, bad_arg};
-            {ok, <<"ERROR WEDGED", _/binary>>} ->
-                {error, wedged};
-            {ok, Else} ->
-                throw({server_protocol_error, Else})
-        end
-    catch
-        throw:Error ->
-            put(bad_sock, Sock),
-            Error;
-        error:{case_clause,_}=Noo ->
-            put(bad_sock, Sock),
-            {error, {badmatch, Noo, erlang:get_stacktrace()}};
-        error:{badmatch,_}=BadMatch ->
-            put(bad_sock, Sock),
-            {error, {badmatch, BadMatch}}
-    end.
+    ReqID = <<"id-trunc">>,
+    Req = machi_pb_translate:to_pb_request(
+            ReqID, {low_trunc_hack, EpochID, File}),
+    do_pb_request_common(Sock, ReqID, Req).
 
 get_latest_epochid2(Sock, ProjType) ->
     ReqID = <<42>>,
