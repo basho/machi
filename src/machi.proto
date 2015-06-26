@@ -378,7 +378,7 @@ message Mpb_LL_ReadChunkReq {
     required uint32 size = 4;
 
     // Use flag_checksum=non-zero to request the chunk's checksum also
-    optional uint32 flag_checksum = 5 [default=0];
+    optional uint32 flag_get_checksum = 5 [default=0];
 
     // Use flag_no_chunk=non-zero to skip returning the chunk (which
     // only makes sense if flag_checksum is set).
