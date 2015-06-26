@@ -35,11 +35,11 @@
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    echo=#mpb_echoreq{message=Msg}}) ->
-    {ReqID, {low_echo, Msg}};
+    {ReqID, {low_echo, undefined, Msg}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    auth=#mpb_authreq{user=User, password=Pass}}) ->
-    {ReqID, {low_auth, User, Pass}};
+    {ReqID, {low_auth, undefined, User, Pass}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    append_chunk=#mpb_ll_appendchunkreq{
@@ -93,7 +93,7 @@ from_pb_request(#mpb_ll_request{
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    wedge_status=#mpb_ll_wedgestatusreq{}}) ->
-    {ReqID, {low_wedge_status}};
+    {ReqID, {low_wedge_status, undefined}};
 %%qqq
 from_pb_request(#mpb_request{req_id=ReqID,
                              echo=#mpb_echoreq{message=Msg}}) ->
@@ -203,7 +203,7 @@ from_pb_response(#mpb_ll_response{
     Wedged_p = if PB_Wedged == 1 -> true;
                   PB_Wedged == 0 -> false
                end,
-    {ReqID, {EpochID, Wedged_p}};
+    {ReqID, {ok, {Wedged_p, EpochID}}};
 %%qqq
 from_pb_response(#mpb_ll_response{
                     req_id=ReqID,
@@ -265,11 +265,11 @@ from_pb_response(#mpb_ll_response{
 %% TODO: move the #mbp_* record making code from
 %%       machi_pb_high_client:do_send_sync() clauses into to_pb_request().
 
-to_pb_request(ReqID, {low_echo, Msg}) ->
+to_pb_request(ReqID, {low_echo, _BogusEpochID, Msg}) ->
     #mpb_ll_request{
                req_id=ReqID,
                echo=#mpb_echoreq{message=Msg}};
-to_pb_request(ReqID, {low_auth, User, Pass}) ->
+to_pb_request(ReqID, {low_auth, _BogusEpochID, User, Pass}) ->
     #mpb_ll_request{req_id=ReqID,
                     auth=#mpb_authreq{user=User, password=Pass}};
 to_pb_request(ReqID, {low_append_chunk, EpochID, PKey, Prefix, Chunk,
@@ -316,16 +316,16 @@ to_pb_request(ReqID, {low_list_files, EpochID}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     #mpb_ll_request{req_id=ReqID,
                     list_files=#mpb_ll_listfilesreq{epoch_id=PB_EpochID}};
-to_pb_request(ReqID, {low_wedge_status}) ->
+to_pb_request(ReqID, {low_wedge_status, _BogusEpochID}) ->
     #mpb_ll_request{req_id=ReqID,
                     wedge_status=#mpb_ll_wedgestatusreq{}}.
 %%qqq
 
-to_pb_response(ReqID, {low_echo, _Msg}, Resp) ->
+to_pb_response(ReqID, {low_echo, _BogusEpochID, _Msg}, Resp) ->
     #mpb_ll_response{
                 req_id=ReqID,
                 echo=#mpb_echoresp{message=Resp}};
-to_pb_response(ReqID, {low_auth, _, _}, Resp) ->
+to_pb_response(ReqID, {low_auth, _, _, _}, Resp) ->
     #mpb_ll_response{
                 req_id=ReqID,
                 auth=#mpb_authresp{code=Resp}};
@@ -392,11 +392,10 @@ to_pb_response(ReqID, {low_list_files, _EpochID}, Resp) ->
         _Else ->
             make_ll_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
-to_pb_response(ReqID, {low_wedge_status}, {EpochID, Wedged_p}=_Resp) ->
+to_pb_response(ReqID, {low_wedge_status, _BogusEpochID}, Resp) ->
+    {Wedged_p, EpochID} = Resp,
+    PB_Wedged = conv_from_boolean(Wedged_p),
     PB_EpochID = conv_from_epoch_id(EpochID),
-    PB_Wedged = if Wedged_p == true  -> 1;
-                   Wedged_p == false -> 0
-                end,
     #mpb_ll_response{req_id=ReqID,
                      wedge_status=#mpb_ll_wedgestatusresp{epoch_id=PB_EpochID,
                                                         wedged_flag=PB_Wedged}};
@@ -666,3 +665,8 @@ conv_to_boolean(0) ->
     false;
 conv_to_boolean(N) when is_integer(N) ->
     true.
+
+conv_from_boolean(false) ->
+    0;
+conv_from_boolean(true) ->
+    1.

@@ -289,19 +289,140 @@ io:format(user, "\nSSS SockError ~p\n", [SockError]),
 
 do_pb_request(PB_request, S) ->
     Req = machi_pb_translate:from_pb_request(PB_request),
-io:format(user, "\nSSS Req ~p\n", [Req]),
+    io:format(user, "\nSSS Req ~p\n", [Req]),
     {ReqID, Cmd, Result, S2} = 
         case Req of
-            {RqID, {low_echo, Msg}=CMD} ->
-                Rs = Msg,
-                {RqID, CMD, Rs, S};
-            {RqID, {low_checksum_list, EpochID, File}=CMD} ->
-                Rs = do_pb_server_checksum_listing(File, S),
-                {RqID, CMD, Rs, S};
+            {RqID, CMD} ->
+                EpochID = element(2, CMD),      % by common convention
+                {Rs, NewS} = do_pb_request2(EpochID, CMD, S),
+                {RqID, CMD, Rs, NewS};
             nope ->
                 {foo, bar, baz}
         end,
+    io:format(user, "\nSSS Result ~p\n", [Result]),
     {machi_pb_translate:to_pb_response(ReqID, Cmd, Result), S2}.
+
+do_pb_request2(EpochID, CMD, S) ->
+    {Wedged_p, CurrentEpochID} = ets:lookup_element(S#state.etstab, epoch, 2),
+    if Wedged_p == true ->
+            {error, wedged};
+       EpochID /= undefined andalso EpochID /= CurrentEpochID ->
+            {Epoch, _} = EpochID,
+            {CurrentEpoch, _} = CurrentEpochID,
+            if Epoch < CurrentEpoch ->
+                    ok;
+               true ->
+                    %% We're at same epoch # but different checksum, or
+                    %% we're at a newer/bigger epoch #.
+                    io:format(user, "\n\nTODO: wedge myself!\n\n", []),
+                    todo_wedge_myself
+            end,
+            {error, bad_epoch};
+       true ->
+            do_pb_request3(CMD, S)
+    end.
+
+do_pb_request3({low_echo, _BogusEpochID, Msg}, S) ->
+    {Msg, S};
+do_pb_request3({low_append_chunk, EpochID, PKey, Prefix, Chunk, CSum_tag, CSum,
+                ChunkExtra}, S) ->
+    {do_pb_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
+                               ChunkExtra, S), S};
+do_pb_request3({low_checksum_list, _EpochID, File}, S) ->
+    {do_pb_server_checksum_listing(File, S), S};
+do_pb_request3({low_list_files, _EpochID}, S) ->
+    {do_pb_server_list_files(S), S};
+do_pb_request3({low_wedge_status, _EpochID}, S) ->
+    {do_pb_server_wedge_status(S), S}.
+
+do_pb_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
+                          ChunkExtra, S) ->
+    case sanitize_file_string(Prefix) of
+        ok ->
+            do_pb_server_append_chunk3(PKey, Prefix, Chunk, CSum_tag, CSum,
+                                       ChunkExtra, S);
+        _ ->
+            {error, bad_arg}
+    end.
+    
+do_pb_server_append_chunk3(_PKey, Prefix, Chunk, CSum_tag, Client_CSum,
+                           ChunkExtra, #state{flu_name=FluName}=_S) ->
+    %% TODO: Do anything with PKey?
+    try
+        CSum = case CSum_tag of
+                   ?CSUM_TAG_NONE ->
+                       %% TODO: If the client was foolish enough to use
+                       %% this type of non-checksum, then the client gets
+                       %% what it deserves wrt data integrity, alas.  In
+                       %% the client-side Chain Replication method, each
+                       %% server will calculated this independently, which
+                       %% isn't exactly what ought to happen for best data
+                       %% integrity checking.  In server-side CR, the csum
+                       %% should be calculated by the head and passed down
+                       %% the chain together with the value.
+                       CS = machi_util:checksum_chunk(Chunk),
+                       machi_util:make_tagged_csum(server_sha, CS);
+                   ?CSUM_TAG_CLIENT_SHA ->
+                       CS = machi_util:checksum_chunk(Chunk),
+                       if CS == Client_CSum ->
+                               Client_CSum;
+                          true ->
+                               throw({bad_csum, CS})
+                       end
+               end,
+        FluName ! {seq_append, self(), Prefix, Chunk, CSum, ChunkExtra},
+        receive
+            {assignment, Offset, File} ->
+                Size = if is_binary(Chunk) ->
+                               byte_size(Chunk);
+                          is_list(Chunk) ->
+                               iolist_size(Chunk)
+                       end,
+                {ok, {Offset, Size, File}};
+            wedged ->
+                {error, wedged}
+        after 10*1000 ->
+                {error, partition}
+        end
+    catch
+        throw:{bad_csum, _CS} ->
+            {error, bad_checksum};
+        error:badarg ->
+            error_logger:error_msg("Message send to ~p gave badarg, make certain server is running with correct registered name\n", [?MODULE]),
+            {error, bad_arg}
+    end.
+
+do_pb_server_checksum_listing(File, #state{data_dir=DataDir}=_S) ->
+    case sanitize_file_string(File) of
+        ok ->
+            ok = sync_checksum_file(File),
+            CSumPath = machi_util:make_checksum_filename(DataDir, File),
+            %% TODO: If this file is legitimately bigger than our
+            %% {packet_size,N} limit, then we'll have a difficult time, eh?
+            case file:read_file(CSumPath) of
+                {ok, Bin} ->
+                    {ok, Bin};
+                {error, enoent} ->
+                    {error, no_such_file};
+                {error, _} ->
+                    {error, bad_arg}
+            end;
+        _ ->
+            {error, bad_arg}
+    end.
+
+do_pb_server_list_files(#state{data_dir=DataDir}=_S) ->
+    {_, WildPath} = machi_util:make_data_filename(DataDir, ""),
+    Files = filelib:wildcard("*", WildPath),
+    {ok, [begin
+              {ok, FI} = file:read_file_info(WildPath ++ "/" ++ File),
+              Size = FI#file_info.size,
+              {Size, File}
+          end || File <- Files]}.
+
+do_pb_server_wedge_status(S) ->
+    {Wedged_p, CurrentEpochID} = ets:lookup_element(S#state.etstab, epoch, 2),
+    {Wedged_p, CurrentEpochID}.
 
 net_server_loop_old(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
     %% TODO: Add testing control knob to adjust this timeout and/or inject
@@ -335,7 +456,7 @@ net_server_loop_old(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                                        EpochID, S);
                 <<"L ", EpochIDHex:(?EpochIDSpace)/binary, "\n">> ->
                     _EpochID = decode_epoch_id(EpochIDHex),
-                    do_net_server_listing(Sock, DataDir, S);
+                    delme; %% do_net_server_listing(Sock, DataDir, S);
                 <<"C ",
                   EpochIDHex:(?EpochIDSpace)/binary,
                   File:CSumFileLenLF/binary, "\n">> ->
@@ -659,29 +780,6 @@ decode_and_reply_net_server_ec_read_version_a(Sock, Rest) ->
     <<Body:BodyLen/binary, _/binary>> = Rest2,
     ok = gen_tcp:send(Sock, ["ERASURE ", BodyLenHex, " ", Hdr, Body]).
 
-do_net_server_listing(Sock, DataDir, S) ->
-    {Wedged_p, _CurrentEpochId} = ets:lookup_element(S#state.etstab, epoch, 2),
-    if Wedged_p ->
-            ok = gen_tcp:send(Sock, <<"ERROR WEDGED\n">>);
-       true ->
-            do_net_server_listing2(Sock, DataDir)
-    end.
-
-do_net_server_listing2(Sock, DataDir) ->
-    {_, WildPath} = machi_util:make_data_filename(DataDir, ""),
-    Files = filelib:wildcard("*", WildPath),
-    Out = ["OK\n",
-           [begin
-                {ok, FI} = file:read_file_info(WildPath ++ "/" ++ File),
-                Size = FI#file_info.size,
-                SizeBin = <<Size:64/big>>,
-                [machi_util:bin_to_hexstr(SizeBin), <<" ">>,
-                 list_to_binary(File), <<"\n">>]
-            end || File <- Files],
-           ".\n"
-          ],
-    ok = gen_tcp:send(Sock, Out).
-
 do_net_server_checksum_listing(Sock, File, DataDir, S) ->
     {Wedged_p, _CurrentEpochId} = ets:lookup_element(S#state.etstab, epoch, 2),
     case {Wedged_p, sanitize_file_string(File)} of
@@ -691,28 +789,6 @@ do_net_server_checksum_listing(Sock, File, DataDir, S) ->
             do_net_server_checksum_listing2(Sock, File, DataDir);
         _ ->
             ok = gen_tcp:send(Sock, <<"ERROR BAD-ARG\n">>)
-    end.
-
-do_pb_server_checksum_listing(File, #state{data_dir=DataDir}=S) ->
-    {Wedged_p, _CurrentEpochId} = ets:lookup_element(S#state.etstab, epoch, 2),
-    case {Wedged_p, sanitize_file_string(File)} of
-        {true, _} ->
-            {error, wedged};
-        {false, ok} ->
-            ok = sync_checksum_file(File),
-
-            CSumPath = machi_util:make_checksum_filename(DataDir, File),
-            %% case file:open(CSumPath, [read, raw, binary]) of
-            case file:read_file(CSumPath) of
-                {ok, Bin} ->
-                    {ok, Bin};
-                {error, enoent} ->
-                    {error, no_such_file};
-                {error, _} ->
-                    {error, bad_arg}
-            end;
-        _ ->
-            {error, bad_arg}
     end.
 
 do_net_server_checksum_listing2(Sock, File, DataDir) ->

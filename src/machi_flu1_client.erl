@@ -478,55 +478,6 @@ trunc_hack(Host, TcpPort, EpochID, File) when is_integer(TcpPort) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-append_chunk2(Sock, EpochID, Prefix0, Chunk0, ChunkExtra) ->
-    erase(bad_sock),
-    try
-        %% TODO: add client-side checksum to the server's protocol
-        %% _ = machi_util:checksum_chunk(Chunk),
-        Prefix = machi_util:make_binary(Prefix0),
-        {CSum, Chunk} = case Chunk0 of
-                            {_,_} ->
-                                Chunk0;
-                            XX when is_binary(XX) ->
-                                SHA = machi_util:checksum_chunk(Chunk0),
-                                {<<?CSUM_TAG_CLIENT_SHA:8, SHA/binary>>, Chunk0}
-                        end,
-        Len = iolist_size(Chunk),
-        true = (Len =< ?MAX_CHUNK_SIZE),
-        {EpochNum, EpochCSum} = EpochID,
-        EpochIDHex = machi_util:bin_to_hexstr(
-                       <<EpochNum:(4*8)/big, EpochCSum/binary>>),
-        CSumHex = machi_util:bin_to_hexstr(CSum),
-        LenHex = machi_util:int_to_hexbin(Len, 32),
-        ExtraHex = machi_util:int_to_hexbin(ChunkExtra, 32),
-        Cmd = [<<"A ">>, EpochIDHex, CSumHex, LenHex, ExtraHex, Prefix, 10],
-        ok = w_send(Sock, [Cmd, Chunk]),
-        {ok, Line} = w_recv(Sock, 0),
-        PathLen = byte_size(Line) - 3 - (2*(1+20)) - 16 - 1 - 1 - 1,
-        case Line of
-            <<"OK ", ServerCSum:(2*(1+20))/binary, " ",
-              OffsetHex:16/binary, " ",
-              Path:PathLen/binary, _:1/binary>> ->
-                Offset = machi_util:hexstr_to_int(OffsetHex),
-                {ok, {Offset, Len, Path}};
-            <<"ERROR BAD-ARG", _/binary>> ->
-                {error, bad_arg};
-            <<"ERROR WEDGED", _/binary>> ->
-                {error, wedged};
-            <<"ERROR BAD-CHECKSUM", _/binary>> ->
-                {error, bad_checksum};
-            <<"ERROR ", Rest/binary>> ->
-                {error, Rest}
-        end
-    catch
-        throw:Error ->
-            put(bad_sock, Sock),
-            Error;
-        error:{badmatch,_}=BadMatch ->
-            put(bad_sock, Sock),
-            {error, {badmatch, BadMatch, erlang:get_stacktrace()}}
-    end.
-
 read_chunk2(Sock, EpochID, File0, Offset, Size) ->
     erase(bad_sock),
     try
@@ -582,74 +533,40 @@ read_chunk2(Sock, EpochID, File0, Offset, Size) ->
             {error, {badmatch, BadMatch, erlang:get_stacktrace()}}
     end.
 
-list2(Sock, EpochID) ->
-    try
-        {EpochNum, EpochCSum} = EpochID,
-        EpochIDHex = machi_util:bin_to_hexstr(
-                       <<EpochNum:(4*8)/big, EpochCSum/binary>>),
-        ok = w_send(Sock, [<<"L ">>, EpochIDHex, <<"\n">>]),
-        ok = w_setopts(Sock, [{packet, line}]),
-        case w_recv(Sock, 0) of
-            {ok, <<"OK\n">>} ->
-                Res = list3(w_recv(Sock, 0), Sock),
-                ok = w_setopts(Sock, [{packet, raw}]),
-                {ok, Res};
-            {ok, <<"ERROR WEDGED\n">>} ->
-                {error, wedged};
-            {ok, <<"ERROR ", Rest/binary>>} ->
-                {error, Rest}
-        end
-    catch
-        throw:Error ->
-            Error;
-        error:{case_clause,_}=Noo ->
-            put(bad_sock, Sock),
-            {error, {badmatch, Noo, erlang:get_stacktrace()}};
-        error:{badmatch,_}=BadMatch ->
-            put(bad_sock, Sock),
-            {error, {badmatch, BadMatch}}
-    end.
+append_chunk2(Sock, EpochID, Prefix0, Chunk0, ChunkExtra) ->
+    ReqID = <<"id">>,
+    {Chunk, CSum_tag, CSum} =
+        case Chunk0 of
+            X when is_binary(X) ->
+                {Chunk0, ?CSUM_TAG_NONE, <<>>};
+            {ChunkCSum, Chk} ->
+                {Tag, CS} = machi_util:unmake_tagged_csum(ChunkCSum),
+                {Chk, Tag, CS}
+        end,
+    PKey = <<>>,                                % TODO
+    Prefix = machi_util:make_binary(Prefix0),
+    Req = machi_pb_translate:to_pb_request(
+            ReqID,
+            {low_append_chunk, EpochID, PKey, Prefix, Chunk, CSum_tag, CSum,
+             ChunkExtra}),
+    do_pb_request_common(Sock, ReqID, Req).
 
-list3({ok, <<".\n">>}, _Sock) ->
-    [];
-list3({ok, Line}, Sock) ->
-    FileLen = byte_size(Line) - 16 - 1 - 1,
-    <<SizeHex:16/binary, " ", File:FileLen/binary, _/binary>> = Line,
-    Size = machi_util:hexstr_to_int(SizeHex),
-    [{Size, File}|list3(w_recv(Sock, 0), Sock)];
-list3(Else, _Sock) ->
-    throw({server_protocol_error, Else}).
+list2(Sock, EpochID) ->
+    ReqID = <<"id">>,
+    Req = machi_pb_translate:to_pb_request(
+            ReqID, {low_list_files, EpochID}),
+    do_pb_request_common(Sock, ReqID, Req).
 
 wedge_status2(Sock) ->
-    try
-        ok = w_send(Sock, [<<"WEDGE-STATUS\n">>]),
-        ok = w_setopts(Sock, [{packet, line}]),
-        {ok, <<"OK ",
-               BooleanHex:2/binary, " ",
-               EpochHex:8/binary, " ",
-               CSumHex:40/binary, "\n">>} = w_recv(Sock, 0),
-        ok = w_setopts(Sock, [{packet, raw}]),
-        Boolean = if BooleanHex == <<"00">> -> false;
-                     BooleanHex == <<"01">> -> true
-                  end,
-        Res = {Boolean, {machi_util:hexstr_to_int(EpochHex),
-                         machi_util:hexstr_to_bin(CSumHex)}},
-        {ok, Res}
-    catch
-        throw:Error ->
-            Error;
-        error:{case_clause,_}=Noo ->
-            put(bad_sock, Sock),
-            {error, {badmatch, Noo, erlang:get_stacktrace()}};
-        error:{badmatch,_}=BadMatch ->
-            put(bad_sock, Sock),
-            {error, {badmatch, BadMatch}}
-    end.
+    ReqID = <<"id">>,
+    Req = machi_pb_translate:to_pb_request(
+            ReqID, {low_wedge_status, undefined}),
+    do_pb_request_common(Sock, ReqID, Req).
 
 echo2(Sock, Message) ->
     ReqID = <<"id">>,
     Req = machi_pb_translate:to_pb_request(
-            ReqID, {low_echo, Message}),
+            ReqID, {low_echo, undefined, Message}),
     do_pb_request_common(Sock, ReqID, Req).
 
 checksum_list2(Sock, EpochID, File) ->
