@@ -108,6 +108,33 @@ from_pb_request(#mpb_ll_request{
                     file=File}}) ->
     EpochID = conv_to_epoch_id(PB_EpochID),
     {ReqID, {low_trunc_hack, EpochID, File}};
+from_pb_request(#mpb_ll_request{
+                   req_id=ReqID,
+                   proj_gl=#mpb_ll_getlatestepochidreq{type=ProjType}}) ->
+    {ReqID, {low_proj, {get_latest_epochid, conv_to_type(ProjType)}}};
+from_pb_request(#mpb_ll_request{
+                   req_id=ReqID,
+                   proj_rl=#mpb_ll_readlatestprojectionreq{type=ProjType}}) ->
+    {ReqID, {low_proj, {read_latest_projection, conv_to_type(ProjType)}}};
+from_pb_request(#mpb_ll_request{
+                   req_id=ReqID,
+                   proj_rp=#mpb_ll_readprojectionreq{type=ProjType,
+                                                     epoch_number=Epoch}}) ->
+    {ReqID, {low_proj, {read_projection, conv_to_type(ProjType), Epoch}}};
+from_pb_request(#mpb_ll_request{
+                   req_id=ReqID,
+                   proj_wp=#mpb_ll_writeprojectionreq{type=ProjType,
+                                                      proj=ProjM}}) ->
+    Proj = conv_to_projection_v1(ProjM),
+    {ReqID, {low_proj, {write_projection, conv_to_type(ProjType), Proj}}};
+from_pb_request(#mpb_ll_request{
+                   req_id=ReqID,
+                   proj_ga=#mpb_ll_getallprojectionsreq{type=ProjType}}) ->
+    {ReqID, {low_proj, {get_all_projections, conv_to_type(ProjType)}}};
+from_pb_request(#mpb_ll_request{
+                   req_id=ReqID,
+                   proj_la=#mpb_ll_listallprojectionsreq{type=ProjType}}) ->
+    {ReqID, {low_proj, {list_all_projections, conv_to_type(ProjType)}}};
 %%qqq
 from_pb_request(#mpb_request{req_id=ReqID,
                              echo=#mpb_echoreq{message=Msg}}) ->
@@ -355,7 +382,28 @@ to_pb_request(ReqID, {low_trunc_hack, EpochID, File}) ->
     #mpb_ll_request{req_id=ReqID,
                     trunc_hack=#mpb_ll_trunchackreq{
                      epoch_id=PB_EpochID,
-                      file=File}}.
+                      file=File}};
+to_pb_request(ReqID, {low_proj, {get_latest_epochid, ProjType}}) ->
+    #mpb_ll_request{req_id=ReqID,
+                    proj_gl=#mpb_ll_getlatestepochidreq{type=conv_from_type(ProjType)}};
+to_pb_request(ReqID, {low_proj, {read_latest_projection, ProjType}}) ->
+    #mpb_ll_request{req_id=ReqID,
+                    proj_rl=#mpb_ll_readlatestprojectionreq{type=conv_from_type(ProjType)}};
+to_pb_request(ReqID, {low_proj, {read_projection, ProjType, Epoch}}) ->
+    #mpb_ll_request{req_id=ReqID,
+                    proj_rp=#mpb_ll_readprojectionreq{type=conv_from_type(ProjType),
+                                              epoch_number=Epoch}};
+to_pb_request(ReqID, {low_proj, {write_projection, ProjType, Proj}}) ->
+    ProjM = conv_from_projection_v1(Proj),
+    #mpb_ll_request{req_id=ReqID,
+                    proj_wp=#mpb_ll_writeprojectionreq{type=conv_from_type(ProjType),
+                                                       proj=ProjM}};
+to_pb_request(ReqID, {low_proj, {get_all_projections, ProjType}}) ->
+    #mpb_ll_request{req_id=ReqID,
+                    proj_ga=#mpb_ll_getallprojectionsreq{type=conv_from_type(ProjType)}};
+to_pb_request(ReqID, {low_proj, {list_all_projections, ProjType}}) ->
+    #mpb_ll_request{req_id=ReqID,
+                    proj_la=#mpb_ll_listallprojectionsreq{type=conv_from_type(ProjType)}}.
 %%qqq
 
 to_pb_response(ReqID, {low_echo, _BogusEpochID, _Msg}, Resp) ->
@@ -444,6 +492,71 @@ to_pb_response(ReqID, {low_trunc_hack, _EID, _Fl}, Resp)->
     Status = conv_from_status(Resp),
     #mpb_ll_response{req_id=ReqID,
                      trunc_hack=#mpb_ll_trunchackresp{status=Status}};
+to_pb_response(ReqID, {low_proj, {get_latest_epochid, _ProjType}}, Resp)->
+    case Resp of
+        {ok, {Epoch, CSum}} ->
+            EID = #mpb_epochid{epoch_number=Epoch, epoch_csum=CSum},
+            #mpb_ll_response{req_id=ReqID,
+                             proj_gl=#mpb_ll_getlatestepochidresp{
+                               status='OK', epoch_id=EID}};
+        {error, _}=Error ->
+            Status = conv_from_status(Error),
+            #mpb_ll_response{req_id=ReqID,
+                            proj_gl=#mpb_ll_getlatestepochidresp{status=Status}}
+    end;
+to_pb_response(ReqID, {low_proj, {read_latest_projection, _ProjType}}, Resp) ->
+    case Resp of
+        {ok, Proj} ->
+            ProjM = conv_from_projection_v1(Proj),
+            #mpb_ll_response{req_id=ReqID,
+                             proj_rl=#mpb_ll_readlatestprojectionresp{
+                               status='OK', proj=ProjM}};
+        {error, _}=Error ->
+            Status = conv_from_status(Error),
+            #mpb_ll_response{req_id=ReqID,
+                       proj_rl=#mpb_ll_readlatestprojectionresp{status=Status}}
+    end;
+to_pb_response(ReqID, {low_proj, {read_projection, _ProjType, _Epoch}}, Resp)->
+    case Resp of
+        {ok, Proj} ->
+            ProjM = conv_from_projection_v1(Proj),
+            #mpb_ll_response{req_id=ReqID,
+                             proj_rp=#mpb_ll_readprojectionresp{
+                               status='OK', proj=ProjM}};
+        {error, _}=Error ->
+            Status = conv_from_status(Error),
+            #mpb_ll_response{req_id=ReqID,
+                             proj_rp=#mpb_ll_readprojectionresp{status=Status}}
+    end;
+to_pb_response(ReqID, {low_proj, {write_projection, _ProjType, _Proj}}, Resp) ->
+    Status = conv_from_status(Resp),
+    #mpb_ll_response{req_id=ReqID,
+                     proj_wp=#mpb_ll_writeprojectionresp{status=Status}};
+to_pb_response(ReqID, {low_proj, {get_all_projections, _ProjType}}, Resp)->
+    case Resp of
+        {ok, Projs} ->
+            ProjsM = [conv_from_projection_v1(Proj) || Proj <- Projs],
+            #mpb_ll_response{req_id=ReqID,
+                             proj_ga=#mpb_ll_getallprojectionsresp{
+                               status='OK', projs=ProjsM}};
+        {error, _}=Error ->
+            Status = conv_from_status(Error),
+            #mpb_ll_response{req_id=ReqID,
+                             proj_ga=#mpb_ll_getallprojectionsresp{
+                               status=Status}}
+    end;
+to_pb_response(ReqID, {low_proj, {list_all_projections, _ProjType}}, Resp)->
+    case Resp of
+        {ok, Epochs} ->
+            #mpb_ll_response{req_id=ReqID,
+                             proj_la=#mpb_ll_listallprojectionsresp{
+                               status='OK', epochs=Epochs}};
+        {error, _}=Error ->
+            Status = conv_from_status(Error),
+            #mpb_ll_response{req_id=ReqID,
+                             proj_la=#mpb_ll_listallprojectionsresp{
+                               status=Status}}
+    end;
 %%qqq
 to_pb_response(ReqID, {high_echo, _Msg}, Resp) ->
     Msg = Resp,
@@ -717,3 +830,32 @@ conv_from_boolean(false) ->
     0;
 conv_from_boolean(true) ->
     1.
+
+conv_from_projection_v1(#projection_v1{epoch_number=Epoch,
+                                       epoch_csum=CSum,
+                                       author_server=Author,
+                                       all_members=AllMembers,
+                                       creation_time=CTime,
+                                       mode=Mode,
+                                       upi=UPI,
+                                       repairing=Repairing,
+                                       down=Down,
+                                       flap=Flap,
+                                       inner=Inner,
+                                       dbg=Dbg,
+                                       dbg2=Dbg2,
+                                       members_dict=MembersDict}) ->
+    #mpb_projectionv1{epoch_number=Epoch,
+                      epoch_csum=CSum,
+                      author_server=to_list(Author),
+                      all_members=[to_list(X) || X <- AllMembers],
+                      creation_time=conv_from_now(CTime),
+                      mode=conv_from_mode(Mode),
+                      upi=[to_list(X) || X <- UPI],
+                      repairing=[to_list(X) || X <- Repairing],
+                      down=[to_list(X) || X <- Down],
+                      opaque_flap=enc_optional_sexp(Flap),
+                      opaque_inner=enc_optional_sexp(Inner),
+                      opaque_dbg=enc_sexp(Dbg),
+                      opaque_dbg2=enc_sexp(Dbg2),
+                      members_dict=conv_from_members_dict(MembersDict)}.

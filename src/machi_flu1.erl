@@ -293,6 +293,10 @@ do_pb_request(PB_request, S) ->
     io:format(user, "\nSSS Req ~p\n", [Req]),
     {ReqID, Cmd, Result, S2} = 
         case Req of
+            {RqID, {low_proj, _}=CMD} ->
+                %% Skip wedge check for projection commands!
+                {Rs, NewS} = do_pb_request3(CMD, S),
+                {RqID, CMD, Rs, NewS};
             {RqID, CMD} ->
                 EpochID = element(2, CMD),      % by common convention
                 {Rs, NewS} = do_pb_request2(EpochID, CMD, S),
@@ -306,7 +310,7 @@ do_pb_request(PB_request, S) ->
 do_pb_request2(EpochID, CMD, S) ->
     {Wedged_p, CurrentEpochID} = ets:lookup_element(S#state.etstab, epoch, 2),
     if Wedged_p == true ->
-            {error, wedged};
+            {{error, wedged}, S};
        EpochID /= undefined andalso EpochID /= CurrentEpochID ->
             {Epoch, _} = EpochID,
             {CurrentEpoch, _} = CurrentEpochID,
@@ -318,7 +322,7 @@ do_pb_request2(EpochID, CMD, S) ->
                     io:format(user, "\n\nTODO: wedge myself!\n\n", []),
                     todo_wedge_myself
             end,
-            {error, bad_epoch};
+            {{error, bad_epoch}, S};
        true ->
             do_pb_request3(CMD, S)
     end.
@@ -343,7 +347,28 @@ do_pb_request3({low_wedge_status, _EpochID}, S) ->
 do_pb_request3({low_delete_migration, _EpochID, File}, S) ->
     {do_pb_server_delete_migration(File, S), S};
 do_pb_request3({low_trunc_hack, _EpochID, File}, S) ->
-    {do_pb_server_trunc_hack(File, S), S}.
+    {do_pb_server_trunc_hack(File, S), S};
+do_pb_request3({low_proj, PCMD}, S) ->
+    {do_pb_server_proj_request(PCMD, S), S}.
+
+do_pb_server_proj_request({get_latest_epochid, ProjType},
+                          #state{proj_store=ProjStore}) ->
+    machi_projection_store:get_latest_epochid(ProjStore, ProjType);
+do_pb_server_proj_request({read_latest_projection, ProjType},
+                          #state{proj_store=ProjStore}) ->
+    machi_projection_store:read_latest_projection(ProjStore, ProjType);
+do_pb_server_proj_request({read_projection, ProjType, Epoch},
+                          #state{proj_store=ProjStore}) ->
+    machi_projection_store:read(ProjStore, ProjType, Epoch);
+do_pb_server_proj_request({write_projection, ProjType, Proj},
+                          #state{proj_store=ProjStore}) ->
+    machi_projection_store:write(ProjStore, ProjType, Proj);
+do_pb_server_proj_request({get_all_projections, ProjType},
+                          #state{proj_store=ProjStore}) ->
+    machi_projection_store:get_all_projections(ProjStore, ProjType);
+do_pb_server_proj_request({list_all_projections, ProjType},
+                          #state{proj_store=ProjStore}) ->
+    machi_projection_store:list_all_projections(ProjStore, ProjType).
 
 do_pb_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
                           ChunkExtra, S) ->
@@ -593,8 +618,8 @@ net_server_loop_old(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
                                                                     - 8 - 8 - 1,
             %% FileLenLF = byte_size(Line)   - 2 - ?EpochIDSpace - 16 - 8 - 1,
             CSumFileLenLF = byte_size(Line) - 2 - ?EpochIDSpace - 1,
-            WriteFileLenLF = byte_size(Line) - 7 - ?EpochIDSpace - ?CSumSpace
-                                                                   - 16 - 8 - 1,
+            %% WriteFileLenLF = byte_size(Line) - 7 - ?EpochIDSpace - ?CSumSpace
+            %%                                                        - 16 - 8 - 1,
             DelFileLenLF = byte_size(Line) - 14 - ?EpochIDSpace - 1,
             case Line of
                 %% For normal use

@@ -584,38 +584,38 @@ trunc_hack2(Sock, EpochID, File) ->
 
 get_latest_epochid2(Sock, ProjType) ->
     ReqID = <<42>>,
-    Req = machi_pb_wrap:make_projection_req(
-                ReqID, {get_latest_epochid, ProjType}),
+    Req = machi_pb_translate:to_pb_request(
+                ReqID, {low_proj, {get_latest_epochid, ProjType}}),
     do_pb_request_common(Sock, ReqID, Req).
 
 read_latest_projection2(Sock, ProjType) ->
     ReqID = <<42>>,
-    Req = machi_pb_wrap:make_projection_req(
-                ReqID, {read_latest_projection, ProjType}),
+    Req = machi_pb_translate:to_pb_request(
+                ReqID, {low_proj, {read_latest_projection, ProjType}}),
     do_pb_request_common(Sock, ReqID, Req).
 
 read_projection2(Sock, ProjType, Epoch) ->
     ReqID = <<42>>,
-    Req = machi_pb_wrap:make_projection_req(
-                ReqID, {read_projection, ProjType, Epoch}),
+    Req = machi_pb_translate:to_pb_request(
+                ReqID, {low_proj, {read_projection, ProjType, Epoch}}),
     do_pb_request_common(Sock, ReqID, Req).
 
 write_projection2(Sock, ProjType, Proj) ->
     ReqID = <<42>>,
-    Req = machi_pb_wrap:make_projection_req(
-                ReqID, {write_projection, ProjType, Proj}),
+    Req = machi_pb_translate:to_pb_request(
+                ReqID, {low_proj, {write_projection, ProjType, Proj}}),
     do_pb_request_common(Sock, ReqID, Req).
 
 get_all_projections2(Sock, ProjType) ->
     ReqID = <<42>>,
-    Req = machi_pb_wrap:make_projection_req(
-                ReqID, {get_all_projections, ProjType}),
+    Req = machi_pb_translate:to_pb_request(
+                ReqID, {low_proj, {get_all_projections, ProjType}}),
     do_pb_request_common(Sock, ReqID, Req).
 
 list_all_projections2(Sock, ProjType) ->
     ReqID = <<42>>,
-    Req = machi_pb_wrap:make_projection_req(
-                ReqID, {list_all_projections, ProjType}),
+    Req = machi_pb_translate:to_pb_request(
+                ReqID, {low_proj, {list_all_projections, ProjType}}),
     do_pb_request_common(Sock, ReqID, Req).
 
 do_pb_request_common(Sock, ReqID, Req) ->
