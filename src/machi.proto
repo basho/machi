@@ -424,8 +424,9 @@ message Mpb_LL_WedgeStatusReq {
 }
 
 message Mpb_LL_WedgeStatusResp {
-    required Mpb_EpochID epoch_id = 1;
-    required uint32 wedged_flag = 2;
+    required Mpb_GeneralStatusCode status = 1;
+    optional Mpb_EpochID epoch_id = 2;
+    optional uint32 wedged_flag = 3;
 }
 
 // Low level API: delete_migration()

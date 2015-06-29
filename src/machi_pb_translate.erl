@@ -480,12 +480,20 @@ to_pb_response(ReqID, {low_list_files, _EpochID}, Resp) ->
             make_ll_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
 to_pb_response(ReqID, {low_wedge_status, _BogusEpochID}, Resp) ->
-    {Wedged_p, EpochID} = Resp,
-    PB_Wedged = conv_from_boolean(Wedged_p),
-    PB_EpochID = conv_from_epoch_id(EpochID),
-    #mpb_ll_response{req_id=ReqID,
-                     wedge_status=#mpb_ll_wedgestatusresp{epoch_id=PB_EpochID,
-                                                        wedged_flag=PB_Wedged}};
+    case Resp of
+        {error, _}=Error ->
+            Status = conv_from_status(Error),
+            #mpb_ll_response{req_id=ReqID,
+                            wedge_status=#mpb_ll_wedgestatusresp{status=Error}};
+        {Wedged_p, EpochID} ->
+            PB_Wedged = conv_from_boolean(Wedged_p),
+            PB_EpochID = conv_from_epoch_id(EpochID),
+            #mpb_ll_response{req_id=ReqID,
+                             wedge_status=#mpb_ll_wedgestatusresp{
+                               status='OK',
+                               epoch_id=PB_EpochID,
+                               wedged_flag=PB_Wedged}}
+    end;
 to_pb_response(ReqID, {low_delete_migration, _EID, _Fl}, Resp)->
     Status = conv_from_status(Resp),
     #mpb_ll_response{req_id=ReqID,

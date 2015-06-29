@@ -638,7 +638,7 @@ io:format(user, "\nCCC Req ~p\n", [Req]),
     catch
         throw:Error ->
             put(bad_sock, Sock),
-            Error;
+            filter_sock_error_result(Error);
         error:{case_clause,_}=Noo ->
             put(bad_sock, Sock),
             {error, {badmatch, Noo, erlang:get_stacktrace()}};
@@ -646,6 +646,11 @@ io:format(user, "\nCCC Req ~p\n", [Req]),
             put(bad_sock, Sock),
             {error, {badmatch, BadMatch, erlang:get_stacktrace()}}
     end.
+
+filter_sock_error_result({error, closed}) ->
+    {error, partition};
+filter_sock_error_result(Error) ->
+    Error.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 

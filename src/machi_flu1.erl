@@ -327,6 +327,10 @@ do_pb_ll_request(PB_request, S) ->
                 %% Skip wedge check for projection commands!
                 {Rs, NewS} = do_pb_ll_request3(CMD, S),
                 {RqID, CMD, Rs, NewS};
+            {RqID, {low_wedge_status, _}=CMD} ->
+                %% Skip wedge check for low_wedge_status!
+                {Rs, NewS} = do_pb_ll_request3(CMD, S),
+                {RqID, CMD, Rs, NewS};
             {RqID, CMD} ->
                 EpochID = element(2, CMD),      % by common convention
                 {Rs, NewS} = do_pb_ll_request2(EpochID, CMD, S),
@@ -642,7 +646,12 @@ do_pb_server_list_files(#state{data_dir=DataDir}=_S) ->
           end || File <- Files]}.
 
 do_pb_server_wedge_status(S) ->
-    {Wedged_p, CurrentEpochID} = ets:lookup_element(S#state.etstab, epoch, 2),
+    {Wedged_p, CurrentEpochID0} = ets:lookup_element(S#state.etstab, epoch, 2),
+    CurrentEpochID = if CurrentEpochID0 == undefined ->
+                             ?DUMMY_PV1_EPOCH;
+                        true ->
+                             CurrentEpochID0
+                     end,
     {Wedged_p, CurrentEpochID}.
 
 do_pb_server_delete_migration(File, #state{data_dir=DataDir}=_S) ->
