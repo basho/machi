@@ -171,16 +171,21 @@ do_connect_to_pb_listener(P) ->
         {ok, Sock} = gen_tcp:connect(P#p_srvr.address, P#p_srvr.port,
                                      ?PB_PACKET_OPTS ++
                                      [binary, {active, false}]),
+io:format(user, "HHC connected to ~p on sock ~p\n", [P, Sock]),
         Sock
     catch _X:_Y ->
             io:format(user, "\n~p ~p @ ~p\n", [_X, _Y, erlang:get_stacktrace()]),
             bummer
     end.
 
-do_send_sync({echo, String}, #state{sock=Sock}=S) ->
+do_send_sync(Cmd, S) ->
+    io:format(user, "\nHHC Req ~p\n", [Cmd]),
+    do_send_sync2(Cmd, S).
+
+do_send_sync2({echo, String}, #state{sock=Sock}=S) ->
     try
         ReqID = <<0>>,
-        R1a = #mpb_request{req_id=ReqID,
+        R1a = #mpb_request{req_id=ReqID, do_not_alter=1,
                            echo=#mpb_echoreq{message=String}},
         Bin1a = machi_pb:encode_mpb_request(R1a),
         ok = gen_tcp:send(Sock, Bin1a),
@@ -196,10 +201,10 @@ do_send_sync({echo, String}, #state{sock=Sock}=S) ->
             Res = {bummer, {X, Y, erlang:get_stacktrace()}},
             {Res, S}
     end;
-do_send_sync({auth, User, Pass}, #state{sock=Sock}=S) ->
+do_send_sync2({auth, User, Pass}, #state{sock=Sock}=S) ->
     try
         ReqID = <<0>>,
-        R1a = #mpb_request{req_id=ReqID,
+        R1a = #mpb_request{req_id=ReqID, do_not_alter=1,
                            auth=#mpb_authreq{user=User, password=Pass}},
         Bin1a = machi_pb:encode_mpb_request(R1a),
         ok = gen_tcp:send(Sock, Bin1a),
@@ -215,7 +220,7 @@ do_send_sync({auth, User, Pass}, #state{sock=Sock}=S) ->
             Res = {bummer, {X, Y, erlang:get_stacktrace()}},
             {Res, S}
     end;
-do_send_sync({append_chunk, PlacementKey, Prefix, Chunk, CSum, ChunkExtra},
+do_send_sync2({append_chunk, PlacementKey, Prefix, Chunk, CSum, ChunkExtra},
              #state{sock=Sock, sock_id=Index, count=Count}=S) ->
     try
         ReqID = <<Index:64/big, Count:64/big>>,
@@ -228,8 +233,9 @@ do_send_sync({append_chunk, PlacementKey, Prefix, Chunk, CSum, ChunkExtra},
                                   chunk=Chunk,
                                   csum=CSumT,
                                   chunk_extra=ChunkExtra},
-        R1a = #mpb_request{req_id=ReqID,
+        R1a = #mpb_request{req_id=ReqID, do_not_alter=1,
                            append_chunk=Req},
+io:format(user, "HHC app on ~p req ~p\n", [Sock, R1a]),
         Bin1a = machi_pb:encode_mpb_request(R1a),
         ok = gen_tcp:send(Sock, Bin1a),
         {ok, Bin1B} = gen_tcp:recv(Sock, 0),
@@ -245,7 +251,7 @@ do_send_sync({append_chunk, PlacementKey, Prefix, Chunk, CSum, ChunkExtra},
             Res = {bummer, {X, Y, erlang:get_stacktrace()}},
             {Res, S#state{count=Count+1}}
     end;
-do_send_sync({write_chunk, File, Offset, Chunk, CSum},
+do_send_sync2({write_chunk, File, Offset, Chunk, CSum},
              #state{sock=Sock, sock_id=Index, count=Count}=S) ->
     try
         ReqID = <<Index:64/big, Count:64/big>>,
@@ -254,7 +260,7 @@ do_send_sync({write_chunk, File, Offset, Chunk, CSum},
                                  offset=Offset,
                                  chunk=Chunk,
                                  csum=CSumT},
-        R1a = #mpb_request{req_id=ReqID,
+        R1a = #mpb_request{req_id=ReqID, do_not_alter=1,
                            write_chunk=Req},
         Bin1a = machi_pb:encode_mpb_request(R1a),
         ok = gen_tcp:send(Sock, Bin1a),
@@ -271,14 +277,14 @@ do_send_sync({write_chunk, File, Offset, Chunk, CSum},
             Res = {bummer, {X, Y, erlang:get_stacktrace()}},
             {Res, S#state{count=Count+1}}
     end;
-do_send_sync({read_chunk, File, Offset, Size},
+do_send_sync2({read_chunk, File, Offset, Size},
              #state{sock=Sock, sock_id=Index, count=Count}=S) ->
     try
         ReqID = <<Index:64/big, Count:64/big>>,
         Req = #mpb_readchunkreq{file=File,
                                 offset=Offset,
                                 size=Size},
-        R1a = #mpb_request{req_id=ReqID,
+        R1a = #mpb_request{req_id=ReqID, do_not_alter=1,
                            read_chunk=Req},
         Bin1a = machi_pb:encode_mpb_request(R1a),
         ok = gen_tcp:send(Sock, Bin1a),
@@ -295,12 +301,12 @@ do_send_sync({read_chunk, File, Offset, Size},
             Res = {bummer, {X, Y, erlang:get_stacktrace()}},
             {Res, S#state{count=Count+1}}
     end;
-do_send_sync({checksum_list, File},
+do_send_sync2({checksum_list, File},
              #state{sock=Sock, sock_id=Index, count=Count}=S) ->
     try
         ReqID = <<Index:64/big, Count:64/big>>,
         Req = #mpb_checksumlistreq{file=File},
-        R1a = #mpb_request{req_id=ReqID,
+        R1a = #mpb_request{req_id=ReqID, do_not_alter=1,
                            checksum_list=Req},
         Bin1a = machi_pb:encode_mpb_request(R1a),
         ok = gen_tcp:send(Sock, Bin1a),
@@ -317,12 +323,12 @@ do_send_sync({checksum_list, File},
             Res = {bummer, {X, Y, erlang:get_stacktrace()}},
             {Res, S#state{count=Count+1}}
     end;
-do_send_sync({list_files},
+do_send_sync2({list_files},
              #state{sock=Sock, sock_id=Index, count=Count}=S) ->
     try
         ReqID = <<Index:64/big, Count:64/big>>,
         Req = #mpb_listfilesreq{},
-        R1a = #mpb_request{req_id=ReqID,
+        R1a = #mpb_request{req_id=ReqID, do_not_alter=1,
                            list_files=Req},
         Bin1a = machi_pb:encode_mpb_request(R1a),
         ok = gen_tcp:send(Sock, Bin1a),

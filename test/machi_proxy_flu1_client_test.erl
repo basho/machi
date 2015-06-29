@@ -52,10 +52,10 @@ api_smoke_test() ->
             %% Stop the FLU, what happens?
             machi_flu1:stop(FLU1),
             {error,_} = ?MUT:append_chunk(Prox1,
-                                FakeEpoch, Prefix, <<"data">>,
+                                FakeEpoch, Prefix, <<"data-stopped1">>,
                                 infinity),
             {error,partition} = ?MUT:append_chunk(Prox1,
-                                FakeEpoch, Prefix, <<"data">>,
+                                FakeEpoch, Prefix, <<"data-stopped2">>,
                                 infinity),
             %% Start the FLU again, we should be able to do stuff immediately
             FLU1b = machi_flu1_test:setup_test_flu(RegName, TcpPort, DataDir,

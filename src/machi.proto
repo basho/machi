@@ -233,6 +233,8 @@ message Mpb_Request {
     // TODO: If we wish to support pipelined requests sometime in the
     // future, this is the placeholder to do it.
     required bytes req_id = 1;
+    // CLIENTS must not set 'do_not_alter' flag; leave it to default.
+    required uint32 do_not_alter = 2 [default=1];
 
     // The client should only define one request message.  If the client
     // includes multiple requests here, the server may pick/choose an
@@ -240,13 +242,13 @@ message Mpb_Request {
     // NOTE: The erlang protobuffs compiler doesn't support 'oneof'.
     //       But 'oneof' appears to be a very tiny memory optimization
     //       that not all languages might care about?  (Erlang doesn't)
-    optional Mpb_EchoReq echo = 10;
-    optional Mpb_AuthReq auth = 11;
-    optional Mpb_AppendChunkReq append_chunk = 12;
-    optional Mpb_WriteChunkReq write_chunk = 13;
-    optional Mpb_ReadChunkReq read_chunk = 14;
-    optional Mpb_ChecksumListReq checksum_list = 15;
-    optional Mpb_ListFilesReq list_files = 16;
+    optional Mpb_EchoReq echo = 110;
+    optional Mpb_AuthReq auth = 111;
+    optional Mpb_AppendChunkReq append_chunk = 112;
+    optional Mpb_WriteChunkReq write_chunk = 113;
+    optional Mpb_ReadChunkReq read_chunk = 114;
+    optional Mpb_ChecksumListReq checksum_list = 115;
+    optional Mpb_ListFilesReq list_files = 116;
 }
 
 message Mpb_Response {
@@ -525,6 +527,8 @@ message Mpb_LL_Request {
     // TODO: If we wish to support pipelined requests sometime in the
     // future, this is the placeholder to do it.
     required bytes req_id = 1;
+    // CLIENTS must not set 'do_not_alter' flag; leave it to default.
+    required uint32 do_not_alter = 2 [default=2];
 
     // The client should only define one request message.  If the client
     // includes multiple requests here, the server may pick/choose an

@@ -93,6 +93,8 @@
           wedged = true   :: boolean(),
           etstab          :: ets:tid(),
           epoch_id        :: 'undefined' | machi_dt:epoch_id(),
+          pb_mode = undefined  :: 'undefined' | 'high' | 'low',
+          high_clnt       :: 'undefined' | pid(),
           dbg_props = []  :: list(), % proplist
           props = []      :: list()  % proplist
          }).
@@ -272,10 +274,20 @@ decode_epoch_id(EpochIDHex) ->
 net_server_loop(Sock, S) ->
     case gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT) of
         {ok, Bin} ->
-    io:format(user, "\nSSS RawReq ~p\n", [catch machi_pb:decode_mpb_ll_request(Bin)]),
-            {R, S2} = do_pb_request(catch machi_pb:decode_mpb_ll_request(Bin), S),
-            Resp = machi_pb:encode_mpb_ll_response(R),
-            ok = gen_tcp:send(Sock, Resp),
+            {RespBin, S2} = 
+                case machi_pb:decode_mpb_ll_request(Bin) of
+                    LL_req when LL_req#mpb_ll_request.do_not_alter == 2 ->
+io:format(user, "SSS low req ~p\n", [LL_req]),
+                        {R, NewS} = do_pb_ll_request(LL_req, S),
+                        {machi_pb:encode_mpb_ll_response(R), mode(low, NewS)};
+                    _ ->
+                        HL_req = machi_pb:decode_mpb_request(Bin),
+io:format(user, "SSS high req ~p\n", [HL_req]),
+                        1 = HL_req#mpb_request.do_not_alter,
+                        {R, NewS} = do_pb_hl_request(HL_req, make_high_clnt(S)),
+                        {machi_pb:encode_mpb_response(R), mode(high, NewS)}
+                end,
+            ok = gen_tcp:send(Sock, RespBin),
             net_server_loop(Sock, S2);
         {error, SockError} ->
             Msg = io_lib:format("Socket error ~w", [SockError]),
@@ -288,31 +300,50 @@ io:format(user, "\nSSS SockError ~p\n", [SockError]),
             exit(normal)
     end.
 
-do_pb_request(PB_request, S) ->
+mode(Mode, #state{pb_mode=undefined}=S) ->
+    S#state{pb_mode=Mode};
+mode(_, S) ->
+    S.
+
+make_high_clnt(#state{high_clnt=undefined}=S) ->
+    {ok, Proj} = machi_projection_store:read_latest_projection(
+                   S#state.proj_store, private),
+    Ps = [P_srvr || {_, P_srvr} <- orddict:to_list(
+                                     Proj#projection_v1.members_dict)],
+    {ok, Clnt} = machi_cr_client:start_link(Ps),
+    S#state{high_clnt=Clnt};
+make_high_clnt(S) ->
+    S.
+
+do_pb_ll_request(#mpb_ll_request{req_id=ReqID}, #state{pb_mode=high}=S) ->
+    Result = {high_error, 41, "Low protocol request while in high mode"},
+    {machi_pb_translate:to_pb_response(ReqID, unused, Result), S};
+do_pb_ll_request(PB_request, S) ->
     Req = machi_pb_translate:from_pb_request(PB_request),
     io:format(user, "\nSSS Req ~p\n", [Req]),
     {ReqID, Cmd, Result, S2} = 
         case Req of
             {RqID, {low_proj, _}=CMD} ->
                 %% Skip wedge check for projection commands!
-                {Rs, NewS} = do_pb_request3(CMD, S),
+                {Rs, NewS} = do_pb_ll_request3(CMD, S),
                 {RqID, CMD, Rs, NewS};
             {RqID, CMD} ->
                 EpochID = element(2, CMD),      % by common convention
-                {Rs, NewS} = do_pb_request2(EpochID, CMD, S),
+                {Rs, NewS} = do_pb_ll_request2(EpochID, CMD, S),
                 {RqID, CMD, Rs, NewS};
             nope ->
                 {foo, bar, baz}
         end,
-    io:format(user, "\nSSS Result ~p\n", [Result]),
+    io:format(user, "\nSSS Result1 ~p\n", [Result]),
+    io:format(user, "\nSSS Result2 ~p\n", [catch machi_pb_translate:to_pb_response(ReqID, Cmd, Result)]),
     {machi_pb_translate:to_pb_response(ReqID, Cmd, Result), S2}.
 
-do_pb_request2(EpochID, CMD, S) ->
+do_pb_ll_request2(EpochID, CMD, S) ->
     {Wedged_p, CurrentEpochID} = ets:lookup_element(S#state.etstab, epoch, 2),
     if Wedged_p == true ->
 io:format(user, "LINE ~s ~p : ~p\n", [?MODULE, ?LINE, ets:lookup_element(S#state.etstab, epoch, 2)]),
             {{error, wedged}, S};
-       not (EpochID == undefined orelse EpochID == ?DUMMY_PV1_EPOCH)
+       not ((not is_tuple(EpochID)) orelse EpochID == ?DUMMY_PV1_EPOCH)
        andalso
        EpochID /= CurrentEpochID ->
             {Epoch, _} = EpochID,
@@ -329,34 +360,71 @@ io:format(user, "LINE ~s ~p\n", [?MODULE, ?LINE]),
             {{error, bad_epoch}, S};
        true ->
 io:format(user, "LINE ~s ~p\n", [?MODULE, ?LINE]),
-            do_pb_request3(CMD, S)
+            do_pb_ll_request3(CMD, S)
     end.
 
-do_pb_request3({low_echo, _BogusEpochID, Msg}, S) ->
+do_pb_ll_request3({low_echo, _BogusEpochID, Msg}, S) ->
     {Msg, S};
-do_pb_request3({low_auth, _BogusEpochID, _User, _Pass}, S) ->
+do_pb_ll_request3({low_auth, _BogusEpochID, _User, _Pass}, S) ->
     {-6, S};
-do_pb_request3({low_append_chunk, _EpochID, PKey, Prefix, Chunk, CSum_tag,
+do_pb_ll_request3({low_append_chunk, _EpochID, PKey, Prefix, Chunk, CSum_tag,
                 CSum, ChunkExtra}, S) ->
     {do_pb_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
                                ChunkExtra, S), S};
-do_pb_request3({low_write_chunk, _EpochID, File, Offset, Chunk, CSum_tag,
+do_pb_ll_request3({low_write_chunk, _EpochID, File, Offset, Chunk, CSum_tag,
                 CSum}, S) ->
     {do_pb_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum, S), S};
-do_pb_request3({low_read_chunk, _EpochID, File, Offset, Size, Opts}, S) ->
+do_pb_ll_request3({low_read_chunk, _EpochID, File, Offset, Size, Opts}, S) ->
     {do_pb_server_read_chunk(File, Offset, Size, Opts, S), S};
-do_pb_request3({low_checksum_list, _EpochID, File}, S) ->
+do_pb_ll_request3({low_checksum_list, _EpochID, File}, S) ->
     {do_pb_server_checksum_listing(File, S), S};
-do_pb_request3({low_list_files, _EpochID}, S) ->
+do_pb_ll_request3({low_list_files, _EpochID}, S) ->
     {do_pb_server_list_files(S), S};
-do_pb_request3({low_wedge_status, _EpochID}, S) ->
+do_pb_ll_request3({low_wedge_status, _EpochID}, S) ->
     {do_pb_server_wedge_status(S), S};
-do_pb_request3({low_delete_migration, _EpochID, File}, S) ->
+do_pb_ll_request3({low_delete_migration, _EpochID, File}, S) ->
     {do_pb_server_delete_migration(File, S), S};
-do_pb_request3({low_trunc_hack, _EpochID, File}, S) ->
+do_pb_ll_request3({low_trunc_hack, _EpochID, File}, S) ->
     {do_pb_server_trunc_hack(File, S), S};
-do_pb_request3({low_proj, PCMD}, S) ->
+do_pb_ll_request3({low_proj, PCMD}, S) ->
     {do_pb_server_proj_request(PCMD, S), S}.
+
+do_pb_hl_request(#mpb_request{req_id=ReqID}, #state{pb_mode=low}=S) ->
+    Result = {low_error, 41, "High protocol request while in low mode"},
+    {machi_pb_translate:to_pb_response(ReqID, unused, Result), S};
+do_pb_hl_request(PB_request, S) ->
+    {ReqID, Cmd} = machi_pb_translate:from_pb_request(PB_request),
+    io:format(user, "\nSSS high Cmd ~p\n", [Cmd]),
+    {Result, S2} = do_pb_hl_request2(Cmd, S),
+    io:format(user, "\nSSS high Result1 ~p\n", [Result]),
+    io:format(user, "\nSSS high Result2 ~p\n", [catch machi_pb_translate:to_pb_response(ReqID, Cmd, Result)]),
+    {machi_pb_translate:to_pb_response(ReqID, Cmd, Result), S2}.
+
+do_pb_hl_request2({high_echo, Msg}, S) ->
+    {Msg, S};
+do_pb_hl_request2({high_auth, _User, _Pass}, S) ->
+    {-77, S};
+do_pb_hl_request2({high_append_chunk, _todoPK, Prefix, ChunkBin, TaggedCSum,
+                   ChunkExtra}, #state{high_clnt=Clnt}=S) ->
+    Chunk = {TaggedCSum, ChunkBin},
+    Res = machi_cr_client:append_chunk_extra(Clnt, Prefix, Chunk,
+                                             ChunkExtra),
+    {Res, S};
+do_pb_hl_request2({high_write_chunk, File, Offset, ChunkBin, TaggedCSum},
+                  #state{high_clnt=Clnt}=S) ->
+    Chunk = {TaggedCSum, ChunkBin},
+    Res = machi_cr_client:write_chunk(Clnt, File, Offset, Chunk),
+    {Res, S};
+do_pb_hl_request2({high_read_chunk, File, Offset, Size},
+                  #state{high_clnt=Clnt}=S) ->
+    Res = machi_cr_client:read_chunk(Clnt, File, Offset, Size),
+    {Res, S};
+do_pb_hl_request2({high_checksum_list, File}, #state{high_clnt=Clnt}=S) ->
+    Res = machi_cr_client:checksum_list(Clnt, File),
+    {Res, S};
+do_pb_hl_request2({high_list_files}, #state{high_clnt=Clnt}=S) ->
+    Res = machi_cr_client:list_files(Clnt),
+    {Res, S}.
 
 do_pb_server_proj_request({get_latest_epochid, ProjType},
                           #state{proj_store=ProjStore}) ->
@@ -436,11 +504,11 @@ do_pb_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum,
     case sanitize_file_string(File) of
         ok ->
             CSumPath = machi_util:make_checksum_filename(DataDir, File),
-                case file:open(CSumPath, [write, read, binary, raw]) of
+                case file:open(CSumPath, [append, raw, binary]) of
                     {ok, FHc} ->
                         Path = DataDir ++ "/data/" ++
                             machi_util:make_string(File),
-                        {ok, FHd} = file:open(Path, [write, binary, raw]),
+                        {ok, FHd} = file:open(Path, [read, write, raw, binary]),
                         try
                             do_pb_server_write_chunk2(
                               File, Offset, Chunk, CSum_tag, CSum, DataDir,
@@ -484,6 +552,7 @@ do_pb_server_write_chunk2(_File, Offset, Chunk, CSum_tag,
                        end
                end,
         Size = iolist_size(Chunk),
+io:format(user, "LINE ~s ~p append/no/no/write @ offset ~w\n", [?MODULE, ?LINE, Offset]),
         case file:pwrite(FHd, Offset, Chunk) of
             ok ->
                 OffsetHex = machi_util:bin_to_hexstr(<<Offset:64/big>>),
@@ -1052,11 +1121,10 @@ seq_append_server_loop(DataDir, Prefix, FileNum) ->
     {File, FullPath} = machi_util:make_data_filename(
                          DataDir, Prefix, SequencerNameHack, FileNum),
     {ok, FHd} = file:open(FullPath,
-                          [write, binary, raw]),
-                          %% [write, binary, raw, delayed_write]),
+                          [read, write, raw, binary]),
     CSumPath = machi_util:make_checksum_filename(
                  DataDir, Prefix, SequencerNameHack, FileNum),
-    {ok, FHc} = file:open(CSumPath, [append, raw, binary, delayed_write]),
+    {ok, FHc} = file:open(CSumPath, [append, raw, binary]),
     seq_append_server_loop(DataDir, Prefix, File, {FHd,FHc}, FileNum,
                            ?MINIMUM_OFFSET).
 
@@ -1071,6 +1139,7 @@ seq_append_server_loop(DataDir, Prefix, File, {FHd,FHc}=FH_, FileNum, Offset) ->
     receive
         {seq_append, From, Prefix, Chunk, CSum, Extra} ->
             if Chunk /= <<>> ->
+io:format(user, "LINE ~s ~p append/pwrite @ offset ~w FHd ~p\n", [?MODULE, ?LINE, Offset, FHd]),
                     ok = file:pwrite(FHd, Offset, Chunk);
                true ->
                     ok

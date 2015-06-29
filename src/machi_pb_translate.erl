@@ -319,17 +319,17 @@ from_pb_response(#mpb_ll_response{
 
 to_pb_request(ReqID, {low_echo, _BogusEpochID, Msg}) ->
     #mpb_ll_request{
-               req_id=ReqID,
+               req_id=ReqID, do_not_alter=2,
                echo=#mpb_echoreq{message=Msg}};
 to_pb_request(ReqID, {low_auth, _BogusEpochID, User, Pass}) ->
-    #mpb_ll_request{req_id=ReqID,
+    #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     auth=#mpb_authreq{user=User, password=Pass}};
 to_pb_request(ReqID, {low_append_chunk, EpochID, PKey, Prefix, Chunk,
                       CSum_tag, CSum, ChunkExtra}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     CSum_type = conv_from_csum_tag(CSum_tag),
     PB_CSum = #mpb_chunkcsum{type=CSum_type, csum=CSum},
-    #mpb_ll_request{req_id=ReqID,
+    #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     append_chunk=#mpb_ll_appendchunkreq{
                       epoch_id=PB_EpochID,
                       placement_key=PKey,
@@ -341,7 +341,7 @@ to_pb_request(ReqID, {low_write_chunk, EpochID, File, Offset, Chunk, CSum_tag, C
     PB_EpochID = conv_from_epoch_id(EpochID),
     CSum_type = conv_from_csum_tag(CSum_tag),
     PB_CSum = #mpb_chunkcsum{type=CSum_type, csum=CSum},
-    #mpb_ll_request{req_id=ReqID,
+    #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     write_chunk=#mpb_ll_writechunkreq{
                       epoch_id=PB_EpochID,
                       file=File,
@@ -352,7 +352,7 @@ to_pb_request(ReqID, {low_read_chunk, EpochID, File, Offset, Size, _Opts}) ->
     %% TODO: stop ignoring Opts ^_^
     PB_EpochID = conv_from_epoch_id(EpochID),
     #mpb_ll_request{
-               req_id=ReqID,
+               req_id=ReqID, do_not_alter=2,
                read_chunk=#mpb_ll_readchunkreq{
                  epoch_id=PB_EpochID,
                  file=File,
@@ -360,57 +360,59 @@ to_pb_request(ReqID, {low_read_chunk, EpochID, File, Offset, Size, _Opts}) ->
                  size=Size}};
 to_pb_request(ReqID, {low_checksum_list, EpochID, File}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
-    #mpb_ll_request{req_id=ReqID,
+    #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     checksum_list=#mpb_ll_checksumlistreq{
                       epoch_id=PB_EpochID,
                       file=File}};
 to_pb_request(ReqID, {low_list_files, EpochID}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
-    #mpb_ll_request{req_id=ReqID,
+    #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     list_files=#mpb_ll_listfilesreq{epoch_id=PB_EpochID}};
 to_pb_request(ReqID, {low_wedge_status, _BogusEpochID}) ->
-    #mpb_ll_request{req_id=ReqID,
+    #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     wedge_status=#mpb_ll_wedgestatusreq{}};
 to_pb_request(ReqID, {low_delete_migration, EpochID, File}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
-    #mpb_ll_request{req_id=ReqID,
+    #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     delete_migration=#mpb_ll_deletemigrationreq{
                      epoch_id=PB_EpochID,
                       file=File}};
 to_pb_request(ReqID, {low_trunc_hack, EpochID, File}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
-    #mpb_ll_request{req_id=ReqID,
+    #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     trunc_hack=#mpb_ll_trunchackreq{
                      epoch_id=PB_EpochID,
                       file=File}};
 to_pb_request(ReqID, {low_proj, {get_latest_epochid, ProjType}}) ->
-    #mpb_ll_request{req_id=ReqID,
+    #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     proj_gl=#mpb_ll_getlatestepochidreq{type=conv_from_type(ProjType)}};
 to_pb_request(ReqID, {low_proj, {read_latest_projection, ProjType}}) ->
-    #mpb_ll_request{req_id=ReqID,
+    #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     proj_rl=#mpb_ll_readlatestprojectionreq{type=conv_from_type(ProjType)}};
 to_pb_request(ReqID, {low_proj, {read_projection, ProjType, Epoch}}) ->
-    #mpb_ll_request{req_id=ReqID,
+    #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     proj_rp=#mpb_ll_readprojectionreq{type=conv_from_type(ProjType),
                                               epoch_number=Epoch}};
 to_pb_request(ReqID, {low_proj, {write_projection, ProjType, Proj}}) ->
     ProjM = conv_from_projection_v1(Proj),
-    #mpb_ll_request{req_id=ReqID,
+    #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     proj_wp=#mpb_ll_writeprojectionreq{type=conv_from_type(ProjType),
                                                        proj=ProjM}};
 to_pb_request(ReqID, {low_proj, {get_all_projections, ProjType}}) ->
-    #mpb_ll_request{req_id=ReqID,
+    #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     proj_ga=#mpb_ll_getallprojectionsreq{type=conv_from_type(ProjType)}};
 to_pb_request(ReqID, {low_proj, {list_all_projections, ProjType}}) ->
-    #mpb_ll_request{req_id=ReqID,
+    #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     proj_la=#mpb_ll_listallprojectionsreq{type=conv_from_type(ProjType)}}.
 %%qqq
 
+to_pb_response(ReqID, _, {low_error, ErrCode, ErrMsg}) ->
+    make_ll_error_resp(ReqID, ErrCode, ErrMsg);
 to_pb_response(ReqID, {low_echo, _BogusEpochID, _Msg}, Resp) ->
     #mpb_ll_response{
                 req_id=ReqID,
                 echo=#mpb_echoresp{message=Resp}};
-to_pb_response(ReqID, {low_auth, _, _, _}, Resp) ->
+to_pb_response(ReqID, {low_auth, _, _, _}, __TODO_Resp) ->
     #mpb_ll_response{req_id=ReqID,
                      generic=#mpb_errorresp{code=1,
                                             msg="AUTH not implemented"}};
@@ -428,7 +430,7 @@ to_pb_response(ReqID, {low_append_chunk, _EID, _PKey, _Pfx, _Ch, _CST, _CS, _CE}
             #mpb_ll_response{req_id=ReqID,
                            append_chunk=#mpb_ll_appendchunkresp{status=Status}};
         _Else ->
-            make_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
+            make_ll_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
 to_pb_response(ReqID, {low_write_chunk, _EID, _Fl, _Off, _Ch, _CST, _CS},Resp)->
     Status = conv_from_status(Resp),
@@ -447,7 +449,7 @@ to_pb_response(ReqID, {low_read_chunk, _EID, _Fl, _Off, _Sz, _Opts}, Resp)->
             #mpb_ll_response{req_id=ReqID,
                              read_chunk=#mpb_ll_readchunkresp{status=Status}};
         _Else ->
-            make_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
+            make_ll_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
 to_pb_response(ReqID, {low_checksum_list, _EpochID, _File}, Resp) ->
     case Resp of
@@ -558,6 +560,8 @@ to_pb_response(ReqID, {low_proj, {list_all_projections, _ProjType}}, Resp)->
                                status=Status}}
     end;
 %%qqq
+to_pb_response(ReqID, _, {high_error, ErrCode, ErrMsg}) ->
+    make_error_resp(ReqID, ErrCode, ErrMsg);
 to_pb_response(ReqID, {high_echo, _Msg}, Resp) ->
     Msg = Resp,
     #mpb_response{req_id=ReqID,
@@ -635,9 +639,7 @@ to_pb_response(ReqID, {high_list_files}, Resp) ->
                           list_files=#mpb_listfilesresp{status=Status}};
         _Else ->
             make_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
-    end;
-to_pb_response(ReqID, {high_error, _, _}, {ErrCode, ErrMsg}) ->
-    make_error_resp(ReqID, ErrCode, ErrMsg).
+    end.
 
 make_tagged_csum(#mpb_chunkcsum{type='CSUM_TAG_NONE'}, Chunk) ->
     C = machi_util:checksum_chunk(Chunk),
