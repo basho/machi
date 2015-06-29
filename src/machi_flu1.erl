@@ -357,25 +357,25 @@ do_pb_ll_request3({low_auth, _BogusEpochID, _User, _Pass}, S) ->
     {-6, S};
 do_pb_ll_request3({low_append_chunk, _EpochID, PKey, Prefix, Chunk, CSum_tag,
                 CSum, ChunkExtra}, S) ->
-    {do_pb_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
-                               ChunkExtra, S), S};
+    {do_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
+                            ChunkExtra, S), S};
 do_pb_ll_request3({low_write_chunk, _EpochID, File, Offset, Chunk, CSum_tag,
-                CSum}, S) ->
-    {do_pb_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum, S), S};
+                   CSum}, S) ->
+    {do_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum, S), S};
 do_pb_ll_request3({low_read_chunk, _EpochID, File, Offset, Size, Opts}, S) ->
-    {do_pb_server_read_chunk(File, Offset, Size, Opts, S), S};
+    {do_server_read_chunk(File, Offset, Size, Opts, S), S};
 do_pb_ll_request3({low_checksum_list, _EpochID, File}, S) ->
-    {do_pb_server_checksum_listing(File, S), S};
+    {do_server_checksum_listing(File, S), S};
 do_pb_ll_request3({low_list_files, _EpochID}, S) ->
-    {do_pb_server_list_files(S), S};
+    {do_server_list_files(S), S};
 do_pb_ll_request3({low_wedge_status, _EpochID}, S) ->
-    {do_pb_server_wedge_status(S), S};
+    {do_server_wedge_status(S), S};
 do_pb_ll_request3({low_delete_migration, _EpochID, File}, S) ->
-    {do_pb_server_delete_migration(File, S), S};
+    {do_server_delete_migration(File, S), S};
 do_pb_ll_request3({low_trunc_hack, _EpochID, File}, S) ->
-    {do_pb_server_trunc_hack(File, S), S};
+    {do_server_trunc_hack(File, S), S};
 do_pb_ll_request3({low_proj, PCMD}, S) ->
-    {do_pb_server_proj_request(PCMD, S), S}.
+    {do_server_proj_request(PCMD, S), S}.
 
 do_pb_hl_request(#mpb_request{req_id=ReqID}, #state{pb_mode=low}=S) ->
     Result = {low_error, 41, "High protocol request while in low mode"},
@@ -411,37 +411,37 @@ do_pb_hl_request2({high_list_files}, #state{high_clnt=Clnt}=S) ->
     Res = machi_cr_client:list_files(Clnt),
     {Res, S}.
 
-do_pb_server_proj_request({get_latest_epochid, ProjType},
-                          #state{proj_store=ProjStore}) ->
+do_server_proj_request({get_latest_epochid, ProjType},
+                       #state{proj_store=ProjStore}) ->
     machi_projection_store:get_latest_epochid(ProjStore, ProjType);
-do_pb_server_proj_request({read_latest_projection, ProjType},
-                          #state{proj_store=ProjStore}) ->
+do_server_proj_request({read_latest_projection, ProjType},
+                       #state{proj_store=ProjStore}) ->
     machi_projection_store:read_latest_projection(ProjStore, ProjType);
-do_pb_server_proj_request({read_projection, ProjType, Epoch},
-                          #state{proj_store=ProjStore}) ->
+do_server_proj_request({read_projection, ProjType, Epoch},
+                       #state{proj_store=ProjStore}) ->
     machi_projection_store:read(ProjStore, ProjType, Epoch);
-do_pb_server_proj_request({write_projection, ProjType, Proj},
-                          #state{proj_store=ProjStore}) ->
+do_server_proj_request({write_projection, ProjType, Proj},
+                       #state{proj_store=ProjStore}) ->
     machi_projection_store:write(ProjStore, ProjType, Proj);
-do_pb_server_proj_request({get_all_projections, ProjType},
-                          #state{proj_store=ProjStore}) ->
+do_server_proj_request({get_all_projections, ProjType},
+                       #state{proj_store=ProjStore}) ->
     machi_projection_store:get_all_projections(ProjStore, ProjType);
-do_pb_server_proj_request({list_all_projections, ProjType},
-                          #state{proj_store=ProjStore}) ->
+do_server_proj_request({list_all_projections, ProjType},
+                       #state{proj_store=ProjStore}) ->
     machi_projection_store:list_all_projections(ProjStore, ProjType).
 
-do_pb_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
-                          ChunkExtra, S) ->
+do_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
+                       ChunkExtra, S) ->
     case sanitize_file_string(Prefix) of
         ok ->
-            do_pb_server_append_chunk2(PKey, Prefix, Chunk, CSum_tag, CSum,
-                                       ChunkExtra, S);
+            do_server_append_chunk2(PKey, Prefix, Chunk, CSum_tag, CSum,
+                                    ChunkExtra, S);
         _ ->
             {error, bad_arg}
     end.
-    
-do_pb_server_append_chunk2(_PKey, Prefix, Chunk, CSum_tag, Client_CSum,
-                           ChunkExtra, #state{flu_name=FluName}=_S) ->
+
+do_server_append_chunk2(_PKey, Prefix, Chunk, CSum_tag, Client_CSum,
+                        ChunkExtra, #state{flu_name=FluName}=_S) ->
     %% TODO: Do anything with PKey?
     try
         CSum = case CSum_tag of
@@ -484,35 +484,35 @@ do_pb_server_append_chunk2(_PKey, Prefix, Chunk, CSum_tag, Client_CSum,
             {error, bad_arg}
     end.
 
-do_pb_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum,
-                        #state{data_dir=DataDir}=S) ->
+do_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum,
+                      #state{data_dir=DataDir}=S) ->
     case sanitize_file_string(File) of
         ok ->
             CSumPath = machi_util:make_checksum_filename(DataDir, File),
-                case file:open(CSumPath, [append, raw, binary]) of
-                    {ok, FHc} ->
-                        Path = DataDir ++ "/data/" ++
-                            machi_util:make_string(File),
-                        {ok, FHd} = file:open(Path, [read, write, raw, binary]),
-                        try
-                            do_pb_server_write_chunk2(
-                              File, Offset, Chunk, CSum_tag, CSum, DataDir,
-                              FHc, FHd)
-                        after
-                            (catch file:close(FHc)),
-                            (catch file:close(FHd))
-                        end;
-                    {error, enoent} ->
-                        ok = filelib:ensure_dir(CSumPath),
-                        do_pb_server_write_chunk(File, Offset, Chunk, CSum_tag,
-                                                 CSum, S)
-                end;
+            case file:open(CSumPath, [append, raw, binary]) of
+                {ok, FHc} ->
+                    Path = DataDir ++ "/data/" ++
+                        machi_util:make_string(File),
+                    {ok, FHd} = file:open(Path, [read, write, raw, binary]),
+                    try
+                        do_server_write_chunk2(
+                          File, Offset, Chunk, CSum_tag, CSum, DataDir,
+                          FHc, FHd)
+                    after
+                        (catch file:close(FHc)),
+                        (catch file:close(FHd))
+                    end;
+                {error, enoent} ->
+                    ok = filelib:ensure_dir(CSumPath),
+                    do_server_write_chunk(File, Offset, Chunk, CSum_tag,
+                                          CSum, S)
+            end;
         _ ->
             {error, bad_arg}
     end.
 
-do_pb_server_write_chunk2(_File, Offset, Chunk, CSum_tag,
-                          Client_CSum, _DataDir, FHc, FHd) ->
+do_server_write_chunk2(_File, Offset, Chunk, CSum_tag,
+                       Client_CSum, _DataDir, FHc, FHd) ->
     try
         CSum = case CSum_tag of
                    ?CSUM_TAG_NONE ->
@@ -559,7 +559,7 @@ do_pb_server_write_chunk2(_File, Offset, Chunk, CSum_tag,
             {error, bad_arg}
     end.
 
-do_pb_server_read_chunk(File, Offset, Size, _Opts, #state{data_dir=DataDir})->
+do_server_read_chunk(File, Offset, Size, _Opts, #state{data_dir=DataDir})->
     %% TODO: Look inside Opts someday.
     case sanitize_file_string(File) of
         ok ->
@@ -574,7 +574,7 @@ do_pb_server_read_chunk(File, Offset, Size, _Opts, #state{data_dir=DataDir})->
                                 machi_util:verb("ok read but wanted ~p got ~p: ~p @ offset ~p\n",
                                                 [Size,size(Bytes),File,Offset]),
                                 io:format(user, "ok read but wanted ~p got ~p: ~p @ offset ~p\n",
-                                                [Size,size(Bytes),File,Offset]),
+                                          [Size,size(Bytes),File,Offset]),
                                 {error, partial_read};
                             eof ->
                                 {error, not_written}; %% TODO perhaps_do_net_server_ec_read(Sock, FH);
@@ -597,7 +597,7 @@ do_pb_server_read_chunk(File, Offset, Size, _Opts, #state{data_dir=DataDir})->
             {error, bad_arg}
     end.
 
-do_pb_server_checksum_listing(File, #state{data_dir=DataDir}=_S) ->
+do_server_checksum_listing(File, #state{data_dir=DataDir}=_S) ->
     case sanitize_file_string(File) of
         ok ->
             ok = sync_checksum_file(File),
@@ -616,7 +616,7 @@ do_pb_server_checksum_listing(File, #state{data_dir=DataDir}=_S) ->
             {error, bad_arg}
     end.
 
-do_pb_server_list_files(#state{data_dir=DataDir}=_S) ->
+do_server_list_files(#state{data_dir=DataDir}=_S) ->
     {_, WildPath} = machi_util:make_data_filename(DataDir, ""),
     Files = filelib:wildcard("*", WildPath),
     {ok, [begin
@@ -625,7 +625,7 @@ do_pb_server_list_files(#state{data_dir=DataDir}=_S) ->
               {Size, File}
           end || File <- Files]}.
 
-do_pb_server_wedge_status(S) ->
+do_server_wedge_status(S) ->
     {Wedged_p, CurrentEpochID0} = ets:lookup_element(S#state.etstab, epoch, 2),
     CurrentEpochID = if CurrentEpochID0 == undefined ->
                              ?DUMMY_PV1_EPOCH;
@@ -634,7 +634,7 @@ do_pb_server_wedge_status(S) ->
                      end,
     {Wedged_p, CurrentEpochID}.
 
-do_pb_server_delete_migration(File, #state{data_dir=DataDir}=_S) ->
+do_server_delete_migration(File, #state{data_dir=DataDir}=_S) ->
     case sanitize_file_string(File) of
         ok ->
             {_, Path} = machi_util:make_data_filename(DataDir, File),
@@ -650,7 +650,7 @@ do_pb_server_delete_migration(File, #state{data_dir=DataDir}=_S) ->
             {error, bad_arg}
     end.
 
-do_pb_server_trunc_hack(File, #state{data_dir=DataDir}=_S) ->
+do_server_trunc_hack(File, #state{data_dir=DataDir}=_S) ->
     case sanitize_file_string(File) of
         ok ->
             {_, Path} = machi_util:make_data_filename(DataDir, File),
