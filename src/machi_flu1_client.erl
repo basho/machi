@@ -632,8 +632,8 @@ io:format(user, "\nCCC Req ~p\n", [Req]),
                 io:format(user, "\nCCC ReqID2 ~p Reply ~p\n", [ReqID2, Reply]),
                 true = (ReqID == ReqID2 orelse ReqID2 == <<>>),
                 Reply;
-            Else ->
-                {error, Else}
+            {error, _}=Err ->
+                throw(Err)
         end
     catch
         throw:Error ->

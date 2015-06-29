@@ -38,10 +38,10 @@
 %% message types/names here.
 
 smoke_requests_test() ->
-    Echo0 = #mpb_request{req_id= <<"x">>,
+    Echo0 = #mpb_request{req_id= <<"x">>, do_not_alter=1,
                          echo=#mpb_echoreq{}},
     Echo0 = encdec_request(Echo0),
-    Echo1 = #mpb_request{req_id= <<"x">>,
+    Echo1 = #mpb_request{req_id= <<"x">>, do_not_alter=1,
                          echo=#mpb_echoreq{message="Yo!"}},
     Echo1 = encdec_request(Echo1),
 
