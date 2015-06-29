@@ -25,6 +25,7 @@
 -export([
          checksum_chunk/1,
          make_tagged_csum/1, make_tagged_csum/2,
+         unmake_tagged_csum/1,
          hexstr_to_bin/1, bin_to_hexstr/1,
          hexstr_to_int/1, int_to_hexstr/2, int_to_hexbin/2,
          make_binary/1, make_string/1,
@@ -233,6 +234,9 @@ make_tagged_csum(server_sha, SHA) ->
     <<?CSUM_TAG_SERVER_SHA:8, SHA/binary>>;
 make_tagged_csum(server_regen_sha, SHA) ->
     <<?CSUM_TAG_SERVER_REGEN_SHA:8, SHA/binary>>.
+
+unmake_tagged_csum(<<Tag:8, Rest/binary>>) ->
+    {Tag, Rest}.
 
 %% @doc Log a verbose message.
 

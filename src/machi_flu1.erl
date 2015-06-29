@@ -75,6 +75,7 @@
 -include_lib("kernel/include/file.hrl").
 
 -include("machi.hrl").
+-include("machi_pb.hrl").
 -include("machi_projection.hrl").
 
 -define(SERVER_CMD_READ_TIMEOUT, 600*1000).
@@ -92,6 +93,8 @@
           wedged = true   :: boolean(),
           etstab          :: ets:tid(),
           epoch_id        :: 'undefined' | machi_dt:epoch_id(),
+          pb_mode = undefined  :: 'undefined' | 'high' | 'low',
+          high_clnt       :: 'undefined' | pid(),
           dbg_props = []  :: list(), % proplist
           props = []      :: list()  % proplist
          }).
@@ -207,8 +210,8 @@ start_append_server(S, AckPid) ->
 
 run_listen_server(#state{flu_name=FluName, tcp_port=TcpPort}=S) ->
     register(make_listener_regname(FluName), self()),
-    SockOpts = [{reuseaddr, true},
-                {mode, binary}, {active, false}, {packet, line}],
+    SockOpts = ?PB_PACKET_OPTS ++
+        [{reuseaddr, true}, {mode, binary}, {active, false}],
     case gen_tcp:listen(TcpPort, SockOpts) of
         {ok, LSock} ->
             listen_server_loop(LSock, S);
@@ -263,141 +266,186 @@ append_server_loop(FluPid, #state{data_dir=DataDir,wedged=Wedged_p}=S) ->
 -define(EpochIDSpace, ((4*2)+(20*2))).          % hexencodingwhee!
 -define(CSumSpace, ((1*2)+(20*2))).             % hexencodingwhee!
 
-decode_epoch_id(EpochIDHex) ->
-    <<EpochNum:(4*8)/big, EpochCSum/binary>> =
-        machi_util:hexstr_to_bin(EpochIDHex),
-    {EpochNum, EpochCSum}.
-
-net_server_loop(Sock, #state{flu_name=FluName, data_dir=DataDir}=S) ->
-    ok = inet:setopts(Sock, [{packet, line}]),
-    %% TODO: Add testing control knob to adjust this timeout and/or inject
-    %% timeout condition.
+net_server_loop(Sock, S) ->
     case gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT) of
-        {ok, Line} ->
-            %% machi_util:verb("Got: ~p\n", [Line]),
-            PrefixLenLF = byte_size(Line) - 2 - ?EpochIDSpace - ?CSumSpace
-                                                                    - 8 - 8 - 1,
-            FileLenLF = byte_size(Line)   - 2 - ?EpochIDSpace - 16 - 8 - 1,
-            CSumFileLenLF = byte_size(Line) - 2 - ?EpochIDSpace - 1,
-            WriteFileLenLF = byte_size(Line) - 7 - ?EpochIDSpace - ?CSumSpace
-                                                                   - 16 - 8 - 1,
-            DelFileLenLF = byte_size(Line) - 14 - ?EpochIDSpace - 1,
-            case Line of
-                %% For normal use
-                <<"A ",
-                  EpochIDHex:(?EpochIDSpace)/binary,
-                  CSumHex:(?CSumSpace)/binary,
-                  LenHex:8/binary, ExtraHex:8/binary,
-                  Prefix:PrefixLenLF/binary, "\n">> ->
-                    _EpochID = decode_epoch_id(EpochIDHex),
-                    do_net_server_append(FluName, Sock, CSumHex,
-                                         LenHex, ExtraHex, Prefix);
-                <<"R ",
-                  EpochIDHex:(?EpochIDSpace)/binary,
-                  OffsetHex:16/binary, LenHex:8/binary,
-                  File:FileLenLF/binary, "\n">> ->
-                    EpochID = decode_epoch_id(EpochIDHex),
-                    do_net_server_read(Sock, OffsetHex, LenHex, File, DataDir,
-                                       EpochID, S);
-                <<"L ", EpochIDHex:(?EpochIDSpace)/binary, "\n">> ->
-                    _EpochID = decode_epoch_id(EpochIDHex),
-                    do_net_server_listing(Sock, DataDir, S);
-                <<"C ",
-                  EpochIDHex:(?EpochIDSpace)/binary,
-                  File:CSumFileLenLF/binary, "\n">> ->
-                    _EpochID = decode_epoch_id(EpochIDHex),
-                    do_net_server_checksum_listing(Sock, File, DataDir, S);
-                <<"QUIT\n">> ->
-                    catch gen_tcp:close(Sock),
-                    exit(normal);
-                <<"QUIT\r\n">> ->
-                    catch gen_tcp:close(Sock),
-                    exit(normal);
-                %% For "internal" replication only.
-                <<"W-repl ",
-                  EpochIDHex:(?EpochIDSpace)/binary,
-                  CSumHex:(?CSumSpace)/binary,
-                  OffsetHex:16/binary, LenHex:8/binary,
-                  File:WriteFileLenLF/binary, "\n">> ->
-                    _EpochID = decode_epoch_id(EpochIDHex),
-                    do_net_server_write(Sock, CSumHex, OffsetHex, LenHex,
-                                        File, DataDir,
-                                        <<"fixme1">>, false, <<"fixme2">>);
-                %% For data migration only.
-                <<"DEL-migration ",
-                  EpochIDHex:(?EpochIDSpace)/binary,
-                  File:DelFileLenLF/binary, "\n">> ->
-                    _EpochID = decode_epoch_id(EpochIDHex),
-                    do_net_server_delete_migration_only(Sock, File, DataDir);
-                %% For erasure coding hackityhack
-                <<"TRUNC-hack--- ",
-                  EpochIDHex:(?EpochIDSpace)/binary,
-                  File:DelFileLenLF/binary, "\n">> ->
-                    _EpochID = decode_epoch_id(EpochIDHex),
-                    do_net_server_truncate_hackityhack(Sock, File, DataDir);
-                <<"PROJ ", LenHex:8/binary, "\n">> ->
-                    do_projection_command(Sock, LenHex, S);
-                <<"WEDGE-STATUS\n">> ->
-                    do_wedge_status(FluName, Sock);
-                <<"PUT ", _/binary>>=PutLine ->
-                    http_server_hack(FluName, PutLine, Sock, S);
-                <<"GET ", _/binary>>=PutLine ->
-                    http_server_hack(FluName, PutLine, Sock, S);
-                <<"PROTOCOL-BUFFERS\n">> ->
-                    ok = gen_tcp:send(Sock, <<"OK\n">>),
-                    ok = inet:setopts(Sock, [{packet, 4},
-                                             {packet_size, 33*1024*1024}]),
-                    {ok, Proj} = machi_projection_store:read_latest_projection(
-                                   S#state.proj_store, private),
-                    Ps = [P_srvr ||
-                             {_, P_srvr} <- orddict:to_list(
-                                              Proj#projection_v1.members_dict)],
-                    machi_pb_server:run_loop(Sock, Ps);
-                _ ->
-                    machi_util:verb("Else Got: ~p\n", [Line]),
-                    io:format(user, "TODO: Else Got: ~p\n", [Line]),
-                    gen_tcp:send(Sock, "ERROR SYNTAX\n"),
-                    catch gen_tcp:close(Sock),
-                    exit(normal)
-            end,
-            net_server_loop(Sock, S);
-        _ ->
-            catch gen_tcp:close(Sock),
+        {ok, Bin} ->
+            {RespBin, S2} = 
+                case machi_pb:decode_mpb_ll_request(Bin) of
+                    LL_req when LL_req#mpb_ll_request.do_not_alter == 2 ->
+                        {R, NewS} = do_pb_ll_request(LL_req, S),
+                        {machi_pb:encode_mpb_ll_response(R), mode(low, NewS)};
+                    _ ->
+                        HL_req = machi_pb:decode_mpb_request(Bin),
+                        1 = HL_req#mpb_request.do_not_alter,
+                        {R, NewS} = do_pb_hl_request(HL_req, make_high_clnt(S)),
+                        {machi_pb:encode_mpb_response(R), mode(high, NewS)}
+                end,
+            ok = gen_tcp:send(Sock, RespBin),
+            net_server_loop(Sock, S2);
+        {error, SockError} ->
+            Msg = io_lib:format("Socket error ~w", [SockError]),
+            R = #mpb_ll_response{req_id= <<>>,
+                                 generic=#mpb_errorresp{code=1, msg=Msg}},
+            Resp = machi_pb:encode_mpb_ll_response(R),
+            _ = (catch gen_tcp:send(Sock, Resp)),
+            (catch gen_tcp:close(Sock)),
             exit(normal)
     end.
 
-append_server_dispatch(From, Prefix, Chunk, CSum, Extra, DataDir, LinkPid) ->
-    Pid = write_server_get_pid(Prefix, DataDir, LinkPid),
-    Pid ! {seq_append, From, Prefix, Chunk, CSum, Extra},
-    exit(normal).
+mode(Mode, #state{pb_mode=undefined}=S) ->
+    S#state{pb_mode=Mode};
+mode(_, S) ->
+    S.
 
-do_net_server_append(FluName, Sock, CSumHex, LenHex, ExtraHex, Prefix) ->
-    %% TODO: robustify against other invalid path characters such as NUL
+make_high_clnt(#state{high_clnt=undefined}=S) ->
+    {ok, Proj} = machi_projection_store:read_latest_projection(
+                   S#state.proj_store, private),
+    Ps = [P_srvr || {_, P_srvr} <- orddict:to_list(
+                                     Proj#projection_v1.members_dict)],
+    {ok, Clnt} = machi_cr_client:start_link(Ps),
+    S#state{high_clnt=Clnt};
+make_high_clnt(S) ->
+    S.
+
+do_pb_ll_request(#mpb_ll_request{req_id=ReqID}, #state{pb_mode=high}=S) ->
+    Result = {high_error, 41, "Low protocol request while in high mode"},
+    {machi_pb_translate:to_pb_response(ReqID, unused, Result), S};
+do_pb_ll_request(PB_request, S) ->
+    Req = machi_pb_translate:from_pb_request(PB_request),
+    {ReqID, Cmd, Result, S2} = 
+        case Req of
+            {RqID, {low_proj, _}=CMD} ->
+                %% Skip wedge check for projection commands!
+                {Rs, NewS} = do_pb_ll_request3(CMD, S),
+                {RqID, CMD, Rs, NewS};
+            {RqID, {low_wedge_status, _}=CMD} ->
+                %% Skip wedge check for low_wedge_status!
+                {Rs, NewS} = do_pb_ll_request3(CMD, S),
+                {RqID, CMD, Rs, NewS};
+            {RqID, CMD} ->
+                EpochID = element(2, CMD),      % by common convention
+                {Rs, NewS} = do_pb_ll_request2(EpochID, CMD, S),
+                {RqID, CMD, Rs, NewS}
+        end,
+    {machi_pb_translate:to_pb_response(ReqID, Cmd, Result), S2}.
+
+do_pb_ll_request2(EpochID, CMD, S) ->
+    {Wedged_p, CurrentEpochID} = ets:lookup_element(S#state.etstab, epoch, 2),
+    if Wedged_p == true ->
+            {{error, wedged}, S};
+       not ((not is_tuple(EpochID)) orelse EpochID == ?DUMMY_PV1_EPOCH)
+       andalso
+       EpochID /= CurrentEpochID ->
+            {Epoch, _} = EpochID,
+            {CurrentEpoch, _} = CurrentEpochID,
+            if Epoch < CurrentEpoch ->
+                    ok;
+               true ->
+                    %% We're at same epoch # but different checksum, or
+                    %% we're at a newer/bigger epoch #.
+                    io:format(user, "\n\nTODO: wedge myself!\n\n", []),
+                    todo_wedge_myself
+            end,
+            {{error, bad_epoch}, S};
+       true ->
+            do_pb_ll_request3(CMD, S)
+    end.
+
+do_pb_ll_request3({low_echo, _BogusEpochID, Msg}, S) ->
+    {Msg, S};
+do_pb_ll_request3({low_auth, _BogusEpochID, _User, _Pass}, S) ->
+    {-6, S};
+do_pb_ll_request3({low_append_chunk, _EpochID, PKey, Prefix, Chunk, CSum_tag,
+                CSum, ChunkExtra}, S) ->
+    {do_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
+                            ChunkExtra, S), S};
+do_pb_ll_request3({low_write_chunk, _EpochID, File, Offset, Chunk, CSum_tag,
+                   CSum}, S) ->
+    {do_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum, S), S};
+do_pb_ll_request3({low_read_chunk, _EpochID, File, Offset, Size, Opts}, S) ->
+    {do_server_read_chunk(File, Offset, Size, Opts, S), S};
+do_pb_ll_request3({low_checksum_list, _EpochID, File}, S) ->
+    {do_server_checksum_listing(File, S), S};
+do_pb_ll_request3({low_list_files, _EpochID}, S) ->
+    {do_server_list_files(S), S};
+do_pb_ll_request3({low_wedge_status, _EpochID}, S) ->
+    {do_server_wedge_status(S), S};
+do_pb_ll_request3({low_delete_migration, _EpochID, File}, S) ->
+    {do_server_delete_migration(File, S), S};
+do_pb_ll_request3({low_trunc_hack, _EpochID, File}, S) ->
+    {do_server_trunc_hack(File, S), S};
+do_pb_ll_request3({low_proj, PCMD}, S) ->
+    {do_server_proj_request(PCMD, S), S}.
+
+do_pb_hl_request(#mpb_request{req_id=ReqID}, #state{pb_mode=low}=S) ->
+    Result = {low_error, 41, "High protocol request while in low mode"},
+    {machi_pb_translate:to_pb_response(ReqID, unused, Result), S};
+do_pb_hl_request(PB_request, S) ->
+    {ReqID, Cmd} = machi_pb_translate:from_pb_request(PB_request),
+    {Result, S2} = do_pb_hl_request2(Cmd, S),
+    {machi_pb_translate:to_pb_response(ReqID, Cmd, Result), S2}.
+
+do_pb_hl_request2({high_echo, Msg}, S) ->
+    {Msg, S};
+do_pb_hl_request2({high_auth, _User, _Pass}, S) ->
+    {-77, S};
+do_pb_hl_request2({high_append_chunk, _todoPK, Prefix, ChunkBin, TaggedCSum,
+                   ChunkExtra}, #state{high_clnt=Clnt}=S) ->
+    Chunk = {TaggedCSum, ChunkBin},
+    Res = machi_cr_client:append_chunk_extra(Clnt, Prefix, Chunk,
+                                             ChunkExtra),
+    {Res, S};
+do_pb_hl_request2({high_write_chunk, File, Offset, ChunkBin, TaggedCSum},
+                  #state{high_clnt=Clnt}=S) ->
+    Chunk = {TaggedCSum, ChunkBin},
+    Res = machi_cr_client:write_chunk(Clnt, File, Offset, Chunk),
+    {Res, S};
+do_pb_hl_request2({high_read_chunk, File, Offset, Size},
+                  #state{high_clnt=Clnt}=S) ->
+    Res = machi_cr_client:read_chunk(Clnt, File, Offset, Size),
+    {Res, S};
+do_pb_hl_request2({high_checksum_list, File}, #state{high_clnt=Clnt}=S) ->
+    Res = machi_cr_client:checksum_list(Clnt, File),
+    {Res, S};
+do_pb_hl_request2({high_list_files}, #state{high_clnt=Clnt}=S) ->
+    Res = machi_cr_client:list_files(Clnt),
+    {Res, S}.
+
+do_server_proj_request({get_latest_epochid, ProjType},
+                       #state{proj_store=ProjStore}) ->
+    machi_projection_store:get_latest_epochid(ProjStore, ProjType);
+do_server_proj_request({read_latest_projection, ProjType},
+                       #state{proj_store=ProjStore}) ->
+    machi_projection_store:read_latest_projection(ProjStore, ProjType);
+do_server_proj_request({read_projection, ProjType, Epoch},
+                       #state{proj_store=ProjStore}) ->
+    machi_projection_store:read(ProjStore, ProjType, Epoch);
+do_server_proj_request({write_projection, ProjType, Proj},
+                       #state{proj_store=ProjStore}) ->
+    machi_projection_store:write(ProjStore, ProjType, Proj);
+do_server_proj_request({get_all_projections, ProjType},
+                       #state{proj_store=ProjStore}) ->
+    machi_projection_store:get_all_projections(ProjStore, ProjType);
+do_server_proj_request({list_all_projections, ProjType},
+                       #state{proj_store=ProjStore}) ->
+    machi_projection_store:list_all_projections(ProjStore, ProjType).
+
+do_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
+                       ChunkExtra, S) ->
     case sanitize_file_string(Prefix) of
         ok ->
-            do_net_server_append2(FluName, Sock, CSumHex,
-                                  LenHex, ExtraHex, Prefix);
+            do_server_append_chunk2(PKey, Prefix, Chunk, CSum_tag, CSum,
+                                    ChunkExtra, S);
         _ ->
-            ok = gen_tcp:send(Sock, <<"ERROR BAD-ARG">>)
+            {error, bad_arg}
     end.
 
-sanitize_file_string(Str) ->
-    case re:run(Str, "/") of
-        nomatch ->
-            ok;
-        _ ->
-            error
-    end.
-
-do_net_server_append2(FluName, Sock, CSumHex, LenHex, ExtraHex, Prefix) ->
-    <<Len:32/big>> = machi_util:hexstr_to_bin(LenHex),
-    <<Extra:32/big>> = machi_util:hexstr_to_bin(ExtraHex),
-    ClientCSum = machi_util:hexstr_to_bin(CSumHex),
-    ok = inet:setopts(Sock, [{packet, raw}]),
-    {ok, Chunk} = gen_tcp:recv(Sock, Len, 60*1000),
+do_server_append_chunk2(_PKey, Prefix, Chunk, CSum_tag, Client_CSum,
+                        ChunkExtra, #state{flu_name=FluName}=_S) ->
+    %% TODO: Do anything with PKey?
     try
-        CSum = case ClientCSum of
-                   <<?CSUM_TAG_NONE:8, _/binary>> ->
+        CSum = case CSum_tag of
+                   ?CSUM_TAG_NONE ->
                        %% TODO: If the client was foolish enough to use
                        %% this type of non-checksum, then the client gets
                        %% what it deserves wrt data integrity, alas.  In
@@ -409,277 +457,233 @@ do_net_server_append2(FluName, Sock, CSumHex, LenHex, ExtraHex, Prefix) ->
                        %% the chain together with the value.
                        CS = machi_util:checksum_chunk(Chunk),
                        machi_util:make_tagged_csum(server_sha, CS);
-                   <<?CSUM_TAG_CLIENT_SHA:8, ClientCS/binary>> ->
+                   ?CSUM_TAG_CLIENT_SHA ->
                        CS = machi_util:checksum_chunk(Chunk),
-                       if CS == ClientCS ->
-                               ClientCSum;
+                       if CS == Client_CSum ->
+                               machi_util:make_tagged_csum(server_sha,
+                                                           Client_CSum);
                           true ->
                                throw({bad_csum, CS})
-                       end;
-                   _ ->
-                       ClientCSum
+                       end
                end,
-        FluName ! {seq_append, self(), Prefix, Chunk, CSum, Extra}
+        FluName ! {seq_append, self(), Prefix, Chunk, CSum, ChunkExtra},
+        receive
+            {assignment, Offset, File} ->
+                Size = iolist_size(Chunk),
+                {ok, {Offset, Size, File}};
+            wedged ->
+                {error, wedged}
+        after 10*1000 ->
+                {error, partition}
+        end
     catch
         throw:{bad_csum, _CS} ->
-            ok = gen_tcp:send(Sock, <<"ERROR BAD-CHECKSUM\n">>),
-            exit(normal);
+            {error, bad_checksum};
         error:badarg ->
-            error_logger:error_msg("Message send to ~p gave badarg, make certain server is running with correct registered name\n", [?MODULE])
-    end,
-    receive
-        {assignment, Offset, File} ->
-            OffsetHex = machi_util:bin_to_hexstr(<<Offset:64/big>>),
-            Out = io_lib:format("OK ~s ~s ~s\n", [CSumHex, OffsetHex, File]),
-            ok = gen_tcp:send(Sock, Out);
-        wedged ->
-            ok = gen_tcp:send(Sock, <<"ERROR WEDGED\n">>)
-    after 10*1000 ->
-            ok = gen_tcp:send(Sock, "TIMEOUT\n")
+            error_logger:error_msg("Message send to ~p gave badarg, make certain server is running with correct registered name\n", [?MODULE]),
+            {error, bad_arg}
     end.
 
-do_wedge_status(FluName, Sock) ->
-    FluName ! {wedge_status, self()},
-    Reply = receive
-                {wedge_status_reply, Bool, EpochId} ->
-                    BoolHex = if Bool == false -> <<"00">>;
-                                 Bool == true  -> <<"01">>
-                              end,
-                    case EpochId of
-                        undefined ->
-                            EpochHex = machi_util:int_to_hexstr(0, 32),
-                            CSumHex = machi_util:bin_to_hexstr(<<0:(20*8)/big>>);
-                        {Epoch, EpochCSum} ->
-                            EpochHex = machi_util:int_to_hexstr(Epoch, 32),
-                            CSumHex = machi_util:bin_to_hexstr(EpochCSum)
-                    end,
-                    [<<"OK ">>, BoolHex, 32, EpochHex, 32, CSumHex, 10]
-            after 30*1000 ->
-                    <<"give_it_up\n">>
-            end,
-    ok = gen_tcp:send(Sock, Reply).
-
-do_net_server_read(Sock, OffsetHex, LenHex, FileBin, DataDir,
-                   EpochID, S) ->
-    {Wedged_p, CurrentEpochId} = ets:lookup_element(S#state.etstab, epoch, 2),
-    DoItFun = fun(FH, Offset, Len) ->
-                      case file:pread(FH, Offset, Len) of
-                          {ok, Bytes} when byte_size(Bytes) == Len ->
-                              gen_tcp:send(Sock, ["OK\n", Bytes]);
-                          {ok, Bytes} ->
-                              machi_util:verb("ok read but wanted ~p  got ~p: ~p @ offset ~p\n",
-                                  [Len, size(Bytes), FileBin, Offset]),
-                              ok = gen_tcp:send(Sock, "ERROR PARTIAL-READ\n");
-                          eof ->
-                              perhaps_do_net_server_ec_read(Sock, FH);
-                          _Else2 ->
-                              machi_util:verb("Else2 ~p ~p ~P\n",
-                                              [Offset, Len, _Else2, 20]),
-                              ok = gen_tcp:send(Sock, "ERROR BAD-READ\n")
-                      end
-              end,
-    do_net_server_readwrite_common(Sock, OffsetHex, LenHex, FileBin, DataDir,
-                                   [read, binary, raw], DoItFun,
-                                   EpochID, Wedged_p, CurrentEpochId).
-
-do_net_server_readwrite_common(Sock, OffsetHex, LenHex, FileBin, DataDir,
-                               FileOpts, DoItFun,
-                               EpochID, Wedged_p, CurrentEpochId) ->
-    case {Wedged_p, sanitize_file_string(FileBin)} of
-        {false, ok} ->
-            do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin,
-                                            DataDir, FileOpts, DoItFun,
-                                            EpochID, Wedged_p, CurrentEpochId);
-        {true, _} ->
-            ok = gen_tcp:send(Sock, <<"ERROR WEDGED\n">>);
-        {_, __} ->
-            ok = gen_tcp:send(Sock, <<"ERROR BAD-ARG\n">>)
-    end.
-
-do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin, DataDir,
-                                FileOpts, DoItFun,
-                                EpochID, Wedged_p, CurrentEpochId) ->
-    NoSuchFileFun = fun(Sck) ->
-                            ok = gen_tcp:send(Sck, <<"ERROR NO-SUCH-FILE\n">>)
-                    end,
-    BadIoFun = fun(Sck) ->
-                       ok = gen_tcp:send(Sck, <<"ERROR BAD-IO\n">>)
-               end,
-    do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin, DataDir,
-                                    FileOpts, DoItFun,
-                                    EpochID, Wedged_p, CurrentEpochId,
-                                    NoSuchFileFun, BadIoFun).
-
-do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, FileBin, DataDir,
-                                FileOpts, DoItFun,
-                                EpochID, Wedged_p, CurrentEpochId,
-                                NoSuchFileFun, BadIoFun) ->
-    <<Offset:64/big>> = machi_util:hexstr_to_bin(OffsetHex),
-    <<Len:32/big>> = machi_util:hexstr_to_bin(LenHex),
-    {_, Path} = machi_util:make_data_filename(DataDir, FileBin),
-    OptsHasWrite = lists:member(write, FileOpts),
-    OptsHasRead = lists:member(read, FileOpts),
-    case file:open(Path, FileOpts) of
-        {ok, FH} ->
-            try
-                DoItFun(FH, Offset, Len)
-            catch
-                throw:{bad_csum, _CS} ->
-                    ok = gen_tcp:send(Sock, <<"ERROR BAD-CHECKSUM\n">>)
-            after
-                file:close(FH)
+do_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum,
+                      #state{data_dir=DataDir}=S) ->
+    case sanitize_file_string(File) of
+        ok ->
+            CSumPath = machi_util:make_checksum_filename(DataDir, File),
+            case file:open(CSumPath, [append, raw, binary]) of
+                {ok, FHc} ->
+                    Path = DataDir ++ "/data/" ++
+                        machi_util:make_string(File),
+                    {ok, FHd} = file:open(Path, [read, write, raw, binary]),
+                    try
+                        do_server_write_chunk2(
+                          File, Offset, Chunk, CSum_tag, CSum, DataDir,
+                          FHc, FHd)
+                    after
+                        (catch file:close(FHc)),
+                        (catch file:close(FHd))
+                    end;
+                {error, enoent} ->
+                    ok = filelib:ensure_dir(CSumPath),
+                    do_server_write_chunk(File, Offset, Chunk, CSum_tag,
+                                          CSum, S)
             end;
-        {error, enoent} when OptsHasWrite ->
-            do_net_server_readwrite_common(
-              Sock, OffsetHex, LenHex, FileBin, DataDir,
-              FileOpts, DoItFun,
-              EpochID, Wedged_p, CurrentEpochId);
-        {error, enoent} when OptsHasRead ->
-            ok = NoSuchFileFun(Sock);
-        _Else ->
-            ok = BadIoFun(Sock)
+        _ ->
+            {error, bad_arg}
     end.
 
-do_net_server_write(Sock, CSumHex, OffsetHex, LenHex, FileBin, DataDir,
-                    EpochID, Wedged_p, CurrentEpochId) ->
-    CSumPath = machi_util:make_checksum_filename(DataDir, FileBin),
-    case file:open(CSumPath, [append, raw, binary, delayed_write]) of
-        {ok, FHc} ->
-            do_net_server_write2(Sock, CSumHex, OffsetHex, LenHex, FileBin,
-                                 DataDir, FHc, EpochID, Wedged_p,
-                                 CurrentEpochId);
-        {error, enoent} ->
-            ok = filelib:ensure_dir(CSumPath),
-            do_net_server_write(Sock, CSumHex, OffsetHex, LenHex, FileBin,
-                                DataDir, EpochID, Wedged_p,
-                                CurrentEpochId)
+do_server_write_chunk2(_File, Offset, Chunk, CSum_tag,
+                       Client_CSum, _DataDir, FHc, FHd) ->
+    try
+        CSum = case CSum_tag of
+                   ?CSUM_TAG_NONE ->
+                       %% TODO: If the client was foolish enough to use
+                       %% this type of non-checksum, then the client gets
+                       %% what it deserves wrt data integrity, alas.  In
+                       %% the client-side Chain Replication method, each
+                       %% server will calculated this independently, which
+                       %% isn't exactly what ought to happen for best data
+                       %% integrity checking.  In server-side CR, the csum
+                       %% should be calculated by the head and passed down
+                       %% the chain together with the value.
+                       CS = machi_util:checksum_chunk(Chunk),
+                       machi_util:make_tagged_csum(server_sha,CS);
+                   ?CSUM_TAG_CLIENT_SHA ->
+                       CS = machi_util:checksum_chunk(Chunk),
+                       if CS == Client_CSum ->
+                               machi_util:make_tagged_csum(server_sha,
+                                                           Client_CSum);
+                          true ->
+                               throw({bad_csum, CS})
+                       end
+               end,
+        Size = iolist_size(Chunk),
+        case file:pwrite(FHd, Offset, Chunk) of
+            ok ->
+                OffsetHex = machi_util:bin_to_hexstr(<<Offset:64/big>>),
+                LenHex = machi_util:bin_to_hexstr(<<Size:32/big>>),
+                CSumHex2 = machi_util:bin_to_hexstr(CSum),
+                CSum_info = [OffsetHex, 32, LenHex, 32,
+                             CSumHex2, 10],
+                ok = file:write(FHc, CSum_info),
+                ok;
+            _Else3 ->
+                machi_util:verb("Else3 ~p ~p ~p\n",
+                                [Offset, Size, _Else3]),
+                {error, bad_arg}
+        end
+    catch
+        throw:{bad_csum, _CS} ->
+            {error, bad_checksum};
+        error:badarg ->
+            error_logger:error_msg("Message send to ~p gave badarg, make certain server is running with correct registered name\n", [?MODULE]),
+            {error, bad_arg}
     end.
 
-do_net_server_write2(Sock, CSumHex, OffsetHex, LenHex, FileBin, DataDir, FHc,
-                     EpochID, Wedged_p, CurrentEpochId) ->
-    ClientCSum = machi_util:hexstr_to_bin(CSumHex),
-    DoItFun = fun(FHd, Offset, Len) ->
-                      ok = inet:setopts(Sock, [{packet, raw}]),
-                      {ok, Chunk} = gen_tcp:recv(Sock, Len),
-                      CSum = case ClientCSum of
-                                 <<?CSUM_TAG_NONE:8, _/binary>> ->
-                                     %% TODO: If the client was foolish enough to use
-                                     %% this type of non-checksum, then the client gets
-                                     %% what it deserves wrt data integrity, alas.  In
-                                     %% the client-side Chain Replication method, each
-                                     %% server will calculated this independently, which
-                                     %% isn't exactly what ought to happen for best data
-                                     %% integrity checking.  In server-side CR, the csum
-                                     %% should be calculated by the head and passed down
-                                     %% the chain together with the value.
-                                     CS = machi_util:checksum_chunk(Chunk),
-                                     machi_util:make_tagged_csum(server_sha,CS);
-                                 <<?CSUM_TAG_CLIENT_SHA:8, ClientCS/binary>> ->
-                                     CS = machi_util:checksum_chunk(Chunk),
-                                     if CS == ClientCS ->
-                                             ClientCSum;
-                                        true ->
-                                             throw({bad_csum, CS})
-                                     end;
-                                 _ ->
-                                     ClientCSum
-                             end,
-                      case file:pwrite(FHd, Offset, Chunk) of
-                          ok ->
-                              CSumHex2 = machi_util:bin_to_hexstr(CSum),
-                              CSum_info = [OffsetHex, 32, LenHex, 32,
-                                           CSumHex2, 10],
-                              ok = file:write(FHc, CSum_info),
-                              ok = file:close(FHc),
-                              gen_tcp:send(Sock, <<"OK\n">>);
-                          _Else3 ->
-                              machi_util:verb("Else3 ~p ~p ~p\n",
-                                              [Offset, Len, _Else3]),
-                              ok = gen_tcp:send(Sock, "ERROR BAD-PWRITE\n")
-                      end
-              end,
-    do_net_server_readwrite_common(Sock, OffsetHex, LenHex, FileBin, DataDir,
-                                   [write, read, binary, raw], DoItFun,
-                                   EpochID, Wedged_p, CurrentEpochId).
-
-perhaps_do_net_server_ec_read(Sock, FH) ->
-    case file:pread(FH, 0, ?MINIMUM_OFFSET) of
-        {ok, Bin} when byte_size(Bin) == ?MINIMUM_OFFSET ->
-            decode_and_reply_net_server_ec_read(Sock, Bin);
-        {ok, _AnythingElse} ->
-            ok = gen_tcp:send(Sock, "ERROR PARTIAL-READ2\n");
-        _AnythingElse ->
-            ok = gen_tcp:send(Sock, "ERROR BAD-PREAD\n")
+do_server_read_chunk(File, Offset, Size, _Opts, #state{data_dir=DataDir})->
+    %% TODO: Look inside Opts someday.
+    case sanitize_file_string(File) of
+        ok ->
+            {_, Path} = machi_util:make_data_filename(DataDir, File),
+            case file:open(Path, [read, binary, raw]) of
+                {ok, FH} ->
+                    try
+                        case file:pread(FH, Offset, Size) of
+                            {ok, Bytes} when byte_size(Bytes) == Size ->
+                                {ok, Bytes};
+                            {ok, Bytes} ->
+                                machi_util:verb("ok read but wanted ~p got ~p: ~p @ offset ~p\n",
+                                                [Size,size(Bytes),File,Offset]),
+                                io:format(user, "ok read but wanted ~p got ~p: ~p @ offset ~p\n",
+                                          [Size,size(Bytes),File,Offset]),
+                                {error, partial_read};
+                            eof ->
+                                {error, not_written}; %% TODO perhaps_do_net_server_ec_read(Sock, FH);
+                            _Else2 ->
+                                machi_util:verb("Else2 ~p ~p ~P\n",
+                                                [Offset, Size, _Else2, 20]),
+                                {error, bad_read}
+                        end
+                    after
+                        file:close(FH)
+                    end;
+                {error, enoent} ->
+                    {error, not_written};
+                {error, _Else} ->
+                    io:format(user, "Unexpected ~p at ~p ~p\n",
+                              [_Else, ?MODULE, ?LINE]),
+                    {error, bad_arg}
+            end;
+        _ ->
+            {error, bad_arg}
     end.
 
-decode_and_reply_net_server_ec_read(Sock, <<"a ", Rest/binary>>) ->
-    decode_and_reply_net_server_ec_read_version_a(Sock, Rest);
-decode_and_reply_net_server_ec_read(Sock, <<0:8, _/binary>>) ->
-    ok = gen_tcp:send(Sock, <<"ERROR NOT-ERASURE\n">>).
-
-decode_and_reply_net_server_ec_read_version_a(Sock, Rest) ->
-    %% <<BodyLenHex:4/binary, " ", StripeWidthHex:16/binary, " ",
-    %%   OrigFileLenHex:16/binary, " ", _/binary>> = Rest,
-    HdrLen = 80 - 2 - 4 - 1,
-    <<BodyLenHex:4/binary, " ", Hdr:HdrLen/binary, Rest2/binary>> = Rest,
-    <<BodyLen:16/big>> = machi_util:hexstr_to_bin(BodyLenHex),
-    <<Body:BodyLen/binary, _/binary>> = Rest2,
-    ok = gen_tcp:send(Sock, ["ERASURE ", BodyLenHex, " ", Hdr, Body]).
-
-do_net_server_listing(Sock, DataDir, S) ->
-    {Wedged_p, _CurrentEpochId} = ets:lookup_element(S#state.etstab, epoch, 2),
-    if Wedged_p ->
-            ok = gen_tcp:send(Sock, <<"ERROR WEDGED\n">>);
-       true ->
-            do_net_server_listing2(Sock, DataDir)
+do_server_checksum_listing(File, #state{data_dir=DataDir}=_S) ->
+    case sanitize_file_string(File) of
+        ok ->
+            ok = sync_checksum_file(File),
+            CSumPath = machi_util:make_checksum_filename(DataDir, File),
+            %% TODO: If this file is legitimately bigger than our
+            %% {packet_size,N} limit, then we'll have a difficult time, eh?
+            case file:read_file(CSumPath) of
+                {ok, Bin} ->
+                    {ok, Bin};
+                {error, enoent} ->
+                    {error, no_such_file};
+                {error, _} ->
+                    {error, bad_arg}
+            end;
+        _ ->
+            {error, bad_arg}
     end.
 
-do_net_server_listing2(Sock, DataDir) ->
+do_server_list_files(#state{data_dir=DataDir}=_S) ->
     {_, WildPath} = machi_util:make_data_filename(DataDir, ""),
     Files = filelib:wildcard("*", WildPath),
-    Out = ["OK\n",
-           [begin
-                {ok, FI} = file:read_file_info(WildPath ++ "/" ++ File),
-                Size = FI#file_info.size,
-                SizeBin = <<Size:64/big>>,
-                [machi_util:bin_to_hexstr(SizeBin), <<" ">>,
-                 list_to_binary(File), <<"\n">>]
-            end || File <- Files],
-           ".\n"
-          ],
-    ok = gen_tcp:send(Sock, Out).
+    {ok, [begin
+              {ok, FI} = file:read_file_info(WildPath ++ "/" ++ File),
+              Size = FI#file_info.size,
+              {Size, File}
+          end || File <- Files]}.
 
-do_net_server_checksum_listing(Sock, File, DataDir, S) ->
-    {Wedged_p, _CurrentEpochId} = ets:lookup_element(S#state.etstab, epoch, 2),
-    case {Wedged_p, sanitize_file_string(File)} of
-        {true, _} ->
-            ok = gen_tcp:send(Sock, <<"ERROR WEDGED\n">>);
-        {false, ok} ->
-            do_net_server_checksum_listing2(Sock, File, DataDir);
+do_server_wedge_status(S) ->
+    {Wedged_p, CurrentEpochID0} = ets:lookup_element(S#state.etstab, epoch, 2),
+    CurrentEpochID = if CurrentEpochID0 == undefined ->
+                             ?DUMMY_PV1_EPOCH;
+                        true ->
+                             CurrentEpochID0
+                     end,
+    {Wedged_p, CurrentEpochID}.
+
+do_server_delete_migration(File, #state{data_dir=DataDir}=_S) ->
+    case sanitize_file_string(File) of
+        ok ->
+            {_, Path} = machi_util:make_data_filename(DataDir, File),
+            case file:delete(Path) of
+                ok ->
+                    ok;
+                {error, enoent} ->
+                    {error, no_such_file};
+                _ ->
+                    {error, bad_arg}
+            end;
         _ ->
-            ok = gen_tcp:send(Sock, <<"ERROR BAD-ARG\n">>)
+            {error, bad_arg}
     end.
 
-do_net_server_checksum_listing2(Sock, File, DataDir) ->
-    ok = sync_checksum_file(File),
-
-    CSumPath = machi_util:make_checksum_filename(DataDir, File),
-    case file:open(CSumPath, [read, raw, binary]) of
-        {ok, FH} ->
-            {ok, FI} = file:read_file_info(CSumPath),
-            Len = FI#file_info.size,
-            LenHex = list_to_binary(machi_util:bin_to_hexstr(<<Len:64/big>>)),
-            %% Client has option of line-by-line with "." terminator,
-            %% or using the offset in the OK message to slurp things
-            %% down by exact byte size.
-            ok = gen_tcp:send(Sock, [<<"OK ">>, LenHex, <<"\n">>]),
-            do_net_copy_bytes(FH, Sock),
-            ok = file:close(FH),
-            ok = gen_tcp:send(Sock, ".\n");
-        {error, enoent} ->
-            ok = gen_tcp:send(Sock, "ERROR NO-SUCH-FILE\n");
+do_server_trunc_hack(File, #state{data_dir=DataDir}=_S) ->
+    case sanitize_file_string(File) of
+        ok ->
+            {_, Path} = machi_util:make_data_filename(DataDir, File),
+            case file:open(Path, [read, write, binary, raw]) of
+                {ok, FH} ->
+                    try
+                        {ok, ?MINIMUM_OFFSET} = file:position(FH,
+                                                              ?MINIMUM_OFFSET),
+                        ok = file:truncate(FH),
+                        ok
+                    after
+                        file:close(FH)
+                    end;
+                {error, enoent} ->
+                    {error, no_such_file};
+                _ ->
+                    {error, bad_arg}
+            end;
         _ ->
-            ok = gen_tcp:send(Sock, "ERROR\n")
+            {error, bad_arg}
+    end.
+
+append_server_dispatch(From, Prefix, Chunk, CSum, Extra, DataDir, LinkPid) ->
+    Pid = write_server_get_pid(Prefix, DataDir, LinkPid),
+    Pid ! {seq_append, From, Prefix, Chunk, CSum, Extra},
+    exit(normal).
+
+sanitize_file_string(Str) ->
+    case re:run(Str, "/") of
+        nomatch ->
+            ok;
+        _ ->
+            error
     end.
 
 sync_checksum_file(File) ->
@@ -703,59 +707,6 @@ sync_checksum_file(File) ->
                             error
                     end
             end
-    end.
-
-do_net_copy_bytes(FH, Sock) ->
-    case file:read(FH, 1024*1024) of
-        {ok, Bin} ->
-            ok = gen_tcp:send(Sock, Bin),
-            do_net_copy_bytes(FH, Sock);
-        eof ->
-            ok
-    end.
-
-do_net_server_delete_migration_only(Sock, File, DataDir) ->
-    case sanitize_file_string(File) of
-        ok ->
-            do_net_server_delete_migration_only2(Sock, File, DataDir);
-        _ ->
-            ok = gen_tcp:send(Sock, <<"ERROR BAD-ARG\n">>)
-    end.
-
-do_net_server_delete_migration_only2(Sock, File, DataDir) ->
-    {_, Path} = machi_util:make_data_filename(DataDir, File),
-    case file:delete(Path) of
-        ok ->
-            ok = gen_tcp:send(Sock, "OK\n");
-        {error, enoent} ->
-            ok = gen_tcp:send(Sock, "ERROR NO-SUCH-FILE\n");
-        _ ->
-            ok = gen_tcp:send(Sock, "ERROR\n")
-    end.
-
-do_net_server_truncate_hackityhack(Sock, File, DataDir) ->
-    case sanitize_file_string(File) of
-        ok ->
-            do_net_server_truncate_hackityhack2(Sock, File, DataDir);
-        _ ->
-            ok = gen_tcp:send(Sock, <<"ERROR BAD-ARG\n">>)
-    end.
-
-do_net_server_truncate_hackityhack2(Sock, File, DataDir) ->
-    {_, Path} = machi_util:make_data_filename(DataDir, File),
-    case file:open(Path, [read, write, binary, raw]) of
-        {ok, FH} ->
-            try
-                {ok, ?MINIMUM_OFFSET} = file:position(FH, ?MINIMUM_OFFSET),
-                ok = file:truncate(FH),
-                ok = gen_tcp:send(Sock, "OK\n")
-            after
-                file:close(FH)
-            end;
-        {error, enoent} ->
-            ok = gen_tcp:send(Sock, "ERROR NO-SUCH-FILE\n");
-        _ ->
-            ok = gen_tcp:send(Sock, "ERROR\n")
     end.
 
 write_server_get_pid(Prefix, DataDir, LinkPid) ->
@@ -813,11 +764,10 @@ seq_append_server_loop(DataDir, Prefix, FileNum) ->
     {File, FullPath} = machi_util:make_data_filename(
                          DataDir, Prefix, SequencerNameHack, FileNum),
     {ok, FHd} = file:open(FullPath,
-                          [write, binary, raw]),
-                          %% [write, binary, raw, delayed_write]),
+                          [read, write, raw, binary]),
     CSumPath = machi_util:make_checksum_filename(
                  DataDir, Prefix, SequencerNameHack, FileNum),
-    {ok, FHc} = file:open(CSumPath, [append, raw, binary, delayed_write]),
+    {ok, FHc} = file:open(CSumPath, [append, raw, binary]),
     seq_append_server_loop(DataDir, Prefix, File, {FHd,FHc}, FileNum,
                            ?MINIMUM_OFFSET).
 
@@ -857,49 +807,6 @@ seq_append_server_loop(DataDir, Prefix, File, {FHd,FHc}=FH_, FileNum, Offset) ->
                                 [Prefix, self(), FileNum, Offset]),
             exit(normal)
     end.
-
-do_projection_command(Sock, LenHex, S) ->
-    try
-        Len = machi_util:hexstr_to_int(LenHex),
-        ok = inet:setopts(Sock, [{packet, raw}]),
-        {ok, ProjCmdBin} = gen_tcp:recv(Sock, Len),
-        ok = inet:setopts(Sock, [{packet, line}]),
-        ProjCmdM = machi_pb:decode_mpb_ll_request(ProjCmdBin),
-        {ID, ProjCmd} = machi_pb_wrap:unmake_projection_req(ProjCmdM),
-        ProjOp = element(1, ProjCmd),
-        put(hack, ProjCmd),
-        Res = handle_projection_command(ProjCmd, S),
-        ResM = machi_pb_wrap:make_projection_resp(ID, ProjOp, Res),
-        ResBin = machi_pb:encode_mpb_ll_response(ResM),
-        ResLenHex = machi_util:int_to_hexbin(iolist_size(ResBin), 32),
-        ok = gen_tcp:send(Sock, [<<"OK ">>, ResLenHex, <<"\n">>, ResBin])
-    catch
-        What:Why ->
-            io:format(user, "OOPS ~p\n", [get(hack)]),
-            io:format(user, "OOPS ~p ~p ~p\n", [What, Why, erlang:get_stacktrace()]),
-            WHA = list_to_binary(io_lib:format("TODO-YOLO.~w:~w-~w",
-                                               [What, Why, erlang:get_stacktrace()])),
-            _ = (catch gen_tcp:send(Sock, [<<"ERROR ">>, WHA, <<"\n">>]))
-    end.
-
-handle_projection_command({get_latest_epochid, ProjType},
-                          #state{proj_store=ProjStore}) ->
-    machi_projection_store:get_latest_epochid(ProjStore, ProjType);
-handle_projection_command({read_latest_projection, ProjType},
-                          #state{proj_store=ProjStore}) ->
-    machi_projection_store:read_latest_projection(ProjStore, ProjType);
-handle_projection_command({read_projection, ProjType, Epoch},
-                          #state{proj_store=ProjStore}) ->
-    machi_projection_store:read(ProjStore, ProjType, Epoch);
-handle_projection_command({write_projection, ProjType, Proj},
-                          #state{proj_store=ProjStore}) ->
-    machi_projection_store:write(ProjStore, ProjType, Proj);
-handle_projection_command({get_all_projections, ProjType},
-                          #state{proj_store=ProjStore}) ->
-    machi_projection_store:get_all_projections(ProjStore, ProjType);
-handle_projection_command({list_all_projections, ProjType},
-                          #state{proj_store=ProjStore}) ->
-    machi_projection_store:list_all_projections(ProjStore, ProjType).
 
 make_listener_regname(BaseName) ->
     list_to_atom(atom_to_list(BaseName) ++ "_listener").
@@ -971,41 +878,8 @@ http_server_hack_put(Sock, G, FluName, MyURI) ->
             ok = gen_tcp:send(Sock, <<"HTTP/1.0 499 TIMEOUT\r\n\r\n">>)
     end.
 
-http_server_hack_get(Sock, _G, _FluName, MyURI, S) ->
-    DataDir = S#state.data_dir,
-    {Wedged_p, CurrentEpochId} = ets:lookup_element(S#state.etstab, epoch, 2),
-    EpochID = <<"unused">>,
-    NoSuchFileFun = fun(Sck) ->
-                            ok = gen_tcp:send(Sck, "HTTP/1.0 455 NOT-WRITTEN\r\n\r\n")
-                    end,
-    BadIoFun = fun(Sck) ->
-                            ok = gen_tcp:send(Sck, "HTTP/1.0 466 BAD-IO\r\n\r\n")
-               end,
-    DoItFun = fun(FH, Offset, Len) ->
-                      case file:pread(FH, Offset, Len) of
-                          {ok, Bytes} when byte_size(Bytes) == Len ->
-                              Hdrs = io_lib:format("HTTP/1.0 200 OK\r\nContent-Length: ~w\r\n\r\n", [Len]),
-                              gen_tcp:send(Sock, [Hdrs, Bytes]);
-                          {ok, Bytes} ->
-                              machi_util:verb("ok read but wanted ~p  got ~p: ~p @ offset ~p\n",
-                                  [Len, size(Bytes), Bytes, Offset]),
-                              ok = gen_tcp:send(Sock, "HTTP/1.0 455 PARTIAL-READ\r\n\r\n");
-                          eof ->
-                              ok = gen_tcp:send(Sock, "HTTP/1.0 455 NOT-WRITTEN\r\n\r\n");
-                          _Else2 ->
-                              machi_util:verb("Else2 ~p ~p ~P\n",
-                                              [Offset, Len, _Else2, 20]),
-                              ok = gen_tcp:send(Sock, "HTTP/1.0 466 ERROR BAD-READ\r\n\r\n")
-                      end
-              end,
-    [File, OptsBin] = binary:split(MyURI, <<"?">>),
-    Opts = split_uri_options(OptsBin),
-    OffsetHex = machi_util:int_to_hexstr(proplists:get_value(offset, Opts), 64),
-    LenHex = machi_util:int_to_hexstr(proplists:get_value(size, Opts), 32),
-    do_net_server_readwrite_common2(Sock, OffsetHex, LenHex, File, DataDir,
-                                    [read, binary, raw], DoItFun,
-                                    EpochID, Wedged_p, CurrentEpochId,
-                                    NoSuchFileFun, BadIoFun).
+http_server_hack_get(Sock, _G, _FluName, _MyURI, _S) ->
+    ok = gen_tcp:send(Sock, <<"TODO BROKEN FEATURE see old commits\r\n">>).
 
 http_harvest_headers(Sock) ->
     ok = inet:setopts(Sock, [{packet, httph}]),

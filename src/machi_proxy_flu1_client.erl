@@ -306,9 +306,6 @@ do_req(Req, Depth, S) ->
                     {ok, S2};
                 T when element(1, T) == ok ->
                     {T, S2};
-                %% {error, {badmatch, {badmatch, {error, Why}=TheErr}, _Stk}}
-                %%   when Why == closed; Why == timeout ->
-                %%     do_req_retry(Req, Depth, TheErr, S2);
                 TheErr ->
                     case get(bad_sock) of
                         Bad when Bad == S2#state.sock ->

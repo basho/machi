@@ -52,7 +52,7 @@ smoke_test2() ->
         {ok, Clnt} = ?C:start_link(Ps),
         try
             true = ?C:connected_p(Clnt),
-            String = "yo, dawg",
+            String = "yo, dawgggggggggggggggggggggggggggggggggg",
             String = ?C:echo(Clnt, String),
 
             %% TODO: auth() is not implemented.  Auth requires SSL.
@@ -78,8 +78,9 @@ smoke_test2() ->
             Reads = [{iolist_to_binary(Chunk1), File1, Off1, Size1},
                      {iolist_to_binary(Chunk2), File2, Off2, Size2},
                      {iolist_to_binary(Chunk3), File3, Off3, Size3}],
-            [{ok, Ch} = ?C:read_chunk(Clnt, Fl, Off, Sz) ||
-                {Ch, Fl, Off, Sz} <- Reads],
+            [begin
+                 {ok, Ch} = ?C:read_chunk(Clnt, Fl, Off, Sz)
+             end || {Ch, Fl, Off, Sz} <- Reads],
 
             {ok, _} = ?C:checksum_list(Clnt, File1),
             {ok, [{File1Size,File1}]} = ?C:list_files(Clnt),
@@ -91,7 +92,7 @@ smoke_test2() ->
         end
     after
         exit(SupPid, normal),
-        [os:cmd("rm -rf " ++ P#p_srvr.props) || P <- Ps],
+%%%        [os:cmd("rm -rf " ++ P#p_srvr.props) || P <- Ps],
         machi_util:wait_for_death(SupPid, 100),
         ok
     end.
