@@ -171,7 +171,6 @@ do_connect_to_pb_listener(P) ->
         {ok, Sock} = gen_tcp:connect(P#p_srvr.address, P#p_srvr.port,
                                      ?PB_PACKET_OPTS ++
                                      [binary, {active, false}]),
-io:format(user, "HHC connected to ~p on sock ~p\n", [P, Sock]),
         Sock
     catch _X:_Y ->
             io:format(user, "\n~p ~p @ ~p\n", [_X, _Y, erlang:get_stacktrace()]),
@@ -179,7 +178,6 @@ io:format(user, "HHC connected to ~p on sock ~p\n", [P, Sock]),
     end.
 
 do_send_sync(Cmd, S) ->
-    io:format(user, "\nHHC Req ~p\n", [Cmd]),
     do_send_sync2(Cmd, S).
 
 do_send_sync2({echo, String}, #state{sock=Sock}=S) ->
@@ -235,7 +233,6 @@ do_send_sync2({append_chunk, PlacementKey, Prefix, Chunk, CSum, ChunkExtra},
                                   chunk_extra=ChunkExtra},
         R1a = #mpb_request{req_id=ReqID, do_not_alter=1,
                            append_chunk=Req},
-io:format(user, "HHC app on ~p req ~p\n", [Sock, R1a]),
         Bin1a = machi_pb:encode_mpb_request(R1a),
         ok = gen_tcp:send(Sock, Bin1a),
         {ok, Bin1B} = gen_tcp:recv(Sock, 0),

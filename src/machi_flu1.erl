@@ -277,12 +277,10 @@ net_server_loop(Sock, S) ->
             {RespBin, S2} = 
                 case machi_pb:decode_mpb_ll_request(Bin) of
                     LL_req when LL_req#mpb_ll_request.do_not_alter == 2 ->
-io:format(user, "SSS low req ~p\n", [LL_req]),
                         {R, NewS} = do_pb_ll_request(LL_req, S),
                         {machi_pb:encode_mpb_ll_response(R), mode(low, NewS)};
                     _ ->
                         HL_req = machi_pb:decode_mpb_request(Bin),
-io:format(user, "SSS high req ~p\n", [HL_req]),
                         1 = HL_req#mpb_request.do_not_alter,
                         {R, NewS} = do_pb_hl_request(HL_req, make_high_clnt(S)),
                         {machi_pb:encode_mpb_response(R), mode(high, NewS)}
@@ -291,7 +289,6 @@ io:format(user, "SSS high req ~p\n", [HL_req]),
             net_server_loop(Sock, S2);
         {error, SockError} ->
             Msg = io_lib:format("Socket error ~w", [SockError]),
-io:format(user, "\nSSS SockError ~p\n", [SockError]),
             R = #mpb_ll_response{req_id= <<>>,
                                  generic=#mpb_errorresp{code=1, msg=Msg}},
             Resp = machi_pb:encode_mpb_ll_response(R),
@@ -320,7 +317,6 @@ do_pb_ll_request(#mpb_ll_request{req_id=ReqID}, #state{pb_mode=high}=S) ->
     {machi_pb_translate:to_pb_response(ReqID, unused, Result), S};
 do_pb_ll_request(PB_request, S) ->
     Req = machi_pb_translate:from_pb_request(PB_request),
-    io:format(user, "\nSSS Req ~p\n", [Req]),
     {ReqID, Cmd, Result, S2} = 
         case Req of
             {RqID, {low_proj, _}=CMD} ->
@@ -338,14 +334,11 @@ do_pb_ll_request(PB_request, S) ->
             nope ->
                 {foo, bar, baz}
         end,
-    io:format(user, "\nSSS Result1 ~p\n", [Result]),
-    io:format(user, "\nSSS Result2 ~p\n", [catch machi_pb_translate:to_pb_response(ReqID, Cmd, Result)]),
     {machi_pb_translate:to_pb_response(ReqID, Cmd, Result), S2}.
 
 do_pb_ll_request2(EpochID, CMD, S) ->
     {Wedged_p, CurrentEpochID} = ets:lookup_element(S#state.etstab, epoch, 2),
     if Wedged_p == true ->
-io:format(user, "LINE ~s ~p : ~p\n", [?MODULE, ?LINE, ets:lookup_element(S#state.etstab, epoch, 2)]),
             {{error, wedged}, S};
        not ((not is_tuple(EpochID)) orelse EpochID == ?DUMMY_PV1_EPOCH)
        andalso
@@ -360,10 +353,8 @@ io:format(user, "LINE ~s ~p : ~p\n", [?MODULE, ?LINE, ets:lookup_element(S#state
                     io:format(user, "\n\nTODO: wedge myself!\n\n", []),
                     todo_wedge_myself
             end,
-io:format(user, "LINE ~s ~p\n", [?MODULE, ?LINE]),
             {{error, bad_epoch}, S};
        true ->
-io:format(user, "LINE ~s ~p\n", [?MODULE, ?LINE]),
             do_pb_ll_request3(CMD, S)
     end.
 
@@ -398,10 +389,7 @@ do_pb_hl_request(#mpb_request{req_id=ReqID}, #state{pb_mode=low}=S) ->
     {machi_pb_translate:to_pb_response(ReqID, unused, Result), S};
 do_pb_hl_request(PB_request, S) ->
     {ReqID, Cmd} = machi_pb_translate:from_pb_request(PB_request),
-    io:format(user, "\nSSS high Cmd ~p\n", [Cmd]),
     {Result, S2} = do_pb_hl_request2(Cmd, S),
-    io:format(user, "\nSSS high Result1 ~p\n", [Result]),
-    io:format(user, "\nSSS high Result2 ~p\n", [catch machi_pb_translate:to_pb_response(ReqID, Cmd, Result)]),
     {machi_pb_translate:to_pb_response(ReqID, Cmd, Result), S2}.
 
 do_pb_hl_request2({high_echo, Msg}, S) ->
@@ -556,7 +544,6 @@ do_pb_server_write_chunk2(_File, Offset, Chunk, CSum_tag,
                        end
                end,
         Size = iolist_size(Chunk),
-io:format(user, "LINE ~s ~p append/no/no/write @ offset ~w\n", [?MODULE, ?LINE, Offset]),
         case file:pwrite(FHd, Offset, Chunk) of
             ok ->
                 OffsetHex = machi_util:bin_to_hexstr(<<Offset:64/big>>),
@@ -1148,7 +1135,6 @@ seq_append_server_loop(DataDir, Prefix, File, {FHd,FHc}=FH_, FileNum, Offset) ->
     receive
         {seq_append, From, Prefix, Chunk, CSum, Extra} ->
             if Chunk /= <<>> ->
-io:format(user, "LINE ~s ~p append/pwrite @ offset ~w FHd ~p\n", [?MODULE, ?LINE, Offset, FHd]),
                     ok = file:pwrite(FHd, Offset, Chunk);
                true ->
                     ok

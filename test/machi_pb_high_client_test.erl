@@ -53,24 +53,18 @@ smoke_test2() ->
         try
             true = ?C:connected_p(Clnt),
             String = "yo, dawgggggggggggggggggggggggggggggggggg",
-io:format(user, "LINE ~s ~p\n", [?MODULE, ?LINE]),
             String = ?C:echo(Clnt, String),
-io:format(user, "LINE ~s ~p\n", [?MODULE, ?LINE]),
 
             %% TODO: auth() is not implemented.  Auth requires SSL.
             %% Probably ought to put client stuff that relies on SSL into
             %% a separate test module?  Or separate test func?
-io:format(user, "LINE ~s ~p\n", [?MODULE, ?LINE]),
             {error, _} = ?C:auth(Clnt, "foo", "bar"),
-io:format(user, "LINE ~s ~p\n", [?MODULE, ?LINE]),
 
             PK = <<>>,
             Prefix = <<"prefix">>,
             Chunk1 = <<"Hello, chunk!">>,
-io:format(user, "LINE ~s ~p\n", [?MODULE, ?LINE]),
             {ok, {Off1, Size1, File1}} =
                 ?C:append_chunk(Clnt, PK, Prefix, Chunk1, none, 0),
-io:format(user, "LINE ~s ~p\n", [?MODULE, ?LINE]),
             Chunk2 = "It's another chunk",
             CSum2 = {client_sha, machi_util:checksum_chunk(Chunk2)},
             {ok, {Off2, Size2, File2}} =
@@ -85,7 +79,6 @@ io:format(user, "LINE ~s ~p\n", [?MODULE, ?LINE]),
                      {iolist_to_binary(Chunk2), File2, Off2, Size2},
                      {iolist_to_binary(Chunk3), File3, Off3, Size3}],
             [begin
-                 io:format(user, "HTT ~p ~p ~p\n", [Fl, Off, Sz]),
                  {ok, Ch} = ?C:read_chunk(Clnt, Fl, Off, Sz)
              end || {Ch, Fl, Off, Sz} <- Reads],
 

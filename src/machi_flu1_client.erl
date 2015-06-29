@@ -622,14 +622,11 @@ do_pb_request_common(Sock, ReqID, Req) ->
     erase(bad_sock),
     try
         ReqBin = list_to_binary(machi_pb:encode_mpb_ll_request(Req)),
-io:format(user, "\nCCC Req ~p\n", [Req]),
         ok = w_send(Sock, ReqBin),
         case w_recv(Sock, 0) of
             {ok, RespBin} ->
                 Resp = machi_pb:decode_mpb_ll_response(RespBin),
-                io:format(user, "\nCCC Resp ~p\n", [Resp]),
                 {ReqID2, Reply} = machi_pb_translate:from_pb_response(Resp),
-                io:format(user, "\nCCC ReqID2 ~p Reply ~p\n", [ReqID2, Reply]),
                 true = (ReqID == ReqID2 orelse ReqID2 == <<>>),
                 Reply;
             {error, _}=Err ->
