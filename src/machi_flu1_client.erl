@@ -373,7 +373,7 @@ echo(Sock, String) when is_list(String) ->
 %% @doc Get all epoch numbers from the FLU's projection store.
 
 -spec echo(machi_dt:inet_host(), machi_dt:inet_port(), string()) ->
-      {ok, [non_neg_integer()]} | {error, term()}.
+      string() | {error, term()}.
 echo(Host, TcpPort, String) when is_list(String) ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try

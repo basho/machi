@@ -325,9 +325,7 @@ do_pb_ll_request(PB_request, S) ->
             {RqID, CMD} ->
                 EpochID = element(2, CMD),      % by common convention
                 {Rs, NewS} = do_pb_ll_request2(EpochID, CMD, S),
-                {RqID, CMD, Rs, NewS};
-            nope ->
-                {foo, bar, baz}
+                {RqID, CMD, Rs, NewS}
         end,
     {machi_pb_translate:to_pb_response(ReqID, Cmd, Result), S2}.
 
