@@ -545,31 +545,6 @@ checksum_list2(Sock, EpochID, File) ->
             ReqID, {low_checksum_list, EpochID, File}),
     do_pb_request_common(Sock, ReqID, Req).
 
-checksum_list_fast(Sock, 0) ->
-    {ok, <<".\n">> = _Line} = w_recv(Sock, 2),
-    [];
-checksum_list_fast(Sock, Remaining) ->
-    Num = erlang:min(Remaining, 1024*1024),
-    {ok, Bytes} = w_recv(Sock, Num),
-    [Bytes|checksum_list_fast(Sock, Remaining - byte_size(Bytes))].
-
-checksum_list_finish(Chunks) ->
-    Bin = case Chunks of
-              [X] ->
-                  X;
-              _ ->
-                  iolist_to_binary(Chunks)
-          end,
-    [begin
-         CSumLen = byte_size(Line) - 16 - 1 - 8 - 1,
-         <<OffsetHex:16/binary, " ", SizeHex:8/binary, " ",
-           CSum:CSumLen/binary>> = Line,
-         {machi_util:hexstr_to_int(OffsetHex),
-          machi_util:hexstr_to_int(SizeHex),
-          machi_util:hexstr_to_bin(CSum)}
-     end || Line <- re:split(Bin, "\n", [{return, binary}]),
-            Line /= <<>>].
-
 delete_migration2(Sock, EpochID, File) ->
     ReqID = <<"id">>,
     Req = machi_pb_translate:to_pb_request(
@@ -683,6 +658,6 @@ w_recv({w,tcp,Sock}, Amt) ->
 w_send({w,tcp,Sock}, IoData) ->
     gen_tcp:send(Sock, IoData).
 
-w_setopts({w,tcp,Sock}, Opts) ->
-    inet:setopts(Sock, Opts).
+%% w_setopts({w,tcp,Sock}, Opts) ->
+%%     inet:setopts(Sock, Opts).
 

@@ -484,7 +484,7 @@ to_pb_response(ReqID, {low_wedge_status, _BogusEpochID}, Resp) ->
         {error, _}=Error ->
             Status = conv_from_status(Error),
             #mpb_ll_response{req_id=ReqID,
-                            wedge_status=#mpb_ll_wedgestatusresp{status=Error}};
+                           wedge_status=#mpb_ll_wedgestatusresp{status=Status}};
         {Wedged_p, EpochID} ->
             PB_Wedged = conv_from_boolean(Wedged_p),
             PB_EpochID = conv_from_epoch_id(EpochID),
