@@ -87,6 +87,9 @@
 -export([start_link/1, stop/1,
          update_wedge_state/3]).
 -export([make_listener_regname/1, make_projection_server_regname/1]).
+-export([encode_csum_file_entry/3, encode_csum_file_entry_bin/3,
+         decode_csum_file_entry/1,
+         split_checksum_list_blob/1, split_checksum_list_blob_decode/1]).
 
 -record(state, {
           flu_name        :: atom(),
@@ -498,7 +501,7 @@ do_server_write_chunk2(_File, Offset, Chunk, CSum_tag,
         Size = iolist_size(Chunk),
         case file:pwrite(FHd, Offset, Chunk) of
             ok ->
-                CSum_info = encode_csum_file_entry_nothex(Offset, Size, TaggedCSum),
+                CSum_info = encode_csum_file_entry(Offset, Size, TaggedCSum),
                 ok = file:write(FHc, CSum_info),
                 ok;
             _Else3 ->
@@ -752,7 +755,7 @@ seq_append_server_loop(DataDir, Prefix, File, {FHd,FHc}=FH_, FileNum, Offset) ->
             end,
             From ! {assignment, Offset, File},
             Size = iolist_size(Chunk),
-            CSum_info = encode_csum_file_entry_nothex(Offset, Size, TaggedCSum),
+            CSum_info = encode_csum_file_entry(Offset, Size, TaggedCSum),
             ok = file:write(FHc, CSum_info),
             seq_append_server_loop(DataDir, Prefix, File, FH_,
                                    FileNum, Offset + Size + Extra);
@@ -875,42 +878,85 @@ split_uri_options(OpsBin) ->
              {size, binary_to_integer(Bin)}
      end || X <- L].
 
-encode_csum_file_entry_nothex(Offset, Size, TaggedCSum) ->
+%% @doc Encode `Offset + Size + TaggedCSum' into an `iolist()' type for
+%% internal storage by the FLU.
+
+-spec encode_csum_file_entry(
+        machi_dt:file_offset(), machi_dt:chunk_size(), machi_dt:chunk_s()) ->
+        iolist().
+encode_csum_file_entry(Offset, Size, TaggedCSum) ->
     Len = 8 + 4 + byte_size(TaggedCSum),
     [<<Len:8/unsigned-big, Offset:64/unsigned-big, Size:32/unsigned-big>>,
      TaggedCSum].
 
-decode_csum_file_entry_nothex(<<_:8/unsigned-big, Offset:64/unsigned-big, Size:32/unsigned-big, TaggedCSum/binary>>) ->
+%% @doc Encode `Offset + Size + TaggedCSum' into an `binary()' type for
+%% internal storage by the FLU.
+
+-spec encode_csum_file_entry_bin(
+        machi_dt:file_offset(), machi_dt:chunk_size(), machi_dt:chunk_s()) ->
+        binary().
+encode_csum_file_entry_bin(Offset, Size, TaggedCSum) ->
+    Len = 8 + 4 + byte_size(TaggedCSum),
+    <<Len:8/unsigned-big, Offset:64/unsigned-big, Size:32/unsigned-big,
+      TaggedCSum/binary>>.
+
+%% @doc Decode a single `binary()' blob into an
+%%      `{Offset,Size,TaggedCSum}' tuple.
+%%
+%% The internal encoding (which is currently exposed to the outside world
+%% via this function and related ones) is:
+%%
+%% <ul>
+%% <li> 1 byte: record length
+%% </li>
+%% <li> 8 bytes (unsigned big-endian): byte offset
+%% </li>
+%% <li> 4 bytes (unsigned big-endian): chunk size
+%% </li>
+%% <li> all remaining bytes: tagged checksum (1st byte = type tag)
+%% </li>
+%% </ul>
+%%
+%% See `machi.hrl' for the tagged checksum types, e.g.,
+%% `?CSUM_TAG_NONE'.
+
+-spec decode_csum_file_entry(binary()) ->
+        {machi_dt:file_offset(), machi_dt:chunk_size(), machi_dt:chunk_s()}.
+decode_csum_file_entry(<<_:8/unsigned-big, Offset:64/unsigned-big, Size:32/unsigned-big, TaggedCSum/binary>>) ->
     {Offset, Size, TaggedCSum}.
 
-split_1byte_len_tag_decode(Bin) ->
-    split_1byte_len_tag_decode(Bin, []).
+%% @doc Split a `binary()' blob of `checksum_list' data into a list of
+%% unparsed `binary()' blobs, one per entry.
+%%
+%% Decode the unparsed blobs with {@link decode_csum_file_entry/1}, if
+%% desired.
 
-split_1byte_len_tag_decode(<<Len:8/unsigned-big, Part:Len/binary, Rest/binary>>, Acc)->
-    split_1byte_len_tag_decode(Rest, [decode_csum_file_entry_nothex(Part)|Acc]);
-split_1byte_len_tag_decode(Other, Acc) ->
-    {lists:reverse(Acc), Other}.
+-spec split_checksum_list_blob(binary()) ->
+          list(binary()).
+split_checksum_list_blob(Bin) ->
+    split_checksum_list_blob(Bin, []).
 
-split_1byte_len_tag(Bin) ->
-    split_1byte_len_tag(Bin, []).
-
-split_1byte_len_tag(<<Len:8/unsigned-big, Part:Len/binary, Rest/binary>>, Acc)->
+split_checksum_list_blob(<<Len:8/unsigned-big, Part:Len/binary, Rest/binary>>, Acc)->
     case get(hack_length) of
         Len -> ok;
         _   -> put(hack_different, true)
     end,
-    split_1byte_len_tag(Rest, [<<Len:8/unsigned-big, Part/binary>>|Acc]);
-split_1byte_len_tag(Other, Acc) ->
-    {lists:reverse(Acc), Other}.
+    split_checksum_list_blob(Rest, [<<Len:8/unsigned-big, Part/binary>>|Acc]);
+split_checksum_list_blob(Rest, Acc) ->
+    {lists:reverse(Acc), Rest}.
 
-%% split_1byte_len_tag(<<Len:8/unsigned-big, Part:Len/binary, Rest/binary>>, Acc)->
-%%     case get(hack_length) of
-%%         Len -> ok;
-%%         _   -> put(hack_different, true)
-%%     end,
-%%     split_1byte_len_tag(Rest, [<<Len:8/unsigned-big, Part/binary>>|Acc]);
-%% split_1byte_len_tag(Other, Acc) ->
-%%     {lists:reverse(Acc), Other}.
+%% @doc Split a `binary()' blob of `checksum_list' data into a list of
+%% `{Offset,Size,TaggedCSum}' tuples.
+
+-spec split_checksum_list_blob_decode(binary()) ->
+          list({machi_dt:file_offset(), machi_dt:chunk_size(), machi_dt:chunk_s()}).
+split_checksum_list_blob_decode(Bin) ->
+    split_checksum_list_blob_decode(Bin, []).
+
+split_checksum_list_blob_decode(<<Len:8/unsigned-big, Part:Len/binary, Rest/binary>>, Acc)->
+    split_checksum_list_blob_decode(Rest, [decode_csum_file_entry(Part)|Acc]);
+split_checksum_list_blob_decode(Rest, Acc) ->
+    {lists:reverse(Acc), Rest}.
 
 check_or_make_tagged_checksum(?CSUM_TAG_NONE, Client_CSum, Chunk) ->
     %% TODO: If the client was foolish enough to use
@@ -971,9 +1017,9 @@ timing_demo_test2() ->
     {HexUSec, _} =
     timer:tc(fun() ->
                      lists:foldl(fun(X, _) ->
-                                         B = encode_csum_file_entry(X, 100, CSum),
+                                         B = encode_csum_file_entry_hex(X, 100, CSum),
                                          %% file:write(ZZZ, [B, 10]),
-                                         decode_csum_file_entry(list_to_binary(B))
+                                         decode_csum_file_entry_hex(list_to_binary(B))
                                  end, x, Xs)
              end),
     io:format(user, "~.3f sec\n", [HexUSec / 1000000]),
@@ -984,14 +1030,14 @@ timing_demo_test2() ->
     {NotSortedUSec, _} =
     timer:tc(fun() ->
                      lists:foldl(fun(X, _) ->
-                                         B = encode_csum_file_entry_nothex(X, 100, CSum),
-                                         decode_csum_file_entry_nothex(list_to_binary(B))
+                                         B = encode_csum_file_entry(X, 100, CSum),
+                                         decode_csum_file_entry(list_to_binary(B))
                                  end, x, Xs)
              end),
     io:format(user, "~.3f sec\n", [NotSortedUSec / 1000000]),
 
     NotHexList = lists:foldl(fun(X, Acc) ->
-                                 B = encode_csum_file_entry_nothex(X, 100, CSum),
+                                 B = encode_csum_file_entry(X, 100, CSum),
                                  [B|Acc]
                          end, [], Xs),
     NotHexBin = iolist_to_binary(NotHexList),
@@ -1002,7 +1048,7 @@ timing_demo_test2() ->
     timer:tc(fun() ->
                      put(hack_length, 29),
                      put(hack_different, false),
-                     {Sorted, _Leftover} = split_1byte_len_tag(NotHexBin),
+                     {Sorted, _Leftover} = split_checksum_list_blob(NotHexBin),
                      io:format(user, " Leftover ~p (hack_different ~p) ", [_Leftover, get(hack_different)]),
                      Sorted
              end),
@@ -1045,7 +1091,7 @@ timing_demo_test2() ->
     {NotHexTupleCreationUSec, NotHexTupleList} =
     timer:tc(fun() ->
                      lists:foldl(fun(X, Acc) ->
-                                         B = encode_csum_file_entry(
+                                         B = encode_csum_file_entry_hex(
                                                X, 100, CSum),
                                          [B|Acc]
                                  end, [], Xs)
@@ -1076,7 +1122,7 @@ sort_input_fun(FH, PrevStuff) ->
                                   true ->
                                        <<PrevStuff/binary, NewStuff/binary>>
                                end,
-                    {SplitRes, Leftover} = split_1byte_len_tag(AllStuff),
+                    {SplitRes, Leftover} = split_checksum_list_blob(AllStuff),
                     {SplitRes, sort_input_fun(FH, Leftover)};
                 eof ->
                     end_of_input
@@ -1093,13 +1139,13 @@ sort_output_fun(FH) ->
             sort_output_fun(FH)
     end.
 
-encode_csum_file_entry(Offset, Size, TaggedCSum) ->
+encode_csum_file_entry_hex(Offset, Size, TaggedCSum) ->
     OffsetHex = machi_util:bin_to_hexstr(<<Offset:64/big>>),
     SizeHex = machi_util:bin_to_hexstr(<<Size:32/big>>),
     CSumHex = machi_util:bin_to_hexstr(TaggedCSum),
     [OffsetHex, 32, SizeHex, 32, CSumHex].
 
-decode_csum_file_entry(<<OffsetHex:16/binary, _:1/binary, SizeHex:8/binary, _:1/binary, CSumHex/binary>>) ->
+decode_csum_file_entry_hex(<<OffsetHex:16/binary, _:1/binary, SizeHex:8/binary, _:1/binary, CSumHex/binary>>) ->
     Offset = machi_util:hexstr_to_bin(OffsetHex),
     Size = machi_util:hexstr_to_bin(SizeHex),
     CSum = machi_util:hexstr_to_bin(CSumHex),

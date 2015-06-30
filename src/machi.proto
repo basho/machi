@@ -209,6 +209,9 @@ message Mpb_ChecksumListReq {
 
 message Mpb_ChecksumListResp {
     required Mpb_GeneralStatusCode status = 1;
+    // For data type rationale, see comments for
+    // machi_flu1_client:checksum_list/4 or
+    // http://basho.github.io/machi/edoc/machi_flu1_client.html#checksum_list-4
     optional bytes chunk = 2;
 }
 
@@ -403,6 +406,9 @@ message Mpb_LL_ChecksumListReq {
 
 message Mpb_LL_ChecksumListResp {
     required Mpb_GeneralStatusCode status = 1;
+    // For data type rationale, see comments for
+    // machi_flu1_client:checksum_list/4 or
+    // http://basho.github.io/machi/edoc/machi_flu1_client.html#checksum_list-4
     optional bytes chunk = 2;
 }
 

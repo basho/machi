@@ -174,16 +174,36 @@ read_chunk(Host, TcpPort, EpochID, File, Offset, Size)
 %% @doc Fetch the list of chunk checksums for `File'.
 
 -spec checksum_list(port_wrap(), machi_dt:epoch_id(), machi_dt:file_name()) ->
-      {ok, [machi_dt:chunk_summary()]} |
+      {ok, binary()} |
       {error, machi_dt:error_general() | 'no_such_file' | 'partial_read'} |
       {error, term()}.
 checksum_list(Sock, EpochID, File) ->
     checksum_list2(Sock, EpochID, File).
 
 %% @doc Fetch the list of chunk checksums for `File'.
+%%
+%% Why return a simple `binary()' type rather than
+%% `[machi_dt:chunk_summary()]'?  The two reasons are:
+%% <ol>
+%% <li> Server overhead: the CPU required to chop up the implementation-
+%%      specific store into zillions of very small terms is very high.
+%% </li>
+%% <li> Protocol encoding and decoding overhead: the cost is non-zero,
+%%      and the sum of cost of encoding and decoding a zillion small terms
+%%      is substantial.
+%% </li>
+%% </ol>
+%%
+%% For both reasons, the server's protocol response is absurdly simple
+%% and very fast: send back a `binary()' blob to the client.  Then it
+%% is the client's responsibility to spend the CPU time to parse the
+%% blob.
+%%
+%% Details of the encoding used inside the `binary()' blog can be found
+%% in the EDoc comments for {@link machi_flu1:decode_csum_file_entry/1}.
 
 -spec checksum_list(machi_dt:inet_host(), machi_dt:inet_port(), machi_dt:epoch_id(), machi_dt:file_name()) ->
-      {ok, [machi_dt:chunk_summary()]} |
+      {ok, binary()} |
       {error, machi_dt:error_general() | 'no_such_file'} | {error, term()}.
 checksum_list(Host, TcpPort, EpochID, File) when is_integer(TcpPort) ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
