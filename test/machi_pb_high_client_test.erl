@@ -83,7 +83,8 @@ smoke_test2() ->
                  {ok, Ch} = ?C:read_chunk(Clnt, Fl, Off, Sz)
              end || {Ch, Fl, Off, Sz} <- Reads],
 
-            {ok, _} = ?C:checksum_list(Clnt, File1),
+            {ok, KludgeBin} = ?C:checksum_list(Clnt, File1),
+            true = is_binary(KludgeBin),
             {ok, [{File1Size,File1}]} = ?C:list_files(Clnt),
             true = is_integer(File1Size),
 

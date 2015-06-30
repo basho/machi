@@ -129,11 +129,9 @@ smoke_test2() ->
                                                           999999999, 1),
         {error, partial_read} = machi_cr_client:read_chunk(C1, File1,
                                                            Off1, 88888888),
-        %% Checksum lists are 3-tuples
-        %% TODO: refactor checksum_list(), then put this test back!
-        %% {ok, [{_,_,_}|_]} = machi_cr_client:checksum_list(C1, File1),
-        {ok, TmpKludgeBin} = machi_cr_client:checksum_list(C1, File1),
-        true = is_binary(TmpKludgeBin),
+        %% Checksum list return value is a primitive binary().
+        {ok, KludgeBin} = machi_cr_client:checksum_list(C1, File1),
+        true = is_binary(KludgeBin),
 
         {error, no_such_file} = machi_cr_client:checksum_list(C1, <<"!!!!">>),
         %% Exactly one file right now

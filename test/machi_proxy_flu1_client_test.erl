@@ -225,8 +225,9 @@ flu_restart_test() ->
                     (stop) -> ?MUT:read_chunk(Prox1, FakeEpoch,
                                                  File1, Off1, Size1)
                  end,
-                 fun(run) -> {ok, _} =
+                 fun(run) -> {ok, KludgeBin} =
                                  ?MUT:checksum_list(Prox1, FakeEpoch, File1),
+                             true = is_binary(KludgeBin),
                              ok;
                     (line) -> io:format("line ~p, ", [?LINE]);
                     (stop) -> ?MUT:checksum_list(Prox1, FakeEpoch, File1)

@@ -291,6 +291,9 @@ net_server_loop(Sock, S) ->
             R = #mpb_ll_response{req_id= <<>>,
                                  generic=#mpb_errorresp{code=1, msg=Msg}},
             Resp = machi_pb:encode_mpb_ll_response(R),
+            %% TODO: Weird that sometimes neither catch nor try/catch
+            %%       can prevent OTP's SASL from logging an error here.
+            %%       Error in process <0.545.0> with exit value: {badarg,[{erlang,port_command,.......
             _ = (catch gen_tcp:send(Sock, Resp)),
             (catch gen_tcp:close(Sock)),
             exit(normal)
@@ -963,7 +966,7 @@ split_checksum_list_blob_decode(<<Len:8/unsigned-big, Part:Len/binary, Rest/bina
 split_checksum_list_blob_decode(Rest, Acc) ->
     {lists:reverse(Acc), Rest}.
 
-check_or_make_tagged_checksum(?CSUM_TAG_NONE, Client_CSum, Chunk) ->
+check_or_make_tagged_checksum(?CSUM_TAG_NONE, _Client_CSum, Chunk) ->
     %% TODO: If the client was foolish enough to use
     %% this type of non-checksum, then the client gets
     %% what it deserves wrt data integrity, alas.  In
