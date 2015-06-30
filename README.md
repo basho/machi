@@ -37,20 +37,21 @@ being used as the initial scaffolding.
 * The chain manager is ready for "AP mode" use in eventual
   consistency use cases.
 
-* The Machi client/server protocol is still the hand-crafted,
-  artisanal, bogus protocol that I hacked together for a "demo day"
-  back in January and appears in the
-  [prototype/demo-day-hack](prototype/demo-day-hack/) code.
-    * Today: the only client language supported is Erlang.
-    * Today: an HTTP interface that, at the moment, is a big kludge.
-      If someone who really cares about an
-      HTTP interface that is 100% REST-ful cares to contribute some
-      code ... contributions are welcome!
-    * Work in progress now: replace the current protocol to something
-      based on Protocol Buffers 
-        * If you'd like to work on a protocol such as Thrift, UBF,
-          msgpack over UDP, or some other protocol, let us know by
-          [opening an issue](./issues/new) to discuss it.
+* All Machi client/server protocols are based on
+  [Protocol Buffers](https://developers.google.com/protocol-buffers/docs/overview).
+    * The current specification for Machi's protocols can be found at
+      [https://github.com/basho/machi/blob/master/src/machi.proto](https://github.com/basho/machi/blob/master/src/machi.proto).
+    * The Machi PB protocol is not yet stable.  Expect change!
+    * The Erlang language client implementation of the high-level
+      protocol flavor is very brittle (e.g., very little error
+      handling yet).
+    * The Erlang language client implementation of the low-level
+      protocol flavor are still a work-in-progress ... but they are
+      more robust than the high-level library's implementation.
+
+If you'd like to work on a protocol such as Thrift, UBF,
+msgpack over UDP, or some other protocol, let us know by
+[opening an issue](./issues/new) to discuss it.
 
 ## Contributing to Machi: source code, documentation, etc.
 
