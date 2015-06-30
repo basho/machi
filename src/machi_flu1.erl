@@ -561,7 +561,16 @@ do_server_checksum_listing(File, #state{data_dir=DataDir}=_S) ->
             %% {packet_size,N} limit, then we'll have a difficult time, eh?
             case file:read_file(CSumPath) of
                 {ok, Bin} ->
-                    {ok, Bin};
+                    if byte_size(Bin) > (?PB_MAX_MSG_SIZE - 1024) ->
+                            %% TODO: Fix this limitation by streaming the
+                            %% binary in multiple smaller PB messages.
+                            %% Also, don't read the file all at once. ^_^
+                            error_logger:error_msg("~s:~w oversize ~s\n",
+                                                   [?MODULE, ?LINE, CSumPath]),
+                            {error, bad_arg};
+                       true ->
+                            {ok, Bin}
+                    end;
                 {error, enoent} ->
                     {error, no_such_file};
                 {error, _} ->
