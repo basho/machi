@@ -788,7 +788,7 @@ make_listener_regname(BaseName) ->
 make_projection_server_regname(BaseName) ->
     list_to_atom(atom_to_list(BaseName) ++ "_pstore2").
 
-http_server_hack(FluName, Line1, Sock, S) ->
+http_hack_server(FluName, Line1, Sock, S) ->
     {ok, {http_request, HttpOp, URI0, _HttpV}, _x} =
         erlang:decode_packet(http_bin, Line1, [{line_length,4095}]),
     MyURI = case URI0 of
@@ -796,18 +796,18 @@ http_server_hack(FluName, Line1, Sock, S) ->
                                   Rest;
               _                -> URI0
           end,
-    Hdrs = http_harvest_headers(Sock),
-    G = digest_header_goop(Hdrs, #http_goop{}),
+    Hdrs = http_hack_harvest_headers(Sock),
+    G = http_hack_digest_header_goop(Hdrs, #http_goop{}),
     case HttpOp of
         'PUT' ->
-            http_server_hack_put(Sock, G, FluName, MyURI);
+            http_hack_server_put(Sock, G, FluName, MyURI);
         'GET' ->
-            http_server_hack_get(Sock, G, FluName, MyURI, S)
+            http_hack_server_get(Sock, G, FluName, MyURI, S)
     end,
     ok = gen_tcp:close(Sock),
     exit(normal).
 
-http_server_hack_put(Sock, G, FluName, MyURI) ->
+http_hack_server_put(Sock, G, FluName, MyURI) ->
     ok = inet:setopts(Sock, [{packet, raw}]),
     {ok, Chunk} = gen_tcp:recv(Sock, G#http_goop.len, 60*1000),
     CSum0 = machi_util:checksum_chunk(Chunk),
@@ -845,34 +845,34 @@ http_server_hack_put(Sock, G, FluName, MyURI) ->
             ok = gen_tcp:send(Sock, <<"HTTP/1.0 499 TIMEOUT\r\n\r\n">>)
     end.
 
-http_server_hack_get(Sock, _G, _FluName, _MyURI, _S) ->
+http_hack_server_get(Sock, _G, _FluName, _MyURI, _S) ->
     ok = gen_tcp:send(Sock, <<"TODO BROKEN FEATURE see old commits\r\n">>).
 
-http_harvest_headers(Sock) ->
+http_hack_harvest_headers(Sock) ->
     ok = inet:setopts(Sock, [{packet, httph}]),
-    http_harvest_headers(gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT),
-                         Sock, []).
+    http_hack_harvest_headers(gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT),
+                              Sock, []).
 
-http_harvest_headers({ok, http_eoh}, _Sock, Acc) ->
+http_hack_harvest_headers({ok, http_eoh}, _Sock, Acc) ->
     Acc;
-http_harvest_headers({error, _}, _Sock, _Acc) ->
+http_hack_harvest_headers({error, _}, _Sock, _Acc) ->
     [];
-http_harvest_headers({ok, Hdr}, Sock, Acc) ->
-    http_harvest_headers(gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT),
-                         Sock, [Hdr|Acc]).
+http_hack_harvest_headers({ok, Hdr}, Sock, Acc) ->
+    http_hack_harvest_headers(gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT),
+                              Sock, [Hdr|Acc]).
 
-digest_header_goop([], G) ->
+http_hack_digest_header_goop([], G) ->
     G;
-digest_header_goop([{http_header, _, 'Content-Length', _, Str}|T], G) ->
-    digest_header_goop(T, G#http_goop{len=list_to_integer(Str)});
-digest_header_goop([{http_header, _, "X-Checksum", _, Str}|T], G) ->
+http_hack_digest_header_goop([{http_header, _, 'Content-Length', _, Str}|T], G) ->
+    http_hack_digest_header_goop(T, G#http_goop{len=list_to_integer(Str)});
+http_hack_digest_header_goop([{http_header, _, "X-Checksum", _, Str}|T], G) ->
     SHA = machi_util:hexstr_to_bin(Str),
     CSum = machi_util:make_tagged_csum(client_sha, SHA),
-    digest_header_goop(T, G#http_goop{x_csum=CSum});
-digest_header_goop([_H|T], G) ->
-    digest_header_goop(T, G).
+    http_hack_digest_header_goop(T, G#http_goop{x_csum=CSum});
+http_hack_digest_header_goop([_H|T], G) ->
+    http_hack_digest_header_goop(T, G).
 
-split_uri_options(OpsBin) ->
+http_hack_split_uri_options(OpsBin) ->
     L = binary:split(OpsBin, <<"&">>),
     [case binary:split(X, <<"=">>) of
          [<<"offset">>, Bin] ->
