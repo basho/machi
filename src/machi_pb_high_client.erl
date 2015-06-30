@@ -352,7 +352,7 @@ convert_csum_req({client_sha, CSumBin}, _Chunk) ->
 
 convert_append_chunk_resp(#mpb_appendchunkresp{status='OK', chunk_pos=CP}) ->
     #mpb_chunkpos{offset=Offset, chunk_size=Size, file_name=File} = CP,
-    {ok, {Offset, Size, File}};
+    {ok, {Offset, Size, list_to_binary(File)}};
 convert_append_chunk_resp(#mpb_appendchunkresp{status=Status}) ->
     convert_general_status_code(Status).
 
@@ -393,8 +393,9 @@ convert_checksum_list_resp(#mpb_checksumlistresp{status=Status}) ->
     convert_general_status_code(Status).
 
 convert_list_files_resp(#mpb_listfilesresp{status='OK', files=Files}) ->
-    FileInfo = [{Size, File} || #mpb_fileinfo{file_size=Size,
-                                              file_name=File} <- Files],
+    FileInfo = [{Size, list_to_binary(File)} ||
+                   #mpb_fileinfo{file_size=Size,
+                                 file_name=File} <- Files],
     {ok, FileInfo};
 convert_list_files_resp(#mpb_listfilesresp{status=Status}) ->
     convert_general_status_code(Status).

@@ -930,9 +930,12 @@ decode_csum_file_entry(<<_:8/unsigned-big, Offset:64/unsigned-big, Size:32/unsig
 %%
 %% Decode the unparsed blobs with {@link decode_csum_file_entry/1}, if
 %% desired.
+%%
+%% The return value `TrailingJunk' is unparseable bytes at the end of
+%% the checksum list blob.
 
 -spec split_checksum_list_blob(binary()) ->
-          list(binary()).
+          {list(binary()), TrailingJunk::binary()}.
 split_checksum_list_blob(Bin) ->
     split_checksum_list_blob(Bin, []).
 
@@ -949,12 +952,14 @@ split_checksum_list_blob(Rest, Acc) ->
 %% `{Offset,Size,TaggedCSum}' tuples.
 
 -spec split_checksum_list_blob_decode(binary()) ->
-          list({machi_dt:file_offset(), machi_dt:chunk_size(), machi_dt:chunk_s()}).
+  {list({machi_dt:file_offset(), machi_dt:chunk_size(), machi_dt:chunk_s()}),
+   TrailingJunk::binary()}.
 split_checksum_list_blob_decode(Bin) ->
     split_checksum_list_blob_decode(Bin, []).
 
 split_checksum_list_blob_decode(<<Len:8/unsigned-big, Part:Len/binary, Rest/binary>>, Acc)->
-    split_checksum_list_blob_decode(Rest, [decode_csum_file_entry(Part)|Acc]);
+    One = <<Len:8/unsigned-big, Part/binary>>,
+    split_checksum_list_blob_decode(Rest, [decode_csum_file_entry(One)|Acc]);
 split_checksum_list_blob_decode(Rest, Acc) ->
     {lists:reverse(Acc), Rest}.
 

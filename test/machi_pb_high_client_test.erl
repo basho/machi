@@ -65,6 +65,7 @@ smoke_test2() ->
             Chunk1 = <<"Hello, chunk!">>,
             {ok, {Off1, Size1, File1}} =
                 ?C:append_chunk(Clnt, PK, Prefix, Chunk1, none, 0),
+            true = is_binary(File1),
             Chunk2 = "It's another chunk",
             CSum2 = {client_sha, machi_util:checksum_chunk(Chunk2)},
             {ok, {Off2, Size2, File2}} =
@@ -92,7 +93,7 @@ smoke_test2() ->
         end
     after
         exit(SupPid, normal),
-%%%        [os:cmd("rm -rf " ++ P#p_srvr.props) || P <- Ps],
+       [os:cmd("rm -rf " ++ P#p_srvr.props) || P <- Ps],
         machi_util:wait_for_death(SupPid, 100),
         ok
     end.

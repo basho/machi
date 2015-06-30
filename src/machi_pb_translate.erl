@@ -196,7 +196,7 @@ from_pb_response(#mpb_ll_response{
             #mpb_chunkpos{offset=Offset,
                           chunk_size=Size,
                           file_name=File} = ChunkPos,
-            {ReqID, {ok, {Offset, Size, File}}};
+            {ReqID, {ok, {Offset, Size, list_to_binary(File)}}};
         _ ->
             {ReqID, machi_pb_high_client:convert_general_status_code(Status)}
     end;
@@ -230,7 +230,7 @@ from_pb_response(#mpb_ll_response{
                       status=Status, files=PB_Files}}) ->
     case Status of
         'OK' ->
-            Files = [{Size, Name} ||
+            Files = [{Size, list_to_binary(Name)} ||
                         #mpb_fileinfo{file_size=Size,
                                       file_name=Name} <- PB_Files],
             {ReqID, {ok, Files}};
