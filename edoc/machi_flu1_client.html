@@ -21,26 +21,17 @@
   management can be found in <a href="machi_proxy_flu1_client.html"><code>machi_proxy_flu1_client</code></a> and
   <a href="machi_cr_client.html"><code>machi_cr_client</code></a>.</p>
  
-  <p>TODO This EDoc was written first, and the EDoc and also <code>-type</code> and
-  <code>-spec</code> definitions for <a href="machi_proxy_flu1_client.html"><code>machi_proxy_flu1_client</code></a> and <a href="machi_cr_client.html"><code>machi_cr_client</code></a> must be improved.</p>
+  <p>For the moment, this module implements a Protocol Buffers-based  
+protocol as the sole supported access method to the server,  
+sequencer, and projection store.  Conceptually, those three  
+services are independent and ought to have their own protocols.  As  
+a practical matter, there is no need for wire protocol  
+compatibility.  Furthermore, from the perspective of failure  
+detection, it is very convenient that all three FLU-related  
+services are accessed using the same single TCP port.</p>
  
-  <h4><a name="Protocol_origins">Protocol origins</a></h4>
- 
-  <p>The protocol implemented here is an artisanal, hand-crafted, silly  
-thing that was very quick to put together for a "demo day" proof of  
-concept.  It will almost certainly be replaced with something else,  
-both in terms of wire format and better code separation of  
-serialization/deserialization vs. network transport management,  
-etc.</p>
- 
-  For the moment, this module implements a rudimentary TCP-based
-  protocol as the sole supported access method to the server,
-  sequencer, and projection store.  Conceptually, those three
-  services are independent and ought to have their own protocols.  As
-  a practical matter, there is no need for wire protocol
-  compatibility.  Furthermore, from the perspective of failure
-  detection, it is very convenient that all three FLU-related
-  services are accessed using the same single TCP port.
+  TODO This EDoc was written first, and the EDoc and also <code>-type</code> and
+  <code>-spec</code> definitions for <a href="machi_proxy_flu1_client.html"><code>machi_proxy_flu1_client</code></a> and <a href="machi_cr_client.html"><code>machi_cr_client</code></a> must be improved.
 <h2><a name="types">Data Types</a></h2>
 
 <h3 class="typedecl"><a name="type-port_wrap">port_wrap()</a></h3>
@@ -65,6 +56,8 @@ etc.</p>
 <tr><td valign="top"><a href="#delete_migration-4">delete_migration/4</a></td><td>Restricted API: Delete a file after it has been successfully
   migrated.</td></tr>
 <tr><td valign="top"><a href="#disconnect-1">disconnect/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#echo-2">echo/2</a></td><td>Echo -- test protocol round-trip.</td></tr>
+<tr><td valign="top"><a href="#echo-3">echo/3</a></td><td>Get all epoch numbers from the FLU's projection store.</td></tr>
 <tr><td valign="top"><a href="#get_all_projections-2">get_all_projections/2</a></td><td>Get all projections from the FLU's projection store.</td></tr>
 <tr><td valign="top"><a href="#get_all_projections-3">get_all_projections/3</a></td><td>Get all projections from the FLU's projection store.</td></tr>
 <tr><td valign="top"><a href="#get_latest_epochid-2">get_latest_epochid/2</a></td><td>Get the latest epoch number + checksum from the FLU's projection store.</td></tr>
@@ -132,13 +125,33 @@ etc.</p>
 
 <h3 class="function"><a name="checksum_list-3">checksum_list/3</a></h3>
 <div class="spec">
-<p><tt>checksum_list(Sock::<a href="#type-port_wrap">port_wrap()</a>, EpochID::<a href="machi_dt.html#type-epoch_id">machi_dt:epoch_id()</a>, File::<a href="machi_dt.html#type-file_name">machi_dt:file_name()</a>) -&gt; {ok, [<a href="machi_dt.html#type-chunk_summary">machi_dt:chunk_summary()</a>]} | {error, <a href="machi_dt.html#type-error_general">machi_dt:error_general()</a> | no_such_file | partial_read} | {error, term()}</tt><br></p>
+<p><tt>checksum_list(Sock::<a href="#type-port_wrap">port_wrap()</a>, EpochID::<a href="machi_dt.html#type-epoch_id">machi_dt:epoch_id()</a>, File::<a href="machi_dt.html#type-file_name">machi_dt:file_name()</a>) -&gt; {ok, binary()} | {error, <a href="machi_dt.html#type-error_general">machi_dt:error_general()</a> | no_such_file | partial_read} | {error, term()}</tt><br></p>
 </div><p>Fetch the list of chunk checksums for <code>File</code>.</p>
 
 <h3 class="function"><a name="checksum_list-4">checksum_list/4</a></h3>
 <div class="spec">
-<p><tt>checksum_list(Host::<a href="machi_dt.html#type-inet_host">machi_dt:inet_host()</a>, TcpPort::<a href="machi_dt.html#type-inet_port">machi_dt:inet_port()</a>, EpochID::<a href="machi_dt.html#type-epoch_id">machi_dt:epoch_id()</a>, File::<a href="machi_dt.html#type-file_name">machi_dt:file_name()</a>) -&gt; {ok, [<a href="machi_dt.html#type-chunk_summary">machi_dt:chunk_summary()</a>]} | {error, <a href="machi_dt.html#type-error_general">machi_dt:error_general()</a> | no_such_file} | {error, term()}</tt><br></p>
-</div><p>Fetch the list of chunk checksums for <code>File</code>.</p>
+<p><tt>checksum_list(Host::<a href="machi_dt.html#type-inet_host">machi_dt:inet_host()</a>, TcpPort::<a href="machi_dt.html#type-inet_port">machi_dt:inet_port()</a>, EpochID::<a href="machi_dt.html#type-epoch_id">machi_dt:epoch_id()</a>, File::<a href="machi_dt.html#type-file_name">machi_dt:file_name()</a>) -&gt; {ok, binary()} | {error, <a href="machi_dt.html#type-error_general">machi_dt:error_general()</a> | no_such_file} | {error, term()}</tt><br></p>
+</div><p><p>Fetch the list of chunk checksums for <code>File</code>.</p>
+ 
+  Why return a simple <code>binary()</code> type rather than
+  <code>[machi_dt:chunk_summary()]</code>?  The two reasons are:
+  <ol>
+  <li> Server overhead: the CPU required to chop up the implementation-
+       specific store into zillions of very small terms is very high.
+  </li>
+  <li> Protocol encoding and decoding overhead: the cost is non-zero,
+       and the sum of cost of encoding and decoding a zillion small terms
+       is substantial.
+  </li>
+  </ol>
+ 
+  <p>For both reasons, the server's protocol response is absurdly simple
+  and very fast: send back a <code>binary()</code> blob to the client.  Then it  
+is the client's responsibility to spend the CPU time to parse the  
+blob.</p>
+ 
+  Details of the encoding used inside the <code>binary()</code> blog can be found
+  in the EDoc comments for <a href="machi_flu1.html#decode_csum_file_entry-1"><code>machi_flu1:decode_csum_file_entry/1</code></a>.</p>
 
 <h3 class="function"><a name="connect-1">connect/1</a></h3>
 <div class="spec">
@@ -166,6 +179,16 @@ etc.</p>
 <div class="spec">
 <p><tt>disconnect(WS) -&gt; any()</tt></p>
 </div>
+
+<h3 class="function"><a name="echo-2">echo/2</a></h3>
+<div class="spec">
+<p><tt>echo(Sock::<a href="#type-port_wrap">port_wrap()</a>, String::string()) -&gt; string() | {error, term()}</tt><br></p>
+</div><p>Echo -- test protocol round-trip.</p>
+
+<h3 class="function"><a name="echo-3">echo/3</a></h3>
+<div class="spec">
+<p><tt>echo(Host::<a href="machi_dt.html#type-inet_host">machi_dt:inet_host()</a>, TcpPort::<a href="machi_dt.html#type-inet_port">machi_dt:inet_port()</a>, String::string()) -&gt; string() | {error, term()}</tt><br></p>
+</div><p>Get all epoch numbers from the FLU's projection store.</p>
 
 <h3 class="function"><a name="get_all_projections-2">get_all_projections/2</a></h3>
 <div class="spec">
@@ -288,6 +311,6 @@ etc.</p>
 <hr>
 
 <div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
-<p><i>Generated by EDoc, Jun 25 2015, 16:39:10.</i></p>
+<p><i>Generated by EDoc, Jul 1 2015, 18:32:19.</i></p>
 </body>
 </html>

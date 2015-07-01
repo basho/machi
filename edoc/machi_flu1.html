@@ -65,14 +65,60 @@ replication/chain repair.</p>
   simple implementation would stop all existing processes that are
   running run_seq_append_server().
 <h2><a name="index">Function Index</a></h2>
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#make_listener_regname-1">make_listener_regname/1</a></td><td></td></tr>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#decode_csum_file_entry-1">decode_csum_file_entry/1</a></td><td>Decode a single <code>binary()</code> blob into an
+       <code>{Offset,Size,TaggedCSum}</code> tuple.</td></tr>
+<tr><td valign="top"><a href="#encode_csum_file_entry-3">encode_csum_file_entry/3</a></td><td>Encode <code>Offset + Size + TaggedCSum</code> into an <code>iolist()</code> type for
+  internal storage by the FLU.</td></tr>
+<tr><td valign="top"><a href="#encode_csum_file_entry_bin-3">encode_csum_file_entry_bin/3</a></td><td>Encode <code>Offset + Size + TaggedCSum</code> into an <code>binary()</code> type for
+  internal storage by the FLU.</td></tr>
+<tr><td valign="top"><a href="#make_listener_regname-1">make_listener_regname/1</a></td><td></td></tr>
 <tr><td valign="top"><a href="#make_projection_server_regname-1">make_projection_server_regname/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#split_checksum_list_blob-1">split_checksum_list_blob/1</a></td><td>Split a <code>binary()</code> blob of <code>checksum_list</code> data into a list of
+  unparsed <code>binary()</code> blobs, one per entry.</td></tr>
+<tr><td valign="top"><a href="#split_checksum_list_blob_decode-1">split_checksum_list_blob_decode/1</a></td><td>Split a <code>binary()</code> blob of <code>checksum_list</code> data into a list of
+  <code>{Offset,Size,TaggedCSum}</code> tuples.</td></tr>
 <tr><td valign="top"><a href="#start_link-1">start_link/1</a></td><td></td></tr>
 <tr><td valign="top"><a href="#stop-1">stop/1</a></td><td></td></tr>
 <tr><td valign="top"><a href="#update_wedge_state-3">update_wedge_state/3</a></td><td></td></tr>
+<tr><td valign="top"><a href="#wedge_myself-2">wedge_myself/2</a></td><td></td></tr>
 </table>
 
 <h2><a name="functions">Function Details</a></h2>
+
+<h3 class="function"><a name="decode_csum_file_entry-1">decode_csum_file_entry/1</a></h3>
+<div class="spec">
+<p><tt>decode_csum_file_entry(Else::binary()) -&gt; error | {<a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>, <a href="machi_dt.html#type-chunk_size">machi_dt:chunk_size()</a>, <a href="machi_dt.html#type-chunk_s">machi_dt:chunk_s()</a>}</tt><br></p>
+</div><p><p>Decode a single <code>binary()</code> blob into an
+       <code>{Offset,Size,TaggedCSum}</code> tuple.</p>
+ 
+  <p>The internal encoding (which is currently exposed to the outside world  
+via this function and related ones) is:</p>
+ 
+  <ul>
+  <li> 1 byte: record length
+  </li>
+  <li> 8 bytes (unsigned big-endian): byte offset
+  </li>
+  <li> 4 bytes (unsigned big-endian): chunk size
+  </li>
+  <li> all remaining bytes: tagged checksum (1st byte = type tag)
+  </li>
+  </ul>
+ 
+  See <code>machi.hrl</code> for the tagged checksum types, e.g.,
+  <code>?CSUM_TAG_NONE</code>.</p>
+
+<h3 class="function"><a name="encode_csum_file_entry-3">encode_csum_file_entry/3</a></h3>
+<div class="spec">
+<p><tt>encode_csum_file_entry(Offset::<a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>, Size::<a href="machi_dt.html#type-chunk_size">machi_dt:chunk_size()</a>, TaggedCSum::<a href="machi_dt.html#type-chunk_s">machi_dt:chunk_s()</a>) -&gt; iolist()</tt><br></p>
+</div><p>Encode <code>Offset + Size + TaggedCSum</code> into an <code>iolist()</code> type for
+  internal storage by the FLU.</p>
+
+<h3 class="function"><a name="encode_csum_file_entry_bin-3">encode_csum_file_entry_bin/3</a></h3>
+<div class="spec">
+<p><tt>encode_csum_file_entry_bin(Offset::<a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>, Size::<a href="machi_dt.html#type-chunk_size">machi_dt:chunk_size()</a>, TaggedCSum::<a href="machi_dt.html#type-chunk_s">machi_dt:chunk_s()</a>) -&gt; binary()</tt><br></p>
+</div><p>Encode <code>Offset + Size + TaggedCSum</code> into an <code>binary()</code> type for
+  internal storage by the FLU.</p>
 
 <h3 class="function"><a name="make_listener_regname-1">make_listener_regname/1</a></h3>
 <div class="spec">
@@ -83,6 +129,24 @@ replication/chain repair.</p>
 <div class="spec">
 <p><tt>make_projection_server_regname(BaseName) -&gt; any()</tt></p>
 </div>
+
+<h3 class="function"><a name="split_checksum_list_blob-1">split_checksum_list_blob/1</a></h3>
+<div class="spec">
+<p><tt>split_checksum_list_blob(Bin::binary()) -&gt; {[binary()], TrailingJunk::binary()}</tt><br></p>
+</div><p><p>Split a <code>binary()</code> blob of <code>checksum_list</code> data into a list of
+  unparsed <code>binary()</code> blobs, one per entry.</p>
+ 
+  <p>Decode the unparsed blobs with <a href="#decode_csum_file_entry-1"><code>decode_csum_file_entry/1</code></a>, if  
+desired.</p>
+ 
+  The return value <code>TrailingJunk</code> is unparseable bytes at the end of
+  the checksum list blob.</p>
+
+<h3 class="function"><a name="split_checksum_list_blob_decode-1">split_checksum_list_blob_decode/1</a></h3>
+<div class="spec">
+<p><tt>split_checksum_list_blob_decode(Bin::binary()) -&gt; {[{<a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>, <a href="machi_dt.html#type-chunk_size">machi_dt:chunk_size()</a>, <a href="machi_dt.html#type-chunk_s">machi_dt:chunk_s()</a>}], TrailingJunk::binary()}</tt><br></p>
+</div><p>Split a <code>binary()</code> blob of <code>checksum_list</code> data into a list of
+  <code>{Offset,Size,TaggedCSum}</code> tuples.</p>
 
 <h3 class="function"><a name="start_link-1">start_link/1</a></h3>
 <div class="spec">
@@ -98,9 +162,14 @@ replication/chain repair.</p>
 <div class="spec">
 <p><tt>update_wedge_state(PidSpec, Boolean, EpochId) -&gt; any()</tt></p>
 </div>
+
+<h3 class="function"><a name="wedge_myself-2">wedge_myself/2</a></h3>
+<div class="spec">
+<p><tt>wedge_myself(PidSpec, EpochId) -&gt; any()</tt></p>
+</div>
 <hr>
 
 <div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
-<p><i>Generated by EDoc, Jun 25 2015, 16:39:10.</i></p>
+<p><i>Generated by EDoc, Jul 1 2015, 18:32:19.</i></p>
 </body>
 </html>

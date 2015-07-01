@@ -4,6 +4,6 @@
 {modules,[machi_admin_util,machi_app,machi_basho_bench_driver,
           machi_chain_manager1,machi_chain_repair,machi_chash,machi_cr_client,
           machi_dt,machi_flu1,machi_flu1_client,machi_flu_psup,machi_flu_sup,
-          machi_pb_high_client,machi_pb_server,machi_pb_wrap,machi_projection,
+          machi_pb_high_client,machi_pb_translate,machi_projection,
           machi_projection_store,machi_proxy_flu1_client,machi_sequencer,
           machi_sup,machi_util,machi_yessir_client]}.
