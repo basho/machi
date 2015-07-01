@@ -178,9 +178,10 @@ checksum_list(#yessir{name=Name,chunk_size=ChunkSize}, _EpochID, File) ->
         undefined ->
             {error, no_such_file};
         MaxOffset ->
-            CSum = make_csum(Name, ChunkSize),
-            Cs = [{Offset, ChunkSize, CSum} ||
-                     Offset <- lists:seq(?MINIMUM_OFFSET, MaxOffset, ChunkSize)],
+            C = machi_util:make_tagged_csum(client_sha,
+                                            make_csum(Name, ChunkSize)),
+            Cs = [machi_flu1:encode_csum_file_entry_bin(Offset, ChunkSize, C) ||
+                    Offset <- lists:seq(?MINIMUM_OFFSET, MaxOffset, ChunkSize)],
             {ok, Cs}
     end.
 

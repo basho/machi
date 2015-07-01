@@ -87,11 +87,9 @@ flu_smoke_test() ->
                                                       Prefix, Chunk1),
         {ok, Chunk1} = ?FLU_C:read_chunk(Host, TcpPort, ?DUMMY_PV1_EPOCH,
                                          File1, Off1, Len1),
-        %% TODO: when checksum_list() is refactored, restore this test!
-        %% {ok, [{_,_,_}]} = ?FLU_C:checksum_list(Host, TcpPort,
-        %%                                        ?DUMMY_PV1_EPOCH, File1),
-        {ok, _} = ?FLU_C:checksum_list(Host, TcpPort,
+        {ok, KludgeBin} = ?FLU_C:checksum_list(Host, TcpPort,
                                                ?DUMMY_PV1_EPOCH, File1),
+        true = is_binary(KludgeBin),
         {error, bad_arg} = ?FLU_C:append_chunk(Host, TcpPort,
                                                ?DUMMY_PV1_EPOCH,
                                                BadPrefix, Chunk1),

@@ -602,6 +602,9 @@ Yes, sort of.  For as long as the legacy of
 Machi's first internal protocol & code still
 survives, it's possible to use a
 [primitive/hack'y HTTP interface that is described in this source code commit log](https://github.com/basho/machi/commit/6cebf397232cba8e63c5c9a0a8c02ba391b20fef).
+Please note that commit `6cebf397232cba8e63c5c9a0a8c02ba391b20fef` is
+required to try using this feature: the code has since bit-rotted and
+will not work on today's `master` branch.
 
 In the long term, we'll probably want the option of an HTTP interface
 that is as well designed and REST'ful as possible.  It's on the

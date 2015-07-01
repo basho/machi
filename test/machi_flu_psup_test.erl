@@ -84,20 +84,21 @@ partial_stop_restart2() ->
     WedgeStatus = fun({_,#p_srvr{address=Addr, port=TcpPort}}) ->
                           machi_flu1_client:wedge_status(Addr, TcpPort)
                   end,
-    Append = fun({_,#p_srvr{address=Addr, port=TcpPort}}) ->
+    Append = fun({_,#p_srvr{address=Addr, port=TcpPort}}, EpochID) ->
                      machi_flu1_client:append_chunk(Addr, TcpPort,
-                                                    ?DUMMY_PV1_EPOCH,
+                                                    EpochID,
                                                     <<"prefix">>, <<"data">>)
                   end,
     try
         [Start(P) || P <- Ps],
         [{ok, {true, _}} = WedgeStatus(P) || P <- Ps], % all are wedged
-        [{error,wedged} = Append(P) || P <- Ps], % all are wedged
+        [{error,wedged} = Append(P, ?DUMMY_PV1_EPOCH) || P <- Ps], % all are wedged
 
         [machi_chain_manager1:set_chain_members(ChMgr, Dict) ||
             ChMgr <- ChMgrs ],
-        [{ok, {false, _}} = WedgeStatus(P) || P <- Ps], % *not* wedged
-        [{ok,_} = Append(P) || P <- Ps],                % *not* wedged
+        {ok, {false, EpochID1}} = WedgeStatus(hd(Ps)),
+        [{ok, {false, EpochID1}} = WedgeStatus(P) || P <- Ps], % *not* wedged
+        [{ok,_} = Append(P, EpochID1) || P <- Ps],             % *not* wedged
 
         {_,_,_} = machi_chain_manager1:test_react_to_env(hd(ChMgrs)),
         [begin
@@ -123,7 +124,8 @@ partial_stop_restart2() ->
         Proj_mCSum = Proj_m#projection_v1.epoch_csum,
         [{ok, {false, {Epoch_m, Proj_mCSum}}} = WedgeStatus(P) || % *not* wedged
              P <- Ps], 
-        [{ok,_} = Append(P) || P <- Ps],                % *not* wedged
+        {ok, {false, EpochID2}} = WedgeStatus(hd(Ps)),
+        [{ok,_} = Append(P, EpochID2) || P <- Ps],            % *not* wedged
 
         %% Stop all but 'a'.
         [ok = machi_flu_psup:stop_flu_package(Name) || {Name,_} <- tl(Ps)],
@@ -138,22 +140,25 @@ partial_stop_restart2() ->
         true = (machi_projection:update_dbg2(Proj_m, []) ==
                     machi_projection:update_dbg2(Proj_m, [])),
         %% Confirm that 'a' is wedged
-        {error, wedged} = Append(hd(Ps)),
+        {error, wedged} = Append(hd(Ps), EpochID2),
         {_, #p_srvr{address=Addr_a, port=TcpPort_a}} = hd(Ps),
         {error, wedged} = machi_flu1_client:read_chunk(
                             Addr_a, TcpPort_a, ?DUMMY_PV1_EPOCH,
                             <<>>, 99999999, 1),
         {error, wedged} = machi_flu1_client:checksum_list(
                             Addr_a, TcpPort_a, ?DUMMY_PV1_EPOCH, <<>>),
-        {error, wedged} = machi_flu1_client:list_files(
+        %% list_files() is permitted despite wedged status
+        {ok, _} = machi_flu1_client:list_files(
                             Addr_a, TcpPort_a, ?DUMMY_PV1_EPOCH),
 
         %% Iterate through humming consensus once
         {now_using,_,Epoch_n} = machi_chain_manager1:test_react_to_env(
                                   hd(ChMgrs)),
         true = (Epoch_n > Epoch_m),
+        {ok, {false, EpochID3}} = WedgeStatus(hd(Ps)),
+
         %% Confirm that 'a' is *not* wedged
-        {ok, _} = Append(hd(Ps)),
+        {ok, _} = Append(hd(Ps), EpochID3),
 
         ok
     after

@@ -2065,7 +2065,7 @@ do_repair(
               end,
     Stats = [{K, ets:lookup_element(ETS, K, 2)} || K <- ETS_T_Keys],
     error_logger:info_msg("Repair ~s: tail ~p of ~p finished ~p repair ID ~w: "
-                          "~w\nStats ~w\n",
+                          "~p\nStats ~p\n",
                           [Summary, MyName, UPI, RepairMode, RepairId,
                            Res, Stats]),
     ets:delete(ETS),

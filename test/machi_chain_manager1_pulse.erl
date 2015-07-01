@@ -370,7 +370,7 @@ prop_pulse_test_() ->
                   false -> 0;
                   Val2  -> list_to_integer(Val2)
               end,
-    {timeout, (Timeout+ExtraTO+300),     % 300 = a bit more fudge time
+    {timeout, (Timeout+ExtraTO+600),     % 600 = a bit more fudge time
      fun() ->
              ?assert(eqc:quickcheck(eqc:testing_time(Timeout,
                                                      ?QC_OUT(prop_pulse()))))

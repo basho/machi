@@ -78,11 +78,18 @@
 -include("machi_pb.hrl").
 -include("machi_projection.hrl").
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif. % TEST
+
 -define(SERVER_CMD_READ_TIMEOUT, 600*1000).
 
 -export([start_link/1, stop/1,
-         update_wedge_state/3]).
+         update_wedge_state/3, wedge_myself/2]).
 -export([make_listener_regname/1, make_projection_server_regname/1]).
+-export([encode_csum_file_entry/3, encode_csum_file_entry_bin/3,
+         decode_csum_file_entry/1,
+         split_checksum_list_blob/1, split_checksum_list_blob_decode/1]).
 
 -record(state, {
           flu_name        :: atom(),
@@ -120,6 +127,10 @@ stop(Pid) ->
 update_wedge_state(PidSpec, Boolean, EpochId)
   when (Boolean == true orelse Boolean == false), is_tuple(EpochId) ->
     PidSpec ! {wedge_state_change, Boolean, EpochId}.
+
+wedge_myself(PidSpec, EpochId)
+  when is_tuple(EpochId) ->
+    PidSpec ! {wedge_myself, EpochId}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -239,7 +250,8 @@ listen_server_loop(LSock, S) ->
     spawn_link(fun() -> net_server_loop(Sock, S) end),
     listen_server_loop(LSock, S).
 
-append_server_loop(FluPid, #state{data_dir=DataDir,wedged=Wedged_p}=S) ->
+append_server_loop(FluPid, #state{data_dir=DataDir,wedged=Wedged_p,
+                                  epoch_id=OldEpochId}=S) ->
     AppendServerPid = self(),
     receive
         {seq_append, From, _Prefix, _Chunk, _CSum, _Extra} when Wedged_p ->
@@ -250,10 +262,26 @@ append_server_loop(FluPid, #state{data_dir=DataDir,wedged=Wedged_p}=S) ->
                                                  Chunk, CSum, Extra,
                                                  DataDir, AppendServerPid) end),
             append_server_loop(FluPid, S);
-        {wedge_state_change, Boolean, EpochId} ->
-            true = ets:insert(S#state.etstab, {epoch, {Boolean, EpochId}}),
-            append_server_loop(FluPid, S#state{wedged=Boolean,
-                                               epoch_id=EpochId});
+        {wedge_myself, WedgeEpochId} ->
+            if WedgeEpochId == OldEpochId ->
+                    true = ets:insert(S#state.etstab,
+                                      {epoch, {true, OldEpochId}}),
+                    append_server_loop(FluPid, S#state{wedged=true});
+               true ->
+                    append_server_loop(FluPid, S)
+            end;
+        {wedge_state_change, Boolean, {NewEpoch, _}=NewEpochId} ->
+            OldEpoch = case OldEpochId of {OldE, _} -> OldE;
+                                          undefined -> -1
+                       end,
+            if NewEpoch >= OldEpoch ->
+                    true = ets:insert(S#state.etstab,
+                                      {epoch, {Boolean, NewEpochId}}),
+                    append_server_loop(FluPid, S#state{wedged=Boolean,
+                                                       epoch_id=NewEpochId});
+               true ->
+                    append_server_loop(FluPid, S)
+            end;
         {wedge_status, FromPid} ->
             #state{wedged=Wedged_p, epoch_id=EpochId} = S,
             FromPid ! {wedge_status_reply, Wedged_p, EpochId},
@@ -262,9 +290,6 @@ append_server_loop(FluPid, #state{data_dir=DataDir,wedged=Wedged_p}=S) ->
             io:format(user, "append_server_loop: WHA? ~p\n", [Else]),
             append_server_loop(FluPid, S)
     end.
-
--define(EpochIDSpace, ((4*2)+(20*2))).          % hexencodingwhee!
--define(CSumSpace, ((1*2)+(20*2))).             % hexencodingwhee!
 
 net_server_loop(Sock, S) ->
     case gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT) of
@@ -287,7 +312,10 @@ net_server_loop(Sock, S) ->
             R = #mpb_ll_response{req_id= <<>>,
                                  generic=#mpb_errorresp{code=1, msg=Msg}},
             Resp = machi_pb:encode_mpb_ll_response(R),
-            _ = (catch gen_tcp:send(Sock, Resp)),
+            %% TODO: Weird that sometimes neither catch nor try/catch
+            %%       can prevent OTP's SASL from logging an error here.
+            %%       Error in process <0.545.0> with exit value: {badarg,[{erlang,port_command,.......
+            _ = (catch gen_tcp:send(Sock, Resp)), timer:sleep(1000),
             (catch gen_tcp:close(Sock)),
             exit(normal)
     end.
@@ -314,12 +342,11 @@ do_pb_ll_request(PB_request, S) ->
     Req = machi_pb_translate:from_pb_request(PB_request),
     {ReqID, Cmd, Result, S2} = 
         case Req of
-            {RqID, {low_proj, _}=CMD} ->
+            {RqID, {LowCmd, _}=CMD}
+              when LowCmd == low_proj;
+                   LowCmd == low_wedge_status; LowCmd == low_list_files ->
                 %% Skip wedge check for projection commands!
-                {Rs, NewS} = do_pb_ll_request3(CMD, S),
-                {RqID, CMD, Rs, NewS};
-            {RqID, {low_wedge_status, _}=CMD} ->
-                %% Skip wedge check for low_wedge_status!
+                %% Skip wedge check for these unprivileged commands
                 {Rs, NewS} = do_pb_ll_request3(CMD, S),
                 {RqID, CMD, Rs, NewS};
             {RqID, CMD} ->
@@ -333,7 +360,7 @@ do_pb_ll_request2(EpochID, CMD, S) ->
     {Wedged_p, CurrentEpochID} = ets:lookup_element(S#state.etstab, epoch, 2),
     if Wedged_p == true ->
             {{error, wedged}, S};
-       not ((not is_tuple(EpochID)) orelse EpochID == ?DUMMY_PV1_EPOCH)
+       is_tuple(EpochID)
        andalso
        EpochID /= CurrentEpochID ->
             {Epoch, _} = EpochID,
@@ -343,8 +370,9 @@ do_pb_ll_request2(EpochID, CMD, S) ->
                true ->
                     %% We're at same epoch # but different checksum, or
                     %% we're at a newer/bigger epoch #.
-                    io:format(user, "\n\nTODO: wedge myself!\n\n", []),
-                    todo_wedge_myself
+                    io:format(user, "\n\nTODO/monitor: wedging myself!\n\n",[]),
+                    wedge_myself(S#state.flu_name, CurrentEpochID),
+                    ok
             end,
             {{error, bad_epoch}, S};
        true ->
@@ -444,29 +472,8 @@ do_server_append_chunk2(_PKey, Prefix, Chunk, CSum_tag, Client_CSum,
                         ChunkExtra, #state{flu_name=FluName}=_S) ->
     %% TODO: Do anything with PKey?
     try
-        CSum = case CSum_tag of
-                   ?CSUM_TAG_NONE ->
-                       %% TODO: If the client was foolish enough to use
-                       %% this type of non-checksum, then the client gets
-                       %% what it deserves wrt data integrity, alas.  In
-                       %% the client-side Chain Replication method, each
-                       %% server will calculated this independently, which
-                       %% isn't exactly what ought to happen for best data
-                       %% integrity checking.  In server-side CR, the csum
-                       %% should be calculated by the head and passed down
-                       %% the chain together with the value.
-                       CS = machi_util:checksum_chunk(Chunk),
-                       machi_util:make_tagged_csum(server_sha, CS);
-                   ?CSUM_TAG_CLIENT_SHA ->
-                       CS = machi_util:checksum_chunk(Chunk),
-                       if CS == Client_CSum ->
-                               machi_util:make_tagged_csum(server_sha,
-                                                           Client_CSum);
-                          true ->
-                               throw({bad_csum, CS})
-                       end
-               end,
-        FluName ! {seq_append, self(), Prefix, Chunk, CSum, ChunkExtra},
+        TaggedCSum = check_or_make_tagged_checksum(CSum_tag, Client_CSum,Chunk),
+        FluName ! {seq_append, self(), Prefix, Chunk, TaggedCSum, ChunkExtra},
         receive
             {assignment, Offset, File} ->
                 Size = iolist_size(Chunk),
@@ -514,36 +521,11 @@ do_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum,
 do_server_write_chunk2(_File, Offset, Chunk, CSum_tag,
                        Client_CSum, _DataDir, FHc, FHd) ->
     try
-        CSum = case CSum_tag of
-                   ?CSUM_TAG_NONE ->
-                       %% TODO: If the client was foolish enough to use
-                       %% this type of non-checksum, then the client gets
-                       %% what it deserves wrt data integrity, alas.  In
-                       %% the client-side Chain Replication method, each
-                       %% server will calculated this independently, which
-                       %% isn't exactly what ought to happen for best data
-                       %% integrity checking.  In server-side CR, the csum
-                       %% should be calculated by the head and passed down
-                       %% the chain together with the value.
-                       CS = machi_util:checksum_chunk(Chunk),
-                       machi_util:make_tagged_csum(server_sha,CS);
-                   ?CSUM_TAG_CLIENT_SHA ->
-                       CS = machi_util:checksum_chunk(Chunk),
-                       if CS == Client_CSum ->
-                               machi_util:make_tagged_csum(server_sha,
-                                                           Client_CSum);
-                          true ->
-                               throw({bad_csum, CS})
-                       end
-               end,
+        TaggedCSum = check_or_make_tagged_checksum(CSum_tag, Client_CSum,Chunk),
         Size = iolist_size(Chunk),
         case file:pwrite(FHd, Offset, Chunk) of
             ok ->
-                OffsetHex = machi_util:bin_to_hexstr(<<Offset:64/big>>),
-                LenHex = machi_util:bin_to_hexstr(<<Size:32/big>>),
-                CSumHex2 = machi_util:bin_to_hexstr(CSum),
-                CSum_info = [OffsetHex, 32, LenHex, 32,
-                             CSumHex2, 10],
+                CSum_info = encode_csum_file_entry(Offset, Size, TaggedCSum),
                 ok = file:write(FHc, CSum_info),
                 ok;
             _Else3 ->
@@ -606,7 +588,16 @@ do_server_checksum_listing(File, #state{data_dir=DataDir}=_S) ->
             %% {packet_size,N} limit, then we'll have a difficult time, eh?
             case file:read_file(CSumPath) of
                 {ok, Bin} ->
-                    {ok, Bin};
+                    if byte_size(Bin) > (?PB_MAX_MSG_SIZE - 1024) ->
+                            %% TODO: Fix this limitation by streaming the
+                            %% binary in multiple smaller PB messages.
+                            %% Also, don't read the file all at once. ^_^
+                            error_logger:error_msg("~s:~w oversize ~s\n",
+                                                   [?MODULE, ?LINE, CSumPath]),
+                            {error, bad_arg};
+                       true ->
+                            {ok, Bin}
+                    end;
                 {error, enoent} ->
                     {error, no_such_file};
                 {error, _} ->
@@ -780,21 +771,18 @@ seq_append_server_loop(DataDir, Prefix, _File, {FHd,FHc}, FileNum, Offset)
     run_seq_append_server2(Prefix, DataDir);    
 seq_append_server_loop(DataDir, Prefix, File, {FHd,FHc}=FH_, FileNum, Offset) ->
     receive
-        {seq_append, From, Prefix, Chunk, CSum, Extra} ->
+        {seq_append, From, Prefix, Chunk, TaggedCSum, Extra} ->
             if Chunk /= <<>> ->
                     ok = file:pwrite(FHd, Offset, Chunk);
                true ->
                     ok
             end,
             From ! {assignment, Offset, File},
-            Len = byte_size(Chunk),
-            OffsetHex = machi_util:bin_to_hexstr(<<Offset:64/big>>),
-            LenHex = machi_util:bin_to_hexstr(<<Len:32/big>>),
-            CSumHex = machi_util:bin_to_hexstr(CSum),
-            CSum_info = [OffsetHex, 32, LenHex, 32, CSumHex, 10],
+            Size = iolist_size(Chunk),
+            CSum_info = encode_csum_file_entry(Offset, Size, TaggedCSum),
             ok = file:write(FHc, CSum_info),
             seq_append_server_loop(DataDir, Prefix, File, FH_,
-                                   FileNum, Offset + Len + Extra);
+                                   FileNum, Offset + Size + Extra);
         {sync_stuff, FromPid, Ref} ->
             file:sync(FHc),
             FromPid ! {sync_finished, Ref},
@@ -821,7 +809,7 @@ make_listener_regname(BaseName) ->
 make_projection_server_regname(BaseName) ->
     list_to_atom(atom_to_list(BaseName) ++ "_pstore2").
 
-http_server_hack(FluName, Line1, Sock, S) ->
+http_hack_server(FluName, Line1, Sock, S) ->
     {ok, {http_request, HttpOp, URI0, _HttpV}, _x} =
         erlang:decode_packet(http_bin, Line1, [{line_length,4095}]),
     MyURI = case URI0 of
@@ -829,18 +817,18 @@ http_server_hack(FluName, Line1, Sock, S) ->
                                   Rest;
               _                -> URI0
           end,
-    Hdrs = http_harvest_headers(Sock),
-    G = digest_header_goop(Hdrs, #http_goop{}),
+    Hdrs = http_hack_harvest_headers(Sock),
+    G = http_hack_digest_header_goop(Hdrs, #http_goop{}),
     case HttpOp of
         'PUT' ->
-            http_server_hack_put(Sock, G, FluName, MyURI);
+            http_hack_server_put(Sock, G, FluName, MyURI);
         'GET' ->
-            http_server_hack_get(Sock, G, FluName, MyURI, S)
+            http_hack_server_get(Sock, G, FluName, MyURI, S)
     end,
     ok = gen_tcp:close(Sock),
     exit(normal).
 
-http_server_hack_put(Sock, G, FluName, MyURI) ->
+http_hack_server_put(Sock, G, FluName, MyURI) ->
     ok = inet:setopts(Sock, [{packet, raw}]),
     {ok, Chunk} = gen_tcp:recv(Sock, G#http_goop.len, 60*1000),
     CSum0 = machi_util:checksum_chunk(Chunk),
@@ -878,34 +866,34 @@ http_server_hack_put(Sock, G, FluName, MyURI) ->
             ok = gen_tcp:send(Sock, <<"HTTP/1.0 499 TIMEOUT\r\n\r\n">>)
     end.
 
-http_server_hack_get(Sock, _G, _FluName, _MyURI, _S) ->
+http_hack_server_get(Sock, _G, _FluName, _MyURI, _S) ->
     ok = gen_tcp:send(Sock, <<"TODO BROKEN FEATURE see old commits\r\n">>).
 
-http_harvest_headers(Sock) ->
+http_hack_harvest_headers(Sock) ->
     ok = inet:setopts(Sock, [{packet, httph}]),
-    http_harvest_headers(gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT),
-                         Sock, []).
+    http_hack_harvest_headers(gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT),
+                              Sock, []).
 
-http_harvest_headers({ok, http_eoh}, _Sock, Acc) ->
+http_hack_harvest_headers({ok, http_eoh}, _Sock, Acc) ->
     Acc;
-http_harvest_headers({error, _}, _Sock, _Acc) ->
+http_hack_harvest_headers({error, _}, _Sock, _Acc) ->
     [];
-http_harvest_headers({ok, Hdr}, Sock, Acc) ->
-    http_harvest_headers(gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT),
-                         Sock, [Hdr|Acc]).
+http_hack_harvest_headers({ok, Hdr}, Sock, Acc) ->
+    http_hack_harvest_headers(gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT),
+                              Sock, [Hdr|Acc]).
 
-digest_header_goop([], G) ->
+http_hack_digest_header_goop([], G) ->
     G;
-digest_header_goop([{http_header, _, 'Content-Length', _, Str}|T], G) ->
-    digest_header_goop(T, G#http_goop{len=list_to_integer(Str)});
-digest_header_goop([{http_header, _, "X-Checksum", _, Str}|T], G) ->
+http_hack_digest_header_goop([{http_header, _, 'Content-Length', _, Str}|T], G) ->
+    http_hack_digest_header_goop(T, G#http_goop{len=list_to_integer(Str)});
+http_hack_digest_header_goop([{http_header, _, "X-Checksum", _, Str}|T], G) ->
     SHA = machi_util:hexstr_to_bin(Str),
     CSum = machi_util:make_tagged_csum(client_sha, SHA),
-    digest_header_goop(T, G#http_goop{x_csum=CSum});
-digest_header_goop([_H|T], G) ->
-    digest_header_goop(T, G).
+    http_hack_digest_header_goop(T, G#http_goop{x_csum=CSum});
+http_hack_digest_header_goop([_H|T], G) ->
+    http_hack_digest_header_goop(T, G).
 
-split_uri_options(OpsBin) ->
+http_hack_split_uri_options(OpsBin) ->
     L = binary:split(OpsBin, <<"&">>),
     [case binary:split(X, <<"=">>) of
          [<<"offset">>, Bin] ->
@@ -913,3 +901,291 @@ split_uri_options(OpsBin) ->
          [<<"size">>, Bin] ->
              {size, binary_to_integer(Bin)}
      end || X <- L].
+
+%% @doc Encode `Offset + Size + TaggedCSum' into an `iolist()' type for
+%% internal storage by the FLU.
+
+-spec encode_csum_file_entry(
+        machi_dt:file_offset(), machi_dt:chunk_size(), machi_dt:chunk_s()) ->
+        iolist().
+encode_csum_file_entry(Offset, Size, TaggedCSum) ->
+    Len = 8 + 4 + byte_size(TaggedCSum),
+    [<<Len:8/unsigned-big, Offset:64/unsigned-big, Size:32/unsigned-big>>,
+     TaggedCSum].
+
+%% @doc Encode `Offset + Size + TaggedCSum' into an `binary()' type for
+%% internal storage by the FLU.
+
+-spec encode_csum_file_entry_bin(
+        machi_dt:file_offset(), machi_dt:chunk_size(), machi_dt:chunk_s()) ->
+        binary().
+encode_csum_file_entry_bin(Offset, Size, TaggedCSum) ->
+    Len = 8 + 4 + byte_size(TaggedCSum),
+    <<Len:8/unsigned-big, Offset:64/unsigned-big, Size:32/unsigned-big,
+      TaggedCSum/binary>>.
+
+%% @doc Decode a single `binary()' blob into an
+%%      `{Offset,Size,TaggedCSum}' tuple.
+%%
+%% The internal encoding (which is currently exposed to the outside world
+%% via this function and related ones) is:
+%%
+%% <ul>
+%% <li> 1 byte: record length
+%% </li>
+%% <li> 8 bytes (unsigned big-endian): byte offset
+%% </li>
+%% <li> 4 bytes (unsigned big-endian): chunk size
+%% </li>
+%% <li> all remaining bytes: tagged checksum (1st byte = type tag)
+%% </li>
+%% </ul>
+%%
+%% See `machi.hrl' for the tagged checksum types, e.g.,
+%% `?CSUM_TAG_NONE'.
+
+-spec decode_csum_file_entry(binary()) ->
+        error |
+        {machi_dt:file_offset(), machi_dt:chunk_size(), machi_dt:chunk_s()}.
+decode_csum_file_entry(<<_:8/unsigned-big, Offset:64/unsigned-big, Size:32/unsigned-big, TaggedCSum/binary>>) ->
+    {Offset, Size, TaggedCSum};
+decode_csum_file_entry(_Else) ->
+    error.
+
+%% @doc Split a `binary()' blob of `checksum_list' data into a list of
+%% unparsed `binary()' blobs, one per entry.
+%%
+%% Decode the unparsed blobs with {@link decode_csum_file_entry/1}, if
+%% desired.
+%%
+%% The return value `TrailingJunk' is unparseable bytes at the end of
+%% the checksum list blob.
+
+-spec split_checksum_list_blob(binary()) ->
+          {list(binary()), TrailingJunk::binary()}.
+split_checksum_list_blob(Bin) ->
+    split_checksum_list_blob(Bin, []).
+
+split_checksum_list_blob(<<Len:8/unsigned-big, Part:Len/binary, Rest/binary>>, Acc)->
+    case get(hack_length) of
+        Len -> ok;
+        _   -> put(hack_different, true)
+    end,
+    split_checksum_list_blob(Rest, [<<Len:8/unsigned-big, Part/binary>>|Acc]);
+split_checksum_list_blob(Rest, Acc) ->
+    {lists:reverse(Acc), Rest}.
+
+%% @doc Split a `binary()' blob of `checksum_list' data into a list of
+%% `{Offset,Size,TaggedCSum}' tuples.
+
+-spec split_checksum_list_blob_decode(binary()) ->
+  {list({machi_dt:file_offset(), machi_dt:chunk_size(), machi_dt:chunk_s()}),
+   TrailingJunk::binary()}.
+split_checksum_list_blob_decode(Bin) ->
+    split_checksum_list_blob_decode(Bin, []).
+
+split_checksum_list_blob_decode(<<Len:8/unsigned-big, Part:Len/binary, Rest/binary>>, Acc)->
+    One = <<Len:8/unsigned-big, Part/binary>>,
+    case decode_csum_file_entry(One) of
+        error ->
+            split_checksum_list_blob_decode(Rest, Acc);
+        DecOne ->
+            split_checksum_list_blob_decode(Rest, [DecOne|Acc])
+    end;
+split_checksum_list_blob_decode(Rest, Acc) ->
+    {lists:reverse(Acc), Rest}.
+
+check_or_make_tagged_checksum(?CSUM_TAG_NONE, _Client_CSum, Chunk) ->
+    %% TODO: If the client was foolish enough to use
+    %% this type of non-checksum, then the client gets
+    %% what it deserves wrt data integrity, alas.  In
+    %% the client-side Chain Replication method, each
+    %% server will calculated this independently, which
+    %% isn't exactly what ought to happen for best data
+    %% integrity checking.  In server-side CR, the csum
+    %% should be calculated by the head and passed down
+    %% the chain together with the value.
+    CS = machi_util:checksum_chunk(Chunk),
+    machi_util:make_tagged_csum(server_sha, CS);
+check_or_make_tagged_checksum(?CSUM_TAG_CLIENT_SHA, Client_CSum, Chunk) ->
+    CS = machi_util:checksum_chunk(Chunk),
+    if CS == Client_CSum ->
+            machi_util:make_tagged_csum(server_sha,
+                                        Client_CSum);
+       true ->
+            throw({bad_csum, CS})
+    end.
+
+-ifdef(TEST).
+
+%% Remove "_COMMENTED" string to run the demo/exploratory code.
+
+timing_demo_test_COMMENTED_() ->
+    {timeout, 300, fun() -> timing_demo_test2() end}.
+
+%% Demo/exploratory hackery to check relative speeds of dealing with
+%% checksum data in different ways.
+%%
+%% Summary:
+%%
+%% * Use compact binary encoding, with 1 byte header for entry length.
+%%     * Because the hex-style code is *far* slower just for enc & dec ops.
+%%     * For 1M entries of enc+dec: 0.215 sec vs. 15.5 sec.
+%% * File sorter when sorting binaries as-is is only 30-40% slower
+%%   than an in-memory split (of huge binary emulated by file:read_file()
+%%   "big slurp") and sort of the same as-is sortable binaries.
+%% * File sorter slows by a factor of about 2.5 if {order, fun compare/2}
+%%   function must be used, i.e. because the checksum entry lengths differ.
+%% * File sorter + {order, fun compare/2} is still *far* faster than external
+%%   sort by OS X's sort(1) of sortable ASCII hex-style:
+%%   4.5 sec vs. 21 sec.
+%% * File sorter {order, fun compare/2} is faster than in-memory sort
+%%   of order-friendly 3-tuple-style: 4.5 sec vs. 15 sec.
+
+timing_demo_test2() ->
+    Xs = [random:uniform(1 bsl 32) || _ <- lists:duplicate(1*1000*1000, $x)],
+    CSum = <<"123456789abcdef0A">>,
+    17 = byte_size(CSum),
+    io:format(user, "\n", []),
+
+    %% %% {ok, ZZZ} = file:open("/tmp/foo.hex-style", [write, binary, raw, delayed_write]),
+    io:format(user, "Hex-style file entry enc+dec: ", []),
+    [erlang:garbage_collect(self()) || _ <- lists:seq(1, 4)],
+    {HexUSec, _} =
+    timer:tc(fun() ->
+                     lists:foldl(fun(X, _) ->
+                                         B = encode_csum_file_entry_hex(X, 100, CSum),
+                                         %% file:write(ZZZ, [B, 10]),
+                                         decode_csum_file_entry_hex(list_to_binary(B))
+                                 end, x, Xs)
+             end),
+    io:format(user, "~.3f sec\n", [HexUSec / 1000000]),
+    %% %% file:close(ZZZ),
+
+    io:format(user, "Not-sortable file entry enc+dec: ", []),
+    [erlang:garbage_collect(self()) || _ <- lists:seq(1, 4)],
+    {NotSortedUSec, _} =
+    timer:tc(fun() ->
+                     lists:foldl(fun(X, _) ->
+                                         B = encode_csum_file_entry(X, 100, CSum),
+                                         decode_csum_file_entry(list_to_binary(B))
+                                 end, x, Xs)
+             end),
+    io:format(user, "~.3f sec\n", [NotSortedUSec / 1000000]),
+
+    NotHexList = lists:foldl(fun(X, Acc) ->
+                                 B = encode_csum_file_entry(X, 100, CSum),
+                                 [B|Acc]
+                         end, [], Xs),
+    NotHexBin = iolist_to_binary(NotHexList),
+
+    io:format(user, "Split NotHexBin: ", []),
+    [erlang:garbage_collect(self()) || _ <- lists:seq(1, 4)],
+    {NotHexBinUSec, SplitRes} =
+    timer:tc(fun() ->
+                     put(hack_length, 29),
+                     put(hack_different, false),
+                     {Sorted, _Leftover} = split_checksum_list_blob(NotHexBin),
+                     io:format(user, " Leftover ~p (hack_different ~p) ", [_Leftover, get(hack_different)]),
+                     Sorted
+             end),
+    io:format(user, "~.3f sec\n", [NotHexBinUSec / 1000000]),
+
+    io:format(user, "Sort Split results: ", []),
+    [erlang:garbage_collect(self()) || _ <- lists:seq(1, 4)],
+    {SortSplitUSec, _} =
+    timer:tc(fun() ->
+                     lists:sort(SplitRes)
+                     %% lists:sort(fun sort_2lines/2, SplitRes)
+             end),
+    io:format(user, "~.3f sec\n", [SortSplitUSec / 1000000]),
+
+    UnsortedName = "/tmp/foo.unsorted",
+    SortedName = "/tmp/foo.sorted",
+
+    ok = file:write_file(UnsortedName, NotHexList),
+    io:format(user, "File Sort Split results: ", []),
+    [erlang:garbage_collect(self()) || _ <- lists:seq(1, 4)],
+    {FileSortUSec, _} =
+        timer:tc(fun() ->
+                         {ok, FHin} = file:open(UnsortedName, [read, binary]),
+                         {ok, FHout} = file:open(SortedName,
+                                                [write, binary, delayed_write]),
+                         put(hack_sorter_sha_ctx, crypto:hash_init(sha)),
+                         ok = file_sorter:sort(sort_input_fun(FHin, <<>>),
+                                               sort_output_fun(FHout),
+                                               [{format,binary},
+                                                {header, 1}
+                                                %% , {order, fun sort_2lines/2}
+                                               ])
+                 end),
+    io:format(user, "~.3f sec\n", [FileSortUSec / 1000000]),
+    _SHA = crypto:hash_final(get(hack_sorter_sha_ctx)),
+    %% io:format(user, "SHA via (hack_sorter_sha_ctx) = ~p\n", [_SHA]),
+
+    io:format(user, "NotHex-Not-sortable tuple list creation: ", []),
+    [erlang:garbage_collect(self()) || _ <- lists:seq(1, 4)],
+    {NotHexTupleCreationUSec, NotHexTupleList} =
+    timer:tc(fun() ->
+                     lists:foldl(fun(X, Acc) ->
+                                         B = encode_csum_file_entry_hex(
+                                               X, 100, CSum),
+                                         [B|Acc]
+                                 end, [], Xs)
+             end),
+    io:format(user, "~.3f sec\n", [NotHexTupleCreationUSec / 1000000]),
+
+    io:format(user, "NotHex-Not-sortable tuple list sort: ", []),
+    [erlang:garbage_collect(self()) || _ <- lists:seq(1, 4)],
+    {NotHexTupleSortUSec, _} =
+    timer:tc(fun() ->
+                     lists:sort(NotHexTupleList)
+             end),
+    io:format(user, "~.3f sec\n", [NotHexTupleSortUSec / 1000000]),
+
+    ok.
+
+sort_2lines(<<_:1/binary, A/binary>>, <<_:1/binary, B/binary>>) ->
+    A < B.
+
+sort_input_fun(FH, PrevStuff) ->
+    fun(close) ->
+            ok;
+       (read) ->
+            case file:read(FH, 1024*1024) of
+                {ok, NewStuff} ->
+                    AllStuff = if PrevStuff == <<>> ->
+                                       NewStuff;
+                                  true ->
+                                       <<PrevStuff/binary, NewStuff/binary>>
+                               end,
+                    {SplitRes, Leftover} = split_checksum_list_blob(AllStuff),
+                    {SplitRes, sort_input_fun(FH, Leftover)};
+                eof ->
+                    end_of_input
+            end
+    end.
+
+sort_output_fun(FH) ->
+    fun(close) ->
+            file:close(FH);
+       (Stuff) ->
+            Ctx = get(hack_sorter_sha_ctx),
+            put(hack_sorter_sha_ctx, crypto:hash_update(Ctx, Stuff)),
+            ok = file:write(FH, Stuff),
+            sort_output_fun(FH)
+    end.
+
+encode_csum_file_entry_hex(Offset, Size, TaggedCSum) ->
+    OffsetHex = machi_util:bin_to_hexstr(<<Offset:64/big>>),
+    SizeHex = machi_util:bin_to_hexstr(<<Size:32/big>>),
+    CSumHex = machi_util:bin_to_hexstr(TaggedCSum),
+    [OffsetHex, 32, SizeHex, 32, CSumHex].
+
+decode_csum_file_entry_hex(<<OffsetHex:16/binary, _:1/binary, SizeHex:8/binary, _:1/binary, CSumHex/binary>>) ->
+    Offset = machi_util:hexstr_to_bin(OffsetHex),
+    Size = machi_util:hexstr_to_bin(SizeHex),
+    CSum = machi_util:hexstr_to_bin(CSumHex),
+    {Offset, Size, CSum}.
+
+-endif. % TEST

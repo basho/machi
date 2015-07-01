@@ -207,11 +207,16 @@ make_repair_directives(ConsistencyMode, RepairMode, File, Size, EpochID,
     C0 = [begin
               %% erlang:garbage_collect(),
               Proxy = orddict:fetch(FLU, ProxiesDict),
-              OffSzCs = case machi_proxy_flu1_client:checksum_list(
-                                Proxy, EpochID, File, ?LONG_TIMEOUT) of
-                            {ok, X}               -> X;
-                            {error, no_such_file} -> []
-                        end,
+              OffSzCs =
+                  case machi_proxy_flu1_client:checksum_list(
+                         Proxy, EpochID, File, ?LONG_TIMEOUT) of
+                      {ok, InfoBin} ->
+                          {Info, _} =
+                            machi_flu1:split_checksum_list_blob_decode(InfoBin),
+                          Info;
+                      {error, no_such_file} ->
+                          []
+                  end,
               [{?MAX_OFFSET, 0, <<>>, FLU}]       % our end-of-file marker
               ++
               [{Off, Sz, Cs, FLU} || {Off, Sz, Cs} <- OffSzCs]
@@ -313,7 +318,7 @@ execute_repair_directive({File, Cmds}, {ProxiesDict, EpochID, Verb, ETS}=Acc) ->
                {in_bytes, t_in_bytes}, {out_files, t_out_files},
                {out_chunks, t_out_chunks}, {out_bytes, t_out_bytes}],
     [ets:insert(ETS, {L_K, 0}) || {L_K, _T_K} <- EtsKeys],
-    F = fun({copy, {Offset, Size, CSum, MySrc}, MyDsts}, Acc2) ->
+    F = fun({copy, {Offset, Size, TaggedCSum, MySrc}, MyDsts}, Acc2) ->
                 SrcP = orddict:fetch(MySrc, ProxiesDict),
                 case ets:lookup_element(ETS, in_chunks, 2) rem 100 of
                     0 -> ?VERB(".", []);
@@ -324,6 +329,7 @@ execute_repair_directive({File, Cmds}, {ProxiesDict, EpochID, Verb, ETS}=Acc) ->
                                 SrcP, EpochID, File, Offset, Size,
                                 ?SHORT_TIMEOUT),
                 _T2 = os:timestamp(),
+                <<_Tag:1/binary, CSum/binary>> = TaggedCSum,
                 case machi_util:checksum_chunk(Chunk) of
                     CSum_now when CSum_now == CSum ->
                         [begin
