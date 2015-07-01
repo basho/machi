@@ -135,13 +135,20 @@ long_doc() ->
 %% convergence_demo_testfun() ->
 %%     convergence_demo_testfun(3).
 
+-define(DEFAULT_MGR_OPTS, [{private_write_verbose, false},
+                           {active_mode,false},
+                           {use_partition_simulator, true}]).
+
 t() ->
     t(3).
 
 t(N) ->
-    convergence_demo_testfun(N).
+    t(N, ?DEFAULT_MGR_OPTS).
 
-convergence_demo_testfun(NumFLUs) ->
+t(N, MgrOpts) ->
+    convergence_demo_testfun(N, MgrOpts).
+
+convergence_demo_testfun(NumFLUs, MgrOpts0) ->
     timer:sleep(100),
     %% Faster test startup, commented: io:format(user, short_doc(), []),
     %% Faster test startup, commented: timer:sleep(3000),
@@ -169,8 +176,7 @@ convergence_demo_testfun(NumFLUs) ->
              end || {#p_srvr{name=Name}=P, _Dir} <- PsDirs],
     MembersDict = machi_projection:make_members_dict(Ps),
     %% MgrOpts = [private_write_verbose, {active_mode,false},
-    MgrOpts = [{active_mode,false},
-              {use_partition_simulator, true}],
+    MgrOpts = MgrOpts0 ++ ?DEFAULT_MGR_OPTS,
     MgrNamez =
         [begin
              {ok, MPid} = ?MGR:start_link(P#p_srvr.name, MembersDict, MgrOpts),
