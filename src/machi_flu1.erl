@@ -342,12 +342,11 @@ do_pb_ll_request(PB_request, S) ->
     Req = machi_pb_translate:from_pb_request(PB_request),
     {ReqID, Cmd, Result, S2} = 
         case Req of
-            {RqID, {low_proj, _}=CMD} ->
+            {RqID, {LowCmd, _}=CMD}
+              when LowCmd == low_proj;
+                   LowCmd == low_wedge_status; LowCmd == low_list_files ->
                 %% Skip wedge check for projection commands!
-                {Rs, NewS} = do_pb_ll_request3(CMD, S),
-                {RqID, CMD, Rs, NewS};
-            {RqID, {low_wedge_status, _}=CMD} ->
-                %% Skip wedge check for low_wedge_status!
+                %% Skip wedge check for these unprivileged commands
                 {Rs, NewS} = do_pb_ll_request3(CMD, S),
                 {RqID, CMD, Rs, NewS};
             {RqID, CMD} ->
@@ -361,7 +360,7 @@ do_pb_ll_request2(EpochID, CMD, S) ->
     {Wedged_p, CurrentEpochID} = ets:lookup_element(S#state.etstab, epoch, 2),
     if Wedged_p == true ->
             {{error, wedged}, S};
-       not ((not is_tuple(EpochID)) orelse EpochID == ?DUMMY_PV1_EPOCH)
+       is_tuple(EpochID)
        andalso
        EpochID /= CurrentEpochID ->
             {Epoch, _} = EpochID,
@@ -946,6 +945,7 @@ encode_csum_file_entry_bin(Offset, Size, TaggedCSum) ->
 %% `?CSUM_TAG_NONE'.
 
 -spec decode_csum_file_entry(binary()) ->
+        error |
         {machi_dt:file_offset(), machi_dt:chunk_size(), machi_dt:chunk_s()}.
 decode_csum_file_entry(<<_:8/unsigned-big, Offset:64/unsigned-big, Size:32/unsigned-big, TaggedCSum/binary>>) ->
     {Offset, Size, TaggedCSum};

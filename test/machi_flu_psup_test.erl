@@ -147,7 +147,8 @@ partial_stop_restart2() ->
                             <<>>, 99999999, 1),
         {error, wedged} = machi_flu1_client:checksum_list(
                             Addr_a, TcpPort_a, ?DUMMY_PV1_EPOCH, <<>>),
-        {error, wedged} = machi_flu1_client:list_files(
+        %% list_files() is permitted despite wedged status
+        {ok, _} = machi_flu1_client:list_files(
                             Addr_a, TcpPort_a, ?DUMMY_PV1_EPOCH),
 
         %% Iterate through humming consensus once
