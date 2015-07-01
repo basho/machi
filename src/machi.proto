@@ -45,6 +45,7 @@ enum Mpb_GeneralStatusCode {
      WRITTEN = 6;
      NO_SUCH_FILE = 7;
      PARTIAL_READ = 8;
+     BAD_EPOCH = 9;
      BAD_JOSS = 255;    // Only for testing by the Taipan
 }
 

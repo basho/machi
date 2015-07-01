@@ -825,6 +825,8 @@ conv_from_status({error, no_such_file}) ->
     'NO_SUCH_FILE';
 conv_from_status({error, partial_read}) ->
     'PARTIAL_READ';
+conv_from_status({error, bad_epoch}) ->
+    'BAD_EPOCH';
 conv_from_status(_OOPS) ->
     io:format(user, "HEY, ~s:~w got ~w\n", [?MODULE, ?LINE, _OOPS]),
     'BAD_JOSS'.
