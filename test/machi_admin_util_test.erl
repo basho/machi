@@ -45,13 +45,15 @@ verify_file_checksums_test2() ->
     Sock1 = ?FLU_C:connect(#p_srvr{address=Host, port=TcpPort}),
     try
         Prefix = <<"verify_prefix">>,
+        NumChunks = 10,
         [{ok, _} = ?FLU_C:append_chunk(Sock1, ?DUMMY_PV1_EPOCH,
                                        Prefix, <<X:(X*8)/big>>) ||
-            X <- lists:seq(1,10)],
+            X <- lists:seq(1, NumChunks)],
         {ok, [{_FileSize,File}]} = ?FLU_C:list_files(Sock1, ?DUMMY_PV1_EPOCH),
         {ok, []} = machi_admin_util:verify_file_checksums_remote(
                      Host, TcpPort, ?DUMMY_PV1_EPOCH, File),
 
+        %% Clobber the first 3 chunks, which are sizes 1/2/3.
         {_, Path} = machi_util:make_data_filename(DataDir,binary_to_list(File)),
         {ok, FH} = file:open(Path, [read,write]),
         {ok, _} = file:position(FH, ?MINIMUM_OFFSET),
@@ -60,12 +62,12 @@ verify_file_checksums_test2() ->
         ok = file:write(FH, "yo!"),
         ok = file:close(FH),
 
-        %% Check the local flavor of the API
+        %% Check the local flavor of the API: should be 3 bad checksums
         {ok, Res1} = machi_admin_util:verify_file_checksums_local(
                        Host, TcpPort, ?DUMMY_PV1_EPOCH, Path),
         3 = length(Res1),
 
-        %% Check the remote flavor of the API
+        %% Check the remote flavor of the API: should be 3 bad checksums
         {ok, Res2} = machi_admin_util:verify_file_checksums_remote(
                        Host, TcpPort, ?DUMMY_PV1_EPOCH, File),
         3 = length(Res2),
