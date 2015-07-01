@@ -926,7 +926,9 @@ encode_csum_file_entry_bin(Offset, Size, TaggedCSum) ->
 -spec decode_csum_file_entry(binary()) ->
         {machi_dt:file_offset(), machi_dt:chunk_size(), machi_dt:chunk_s()}.
 decode_csum_file_entry(<<_:8/unsigned-big, Offset:64/unsigned-big, Size:32/unsigned-big, TaggedCSum/binary>>) ->
-    {Offset, Size, TaggedCSum}.
+    {Offset, Size, TaggedCSum};
+decode_csum_file_entry(_Else) ->
+    error.
 
 %% @doc Split a `binary()' blob of `checksum_list' data into a list of
 %% unparsed `binary()' blobs, one per entry.
@@ -962,7 +964,12 @@ split_checksum_list_blob_decode(Bin) ->
 
 split_checksum_list_blob_decode(<<Len:8/unsigned-big, Part:Len/binary, Rest/binary>>, Acc)->
     One = <<Len:8/unsigned-big, Part/binary>>,
-    split_checksum_list_blob_decode(Rest, [decode_csum_file_entry(One)|Acc]);
+    case decode_csum_file_entry(One) of
+        error ->
+            split_checksum_list_blob_decode(Rest, Acc);
+        DecOne ->
+            split_checksum_list_blob_decode(Rest, [DecOne|Acc])
+    end;
 split_checksum_list_blob_decode(Rest, Acc) ->
     {lists:reverse(Acc), Rest}.
 
