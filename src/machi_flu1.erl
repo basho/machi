@@ -209,9 +209,6 @@ start_append_server(S, AckPid) ->
     FluPid = self(),
     proc_lib:spawn_link(fun() -> run_append_server(FluPid, AckPid, S) end).
 
-%% start_projection_server(S) ->
-%%     spawn_link(fun() -> run_projection_server(S) end).
-
 run_listen_server(#state{flu_name=FluName, tcp_port=TcpPort}=S) ->
     register(make_listener_regname(FluName), self()),
     SockOpts = ?PB_PACKET_OPTS ++
@@ -243,8 +240,8 @@ listen_server_loop(LSock, S) ->
     spawn_link(fun() -> net_server_loop(Sock, S) end),
     listen_server_loop(LSock, S).
 
-append_server_loop(FluPid, #state{data_dir=DataDir,wedged=Wedged_p,
-                                  epoch_id=OldEpochId}=S) ->
+append_server_loop(FluPid, #state{data_dir=DataDir, wedged=Wedged_p,
+                                  epoch_id=OldEpochId, flu_name=FluName}=S) ->
     AppendServerPid = self(),
     receive
         {seq_append, From, _Prefix, _Chunk, _CSum, _Extra, _EpochID}
@@ -257,9 +254,15 @@ append_server_loop(FluPid, #state{data_dir=DataDir,wedged=Wedged_p,
                                                  DataDir, AppendServerPid) end),
             append_server_loop(FluPid, S);
         {wedge_myself, WedgeEpochId} ->
-            if WedgeEpochId == OldEpochId ->
+            if not Wedged_p andalso WedgeEpochId == OldEpochId ->
                     true = ets:insert(S#state.etstab,
                                       {epoch, {true, OldEpochId}}),
+                    %% Tell my chain manager that it might want to react to
+                    %% this new world.
+                    Chmgr = machi_chain_manager1:make_chmgr_regname(FluName),
+                    spawn(fun() ->
+                            catch machi_chain_manager:test_react_to_env(Chmgr)
+                          end),
                     append_server_loop(FluPid, S#state{wedged=true});
                true ->
                     append_server_loop(FluPid, S)
