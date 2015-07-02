@@ -132,7 +132,7 @@ increment_max_filenum(DataDir, Prefix) ->
     try
         {ok, FH} = file:open(make_config_filename(DataDir, Prefix), [append]),
         ok = file:write(FH, "x"),
-        %% ok = file:sync(FH),
+        ok = file:sync(FH),
         ok = file:close(FH)
     catch
         error:{badmatch,_}=Error ->

@@ -99,6 +99,7 @@ partial_stop_restart2() ->
         {ok, {false, EpochID1}} = WedgeStatus(hd(Ps)),
         [{ok, {false, EpochID1}} = WedgeStatus(P) || P <- Ps], % *not* wedged
         [{ok,_} = Append(P, EpochID1) || P <- Ps],             % *not* wedged
+        {ok, {_,_,File1}} = Append(hd(Ps), EpochID1),
 
         {_,_,_} = machi_chain_manager1:test_react_to_env(hd(ChMgrs)),
         [begin
@@ -126,6 +127,13 @@ partial_stop_restart2() ->
              P <- Ps], 
         {ok, {false, EpochID2}} = WedgeStatus(hd(Ps)),
         [{ok,_} = Append(P, EpochID2) || P <- Ps],            % *not* wedged
+        %% The file we're assigned should be different with the epoch change.
+        {ok, {_,_,File2}} = Append(hd(Ps), EpochID2),
+        true = (File1 /= File2),
+        %% If we use the old epoch, then we're told that it's bad
+        {error, bad_epoch} = Append(hd(Ps), EpochID1),
+        %% If we use the current epoch again, then it's OK and given same File2
+        {ok, {_,_,File2}} = Append(hd(Ps), EpochID2),
 
         %% Stop all but 'a'.
         [ok = machi_flu_psup:stop_flu_package(Name) || {Name,_} <- tl(Ps)],
@@ -156,6 +164,9 @@ partial_stop_restart2() ->
                                   hd(ChMgrs)),
         true = (Epoch_n > Epoch_m),
         {ok, {false, EpochID3}} = WedgeStatus(hd(Ps)),
+        %% The file we're assigned should be different with the epoch change.
+        {ok, {_,_,File3}} = Append(hd(Ps), EpochID3),
+        true = (File2 /= File3),
 
         %% Confirm that 'a' is *not* wedged
         {ok, _} = Append(hd(Ps), EpochID3),
