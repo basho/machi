@@ -185,16 +185,6 @@ smoke1_test() ->
     end.
 
 nonunanimous_setup_and_fix_test() ->
-    %% TODO attack list:
-    %% __ Add start option to chain manager to be "passive" only, i.e.,
-    %%    not immediately go to work on
-    %% 1. Start FLUs with full complement of FLU+proj+chmgr.
-    %% 2. Put each of them under a supervisor?
-    %%    - Sup proc could be a created-specifically-for-test thing, perhaps?
-    %%      Rather than relying on a supervisor with reg name + OTP app started
-    %%      plus plus more more yaddayadda?
-    %% 3. Add projection catalog/orddict of #p_srvr records??
-    %% 4. Fix this test, etc etc.
     machi_partition_simulator:start_link({1,2,3}, 100, 0),
     TcpPort = 62877,
     FluInfo = [{a,TcpPort+0,"./data.a"}, {b,TcpPort+1,"./data.b"}],
@@ -224,13 +214,16 @@ nonunanimous_setup_and_fix_test() ->
         ok = ?FLU_PC:write_projection(Proxy_b, public, P1b),
 
         %% ?D(x),
-        {not_unanimous,_,_}=_XX = ?MGR:test_read_latest_public_projection(Ma, false),
+        {not_unanimous,_,_}=_XX = ?MGR:test_read_latest_public_projection(
+                                     Ma, false),
         %% ?Dw(_XX),
-        {not_unanimous,_,_}=_YY = ?MGR:test_read_latest_public_projection(Ma, true),
+        {not_unanimous,_,_}=_YY = ?MGR:test_read_latest_public_projection(
+                                     Ma, true),
         %% The read repair here doesn't automatically trigger the creation of
         %% a new projection (to try to create a unanimous projection).  So
         %% we expect nothing to change when called again.
-        {not_unanimous,_,_}=_YY = ?MGR:test_read_latest_public_projection(Ma, true),
+        {not_unanimous,_,_}=_YY = ?MGR:test_read_latest_public_projection(
+                                     Ma, true),
 
         {now_using, _, EpochNum_a} = ?MGR:test_react_to_env(Ma),
         {no_change, _, EpochNum_a} = ?MGR:test_react_to_env(Ma),
