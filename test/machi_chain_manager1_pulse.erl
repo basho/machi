@@ -2,7 +2,7 @@
 %%
 %% Machi: a small village of replicated files
 %%
-%% Copyright (c) 2014 Basho Technologies, Inc.  All Rights Reserved.
+%% Copyright (c) 2014-2015 Basho Technologies, Inc.  All Rights Reserved.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -82,7 +82,8 @@ command(S) ->
                { 1, {call, ?MODULE, change_partitions,
                      [gen_old_threshold(), gen_no_partition_threshold()]}},
                {50, {call, ?MODULE, do_ticks,
-                     [choose(5, 200), S#state.pids,
+                     %% [choose(5, 200), S#state.pids,
+                     [choose(5, 10), S#state.pids,
                       gen_old_threshold(), gen_no_partition_threshold()]}}
               ]).
 
@@ -225,32 +226,31 @@ dump_state() ->
     %%              [io_lib:format("~p ~p ~p: ~w\n", [FLUName, Type, P#projection_v1.epoch_number, machi_projection:make_summary(P)]) || P <- Ps]
     %%          end || {FLUName, Proxy} <- orddict:to_list(ProxiesDict),
     %%                 Type <- [public] ],
-
-    UniquePrivateEs =
-        lists:usort(lists:flatten(
-                      [element(2,?FLU_PC:list_all_projections(Proxy,private)) ||
-                          {_FLUName, Proxy} <- orddict:to_list(ProxiesDict)])),
-    P_lists0 = [{FLUName, Type,
-                 element(2,?FLU_PC:get_all_projections(Proxy, Type))} ||
-                   {FLUName, Proxy} <- orddict:to_list(ProxiesDict),
-                   Type <- [public,private]],
-    P_lists = [{FLUName, Type, P} || {FLUName, Type, Ps} <- P_lists0,
-                                     P <- Ps],
-    AllDict = lists:foldl(fun({FLU, Type, P}, D) ->
-                                  K = {FLU, Type, P#projection_v1.epoch_number},
-                                  dict:store(K, P, D)
-                          end, dict:new(), lists:flatten(P_lists)),
-    DumbFinderBackward =
-        fun(FLUName) ->
-                fun(E, error_unwritten) ->
-                        case dict:find({FLUName, private, E}, AllDict) of
-                            {ok, T} -> T;
-                            error   -> error_unwritten
-                        end;
-                   (_E, Acc) ->
-                        Acc
-                end
-        end,
+    %% P_lists0 = [{FLUName, Type,
+    %%              element(2,?FLU_PC:get_all_projections(Proxy, Type))} ||
+    %%                {FLUName, Proxy} <- orddict:to_list(ProxiesDict),
+    %%                Type <- [public,private]],
+    %% P_lists = [{FLUName, Type, P} || {FLUName, Type, Ps} <- P_lists0,
+    %%                                  P <- Ps],
+    %% AllDict = lists:foldl(fun({FLU, Type, P}, D) ->
+    %%                               K = {FLU, Type, P#projection_v1.epoch_number},
+    %%                               dict:store(K, P, D)
+    %%                       end, dict:new(), lists:flatten(P_lists)),
+    %% DumbFinderBackward =
+    %%     fun(FLUName) ->
+    %%             fun(E, error_unwritten) ->
+    %%                     case dict:find({FLUName, private, E}, AllDict) of
+    %%                         {ok, T} -> T;
+    %%                         error   -> error_unwritten
+    %%                     end;
+    %%                (_E, Acc) ->
+    %%                     Acc
+    %%             end
+    %%     end,
+    %% UniquePrivateEs =
+    %%     lists:usort(lists:flatten(
+    %%                   [element(2,?FLU_PC:list_all_projections(Proxy,private)) ||
+    %%                       {_FLUName, Proxy} <- orddict:to_list(ProxiesDict)])),
     %% Diag2 = [[
     %%             io_lib:format("~p private: ~w\n",
     %%                           [FLUName,
@@ -295,7 +295,6 @@ prop_pulse() ->
         LastTriggerTicks = {set,{var,99999997},
                             {call, ?MODULE, do_ticks, [123, undefined, no, no]}},
         Cmds1 = lists:duplicate(2, LastTriggerTicks),
-        %% Cmds1 = lists:duplicate(length(all_list())*2, LastTriggerTicks),
         Cmds = Cmds0 ++
                Stabilize1 ++
                Cmds1 ++

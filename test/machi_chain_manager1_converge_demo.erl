@@ -2,7 +2,7 @@
 %%
 %% Machi: a small village of replicated files
 %%
-%% Copyright (c) 2014 Basho Technologies, Inc.  All Rights Reserved.
+%% Copyright (c) 2014-2015 Basho Technologies, Inc.  All Rights Reserved.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -262,6 +262,9 @@ catch _Err:_What ->
         exit({line, ?LINE, _Err, _What})
 end,
 io:format(user, "Yay!\n", []),
+      ReportXXX = machi_chain_manager1_test:unanimous_report(Namez),
+      true = machi_chain_manager1_test:all_reports_are_disjoint(ReportXXX),
+io:format(user, "\nLast Reports: ~p\n", [lists:nthtail(length(ReportXXX)-8,ReportXXX)]),
            timer:sleep(1250),
            ok
        end || {Partition, Count} <- PartitionCounts
@@ -287,6 +290,7 @@ io:format(user, "Yay!\n", []),
       %% members appear in only one unique chain, i.e., the sets of
       %% unique chains are disjoint.
       true = machi_chain_manager1_test:all_reports_are_disjoint(Report),
+io:format(user, "\nLast Reports: ~p\n", [lists:nthtail(length(Report)-8,Report)]),
 
       %% For each chain transition experienced by a particular FLU,
       %% confirm that each state transition is OK.
