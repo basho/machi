@@ -284,7 +284,8 @@ handle_call({test_read_latest_public_projection, ReadRepairP}, _From, S) ->
         do_cl_read_latest_public_projection(ReadRepairP, S),
     Res = {Perhaps, Val, ExtraInfo},
     {reply, Res, S2};
-handle_call({test_react_to_env}, _From, S) ->
+handle_call({test_react_to_env}=Call, _From, S) ->
+    gobble_calls(Call),
     {TODOtodo, S2} = do_react_to_env(S),
     {reply, TODOtodo, S2};
 handle_call(_Call, _From, S) ->
@@ -304,9 +305,7 @@ handle_info(tick_check_environment, S) ->
         N when is_integer(N), N > 0 ->
             %% We are flapping.  Set ignore_timer=true and schedule a
             %% reminder to stop ignoring.  This slows down the rate of
-            %% flapping.  If/when the yo:tell_author_yo() function in
-            %% state C200 is ever implemented, then it should be
-            %% implemented via the test_react_to_env style.
+            %% flapping.
             erlang:send_after(N*1000, self(), stop_ignoring_timer),
             {noreply, S3#ch_mgr{ignore_timer=true}};
         _ ->
@@ -1349,13 +1348,10 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     P_latest2 = machi_projection:update_dbg2(P_latest, Extra_todo),
 
     MyNamePid = proxy_pid(MyName, S),
+    Goo = P_latest2#projection_v1.epoch_number,
     %% This is the local projection store.  Use a larger timeout, so
     %% that things locally are pretty horrible if we're killed by a
     %% timeout exception.
-    %% ok = ?FLU_PC:write_projection(MyNamePid, private, P_latest2, ?TO*30),
-    Goo = P_latest2#projection_v1.epoch_number,
-    %% io:format(user, "HEE110 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(get(react))]),
-
     {ok,Goo} = {?FLU_PC:write_projection(MyNamePid, private, P_latest2, ?TO*30),Goo},
     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
         true ->
@@ -1412,13 +1408,11 @@ react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H} = S) ->
 react_to_env_C200(Retries, P_latest, S) ->
     ?REACT(c200),
     try
-        %% TODO: This code works "well enough" without actually
-        %% telling anybody anything.  Do we want to rip this out?
-        %% Actually implement it?  None of the above?
-        yo:tell_author_yo(P_latest#projection_v1.author_server)
+        AuthorProxyPid = proxy_pid(P_latest#projection_v1.author_server, S),
+        ?FLU_PC:kick_projection_reaction(AuthorProxyPid, [])
     catch _Type:_Err ->
-            %% io:format(user, "TODO: tell_author_yo is broken: ~p ~p\n",
-            %%           [_Type, _Err]),
+            io:format(user, "TODO: tell_author_yo error is probably ignorable: ~p ~p\n",
+                      [_Type, _Err]),
             ok
     end,
     react_to_env_C210(Retries, S).
@@ -2008,6 +2002,15 @@ make_chmgr_regname(A) when is_atom(A) ->
     list_to_atom(atom_to_list(A) ++ "_chmgr");
 make_chmgr_regname(B) when is_binary(B) ->
     list_to_atom(binary_to_list(B) ++ "_chmgr").
+
+gobble_calls(_StaticCall) ->
+    receive
+        {'$gen_call',From,{test_react_to_env}} ->
+            gen_server:reply(From, todo_overload),
+            gobble_calls(_StaticCall)
+    after 1 ->                                  % after 0 angers pulse.
+            ok
+    end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

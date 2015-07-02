@@ -261,7 +261,7 @@ append_server_loop(FluPid, #state{data_dir=DataDir, wedged=Wedged_p,
                     %% this new world.
                     Chmgr = machi_chain_manager1:make_chmgr_regname(FluName),
                     spawn(fun() ->
-                            catch machi_chain_manager:test_react_to_env(Chmgr)
+                            catch machi_chain_manager1:test_react_to_env(Chmgr)
                           end),
                     append_server_loop(FluPid, S#state{wedged=true});
                true ->
@@ -295,14 +295,18 @@ net_server_loop(Sock, S) ->
                 case machi_pb:decode_mpb_ll_request(Bin) of
                     LL_req when LL_req#mpb_ll_request.do_not_alter == 2 ->
                         {R, NewS} = do_pb_ll_request(LL_req, S),
-                        {machi_pb:encode_mpb_ll_response(R), mode(low, NewS)};
+                        {maybe_encode_response(R), mode(low, NewS)};
                     _ ->
                         HL_req = machi_pb:decode_mpb_request(Bin),
                         1 = HL_req#mpb_request.do_not_alter,
                         {R, NewS} = do_pb_hl_request(HL_req, make_high_clnt(S)),
                         {machi_pb:encode_mpb_response(R), mode(high, NewS)}
                 end,
-            ok = gen_tcp:send(Sock, RespBin),
+            if RespBin == async_no_response ->
+                    ok;
+               true ->
+                    ok = gen_tcp:send(Sock, RespBin)
+            end,
             net_server_loop(Sock, S2);
         {error, SockError} ->
             Msg = io_lib:format("Socket error ~w", [SockError]),
@@ -316,6 +320,11 @@ net_server_loop(Sock, S) ->
             (catch gen_tcp:close(Sock)),
             exit(normal)
     end.
+
+maybe_encode_response(async_no_response=X) ->
+    X;
+maybe_encode_response(R) ->
+    machi_pb:encode_mpb_ll_response(R).
 
 mode(Mode, #state{pb_mode=undefined}=S) ->
     S#state{pb_mode=Mode};
@@ -452,7 +461,16 @@ do_server_proj_request({get_all_projections, ProjType},
     machi_projection_store:get_all_projections(ProjStore, ProjType);
 do_server_proj_request({list_all_projections, ProjType},
                        #state{proj_store=ProjStore}) ->
-    machi_projection_store:list_all_projections(ProjStore, ProjType).
+    machi_projection_store:list_all_projections(ProjStore, ProjType);
+do_server_proj_request({kick_projection_reaction},
+                       #state{flu_name=FluName}) ->
+    %% Tell my chain manager that it might want to react to
+    %% this new world.
+    Chmgr = machi_chain_manager1:make_chmgr_regname(FluName),
+    spawn(fun() ->
+                  catch machi_chain_manager1:test_react_to_env(Chmgr)
+          end),
+    async_no_response.
 
 do_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
                        ChunkExtra, S) ->

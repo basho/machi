@@ -82,7 +82,7 @@ command(S) ->
                { 1, {call, ?MODULE, change_partitions,
                      [gen_old_threshold(), gen_no_partition_threshold()]}},
                {50, {call, ?MODULE, do_ticks,
-                     [choose(5, 200), S#state.pids,
+                     [choose(5, 100), S#state.pids,
                       gen_old_threshold(), gen_no_partition_threshold()]}}
               ]).
 
@@ -280,7 +280,7 @@ dump_state() ->
 
 prop_pulse() ->
     ?FORALL({Cmds0, Seed}, {non_empty(commands(?MODULE)), pulse:seed()},
-    ?IMPLIES(1 < length(Cmds0) andalso length(Cmds0) < 5,
+    ?IMPLIES(1 < length(Cmds0) andalso length(Cmds0) < 6,
     begin
         ok = shutdown_hard(),
         %% PULSE can be really unfair, of course, including having exec_ticks
@@ -421,10 +421,15 @@ private_projections_are_stable_check(ProxiesDict, All_listE) ->
     %% also check for flapping, and if yes, to see if all_hosed are
     %% all exactly equal.
 
-    _ = exec_ticks(40, All_listE),
+    %% gobble_calls() workaround: many small exec_ticks() calls +
+    %% sleep after each.
+    [begin
+         _ = exec_ticks(10, All_listE),
+         timer:sleep(10)
+     end|| _ <- lists:seq(1, 40)],
     Private1 = [?FLU_PC:get_latest_epochid(Proxy, private) ||
                    {_FLU, Proxy} <- orddict:to_list(ProxiesDict)],
-    _ = exec_ticks(5, All_listE),
+    _ = exec_ticks(3*20, All_listE),
     Private2 = [?FLU_PC:get_latest_epochid(Proxy, private) ||
                    {_FLU, Proxy} <- orddict:to_list(ProxiesDict)],
 
