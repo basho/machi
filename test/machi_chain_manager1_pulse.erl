@@ -82,7 +82,7 @@ command(S) ->
                { 1, {call, ?MODULE, change_partitions,
                      [gen_old_threshold(), gen_no_partition_threshold()]}},
                {50, {call, ?MODULE, do_ticks,
-                     [choose(5, 200), S#state.pids,
+                     [choose(5, 100), S#state.pids,
                       gen_old_threshold(), gen_no_partition_threshold()]}}
               ]).
 
@@ -149,11 +149,11 @@ setup(Num, Seed) ->
     %% do all the same server first, then round-robin evenly across
     %% servers.
     [begin
-         _QQa = machi_chain_manager1:test_react_to_env(get_chmgr(P))
+         _QQa = machi_chain_manager1:trigger_react_to_env(get_chmgr(P))
      end || {P, _Dir} <- All_listE, _I <- lists:seq(1,20), _Repeat <- [1,2]],
     ?QC_FMT(",z~w", [?LINE]),
     [begin
-         _QQa = machi_chain_manager1:test_react_to_env(get_chmgr(P))
+         _QQa = machi_chain_manager1:trigger_react_to_env(get_chmgr(P))
      end || _I <- lists:seq(1,20), {P, _Dir} <- All_listE, _Repeat <- [1,2]],
     ?QC_FMT(",z~w", [?LINE]),
 
@@ -280,7 +280,7 @@ dump_state() ->
 
 prop_pulse() ->
     ?FORALL({Cmds0, Seed}, {non_empty(commands(?MODULE)), pulse:seed()},
-    ?IMPLIES(1 < length(Cmds0) andalso length(Cmds0) < 5,
+    ?IMPLIES(1 < length(Cmds0) andalso length(Cmds0) < 10,
     begin
         ok = shutdown_hard(),
         %% PULSE can be really unfair, of course, including having exec_ticks
@@ -402,7 +402,7 @@ exec_ticks(Num, All_listE) ->
                                Max = 10,
                                Elapsed =
                                    ?MGR:sleep_ranked_order(1, Max, M_name, all_list()),
-                               Res = ?MGR:test_react_to_env(get_chmgr(P)),
+                               Res = ?MGR:trigger_react_to_env(get_chmgr(P)),
                                timer:sleep(erlang:max(0, Max - Elapsed)),
                                Res=Res %% ?D({self(), Res})
                            end || _ <- lists:seq(1,Num)],
@@ -421,10 +421,15 @@ private_projections_are_stable_check(ProxiesDict, All_listE) ->
     %% also check for flapping, and if yes, to see if all_hosed are
     %% all exactly equal.
 
-    _ = exec_ticks(40, All_listE),
+    %% gobble_calls() workaround: many small exec_ticks() calls +
+    %% sleep after each.
+    [begin
+         _ = exec_ticks(10, All_listE),
+         timer:sleep(10)
+     end|| _ <- lists:seq(1, 40)],
     Private1 = [?FLU_PC:get_latest_epochid(Proxy, private) ||
                    {_FLU, Proxy} <- orddict:to_list(ProxiesDict)],
-    _ = exec_ticks(5, All_listE),
+    _ = exec_ticks(3*20, All_listE),
     Private2 = [?FLU_PC:get_latest_epochid(Proxy, private) ||
                    {_FLU, Proxy} <- orddict:to_list(ProxiesDict)],
 

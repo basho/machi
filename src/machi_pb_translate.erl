@@ -135,6 +135,10 @@ from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    proj_la=#mpb_ll_listallprojectionsreq{type=ProjType}}) ->
     {ReqID, {low_proj, {list_all_projections, conv_to_type(ProjType)}}};
+from_pb_request(#mpb_ll_request{
+                   req_id=ReqID,
+                   proj_kp=#mpb_ll_kickprojectionreactionreq{}}) ->
+    {ReqID, {low_proj, {kick_projection_reaction}}};
 %%qqq
 from_pb_request(#mpb_request{req_id=ReqID,
                              echo=#mpb_echoreq{message=Msg}}) ->
@@ -313,6 +317,7 @@ from_pb_response(#mpb_ll_response{
         _ ->
             {ReqID< machi_pb_high_client:convert_general_status_code(Status)}
     end.
+%% No response for proj_kp/kick_projection_reaction
 
 %% TODO: move the #mbp_* record making code from
 %%       machi_pb_high_client:do_send_sync() clauses into to_pb_request().
@@ -403,9 +408,14 @@ to_pb_request(ReqID, {low_proj, {get_all_projections, ProjType}}) ->
                     proj_ga=#mpb_ll_getallprojectionsreq{type=conv_from_type(ProjType)}};
 to_pb_request(ReqID, {low_proj, {list_all_projections, ProjType}}) ->
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
-                    proj_la=#mpb_ll_listallprojectionsreq{type=conv_from_type(ProjType)}}.
+                    proj_la=#mpb_ll_listallprojectionsreq{type=conv_from_type(ProjType)}};
+to_pb_request(ReqID, {low_proj, {kick_projection_reaction}}) ->
+    #mpb_ll_request{req_id=ReqID, do_not_alter=2,
+                    proj_kp=#mpb_ll_kickprojectionreactionreq{}}.
 %%qqq
 
+to_pb_response(_ReqID, _, async_no_response=X) ->
+    X;
 to_pb_response(ReqID, _, {low_error, ErrCode, ErrMsg}) ->
     make_ll_error_resp(ReqID, ErrCode, ErrMsg);
 to_pb_response(ReqID, {low_echo, _BogusEpochID, _Msg}, Resp) ->
@@ -567,6 +577,7 @@ to_pb_response(ReqID, {low_proj, {list_all_projections, _ProjType}}, Resp)->
                              proj_la=#mpb_ll_listallprojectionsresp{
                                status=Status}}
     end;
+%% No response for {kick_projection_reaction}!
 %%qqq
 to_pb_response(ReqID, _, {high_error, ErrCode, ErrMsg}) ->
     make_error_resp(ReqID, ErrCode, ErrMsg);

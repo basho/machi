@@ -68,6 +68,7 @@
          write_projection/3, write_projection/4,
          get_all_projections/2, get_all_projections/3,
          list_all_projections/2, list_all_projections/3,
+         kick_projection_reaction/2, kick_projection_reaction/3,
 
          %% Common API
          quit/1,
@@ -243,6 +244,19 @@ list_all_projections(PidSpec, ProjType, Timeout) ->
     gen_server:call(PidSpec, {req, {list_all_projections, ProjType}},
                     Timeout).
 
+%% @doc Kick (politely) the remote chain manager to react to a
+%% projection change.
+
+kick_projection_reaction(PidSpec, Options) ->
+    kick_projection_reaction(PidSpec, Options, infinity).
+
+%% @doc Kick (politely) the remote chain manager to react to a
+%% projection change.
+
+kick_projection_reaction(PidSpec, Options, Timeout) ->
+    gen_server:call(PidSpec, {req, {kick_projection_reaction, Options}},
+                    Timeout).
+
 %% @doc Quit &amp; close the connection to remote FLU and stop our
 %% proxy process.
 
@@ -373,7 +387,10 @@ make_req_fun({get_all_projections, ProjType},
     fun() -> Mod:get_all_projections(Sock, ProjType) end;
 make_req_fun({list_all_projections, ProjType},
              #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
-    fun() -> Mod:list_all_projections(Sock, ProjType) end.
+    fun() -> Mod:list_all_projections(Sock, ProjType) end;
+make_req_fun({kick_projection_reaction, Options},
+             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
+    fun() -> Mod:kick_projection_reaction(Sock, Options) end.
 
 connected_p(#state{sock=SockMaybe,
                    i=#p_srvr{proto_mod=Mod}=_I}=_S) ->

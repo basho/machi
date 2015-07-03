@@ -75,6 +75,11 @@ api_smoke_test() ->
                                                      <<"foo-file">>, 99832,
                                                      MyChunk_badcs),
 
+            %% Put kick_projection_reaction() in the middle of the test so
+            %% that any problems with its async nature will (hopefully)
+            %% cause problems later in the test.
+            ok = ?MUT:kick_projection_reaction(Prox1, []),
+
             %% Alright, now for the rest of the API, whee
             BadFile = <<"no-such-file">>,
             {error, no_such_file} = ?MUT:checksum_list(Prox1, FakeEpoch, BadFile),

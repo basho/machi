@@ -62,13 +62,6 @@
 %% the FLU keep track of the epoch number of the last file write (and
 %% perhaps last metadata write), as an optimization for inter-FLU data
 %% replication/chain repair.
-%%
-%% TODO Section 4.2 ("The Sequencer") says that the sequencer must
-%% change its file assignments to new &amp; unique names whenever we move
-%% to wedge state.  This is not yet implemented.  In the current
-%% Erlang process scheme (which will probably be changing soon), a
-%% simple implementation would stop all existing processes that are
-%% running run_seq_append_server().
 
 -module(machi_flu1).
 
@@ -216,9 +209,6 @@ start_append_server(S, AckPid) ->
     FluPid = self(),
     proc_lib:spawn_link(fun() -> run_append_server(FluPid, AckPid, S) end).
 
-%% start_projection_server(S) ->
-%%     spawn_link(fun() -> run_projection_server(S) end).
-
 run_listen_server(#state{flu_name=FluName, tcp_port=TcpPort}=S) ->
     register(make_listener_regname(FluName), self()),
     SockOpts = ?PB_PACKET_OPTS ++
@@ -250,22 +240,29 @@ listen_server_loop(LSock, S) ->
     spawn_link(fun() -> net_server_loop(Sock, S) end),
     listen_server_loop(LSock, S).
 
-append_server_loop(FluPid, #state{data_dir=DataDir,wedged=Wedged_p,
-                                  epoch_id=OldEpochId}=S) ->
+append_server_loop(FluPid, #state{data_dir=DataDir, wedged=Wedged_p,
+                                  epoch_id=OldEpochId, flu_name=FluName}=S) ->
     AppendServerPid = self(),
     receive
-        {seq_append, From, _Prefix, _Chunk, _CSum, _Extra} when Wedged_p ->
+        {seq_append, From, _Prefix, _Chunk, _CSum, _Extra, _EpochID}
+          when Wedged_p ->
             From ! wedged,
             append_server_loop(FluPid, S);
-        {seq_append, From, Prefix, Chunk, CSum, Extra} ->
+        {seq_append, From, Prefix, Chunk, CSum, Extra, EpochID} ->
             spawn(fun() -> append_server_dispatch(From, Prefix,
-                                                 Chunk, CSum, Extra,
+                                                 Chunk, CSum, Extra, EpochID,
                                                  DataDir, AppendServerPid) end),
             append_server_loop(FluPid, S);
         {wedge_myself, WedgeEpochId} ->
-            if WedgeEpochId == OldEpochId ->
+            if not Wedged_p andalso WedgeEpochId == OldEpochId ->
                     true = ets:insert(S#state.etstab,
                                       {epoch, {true, OldEpochId}}),
+                    %% Tell my chain manager that it might want to react to
+                    %% this new world.
+                    Chmgr = machi_chain_manager1:make_chmgr_regname(FluName),
+                    spawn(fun() ->
+                            catch machi_chain_manager1:trigger_react_to_env(Chmgr)
+                          end),
                     append_server_loop(FluPid, S#state{wedged=true});
                true ->
                     append_server_loop(FluPid, S)
@@ -298,14 +295,18 @@ net_server_loop(Sock, S) ->
                 case machi_pb:decode_mpb_ll_request(Bin) of
                     LL_req when LL_req#mpb_ll_request.do_not_alter == 2 ->
                         {R, NewS} = do_pb_ll_request(LL_req, S),
-                        {machi_pb:encode_mpb_ll_response(R), mode(low, NewS)};
+                        {maybe_encode_response(R), mode(low, NewS)};
                     _ ->
                         HL_req = machi_pb:decode_mpb_request(Bin),
                         1 = HL_req#mpb_request.do_not_alter,
                         {R, NewS} = do_pb_hl_request(HL_req, make_high_clnt(S)),
                         {machi_pb:encode_mpb_response(R), mode(high, NewS)}
                 end,
-            ok = gen_tcp:send(Sock, RespBin),
+            if RespBin == async_no_response ->
+                    ok;
+               true ->
+                    ok = gen_tcp:send(Sock, RespBin)
+            end,
             net_server_loop(Sock, S2);
         {error, SockError} ->
             Msg = io_lib:format("Socket error ~w", [SockError]),
@@ -319,6 +320,11 @@ net_server_loop(Sock, S) ->
             (catch gen_tcp:close(Sock)),
             exit(normal)
     end.
+
+maybe_encode_response(async_no_response=X) ->
+    X;
+maybe_encode_response(R) ->
+    machi_pb:encode_mpb_ll_response(R).
 
 mode(Mode, #state{pb_mode=undefined}=S) ->
     S#state{pb_mode=Mode};
@@ -359,7 +365,7 @@ do_pb_ll_request(PB_request, S) ->
 do_pb_ll_request2(EpochID, CMD, S) ->
     {Wedged_p, CurrentEpochID} = ets:lookup_element(S#state.etstab, epoch, 2),
     if Wedged_p == true ->
-            {{error, wedged}, S};
+            {{error, wedged}, S#state{epoch_id=CurrentEpochID}};
        is_tuple(EpochID)
        andalso
        EpochID /= CurrentEpochID ->
@@ -370,13 +376,12 @@ do_pb_ll_request2(EpochID, CMD, S) ->
                true ->
                     %% We're at same epoch # but different checksum, or
                     %% we're at a newer/bigger epoch #.
-                    io:format(user, "\n\nTODO/monitor: wedging myself!\n\n",[]),
                     wedge_myself(S#state.flu_name, CurrentEpochID),
                     ok
             end,
-            {{error, bad_epoch}, S};
+            {{error, bad_epoch}, S#state{epoch_id=CurrentEpochID}};
        true ->
-            do_pb_ll_request3(CMD, S)
+            do_pb_ll_request3(CMD, S#state{epoch_id=CurrentEpochID})
     end.
 
 do_pb_ll_request3({low_echo, _BogusEpochID, Msg}, S) ->
@@ -456,7 +461,16 @@ do_server_proj_request({get_all_projections, ProjType},
     machi_projection_store:get_all_projections(ProjStore, ProjType);
 do_server_proj_request({list_all_projections, ProjType},
                        #state{proj_store=ProjStore}) ->
-    machi_projection_store:list_all_projections(ProjStore, ProjType).
+    machi_projection_store:list_all_projections(ProjStore, ProjType);
+do_server_proj_request({kick_projection_reaction},
+                       #state{flu_name=FluName}) ->
+    %% Tell my chain manager that it might want to react to
+    %% this new world.
+    Chmgr = machi_chain_manager1:make_chmgr_regname(FluName),
+    spawn(fun() ->
+                  catch machi_chain_manager1:trigger_react_to_env(Chmgr)
+          end),
+    async_no_response.
 
 do_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
                        ChunkExtra, S) ->
@@ -469,11 +483,13 @@ do_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
     end.
 
 do_server_append_chunk2(_PKey, Prefix, Chunk, CSum_tag, Client_CSum,
-                        ChunkExtra, #state{flu_name=FluName}=_S) ->
+                        ChunkExtra, #state{flu_name=FluName,
+                                           epoch_id=EpochID}=_S) ->
     %% TODO: Do anything with PKey?
     try
         TaggedCSum = check_or_make_tagged_checksum(CSum_tag, Client_CSum,Chunk),
-        FluName ! {seq_append, self(), Prefix, Chunk, TaggedCSum, ChunkExtra},
+        FluName ! {seq_append, self(), Prefix, Chunk, TaggedCSum,
+                   ChunkExtra, EpochID},
         receive
             {assignment, Offset, File} ->
                 Size = iolist_size(Chunk),
@@ -664,9 +680,10 @@ do_server_trunc_hack(File, #state{data_dir=DataDir}=_S) ->
             {error, bad_arg}
     end.
 
-append_server_dispatch(From, Prefix, Chunk, CSum, Extra, DataDir, LinkPid) ->
-    Pid = write_server_get_pid(Prefix, DataDir, LinkPid),
-    Pid ! {seq_append, From, Prefix, Chunk, CSum, Extra},
+append_server_dispatch(From, Prefix, Chunk, CSum, Extra, EpochID,
+                       DataDir, LinkPid) ->
+    Pid = write_server_get_pid(Prefix, EpochID, DataDir, LinkPid),
+    Pid ! {seq_append, From, Prefix, Chunk, CSum, Extra, EpochID},
     exit(normal).
 
 sanitize_file_string(Str) ->
@@ -700,12 +717,12 @@ sync_checksum_file(File) ->
             end
     end.
 
-write_server_get_pid(Prefix, DataDir, LinkPid) ->
+write_server_get_pid(Prefix, EpochID, DataDir, LinkPid) ->
     case write_server_find_pid(Prefix) of
         undefined ->
-            start_seq_append_server(Prefix, DataDir, LinkPid),
+            start_seq_append_server(Prefix, EpochID, DataDir, LinkPid),
             timer:sleep(1),
-            write_server_get_pid(Prefix, DataDir, LinkPid);
+            write_server_get_pid(Prefix, EpochID, DataDir, LinkPid);
         Pid ->
             Pid
     end.
@@ -714,7 +731,7 @@ write_server_find_pid(Prefix) ->
     FluName = machi_util:make_regname(Prefix),
     whereis(FluName).
 
-start_seq_append_server(Prefix, DataDir, AppendServerPid) ->
+start_seq_append_server(Prefix, EpochID, DataDir, AppendServerPid) ->
     proc_lib:spawn_link(fun() ->
                                 %% The following is only necessary to
                                 %% make nice process relationships in
@@ -722,21 +739,20 @@ start_seq_append_server(Prefix, DataDir, AppendServerPid) ->
                                 put('$ancestors', [AppendServerPid]),
                                 put('$initial_call', {x,y,3}),
                                 link(AppendServerPid),
-                                run_seq_append_server(Prefix, DataDir)
+                                run_seq_append_server(Prefix, EpochID, DataDir)
                         end).
 
-run_seq_append_server(Prefix, DataDir) ->
+run_seq_append_server(Prefix, EpochID, DataDir) ->
     true = register(machi_util:make_regname(Prefix), self()),
-    run_seq_append_server2(Prefix, DataDir).
+    run_seq_append_server2(Prefix, EpochID, DataDir).
 
-run_seq_append_server2(Prefix, DataDir) ->
+run_seq_append_server2(Prefix, EpochID, DataDir) ->
     FileNum = machi_util:read_max_filenum(DataDir, Prefix) + 1,
     case machi_util:increment_max_filenum(DataDir, Prefix) of
         ok ->
-            machi_util:increment_max_filenum(DataDir, Prefix),
             machi_util:info_msg("start: ~p server at file ~w\n",
                                 [Prefix, FileNum]),
-            seq_append_server_loop(DataDir, Prefix, FileNum);
+            seq_append_server_loop(DataDir, Prefix, EpochID, FileNum);
         Else ->
             error_logger:error_msg("start: ~p server at file ~w: ~p\n",
                                    [Prefix, FileNum, Else]),
@@ -750,7 +766,7 @@ seq_name_hack() ->
                                 [element(3,now()),
                                  list_to_integer(os:getpid())])).
 
-seq_append_server_loop(DataDir, Prefix, FileNum) ->
+seq_append_server_loop(DataDir, Prefix, EpochID, FileNum) ->
     SequencerNameHack = seq_name_hack(),
     {File, FullPath} = machi_util:make_data_filename(
                          DataDir, Prefix, SequencerNameHack, FileNum),
@@ -759,19 +775,22 @@ seq_append_server_loop(DataDir, Prefix, FileNum) ->
     CSumPath = machi_util:make_checksum_filename(
                  DataDir, Prefix, SequencerNameHack, FileNum),
     {ok, FHc} = file:open(CSumPath, [append, raw, binary]),
-    seq_append_server_loop(DataDir, Prefix, File, {FHd,FHc}, FileNum,
+    seq_append_server_loop(DataDir, Prefix, File, {FHd,FHc}, EpochID, FileNum,
                            ?MINIMUM_OFFSET).
 
-seq_append_server_loop(DataDir, Prefix, _File, {FHd,FHc}, FileNum, Offset)
+seq_append_server_loop(DataDir, Prefix, _File, {FHd,FHc}, EpochID,
+                       FileNum, Offset)
   when Offset > ?MAX_FILE_SIZE ->
     ok = file:close(FHd),
     ok = file:close(FHc),
     machi_util:info_msg("rollover: ~p server at file ~w offset ~w\n",
                         [Prefix, FileNum, Offset]),
-    run_seq_append_server2(Prefix, DataDir);    
-seq_append_server_loop(DataDir, Prefix, File, {FHd,FHc}=FH_, FileNum, Offset) ->
+    run_seq_append_server2(Prefix, EpochID, DataDir);    
+seq_append_server_loop(DataDir, Prefix, File, {FHd,FHc}=FH_, EpochID,
+                       FileNum, Offset) ->
     receive
-        {seq_append, From, Prefix, Chunk, TaggedCSum, Extra} ->
+        {seq_append, From, Prefix, Chunk, TaggedCSum, Extra, R_EpochID}
+          when R_EpochID == EpochID ->
             if Chunk /= <<>> ->
                     ok = file:pwrite(FHd, Offset, Chunk);
                true ->
@@ -781,12 +800,20 @@ seq_append_server_loop(DataDir, Prefix, File, {FHd,FHc}=FH_, FileNum, Offset) ->
             Size = iolist_size(Chunk),
             CSum_info = encode_csum_file_entry(Offset, Size, TaggedCSum),
             ok = file:write(FHc, CSum_info),
-            seq_append_server_loop(DataDir, Prefix, File, FH_,
+            seq_append_server_loop(DataDir, Prefix, File, FH_, EpochID,
                                    FileNum, Offset + Size + Extra);
+        {seq_append, _From, _Prefix, _Chunk, _TCSum, _Extra, R_EpochID}=MSG ->
+            %% Rare'ish event: send MSG to myself so it doesn't get lost
+            %% while we recurse around to pick up a new FileNum.
+            self() ! MSG,
+            machi_util:info_msg("rollover: ~p server at file ~w offset ~w "
+                                "by new epoch_id ~W\n",
+                                [Prefix, FileNum, Offset, R_EpochID, 8]),
+            run_seq_append_server2(Prefix, R_EpochID, DataDir);    
         {sync_stuff, FromPid, Ref} ->
             file:sync(FHc),
             FromPid ! {sync_finished, Ref},
-            seq_append_server_loop(DataDir, Prefix, File, FH_,
+            seq_append_server_loop(DataDir, Prefix, File, FH_, EpochID,
                                    FileNum, Offset)
     after 30*1000 ->
             ok = file:close(FHd),
@@ -843,7 +870,7 @@ http_hack_server_put(Sock, G, FluName, MyURI) ->
                                throw({bad_csum, XX})
                        end
                end,
-        FluName ! {seq_append, self(), MyURI, Chunk, CSum, 0}
+        FluName ! {seq_append, self(), MyURI, Chunk, CSum, 0, todo_epoch_id_bitrot}
     catch
         throw:{bad_csum, _CS} ->
             Out = "HTTP/1.0 412 Precondition failed\r\n"

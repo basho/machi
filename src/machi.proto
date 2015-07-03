@@ -525,6 +525,11 @@ message Mpb_LL_ListAllProjectionsResp {
     repeated uint32 epochs = 2;
 }
 
+// Low level API: kick_projection_reaction request, NO RESPONSE!
+
+message Mpb_LL_KickProjectionReactionReq {
+}
+
 //////////////////////////////////////////
 //
 // Low API request & response wrapper
@@ -552,6 +557,7 @@ message Mpb_LL_Request {
     optional Mpb_LL_WriteProjectionReq proj_wp = 15;
     optional Mpb_LL_GetAllProjectionsReq proj_ga = 16;
     optional Mpb_LL_ListAllProjectionsReq proj_la = 17;
+    optional Mpb_LL_KickProjectionReactionReq proj_kp = 18;
 
     optional Mpb_LL_AppendChunkReq append_chunk = 30;
     optional Mpb_LL_WriteChunkReq write_chunk = 31;
@@ -585,6 +591,7 @@ message Mpb_LL_Response {
     optional Mpb_LL_WriteProjectionResp proj_wp = 15;
     optional Mpb_LL_GetAllProjectionsResp proj_ga = 16;
     optional Mpb_LL_ListAllProjectionsResp proj_la = 17;
+    // No reponse to Mpb_LL_KickProjectionReactionReq = 18;
 
     optional Mpb_LL_AppendChunkResp append_chunk = 30;
     optional Mpb_LL_WriteChunkResp write_chunk = 31;

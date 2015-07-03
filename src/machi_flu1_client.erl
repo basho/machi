@@ -63,6 +63,7 @@
          write_projection/3, write_projection/4,
          get_all_projections/2, get_all_projections/3,
          list_all_projections/2, list_all_projections/3,
+         kick_projection_reaction/2, kick_projection_reaction/3,
 
          %% Common API
          echo/2, echo/3,
@@ -374,6 +375,27 @@ list_all_projections(Host, TcpPort, ProjType)
         disconnect(Sock)
     end.
 
+%% @doc Kick (politely) the remote chain manager to react to a
+%% projection change.
+
+-spec kick_projection_reaction(port_wrap(), list()) ->
+      ok.
+kick_projection_reaction(Sock, Options) ->
+    kick_projection_reaction2(Sock, Options).
+
+%% @doc Kick (politely) the remote chain manager to react to a
+%% projection change.
+
+-spec kick_projection_reaction(machi_dt:inet_host(), machi_dt:inet_port(), list()) ->
+      ok.
+kick_projection_reaction(Host, TcpPort, Options) ->
+    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
+    try
+        kick_projection_reaction2(Sock, Options)
+    after
+        disconnect(Sock)
+    end.
+
 %% @doc Echo -- test protocol round-trip.
 
 -spec echo(port_wrap(), string()) ->
@@ -604,19 +626,32 @@ list_all_projections2(Sock, ProjType) ->
                 ReqID, {low_proj, {list_all_projections, ProjType}}),
     do_pb_request_common(Sock, ReqID, Req).
 
+kick_projection_reaction2(Sock, _Options) ->
+    ReqID = <<42>>,
+    Req = machi_pb_translate:to_pb_request(
+                ReqID, {low_proj, {kick_projection_reaction}}),
+    do_pb_request_common(Sock, ReqID, Req, false).
+
 do_pb_request_common(Sock, ReqID, Req) ->
+    do_pb_request_common(Sock, ReqID, Req, true).
+
+do_pb_request_common(Sock, ReqID, Req, GetReply_p) ->
     erase(bad_sock),
     try
         ReqBin = list_to_binary(machi_pb:encode_mpb_ll_request(Req)),
         ok = w_send(Sock, ReqBin),
-        case w_recv(Sock, 0) of
-            {ok, RespBin} ->
-                Resp = machi_pb:decode_mpb_ll_response(RespBin),
-                {ReqID2, Reply} = machi_pb_translate:from_pb_response(Resp),
-                true = (ReqID == ReqID2 orelse ReqID2 == <<>>),
-                Reply;
-            {error, _}=Err ->
-                throw(Err)
+        if GetReply_p ->
+                case w_recv(Sock, 0) of
+                    {ok, RespBin} ->
+                        Resp = machi_pb:decode_mpb_ll_response(RespBin),
+                        {ReqID2, Reply} = machi_pb_translate:from_pb_response(Resp),
+                        true = (ReqID == ReqID2 orelse ReqID2 == <<>>),
+                        Reply;
+                    {error, _}=Err ->
+                        throw(Err)
+                end;
+           not GetReply_p ->
+                ok
         end
     catch
         throw:Error ->
