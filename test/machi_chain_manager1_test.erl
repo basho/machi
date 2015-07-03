@@ -187,8 +187,9 @@ check_simple_chain_state_transition_is_sane(UPI1, Repair1) ->
 -ifdef(EQC).
 
 smoke_chain_state_transition_is_sane_test() ->
-    false = ?MGR:chain_state_transition_is_sane(a, [a,b], [c,d],
-                                                f, [e]),
+    %% True due to disjoint UPIs.
+    %% false = ?MGR:chain_state_transition_is_sane(a, [a,b], [c,d],
+    %%                                             f, [e]),
     true  = ?MGR:chain_state_transition_is_sane(a, [a,b], [c,d],
                                                 e, [e]),
     ok.
@@ -218,6 +219,9 @@ dedupe([H|T], Seen) ->
 dedupe([], _) ->
     [].
 
+make_prop_ets() ->
+    ETS = ets:new(count, [named_table, set, private]).
+
 prop_chain_state_transition_is_sane() ->
     %% ?FORALL(All, nonempty(list([a,b,c,d,e])),
     ?FORALL(All, non_empty(some([a,b,c])),
@@ -226,7 +230,6 @@ prop_chain_state_transition_is_sane() ->
     ?IMPLIES(length(lists:usort(UPI1 ++ Repair1x)) > 0 andalso
              length(lists:usort(UPI2 ++ Repair2x)) > 0,
     begin
-        io:format(user, "All ~p\n", [All]),
         MembersDict = orddict:from_list([{X, #p_srvr{name=X}} || X <- All]),
         Repair1 = Repair1x -- UPI1,
         Down1 = All -- (UPI1 ++ Repair1),
@@ -244,8 +247,9 @@ prop_chain_state_transition_is_sane() ->
         New_res = ?MGR:chain_state_transition_is_sane(Author1, UPI1, Repair1,
                                                       Author2, UPI2),
         New_p = New_res,
-        ?WHENFAIL(io:format(user, "New_res: ~p\nOld_res: ~p\n",
-                            [New_res, Old_res]),
+        (catch ets:insert(count, {{Author1, UPI1, Repair1, Author2, UPI2, Repair2}, true})),
+        ?WHENFAIL(io:format(user, "New_res: ~p (why line ~p)\nOld_res: ~p\n",
+                            [New_res, get(why), Old_res]),
                   Old_p == New_p)
     end))).
 

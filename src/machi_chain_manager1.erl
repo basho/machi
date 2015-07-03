@@ -100,6 +100,7 @@
 -export([make_chmgr_regname/1, projection_transitions_are_sane/2,
          inner_projection_exists/1, inner_projection_or_self/1,
          simple_chain_state_transition_is_sane/3,
+         simple_chain_state_transition_is_sane/5,
          chain_state_transition_is_sane/5]).
 %% Exports so that EDoc docs generated for these internal funcs.
 -export([mk/3]).
@@ -2153,21 +2154,55 @@ remember_partition_hack(FLU) ->
 %% {[keep,del],[error]}   %% bad transition: 'bogus' not in Repair1'''
 
 simple_chain_state_transition_is_sane(UPI1, Repair1, UPI2) ->
+    simple_chain_state_transition_is_sane(undefined, UPI1, Repair1,
+                                          undefined, UPI2).
+
+-define(RETURN(X), begin put(why, ?LINE), X end).
+
+simple_chain_state_transition_is_sane(Author1, UPI1, Repair1, Author2, UPI2) ->
+    erase(why),
     {KeepsDels, Orders} = mk(UPI1, Repair1, UPI2),
     NumKeeps = length([x || keep <- KeepsDels]),
     NumOrders = length(Orders),
-    false == lists:member(error, Orders)
-        andalso Orders == lists:sort(Orders)
-        andalso length(UPI2) == NumKeeps + NumOrders.
+    Answer1 = false == lists:member(error, Orders)
+              andalso Orders == lists:sort(Orders)
+              andalso length(UPI2) == NumKeeps + NumOrders,
+    if not Answer1 ->
+            ?RETURN(Answer1);
+       true ->
+            if Orders == [] -> % No repairing have joined UPI2
+                    ?RETURN(Answer1);
+               Author2 == undefined ->
+                    ?RETURN(Answer1);
+               Author2 /= undefined ->
+                    case catch(lists:last(UPI1)) of
+                        UPI1_tail when UPI1_tail == Author2 ->
+                            ?RETURN(true);
+                        _ ->
+                            ?RETURN(false)
+                    end
+            end
+    end.
 
 chain_state_transition_is_sane(Author1, UPI1, Repair1, Author2, UPI2) ->
     ToSelfOnly_p = if UPI2 == [Author2] -> true;
                       true              -> false
                    end,
+    Disjoint_UPIs = ordsets:is_disjoint(ordsets:from_list(UPI1),
+                                        ordsets:from_list(UPI2)),
+    Author2_is_Repairer_p = case (catch lists:last(UPI1)) of
+                                FLU when FLU == Author2 ->
+                                    true;
+                                _ ->
+                                    false
+                            end,
     if ToSelfOnly_p ->
             true;
+       Disjoint_UPIs ->
+            true;
        true ->
-            simple_chain_state_transition_is_sane(UPI1, Repair1, UPI2)
+            simple_chain_state_transition_is_sane(Author1, UPI1, Repair1,
+                                                  Author2, UPI2)
     end.
 
 %% @doc Create a 2-tuple that describes how `UPI1' + `Repair1' are
