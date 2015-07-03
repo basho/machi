@@ -261,7 +261,7 @@ append_server_loop(FluPid, #state{data_dir=DataDir, wedged=Wedged_p,
                     %% this new world.
                     Chmgr = machi_chain_manager1:make_chmgr_regname(FluName),
                     spawn(fun() ->
-                            catch machi_chain_manager1:test_react_to_env(Chmgr)
+                            catch machi_chain_manager1:trigger_react_to_env(Chmgr)
                           end),
                     append_server_loop(FluPid, S#state{wedged=true});
                true ->
@@ -468,7 +468,7 @@ do_server_proj_request({kick_projection_reaction},
     %% this new world.
     Chmgr = machi_chain_manager1:make_chmgr_regname(FluName),
     spawn(fun() ->
-                  catch machi_chain_manager1:test_react_to_env(Chmgr)
+                  catch machi_chain_manager1:trigger_react_to_env(Chmgr)
           end),
     async_no_response.
 

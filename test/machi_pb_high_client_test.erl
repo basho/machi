@@ -47,7 +47,7 @@ smoke_test2() ->
              {ok, _} = machi_flu_psup:start_flu_package(Name, Port, Dir, [])
          end || P <- Ps],
         ok = machi_chain_manager1:set_chain_members(a_chmgr, D),
-        [machi_chain_manager1:test_react_to_env(a_chmgr) || _ <-lists:seq(1,5)],
+        [machi_chain_manager1:trigger_react_to_env(a_chmgr) || _ <-lists:seq(1,5)],
 
         {ok, Clnt} = ?C:start_link(Ps),
         try

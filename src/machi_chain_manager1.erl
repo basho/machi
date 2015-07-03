@@ -93,7 +93,8 @@
 
 %% API
 -export([start_link/2, start_link/3, stop/1, ping/1,
-         set_chain_members/2, set_active/2]).
+         set_chain_members/2, set_active/2,
+         trigger_react_to_env/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
@@ -105,7 +106,6 @@
 -export([test_calc_projection/2,
          test_write_public_projection/2,
          test_read_latest_public_projection/2,
-         test_react_to_env/1,
          get_all_hosed/1]).
 
 -ifdef(EQC).
@@ -146,6 +146,9 @@ set_chain_members(Pid, MembersDict) ->
 set_active(Pid, Boolean) when Boolean == true; Boolean == false ->
     gen_server:call(Pid, {set_active, Boolean}, infinity).
 
+trigger_react_to_env(Pid) ->
+    gen_server:call(Pid, {trigger_react_to_env}, infinity).
+
 -ifdef(TEST).
 
 %% Test/debugging code only.
@@ -162,9 +165,6 @@ test_calc_projection(Pid, KeepRunenvP) ->
 test_read_latest_public_projection(Pid, ReadRepairP) ->
     gen_server:call(Pid, {test_read_latest_public_projection, ReadRepairP},
                     infinity).
-
-test_react_to_env(Pid) ->
-    gen_server:call(Pid, {test_react_to_env}, infinity).
 
 -endif. % TEST
 
@@ -284,7 +284,7 @@ handle_call({test_read_latest_public_projection, ReadRepairP}, _From, S) ->
         do_cl_read_latest_public_projection(ReadRepairP, S),
     Res = {Perhaps, Val, ExtraInfo},
     {reply, Res, S2};
-handle_call({test_react_to_env}=Call, _From, S) ->
+handle_call({trigger_react_to_env}=Call, _From, S) ->
     gobble_calls(Call),
     {TODOtodo, S2} = do_react_to_env(S),
     {reply, TODOtodo, S2};
@@ -2003,11 +2003,11 @@ make_chmgr_regname(A) when is_atom(A) ->
 make_chmgr_regname(B) when is_binary(B) ->
     list_to_atom(binary_to_list(B) ++ "_chmgr").
 
-gobble_calls(_StaticCall) ->
+gobble_calls(StaticCall) ->
     receive
-        {'$gen_call',From,{test_react_to_env}} ->
+        {'$gen_call',From,{trigger_react_to_env}} ->
             gen_server:reply(From, todo_overload),
-            gobble_calls(_StaticCall)
+            gobble_calls(StaticCall)
     after 1 ->                                  % after 0 angers pulse.
             ok
     end.

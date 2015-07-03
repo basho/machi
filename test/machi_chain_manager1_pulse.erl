@@ -149,11 +149,11 @@ setup(Num, Seed) ->
     %% do all the same server first, then round-robin evenly across
     %% servers.
     [begin
-         _QQa = machi_chain_manager1:test_react_to_env(get_chmgr(P))
+         _QQa = machi_chain_manager1:trigger_react_to_env(get_chmgr(P))
      end || {P, _Dir} <- All_listE, _I <- lists:seq(1,20), _Repeat <- [1,2]],
     ?QC_FMT(",z~w", [?LINE]),
     [begin
-         _QQa = machi_chain_manager1:test_react_to_env(get_chmgr(P))
+         _QQa = machi_chain_manager1:trigger_react_to_env(get_chmgr(P))
      end || _I <- lists:seq(1,20), {P, _Dir} <- All_listE, _Repeat <- [1,2]],
     ?QC_FMT(",z~w", [?LINE]),
 
@@ -402,7 +402,7 @@ exec_ticks(Num, All_listE) ->
                                Max = 10,
                                Elapsed =
                                    ?MGR:sleep_ranked_order(1, Max, M_name, all_list()),
-                               Res = ?MGR:test_react_to_env(get_chmgr(P)),
+                               Res = ?MGR:trigger_react_to_env(get_chmgr(P)),
                                timer:sleep(erlang:max(0, Max - Elapsed)),
                                Res=Res %% ?D({self(), Res})
                            end || _ <- lists:seq(1,Num)],

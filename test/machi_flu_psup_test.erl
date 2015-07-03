@@ -51,9 +51,9 @@ smoke_test2() ->
              {ok, _} = machi_flu_psup:start_flu_package(Name, Port, Dir, [])
          end || {_,P} <- [hd(Ps)]],
 
-        [machi_chain_manager1:test_react_to_env(a_chmgr) || _ <-lists:seq(1,5)],
+        [machi_chain_manager1:trigger_react_to_env(a_chmgr) || _ <-lists:seq(1,5)],
         machi_chain_manager1:set_chain_members(a_chmgr, orddict:from_list(Ps)),
-        [machi_chain_manager1:test_react_to_env(a_chmgr) || _ <-lists:seq(1,5)],
+        [machi_chain_manager1:trigger_react_to_env(a_chmgr) || _ <-lists:seq(1,5)],
         ok
     after
         exit(SupPid, normal),
@@ -101,16 +101,16 @@ partial_stop_restart2() ->
         [{ok,_} = Append(P, EpochID1) || P <- Ps],             % *not* wedged
         {ok, {_,_,File1}} = Append(hd(Ps), EpochID1),
 
-        {_,_,_} = machi_chain_manager1:test_react_to_env(hd(ChMgrs)),
+        {_,_,_} = machi_chain_manager1:trigger_react_to_env(hd(ChMgrs)),
         [begin
-             _QQa = machi_chain_manager1:test_react_to_env(ChMgr)
+             _QQa = machi_chain_manager1:trigger_react_to_env(ChMgr)
          end || _ <- lists:seq(1,125), ChMgr <- ChMgrs],
 
         %% All chain managers & projection stores should be using the
         %% same projection which is max projection in each store.
-        {no_change,_,Epoch_m} = machi_chain_manager1:test_react_to_env(
+        {no_change,_,Epoch_m} = machi_chain_manager1:trigger_react_to_env(
                                   hd(ChMgrs)),
-        [{no_change,_,Epoch_m} = machi_chain_manager1:test_react_to_env(
+        [{no_change,_,Epoch_m} = machi_chain_manager1:trigger_react_to_env(
                                    ChMgr )|| ChMgr <- ChMgrs],
         {ok, Proj_m} = machi_projection_store:read_latest_projection(
                          hd(PStores), public),
@@ -160,7 +160,7 @@ partial_stop_restart2() ->
                             Addr_a, TcpPort_a, ?DUMMY_PV1_EPOCH),
 
         %% Iterate through humming consensus once
-        {now_using,_,Epoch_n} = machi_chain_manager1:test_react_to_env(
+        {now_using,_,Epoch_n} = machi_chain_manager1:trigger_react_to_env(
                                   hd(ChMgrs)),
         true = (Epoch_n > Epoch_m),
         {ok, {false, EpochID3}} = WedgeStatus(hd(Ps)),

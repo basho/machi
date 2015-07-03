@@ -232,8 +232,8 @@ nonunanimous_setup_and_fix_test() ->
         %% we expect nothing to change when called again.
         {not_unanimous,_,_}=_YY = ?MGR:test_read_latest_public_projection(Ma, true),
 
-        {now_using, _, EpochNum_a} = ?MGR:test_react_to_env(Ma),
-        {no_change, _, EpochNum_a} = ?MGR:test_react_to_env(Ma),
+        {now_using, _, EpochNum_a} = ?MGR:trigger_react_to_env(Ma),
+        {no_change, _, EpochNum_a} = ?MGR:trigger_react_to_env(Ma),
         {unanimous,P2,_E2} = ?MGR:test_read_latest_public_projection(Ma, false),
         {ok, P2pa} = ?FLU_PC:read_latest_projection(Proxy_a, private),
         P2 = P2pa#projection_v1{dbg2=[]},
@@ -244,7 +244,7 @@ nonunanimous_setup_and_fix_test() ->
 
         %% %% Poke FLUb to react ... should be using the same private proj
         %% %% as FLUa.
-        %% {now_using, _, EpochNum_a} = ?MGR:test_react_to_env(Mb),
+        %% {now_using, _, EpochNum_a} = ?MGR:trigger_react_to_env(Mb),
         {ok, P2pb} = ?FLU_PC:read_latest_projection(Proxy_b, private),
         P2 = P2pb#projection_v1{dbg2=[]},
 

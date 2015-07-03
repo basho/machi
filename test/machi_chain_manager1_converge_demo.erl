@@ -2,7 +2,7 @@
 %%
 %% Machi: a small village of replicated files
 %%
-%% Copyright (c) 2014 Basho Technologies, Inc.  All Rights Reserved.
+%% Copyright (c) 2014-2015 Basho Technologies, Inc.  All Rights Reserved.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -207,7 +207,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                                                     ?MGR:sleep_ranked_order(
                                                        S_min, S_max_rand,
                                                        M_name, All_list),
-                                                _ = ?MGR:test_react_to_env(MMM),
+                                                _ = ?MGR:trigger_react_to_env(MMM),
                                                 %% Be more unfair by not
                                                 %% sleeping here.
                                                 % timer:sleep(S_max - Elapsed),
