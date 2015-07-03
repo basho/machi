@@ -1635,7 +1635,7 @@ projection_transition_is_sane(
               upi=UPI_list2,
               repairing=Repairing_list2,
               dbg=Dbg2} = P2,
-  RelativeToServer, RetrospectiveP) ->
+  RelativeToServer, __TODO_RetrospectiveP) ->
  try
     put(why2, []),
     %% General notes:
@@ -1924,7 +1924,7 @@ simple_chain_state_transition_is_sane(UPI1, Repair1, UPI2) ->
     simple_chain_state_transition_is_sane(undefined, UPI1, Repair1,
                                           undefined, UPI2).
 
-simple_chain_state_transition_is_sane(Author1, UPI1, Repair1, Author2, UPI2) ->
+simple_chain_state_transition_is_sane(_Author1, UPI1, Repair1, Author2, UPI2) ->
     put(why2, []),
     {KeepsDels, Orders} = mk(UPI1, Repair1, UPI2),
     NumKeeps = length([x || keep <- KeepsDels]),
@@ -1962,12 +1962,6 @@ chain_state_transition_is_sane(Author1, UPI1, Repair1, Author2, UPI2) ->
                    end,
     Disjoint_UPIs = ordsets:is_disjoint(ordsets:from_list(UPI1),
                                         ordsets:from_list(UPI2)),
-    Author2_is_Repairer_p = case (catch lists:last(UPI1)) of
-                                FLU when FLU == Author2 ->
-                                    true;
-                                _ ->
-                                    false
-                            end,
     %% This if statement contains the only exceptions that we make to
     %% the judgement of simple_chain_state_transition_is_sane().
     if ToSelfOnly_p ->
