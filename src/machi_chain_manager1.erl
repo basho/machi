@@ -91,6 +91,9 @@
 -define(REPAIR_START_STABILITY_TIME, 10).
 -endif. % TEST
 
+-define(RETURN1(X), begin put(why1, [?LINE|get(why1)]), X end).
+-define(RETURN2(X), begin put(why2, [?LINE|get(why2)]), X end).
+
 %% API
 -export([start_link/2, start_link/3, stop/1, ping/1,
          set_chain_members/2, set_active/2]).
@@ -1635,6 +1638,7 @@ projection_transition_is_sane(
               dbg=Dbg2} = P2,
   RelativeToServer, RetrospectiveP) ->
  try
+    put(why1, []),
     %% General notes:
     %%
     %% I'm making no attempt to be "efficient" here.  All of these data
@@ -1684,7 +1688,7 @@ projection_transition_is_sane(
             if UPI_list1 == [] orelse UPI_list2 == [] ->
                     %% If the common prefix is empty, then one of the
                     %% inputs must be empty.
-                    true;
+                    ?RETURN1(true);
                true ->
                     %% Otherwise, we have a case of UPI changing from
                     %% one of these two situations:
@@ -1696,7 +1700,7 @@ projection_transition_is_sane(
                     NotUPI2 = (Down_list2 ++ Repairing_list2),
                     case lists:prefix(UPI_list1 -- NotUPI2, UPI_list2) of
                         true ->
-                            true;
+                            ?RETURN1(true);
                         false ->
                             %% Here's a possible failure scenario:
                             %% UPI_list1        -> UPI_list2
@@ -1712,30 +1716,34 @@ projection_transition_is_sane(
                             %% both, then those authors would not have allowed
                             %% a bad transition, so we will assume this
                             %% transition is OK.
+                            ?RETURN1(
                             lists:member(AuthorServer1, UPI_list1)
                             andalso
                             lists:member(AuthorServer2, UPI_list2)
+                            )
                     end
             end;
        true ->
-            true
+            ?RETURN1(true)
     end,
     true = lists:prefix(UPI_common_prefix, UPI_list1),
     true = lists:prefix(UPI_common_prefix, UPI_list2),
     UPI_1_suffix = UPI_list1 -- UPI_common_prefix,
     UPI_2_suffix = UPI_list2 -- UPI_common_prefix,
+    _ = ?RETURN1(yo),
 
     MoreCheckingP =
         RelativeToServer == undefined
         orelse
         not (lists:member(RelativeToServer, Down_list2) orelse
              lists:member(RelativeToServer, Repairing_list2)),
+    _ = ?RETURN1(yo),
     
     UPIs_are_disjointP = ordsets:is_disjoint(ordsets:from_list(UPI_list1),
                                              ordsets:from_list(UPI_list2)),
     case UPI_2_suffix -- UPI_list1 of
         [] ->
-            true;
+            ?RETURN1(true);
         [_|_] = _Added_by_2 ->
             if RetrospectiveP ->
                     %% Any servers added to the UPI must be added from the
@@ -1745,7 +1753,7 @@ projection_transition_is_sane(
                     %% projections!), and if we're under asymmetric
                     %% partition/churn, then we may not see the repairing
                     %% list.  So we will not check that condition here.
-                    true;
+                    ?RETURN1(true);
                not RetrospectiveP ->
                     %% We're not retrospective.  So, if some server was
                     %% added by to the UPI, then that means that it was
@@ -1754,14 +1762,14 @@ projection_transition_is_sane(
 %io:format(user, "g: UPI_list1=~w, UPI_list2=~w, UPI_2_suffix=~w, ",
 %          [UPI_list1, UPI_list2, UPI_2_suffix]),
 %io:format(user, "g", []),
-                    true = UPI_list1 == [] orelse
-                           UPIs_are_disjointP orelse
-                           (lists:last(UPI_list1) == AuthorServer2)
+                    ?RETURN1(true = UPI_list1 == [] orelse
+                             UPIs_are_disjointP orelse
+                             (lists:last(UPI_list1) == AuthorServer2) )
             end
     end,
 
     if not MoreCheckingP ->
-            ok;
+            ?RETURN1(ok);
         MoreCheckingP ->
             %% Where did elements in UPI_2_suffix come from?
             %% Only two sources are permitted.
@@ -1783,7 +1791,7 @@ projection_transition_is_sane(
             %% true?
             UPI_2_concat = (UPI_2_suffix_from_UPI1 ++ UPI_2_suffix_from_Repairing1),
             if UPI_2_suffix == UPI_2_concat ->
-                    ok;
+                    ?RETURN1(ok);
                true ->
                     %% 'make dialyzer' will believe that this can never succeed.
                     %% 'make dialyzer-test' will not complain, however.
@@ -1834,8 +1842,9 @@ projection_transition_is_sane(
                             %% itself, etc etc).
 
                             if UPIs_are_disjointP ->
-                                    true;
+                                    ?RETURN1(true);
                                true ->
+                                    ?RETURN1(todo),
                                     exit({todo, revisit, ?MODULE, ?LINE,
                                           [
                                            {oops_check_UPI_2_suffix, Oops_check_UPI_2_suffix},
@@ -1889,23 +1898,24 @@ projection_transition_is_sane(
                             SecondCase_p = ((UPI_2_suffix -- Repairing_list1)
                                             == []),
                             if FirstCase_p ->
-                                    true;
+                                    ?RETURN1(true);
                                SecondCase_p ->
-                                    true;
+                                    ?RETURN1(true);
                                UPIs_are_disjointP ->
                                     %% If there's no overlap at all between
                                     %% UPI_list1 & UPI_list2, then we're OK
                                     %% here.
-                                    true;
+                                    ?RETURN1(true);
                                true ->
                                     exit({upi_2_suffix_error, UPI_2_suffix})
                             end
                     end
             end
     end,
-    true
+    ?RETURN1(true)
  catch
      _Type:_Err ->
+         ?RETURN1(oops),
          S1 = machi_projection:make_summary(P1),
          S2 = machi_projection:make_summary(P2),
          Trace = erlang:get_stacktrace(),
@@ -2157,10 +2167,8 @@ simple_chain_state_transition_is_sane(UPI1, Repair1, UPI2) ->
     simple_chain_state_transition_is_sane(undefined, UPI1, Repair1,
                                           undefined, UPI2).
 
--define(RETURN(X), begin put(why, ?LINE), X end).
-
 simple_chain_state_transition_is_sane(Author1, UPI1, Repair1, Author2, UPI2) ->
-    erase(why),
+    put(why2, []),
     {KeepsDels, Orders} = mk(UPI1, Repair1, UPI2),
     NumKeeps = length([x || keep <- KeepsDels]),
     NumOrders = length(Orders),
@@ -2168,18 +2176,18 @@ simple_chain_state_transition_is_sane(Author1, UPI1, Repair1, Author2, UPI2) ->
               andalso Orders == lists:sort(Orders)
               andalso length(UPI2) == NumKeeps + NumOrders,
     if not Answer1 ->
-            ?RETURN(Answer1);
+            ?RETURN2(Answer1);
        true ->
             if Orders == [] -> % No repairing have joined UPI2
-                    ?RETURN(Answer1);
+                    ?RETURN2(Answer1);
                Author2 == undefined ->
-                    ?RETURN(Answer1);
+                    ?RETURN2(Answer1);
                Author2 /= undefined ->
                     case catch(lists:last(UPI1)) of
                         UPI1_tail when UPI1_tail == Author2 ->
-                            ?RETURN(true);
+                            ?RETURN2(true);
                         _ ->
-                            ?RETURN(false)
+                            ?RETURN2(false)
                     end
             end
     end.
@@ -2197,9 +2205,9 @@ chain_state_transition_is_sane(Author1, UPI1, Repair1, Author2, UPI2) ->
                                     false
                             end,
     if ToSelfOnly_p ->
-            true;
+            ?RETURN2(true);
        Disjoint_UPIs ->
-            true;
+            ?RETURN2(true);
        true ->
             simple_chain_state_transition_is_sane(Author1, UPI1, Repair1,
                                                   Author2, UPI2)
