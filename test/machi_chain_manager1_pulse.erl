@@ -280,7 +280,7 @@ dump_state() ->
 
 prop_pulse() ->
     ?FORALL({Cmds0, Seed}, {non_empty(commands(?MODULE)), pulse:seed()},
-    ?IMPLIES(1 < length(Cmds0) andalso length(Cmds0) < 6,
+    ?IMPLIES(1 < length(Cmds0) andalso length(Cmds0) < 10,
     begin
         ok = shutdown_hard(),
         %% PULSE can be really unfair, of course, including having exec_ticks
