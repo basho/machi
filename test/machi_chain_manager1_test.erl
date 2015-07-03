@@ -74,9 +74,9 @@ unanimous_report(Epoch, Namez) ->
                       _Else ->
                           not_in_this_epoch
                   end} || {FLUName, FLU} <- Namez],
-    unanimous_report2(Epoch, FLU_Projs).
+    unanimous_report2(FLU_Projs).
 
-unanimous_report2(Epoch, FLU_Projs) ->
+unanimous_report2(FLU_Projs) ->
     ProjsSumms = [{FLU, if is_tuple(P) ->
                                 Summ = machi_projection:make_summary(P),
                                 lists:flatten(io_lib:format("~w", [Summ]));
@@ -141,64 +141,23 @@ chain_to_projection(MyName, Epoch, UPI_list, Repairing_list, All_list) ->
                          All_list -- (UPI_list ++ Repairing_list),
                          UPI_list, Repairing_list, [{artificial_by, ?MODULE}]).
 
-simple_chain_state_transition_is_sane(UPI1, Repair1, UPI2) ->
-    {KeepsDels, Orders} = mk(UPI1, Repair1, UPI2),
-    NumKeeps = length([x || keep <- KeepsDels]),
-    NumOrders = length(Orders),
-    false == lists:member(error, Orders)
-        andalso Orders == lists:sort(Orders)
-        andalso length(UPI2) == NumKeeps + NumOrders.
+-ifndef(PULSE).
 
-mk(UPI1, Repair1, UPI2) ->
-    mk(UPI1, Repair1, UPI2, []).
+simple_chain_state_transition_is_sane_test_() ->
+    {timeout, 300, fun() -> simple_chain_state_transition_is_sane_test2() end}.
 
-mk([X|UPI1], Repair1, [X|UPI2], Acc) ->
-    mk(UPI1, Repair1, UPI2, [keep|Acc]);
-mk([X|UPI1], Repair1, UPI2, Acc) ->
-    mk(UPI1, Repair1, UPI2 -- [X], [del|Acc]);
-mk([], [], [], Acc) ->
-    {lists:reverse(Acc), []};
-mk([], Repair1, UPI2, Acc) ->
-    {lists:reverse(Acc), mk_order(UPI2, Repair1)}.
-
-mk_order(UPI2, Repair1) ->
-    R1 = length(Repair1),
-    Repair1_order_d = orddict:from_list(lists:zip(Repair1, lists:seq(1, R1))),
-    UPI2_order = [case orddict:find(X, Repair1_order_d) of
-                      {ok, Idx} -> Idx;
-                      error     -> error
-                  end || X <- UPI2],
-    UPI2_order.
-
-perms([]) -> [[]];
-perms(L)  -> [[H|T] || H <- L, T <- perms(L--[H])].
-
-combinations(L) ->
-    lists:usort(perms(L) ++ lists:append([ combinations(L -- [X]) || X <- L])).
-
-ordered_combinations(Master) ->
-    [L || L <- combinations(Master), is_ordered(L, Master)].
-
-is_ordered(L, Reference) ->
-    L_order = mk_order(L, Reference),
-    lists:all(fun(X) -> is_integer(X) end, L_order) andalso
-        L_order == lists:sort(L_order).
-
-mk_order_is_sane_test_() ->
-    {timeout, 300, fun() -> mk_order_is_sane_test2() end}.
-
-mk_order_is_sane_test2() ->
+simple_chain_state_transition_is_sane_test2() ->
     %% All: A list of all FLUS for a particular test
     %% UPI1: some combination of All that represents UPI1
     %% Repair1: Some combination of (All -- UP1) that represents Repairing1
-    %% ... then we test check_sane_func_with_upi_and_repair() with all
+    %% ... then we test check_simple_chain_state_transition_is_sane() with all
     %% possible UPI1 and Repair1.
-    [true = check_sane_func_with_upi_and_repair(UPI1, Repair1) ||
+    [true = check_simple_chain_state_transition_is_sane(UPI1, Repair1) ||
         %% The five elements below runs on my MacBook Pro in about 4.8 seconds
         %% All <- [ [a], [a,b], [a,b,c], [a,b,c,d], [a,b,c,d,e] ],
         All <- [ [a], [a,b], [a,b,c], [a,b,c,d] ],
-        UPI1 <- combinations(All),
-        Repair1 <- combinations(All -- UPI1)].
+        UPI1 <- machi_util:combinations(All),
+        Repair1 <- machi_util:combinations(All -- UPI1)].
 
 %% Given a UPI1 and Repair1 list, we calculate all possible good UPI2
 %% lists.  For all good {UPI1, Repair1} -> UPI2 transitions, then the
@@ -210,42 +169,87 @@ mk_order_is_sane_test2() ->
 %% list of all possible UPI2 transitions, just to demonstrate that
 %% adding an extra element/participant/thingie is never sane.
 
-check_sane_func_with_upi_and_repair([], []) ->
+check_simple_chain_state_transition_is_sane([], []) ->
     true;
-check_sane_func_with_upi_and_repair(UPI1, Repair1) ->
-    Good_UPI2s = [ X ++ Y || X <- ordered_combinations(UPI1),
-                             Y <- ordered_combinations(Repair1)],
-    All_UPI2s = combinations(lists:usort(UPI1 ++ Repair1) ++ [bogus]),
+check_simple_chain_state_transition_is_sane(UPI1, Repair1) ->
+    Good_UPI2s = [ X ++ Y || X <- machi_util:ordered_combinations(UPI1),
+                             Y <- machi_util:ordered_combinations(Repair1)],
+    All_UPI2s = machi_util:combinations(lists:usort(UPI1 ++ Repair1) ++
+                                            [bogus]),
 
-    [true = simple_chain_state_transition_is_sane(UPI1, Repair1, UPI2) ||
+    [true = ?MGR:simple_chain_state_transition_is_sane(UPI1, Repair1, UPI2) ||
         UPI2 <- Good_UPI2s],
-    [false = simple_chain_state_transition_is_sane(UPI1, Repair1, UPI2) ||
+    [false = ?MGR:simple_chain_state_transition_is_sane(UPI1, Repair1, UPI2) ||
         UPI2 <- (All_UPI2s -- Good_UPI2s)],
-
-    All = UPI1 ++ Repair1,
-    Me = hd(All),
-    MembersDict = orddict:from_list([{X, #p_srvr{name=X}} || X <- All]),
-    [true = begin
-         Down1 = All -- (UPI1 ++ Repair1),
-         Repair2 = [],
-         Down2 = All -- (UPI2 ++ Repair2),
-         P1 = machi_projection:new(1, Me, MembersDict,
-                                   Down1, UPI1, Repair1, []),
-         P2 = machi_projection:new(2, Me, MembersDict,
-                                   Down2, UPI2, Repair2, []),
-         QQ = machi_chain_manager1:projection_transition_is_sane(P1, P2, Me,
-                                                                 false),
-         if QQ /= true ->
-                 io:format(user, "QQ ~p\n", [QQ]);
-            true ->
-                 ok
-         end,
-         QQ
-     end || UPI2 <- Good_UPI2s],
 
     true.
 
--ifndef(PULSE).
+-ifdef(EQC).
+
+smoke_chain_state_transition_is_sane_test() ->
+    false = ?MGR:chain_state_transition_is_sane(a, [a,b], [c,d],
+                                                f, [e]),
+    true  = ?MGR:chain_state_transition_is_sane(a, [a,b], [c,d],
+                                                e, [e]),
+    ok.
+
+eqc_chain_state_transition_is_sane_test_() ->
+    Time = 5,
+    {timeout, 3*Time, fun() -> eqc_chain_state_transition_is_sane_test2(Time) end}.
+
+eqc_chain_state_transition_is_sane_test2(Time) ->
+    eqc:quickcheck(
+      eqc:testing_time(Time, ?QC_OUT(prop_chain_state_transition_is_sane()))).
+
+some(L) ->
+    ?LET(L2, list(oneof(L)),
+         dedupe(L2)).
+
+dedupe(L) ->
+    dedupe(L, []).
+
+dedupe([H|T], Seen) ->
+    case lists:member(H, Seen) of
+        false ->
+            [H|dedupe(T, [H|Seen])];
+        true ->
+            dedupe(T, Seen)
+    end;
+dedupe([], _) ->
+    [].
+
+prop_chain_state_transition_is_sane() ->
+    %% ?FORALL(All, nonempty(list([a,b,c,d,e])),
+    ?FORALL(All, non_empty(some([a,b,c])),
+    ?FORALL({Author1, UPI1, Repair1x, Author2, UPI2, Repair2x},
+         {elements(All),some(All),some(All),elements(All),some(All),some(All)},
+    ?IMPLIES(length(lists:usort(UPI1 ++ Repair1x)) > 0 andalso
+             length(lists:usort(UPI2 ++ Repair2x)) > 0,
+    begin
+        io:format(user, "All ~p\n", [All]),
+        MembersDict = orddict:from_list([{X, #p_srvr{name=X}} || X <- All]),
+        Repair1 = Repair1x -- UPI1,
+        Down1 = All -- (UPI1 ++ Repair1),
+        Repair2 = Repair2x -- UPI2,
+        Down2 = All -- (UPI2 ++ Repair2),
+        P1 = machi_projection:new(1, Author1, MembersDict,
+                                  Down1, UPI1, Repair1, []),
+        P2 = machi_projection:new(2, Author2, MembersDict,
+                                  Down2, UPI2, Repair2, []),
+        Old_res = machi_chain_manager1:projection_transition_is_sane(
+                       P1, P2, Author1, false),
+        Old_p = case Old_res of true -> true;
+                                _    -> false
+                end,
+        New_res = ?MGR:chain_state_transition_is_sane(Author1, UPI1, Repair1,
+                                                      Author2, UPI2),
+        New_p = New_res,
+        ?WHENFAIL(io:format(user, "New_res: ~p\nOld_res: ~p\n",
+                            [New_res, Old_res]),
+                  Old_p == New_p)
+    end))).
+
+-endif. % EQC
 
 smoke0_test() ->
     {ok, _} = machi_partition_simulator:start_link({1,2,3}, 50, 50),
@@ -377,22 +381,22 @@ foo_TODO_UNFINISHED_KEEP_PERHAPS_unanimous_report_test() ->
     Rep5 = [],
     P5 = machi_projection:new(E5, a, MembersDict, [], UPI5, Rep5, []),
     {ok_disjoint, [{agreed_membership, {UPI5, Rep5}}]} =
-        unanimous_report2(E5, [{a, P5}, {b, P5}]),
+        unanimous_report2([{a, P5}, {b, P5}]),
     {ok_disjoint, [{not_agreed, _}]} =
-        unanimous_report2(E5, [{a, not_in_this_epoch}, {b, P5}]),
+        unanimous_report2([{a, not_in_this_epoch}, {b, P5}]),
     {ok_disjoint, [{not_agreed, _}]} =
-        unanimous_report2(E5, [{a, P5}, {b, not_in_this_epoch}]),
+        unanimous_report2([{a, P5}, {b, not_in_this_epoch}]),
 
     P5_other_csum = machi_projection:update_checksum(
                     P5#projection_v1{author_server=b}),
     {ok_disjoint, [{not_agreed, _}]} =
-        unanimous_report2(E5, [{a, P5}, {b, P5_other_csum}]),
+        unanimous_report2([{a, P5}, {b, P5_other_csum}]),
 
     UPI5_b = [a],
     Rep5_b = [b],
     P5_b = machi_projection:new(E5, b, MembersDict, [], UPI5_b, Rep5_b, []),
     XX =
-        unanimous_report2(E5, [{a, P5}, {b, P5_b}]),
+        unanimous_report2([{a, P5}, {b, P5_b}]),
 
     io:format(user, "\nXX ~p\n", [XX]).
 

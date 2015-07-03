@@ -98,7 +98,11 @@
          terminate/2, code_change/3]).
 
 -export([make_chmgr_regname/1, projection_transitions_are_sane/2,
-         inner_projection_exists/1, inner_projection_or_self/1]).
+         inner_projection_exists/1, inner_projection_or_self/1,
+         simple_chain_state_transition_is_sane/3,
+         chain_state_transition_is_sane/5]).
+%% Exports so that EDoc docs generated for these internal funcs.
+-export([mk/3]).
 
 -ifdef(TEST).
 
@@ -2122,3 +2126,70 @@ remember_partition_hack(FLU) ->
     put(remember_partition_hack, [FLU|get(remember_partition_hack)]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% @doc A simple technique for checking chain state transition safety.
+%%
+%% Math tells us that any change state `UPI1' plus `Repair1' to state
+%% `UPI2' is OK as long as `UPI2' is a concatenation of some
+%% order-preserving combination from `UPI1' with some order-preserving
+%% combination from `Repair1'.
+%%
+%% ```
+%%   Good_UPI2s = [ X ++ Y || X <- machi_util:ordered_combinations(UPI1),
+%%                            Y <- machi_util:ordered_combinations(Repair1)]'''
+%%
+%% Rather than creating that list and then checking if `UPI2' is in
+%% it, we try a `diff'-like technique to check for basic state
+%% transition safety.  See docs for {@link mk/3} for more detail.
+%%
+%% ```
+%% 2> machi_chain_manager1:mk([a,b], [], [a]).
+%% {[keep,del],[]}        %% good transition
+%% 3> machi_chain_manager1:mk([a,b], [], [b,a]).
+%% {[del,keep],[]}        %% bad transition: too few 'keep' for UPI2's length 2
+%% 4> machi_chain_manager1:mk([a,b], [c,d,e], [a,d]).
+%% {[keep,del],[2]}       %% good transition
+%% 5> machi_chain_manager1:mk([a,b], [c,d,e], [a,bogus]).
+%% {[keep,del],[error]}   %% bad transition: 'bogus' not in Repair1'''
+
+simple_chain_state_transition_is_sane(UPI1, Repair1, UPI2) ->
+    {KeepsDels, Orders} = mk(UPI1, Repair1, UPI2),
+    NumKeeps = length([x || keep <- KeepsDels]),
+    NumOrders = length(Orders),
+    false == lists:member(error, Orders)
+        andalso Orders == lists:sort(Orders)
+        andalso length(UPI2) == NumKeeps + NumOrders.
+
+chain_state_transition_is_sane(Author1, UPI1, Repair1, Author2, UPI2) ->
+    ToSelfOnly_p = if UPI2 == [Author2] -> true;
+                      true              -> false
+                   end,
+    if ToSelfOnly_p ->
+            true;
+       true ->
+            simple_chain_state_transition_is_sane(UPI1, Repair1, UPI2)
+    end.
+
+%% @doc Create a 2-tuple that describes how `UPI1' + `Repair1' are
+%%      transformed into `UPI2' in a chain state change.
+%%
+%% The 1st part of the 2-tuple is a list of `keep' and `del' instructions,
+%% relative to the items in UPI1 and whether they are present (`keep') or
+%% absent (`del') in `UPI2'.
+%%
+%% The 2nd part of the 2-tuple is `list(non_neg_integer()|error)' that
+%% describes the relative order of items in `Repair1' that appear in
+%% `UPI2'.  The `error' atom is used to denote items not present in
+%% `Repair1'.
+
+mk(UPI1, Repair1, UPI2) ->
+    mk(UPI1, Repair1, UPI2, []).
+
+mk([X|UPI1], Repair1, [X|UPI2], Acc) ->
+    mk(UPI1, Repair1, UPI2, [keep|Acc]);
+mk([X|UPI1], Repair1, UPI2, Acc) ->
+    mk(UPI1, Repair1, UPI2 -- [X], [del|Acc]);
+mk([], [], [], Acc) ->
+    {lists:reverse(Acc), []};
+mk([], Repair1, UPI2, Acc) ->
+    {lists:reverse(Acc), machi_util:mk_order(UPI2, Repair1)}.
