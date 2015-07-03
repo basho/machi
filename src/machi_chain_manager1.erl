@@ -895,14 +895,25 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
             {_, P_newprop3_flap_count} when P_newprop3_flap_count >= FlapLimit ->
                 AllHosed = get_all_hosed(P_newprop3),
                 {P_i, S_i} = calc_projection(S3, MyName, AllHosed),
+                %% The inner projection will have a fake author, which
+                %% everyone will agree is the largest UPI member's
+                %% name.
+                BiggestUPIMember =
+                    if P_i#projection_v1.upi == [] ->
+                            %% Oops, ok, fall back to author
+                            P_i#projection_v1.author_server;
+                       true ->
+                            lists:last(lists:sort(P_i#projection_v1.upi))
+                    end,
+                P_i2 = P_i#projection_v1{author_server=BiggestUPIMember},
                 P_inner = case lists:member(MyName, AllHosed) of
                               false ->
-                                  P_i;
+                                  P_i2;
                               true ->
-                                  P_i#projection_v1{
+                                  P_i2#projection_v1{
                                     upi=[MyName],
                                     repairing=[],
-                                    down=P_i#projection_v1.all_members
+                                    down=P_i2#projection_v1.all_members
                                          -- [MyName]}
                           end,
                 FinalInnerEpoch =
