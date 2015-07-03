@@ -187,6 +187,9 @@ check_simple_chain_state_transition_is_sane(UPI1, Repair1) ->
 -ifdef(EQC).
 
 prop_compare_legacy_with_v2_chain_transition_check() ->
+    prop_compare_legacy_with_v2_chain_transition_check(primitive).
+
+prop_compare_legacy_with_v2_chain_transition_check(Style) ->
     %% ?FORALL(All, nonempty(list([a,b,c,d,e])),
     ?FORALL(All, non_empty(some([a,b,c])),
     ?FORALL({Author1, UPI1, Repair1x, Author2, UPI2, Repair2x},
@@ -208,10 +211,20 @@ prop_compare_legacy_with_v2_chain_transition_check() ->
         Old_p = case Old_res of true -> true;
                                 _    -> false
                 end,
-        New_res = ?MGR:chain_state_transition_is_sane(Author1, UPI1, Repair1,
-                                                      Author2, UPI2),
-        New_p = New_res,
-        (catch ets:insert(count, {{Author1, UPI1, Repair1, Author2, UPI2, Repair2}, true})),
+        case Style of
+            primitive ->
+                New_res = ?MGR:chain_state_transition_is_sane(
+                             Author1, UPI1, Repair1, Author2, UPI2),
+                New_p = New_res;
+            whole ->
+                New_res = machi_chain_manager1:projection_transition_is_sane(
+                            P1, P2, Author1, false),
+                New_p = case New_res of true -> true;
+                            _    -> false
+                        end
+        end,
+        (catch ets:insert(count,
+                    {{Author1, UPI1, Repair1, Author2, UPI2, Repair2}, true})),
         ?WHENFAIL(io:format(user,
                             "Old_res (~p): ~p\nNew_res: ~p (why line ~p)\n",
                             [catch get(why1), Old_res, New_res, catch get(why2)]),

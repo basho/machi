@@ -1616,9 +1616,79 @@ projection_transition_is_sane_retrospective(P1, P2, RelativeToServer) ->
     projection_transition_is_sane(P1, P2, RelativeToServer, true).
 -endif. % TEST
 
-projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
-    chain_mgr_legacy:projection_transition_is_sane(
-      P1, P2, RelativeToServer, RetrospectiveP).
+projection_transition_is_sane(
+  #projection_v1{epoch_number=Epoch1,
+              epoch_csum=CSum1,
+              creation_time=CreationTime1,
+              author_server=AuthorServer1,
+              all_members=All_list1,
+              down=Down_list1,
+              upi=UPI_list1,
+              repairing=Repairing_list1,
+              dbg=Dbg1} = P1,
+  #projection_v1{epoch_number=Epoch2,
+              epoch_csum=CSum2,
+              creation_time=CreationTime2,
+              author_server=AuthorServer2,
+              all_members=All_list2,
+              down=Down_list2,
+              upi=UPI_list2,
+              repairing=Repairing_list2,
+              dbg=Dbg2} = P2,
+  RelativeToServer, RetrospectiveP) ->
+ try
+    put(why2, []),
+    %% General notes:
+    %%
+    %% I'm making no attempt to be "efficient" here.  All of these data
+    %% structures are small, and the funcs aren't called zillions of times per
+    %% second.
+
+    true = is_integer(Epoch1) andalso is_integer(Epoch2),
+    true = is_binary(CSum1) andalso is_binary(CSum2),
+    {_,_,_} = CreationTime1,
+    {_,_,_} = CreationTime2,
+    true = is_atom(AuthorServer1) andalso is_atom(AuthorServer2), % todo type may change?
+    true = is_list(All_list1) andalso is_list(All_list2),
+    true = is_list(Down_list1) andalso is_list(Down_list2),
+    true = is_list(UPI_list1) andalso is_list(UPI_list2),
+    true = is_list(Repairing_list1) andalso is_list(Repairing_list2),
+    true = is_list(Dbg1) andalso is_list(Dbg2),
+
+    true = Epoch2 > Epoch1,
+    All_list1 = All_list2,                 % todo will probably change
+
+    %% No duplicates
+    true = lists:sort(Down_list2) == lists:usort(Down_list2),
+    true = lists:sort(UPI_list2) == lists:usort(UPI_list2),
+    true = lists:sort(Repairing_list2) == lists:usort(Repairing_list2),
+
+    %% Disjoint-ness
+    true = lists:sort(All_list2) == lists:sort(Down_list2 ++ UPI_list2 ++
+                                                   Repairing_list2),
+    [] = [X || X <- Down_list2, not lists:member(X, All_list2)],
+    [] = [X || X <- UPI_list2, not lists:member(X, All_list2)],
+    [] = [X || X <- Repairing_list2, not lists:member(X, All_list2)],
+    DownS2 = sets:from_list(Down_list2),
+    UPIS2 = sets:from_list(UPI_list2),
+    RepairingS2 = sets:from_list(Repairing_list2),
+    true = sets:is_disjoint(DownS2, UPIS2),
+    true = sets:is_disjoint(DownS2, RepairingS2),
+    true = sets:is_disjoint(UPIS2, RepairingS2),
+
+    ?RETURN2(
+       chain_state_transition_is_sane(AuthorServer1, UPI_list1, Repairing_list1,
+                                      AuthorServer2, UPI_list2))
+ catch
+     _Type:_Err ->
+         ?RETURN2(oops),
+         S1 = machi_projection:make_summary(P1),
+         S2 = machi_projection:make_summary(P2),
+         Trace = erlang:get_stacktrace(),
+         {err, _Type, _Err, from, S1, to, S2, relative_to, RelativeToServer,
+          history, (catch lists:sort([no_history])),
+          stack, Trace}
+ end.
 
 sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list) ->
     USec = calc_sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list),
@@ -1865,11 +1935,18 @@ simple_chain_state_transition_is_sane(Author1, UPI1, Repair1, Author2, UPI2) ->
     if not Answer1 ->
             ?RETURN2(Answer1);
        true ->
-            if Orders == [] -> % No repairing have joined UPI2
+            if Orders == [] ->
+                    %% No repairing have joined UPI2. Keep original answer.
                     ?RETURN2(Answer1);
                Author2 == undefined ->
+                    %% At least one Repairing1 element is now in UPI2.
+                    %% We need Author2 to make better decision.  Go
+                    %% with what we know, silly caller for not giving
+                    %% us what we need.
                     ?RETURN2(Answer1);
                Author2 /= undefined ->
+                    %% At least one Repairing1 element is now in UPI2.
+                    %% We permit only the tail to author such a UPI2.
                     case catch(lists:last(UPI1)) of
                         UPI1_tail when UPI1_tail == Author2 ->
                             ?RETURN2(true);
@@ -1891,9 +1968,16 @@ chain_state_transition_is_sane(Author1, UPI1, Repair1, Author2, UPI2) ->
                                 _ ->
                                     false
                             end,
+    %% This if statement contains the only exceptions that we make to
+    %% the judgement of simple_chain_state_transition_is_sane().
     if ToSelfOnly_p ->
+            %% The transition is to UPI2=[Author2].
+            %% For AP mode, this transition is always safe.
             ?RETURN2(true);
        Disjoint_UPIs ->
+            %% The transition from UPI1 -> UPI2 where the two are
+            %% disjoint/no FLUs in common.
+            %% For AP mode, this transition is always safe.
             ?RETURN2(true);
        true ->
             simple_chain_state_transition_is_sane(Author1, UPI1, Repair1,
