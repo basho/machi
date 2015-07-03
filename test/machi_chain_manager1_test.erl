@@ -186,23 +186,37 @@ check_simple_chain_state_transition_is_sane(UPI1, Repair1) ->
 
 -ifdef(EQC).
 
-smoke_chain_state_transition_is_sane_test() ->
-    %% True due to disjoint UPIs.
-    %% false = ?MGR:chain_state_transition_is_sane(a, [a,b], [c,d],
-    %%                                             f, [e]),
-    true  = ?MGR:chain_state_transition_is_sane(a, [a,b], [c,d],
-                                                e, [e]),
-    ok.
-
-eqc_chain_state_transition_is_sane_test_() ->
-    Time = 5,
-    {timeout, 3*Time, fun() -> eqc_chain_state_transition_is_sane_test2(Time) end}.
-
-eqc_chain_state_transition_is_sane_test2(Time) ->
-    eqc:quickcheck(
-      eqc:testing_time(
-        Time,
-        ?QC_OUT(prop_compare_legacy_with_new_chain_transition_check()))).
+prop_compare_legacy_with_v2_chain_transition_check() ->
+    %% ?FORALL(All, nonempty(list([a,b,c,d,e])),
+    ?FORALL(All, non_empty(some([a,b,c])),
+    ?FORALL({Author1, UPI1, Repair1x, Author2, UPI2, Repair2x},
+         {elements(All),some(All),some(All),elements(All),some(All),some(All)},
+    ?IMPLIES(length(lists:usort(UPI1 ++ Repair1x)) > 0 andalso
+             length(lists:usort(UPI2 ++ Repair2x)) > 0,
+    begin
+        MembersDict = orddict:from_list([{X, #p_srvr{name=X}} || X <- All]),
+        Repair1 = Repair1x -- UPI1,
+        Down1 = All -- (UPI1 ++ Repair1),
+        Repair2 = Repair2x -- UPI2,
+        Down2 = All -- (UPI2 ++ Repair2),
+        P1 = machi_projection:new(1, Author1, MembersDict,
+                                  Down1, UPI1, Repair1, []),
+        P2 = machi_projection:new(2, Author2, MembersDict,
+                                  Down2, UPI2, Repair2, []),
+        Old_res = chain_mgr_legacy:projection_transition_is_sane(
+                       P1, P2, Author1, false),
+        Old_p = case Old_res of true -> true;
+                                _    -> false
+                end,
+        New_res = ?MGR:chain_state_transition_is_sane(Author1, UPI1, Repair1,
+                                                      Author2, UPI2),
+        New_p = New_res,
+        (catch ets:insert(count, {{Author1, UPI1, Repair1, Author2, UPI2, Repair2}, true})),
+        ?WHENFAIL(io:format(user,
+                            "Old_res (~p): ~p\nNew_res: ~p (why line ~p)\n",
+                            [catch get(why1), Old_res, New_res, catch get(why2)]),
+                  Old_p == New_p)
+    end))).
 
 some(L) ->
     ?LET(L2, list(oneof(L)),
@@ -222,41 +236,7 @@ dedupe([], _) ->
     [].
 
 make_prop_ets() ->
-    ETS = ets:new(count, [named_table, set, private]).
-
-prop_compare_legacy_with_new_chain_transition_check() ->
-    %% ?FORALL(All, nonempty(list([a,b,c,d,e])),
-    ?FORALL(All, non_empty(some([a,b,c])),
-    ?FORALL({Author1, UPI1, Repair1x, Author2, UPI2, Repair2x},
-         {elements(All),some(All),some(All),elements(All),some(All),some(All)},
-    ?IMPLIES(length(lists:usort(UPI1 ++ Repair1x)) > 0 andalso
-             length(lists:usort(UPI2 ++ Repair2x)) > 0,
-    begin
-        MembersDict = orddict:from_list([{X, #p_srvr{name=X}} || X <- All]),
-        Repair1 = Repair1x -- UPI1,
-        Down1 = All -- (UPI1 ++ Repair1),
-        Repair2 = Repair2x -- UPI2,
-        Down2 = All -- (UPI2 ++ Repair2),
-        P1 = machi_projection:new(1, Author1, MembersDict,
-                                  Down1, UPI1, Repair1, []),
-        P2 = machi_projection:new(2, Author2, MembersDict,
-                                  Down2, UPI2, Repair2, []),
-        Old_res = machi_chain_manager1:projection_transition_is_sane(
-                       P1, P2, Author1, false),
-        Old_p = case Old_res of true -> true;
-                                _    -> false
-                end,
-        New_res = ?MGR:chain_state_transition_is_sane(Author1, UPI1, Repair1,
-                                                      Author2, UPI2),
-        New_p = New_res,
-        (catch ets:insert(count, {{Author1, UPI1, Repair1, Author2, UPI2, Repair2}, true})),
-        ?WHENFAIL(io:format(user, "Old_res (~p): ~p\nNew_res: ~p (why line ~p)\n",
-                            [get(why1), Old_res, New_res, get(why2)]),
-                  %% Old_p == New_p)
-                  ((Old_p == New_p) orelse
-                   (Old_p == true andalso New_p == false) %% BOGUS DELETEME temphack!!!!!!!!!!!!!!!!
-                  ))
-    end))).
+    ets:new(count, [named_table, set, public]).
 
 -endif. % EQC
 
