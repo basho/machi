@@ -1337,13 +1337,37 @@ react_to_env_C100(P_newprop, P_latest,
     I_am_UPI_in_newprop_p = lists:member(MyName, P_newprop#projection_v1.upi),
     I_am_Repairing_in_latest_p = lists:member(MyName,
                                              P_latest#projection_v1.repairing),
-    Current_sane_p = projection_transition_is_sane(P_current, P_latest,
-                                                   MyName),
+    Sane_p = fun(X, Y) ->
+                     case projection_transition_is_sane(X, Y, MyName) of
+                         true -> true;
+                         _    -> false
+                     end end,
+    Current_sane_p = Sane_p(P_current, P_latest),
+    %% Inner = fun(P) -> case inner_projection_exists(P) of true  -> t;
+    %%                                                      false -> f
+    %%                   end end,
+    %% io:format(user, "~w:~w.~w,", [MyName, Inner(P_current), Inner(P_latest)]), timer:sleep(50),
+    Inner_sane_p =
+        case inner_projection_exists(P_current)
+            andalso
+            inner_projection_exists(P_latest) of
+            true ->
+                P_currentIx = inner_projection_or_self(P_current),
+                P_currentIxE = P_currentIx#projection_v1.epoch_number,
+                P_currentI = P_currentIx#projection_v1{epoch_number=P_currentIxE-1},
+                P_latestI = inner_projection_or_self(P_latest),
+                io:format(user, "i=~w>?i=~w,", [P_currentI#projection_v1.epoch_number, P_latestI#projection_v1.epoch_number]),
+                Sane_p(P_currentI, P_latestI);
+            false ->
+                true
+        end,
     put(xxx_hack, [{p_current, machi_projection:make_summary(P_current)},
                    {epoch_compare, P_latest#projection_v1.epoch_number > P_current#projection_v1.epoch_number},
                    {i_am_upi_in_newprop_p, I_am_UPI_in_newprop_p},
-                   {i_am_repairing_in_latest_p, I_am_Repairing_in_latest_p}]),
-    case Current_sane_p of
+                   {i_am_repairing_in_latest_p, I_am_Repairing_in_latest_p},
+                   {current_sane_p, Current_sane_p},
+                   {inner_sane_p, Inner_sane_p}]),
+    case Current_sane_p andalso Inner_sane_p of
         _ when P_current#projection_v1.epoch_number == 0 ->
             %% Epoch == 0 is reserved for first-time, just booting conditions.
             ?REACT({c100, ?LINE, [first_write]}),
@@ -1628,6 +1652,18 @@ projection_transition_is_sane_retrospective(P1, P2, RelativeToServer) ->
 -endif. % TEST
 
 projection_transition_is_sane(
+  #projection_v1{epoch_number=Epoch1} = P1,
+  #projection_v1{epoch_number=Epoch2} = P2,
+  RelativeToServer, RetrospectiveP) ->
+    case projection_transition_is_sane_except_epoch(
+           P1, P2, RelativeToServer, RetrospectiveP) of
+        true ->
+            Epoch2 > Epoch1;
+        Else ->
+            Else
+    end.
+
+projection_transition_is_sane_except_epoch(
   #projection_v1{epoch_number=Epoch1,
               epoch_csum=CSum1,
               creation_time=CreationTime1,
@@ -1666,7 +1702,6 @@ projection_transition_is_sane(
     true = is_list(Repairing_list1) andalso is_list(Repairing_list2),
     true = is_list(Dbg1) andalso is_list(Dbg2),
 
-    true = Epoch2 > Epoch1,
     All_list1 = All_list2,                 % todo will probably change
 
     %% No duplicates
