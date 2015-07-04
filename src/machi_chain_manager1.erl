@@ -1049,9 +1049,13 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
             %% guarantee (yet?) that the [c,d] chain will be the UPI basis
             %% for repairs when the partition is healed: the quickest author
             %% after the healing will make that choice for everyone.
+            %%
             %% TODO: Perhaps that quickest author should consult all of the
             %% other private stores, check their inner, and if there is a
             %% higher rank there, then goto C200 for a wait-and-see cycle?
+            %% TODO: 2015-07-04 The suggestion in TODO above appears very good.
+            %%       Also, at least some of the time, MyName is included
+            %%       in the down list, quite odd!  Go investigate that.
 
             P_inner2A = inner_projection_or_self(P_current),
             P_inner2B =
@@ -1337,37 +1341,13 @@ react_to_env_C100(P_newprop, P_latest,
     I_am_UPI_in_newprop_p = lists:member(MyName, P_newprop#projection_v1.upi),
     I_am_Repairing_in_latest_p = lists:member(MyName,
                                              P_latest#projection_v1.repairing),
-    Sane_p = fun(X, Y) ->
-                     case projection_transition_is_sane(X, Y, MyName) of
-                         true -> true;
-                         _    -> false
-                     end end,
-    Current_sane_p = Sane_p(P_current, P_latest),
-    %% Inner = fun(P) -> case inner_projection_exists(P) of true  -> t;
-    %%                                                      false -> f
-    %%                   end end,
-    %% io:format(user, "~w:~w.~w,", [MyName, Inner(P_current), Inner(P_latest)]), timer:sleep(50),
-    Inner_sane_p =
-        case inner_projection_exists(P_current)
-            andalso
-            inner_projection_exists(P_latest) of
-            true ->
-                P_currentIx = inner_projection_or_self(P_current),
-                P_currentIxE = P_currentIx#projection_v1.epoch_number,
-                P_currentI = P_currentIx#projection_v1{epoch_number=P_currentIxE-1},
-                P_latestI = inner_projection_or_self(P_latest),
-                io:format(user, "i=~w>?i=~w,", [P_currentI#projection_v1.epoch_number, P_latestI#projection_v1.epoch_number]),
-                Sane_p(P_currentI, P_latestI);
-            false ->
-                true
-        end,
+    Sane = projection_transition_is_sane(P_current, P_latest, MyName),
     put(xxx_hack, [{p_current, machi_projection:make_summary(P_current)},
                    {epoch_compare, P_latest#projection_v1.epoch_number > P_current#projection_v1.epoch_number},
                    {i_am_upi_in_newprop_p, I_am_UPI_in_newprop_p},
                    {i_am_repairing_in_latest_p, I_am_Repairing_in_latest_p},
-                   {current_sane_p, Current_sane_p},
-                   {inner_sane_p, Inner_sane_p}]),
-    case Current_sane_p andalso Inner_sane_p of
+                   {sane_p, Sane}]),
+    case Sane of
         _ when P_current#projection_v1.epoch_number == 0 ->
             %% Epoch == 0 is reserved for first-time, just booting conditions.
             ?REACT({c100, ?LINE, [first_write]}),
@@ -1643,27 +1623,51 @@ projection_transitions_are_sane([P1, P2|T], RelativeToServer, RetrospectiveP) ->
             Else
     end.
 
-projection_transition_is_sane(P1, P2, RelativeToServer) ->
-    projection_transition_is_sane(P1, P2, RelativeToServer, false).
-
 -ifdef(TEST).
 projection_transition_is_sane_retrospective(P1, P2, RelativeToServer) ->
     projection_transition_is_sane(P1, P2, RelativeToServer, true).
 -endif. % TEST
 
-projection_transition_is_sane(
+projection_transition_is_sane(P1, P2, RelativeToServer) ->
+    projection_transition_is_sane(P1, P2, RelativeToServer, false).
+
+projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
+    case projection_transition_is_sane_with_si_epoch(
+           P1, P2, RelativeToServer, RetrospectiveP) of
+        true ->
+            HasInner1 = inner_projection_exists(P1),
+            HasInner2 = inner_projection_exists(P2),
+            if HasInner1 orelse HasInner2 ->
+                    Inner1 = inner_projection_or_self(P1),
+                    Inner2 = inner_projection_or_self(P2),
+                    if HasInner1 andalso HasInner2 ->
+                            projection_transition_is_sane_except_si_epoch(
+                              Inner1, Inner2, RelativeToServer, RetrospectiveP);
+                       true ->
+                            projection_transition_is_sane_with_si_epoch(
+                              Inner1, Inner2, RelativeToServer, RetrospectiveP)
+                    end;
+               true ->
+                    true
+            end;
+        Else ->
+            Else
+    end.
+
+projection_transition_is_sane_with_si_epoch(
   #projection_v1{epoch_number=Epoch1} = P1,
   #projection_v1{epoch_number=Epoch2} = P2,
   RelativeToServer, RetrospectiveP) ->
-    case projection_transition_is_sane_except_epoch(
+    case projection_transition_is_sane_except_si_epoch(
            P1, P2, RelativeToServer, RetrospectiveP) of
         true ->
+            %% Must be a strictly increasing epoch.
             Epoch2 > Epoch1;
         Else ->
             Else
     end.
 
-projection_transition_is_sane_except_epoch(
+projection_transition_is_sane_except_si_epoch(
   #projection_v1{epoch_number=Epoch1,
               epoch_csum=CSum1,
               creation_time=CreationTime1,
@@ -1702,7 +1706,9 @@ projection_transition_is_sane_except_epoch(
     true = is_list(Repairing_list1) andalso is_list(Repairing_list2),
     true = is_list(Dbg1) andalso is_list(Dbg2),
 
-    All_list1 = All_list2,                 % todo will probably change
+    %% Don't check for strictly increasing epoch here: that's the job of
+    %% projection_transition_is_sane_with_si_epoch().
+    true = Epoch2 >= Epoch1,
 
     %% No duplicates
     true = lists:sort(Down_list2) == lists:usort(Down_list2),
@@ -1710,6 +1716,7 @@ projection_transition_is_sane_except_epoch(
     true = lists:sort(Repairing_list2) == lists:usort(Repairing_list2),
 
     %% Disjoint-ness
+    All_list1 = All_list2,                 % todo will probably change
     true = lists:sort(All_list2) == lists:sort(Down_list2 ++ UPI_list2 ++
                                                    Repairing_list2),
     [] = [X || X <- Down_list2, not lists:member(X, All_list2)],
@@ -2012,12 +2019,14 @@ chain_state_transition_is_sane(Author1, UPI1, Repair1, Author2, UPI2) ->
     %% the judgement of simple_chain_state_transition_is_sane().
     if ToSelfOnly_p ->
             %% The transition is to UPI2=[Author2].
-            %% For AP mode, this transition is always safe.
+            %% For AP mode, this transition is always safe (though not
+            %% always optimal for highest availability).
             ?RETURN2(true);
        Disjoint_UPIs ->
             %% The transition from UPI1 -> UPI2 where the two are
             %% disjoint/no FLUs in common.
-            %% For AP mode, this transition is always safe.
+            %% For AP mode, this transition is always safe (though not
+            %% always optimal for highest availability).
             ?RETURN2(true);
        true ->
             simple_chain_state_transition_is_sane(Author1, UPI1, Repair1,
