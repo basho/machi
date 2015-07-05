@@ -91,7 +91,7 @@
 -define(REPAIR_START_STABILITY_TIME, 10).
 -endif. % TEST
 
--define(RETURN2(X), begin put(why2, [?LINE|get(why2)]), X end).
+-define(RETURN2(X), begin (catch put(why2, [?LINE|get(why2)])), X end).
 
 %% API
 -export([start_link/2, start_link/3, stop/1, ping/1,
@@ -878,6 +878,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
     {P_newprop1, S2} = calc_projection(S, MyName),
     ?REACT({a30, ?LINE, [{current, machi_projection:make_summary(S#ch_mgr.proj)}]}),
     ?REACT({a30, ?LINE, [{newprop1, machi_projection:make_summary(P_newprop1)}]}),
+    ?REACT({a30, ?LINE, [{latest, machi_projection:make_summary(P_latest)}]}),
 
     %% Are we flapping yet?
     {P_newprop2, S3} = calculate_flaps(P_newprop1, P_current, FlapLimit, S2),
@@ -958,7 +959,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                 InnerInfo = [{inner_summary,
                               machi_projection:make_summary(P_inner2)}],
                 DbgX = replace(P_newprop3#projection_v1.dbg, InnerInfo),
-                ?REACT({a30, ?LINE, [qqqwww|DbgX]}),
+                ?REACT({a30, ?LINE, DbgX}),
                 {P_newprop3#projection_v1{dbg=DbgX,
                                           inner=P_inner2}, S_i};
             _ ->
@@ -1359,7 +1360,7 @@ react_to_env_C100(P_newprop, P_latest,
             %% P_latest is not sane.
             %% By process of elimination, P_newprop is best,
             %% so let's write it.
-            ?REACT({c100, ?LINE, [not_sane]}),
+            ?REACT({c100, ?LINE, [not_sane, get(why2), _AnyOtherReturnValue]}),
             react_to_env_C300(P_newprop, P_latest, S)
     end.
 
@@ -1632,6 +1633,7 @@ projection_transition_is_sane(P1, P2, RelativeToServer) ->
     projection_transition_is_sane(P1, P2, RelativeToServer, false).
 
 projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
+    put(why2, []),
     case projection_transition_is_sane_with_si_epoch(
            P1, P2, RelativeToServer, RetrospectiveP) of
         true ->
@@ -1641,18 +1643,54 @@ projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
                     Inner1 = inner_projection_or_self(P1),
                     Inner2 = inner_projection_or_self(P2),
                     if HasInner1 andalso HasInner2 ->
-                            projection_transition_is_sane_except_si_epoch(
-                              Inner1, Inner2, RelativeToServer, RetrospectiveP);
-                       true ->
-                            projection_transition_is_sane_with_si_epoch(
-                              Inner1, Inner2, RelativeToServer, RetrospectiveP)
+                       %% In case of inner->inner transition, we must allow
+                       %% the epoch number to remain constant.  Thus, we
+                       %% call the function that does not check for a
+                       %% strictly-increasing epoch.
+                       ?RETURN2(
+                         projection_transition_is_sane_final_review(P1, P2,
+                           projection_transition_is_sane_except_si_epoch(
+                            Inner1, Inner2, RelativeToServer, RetrospectiveP)));
+                   true ->
+                       ?RETURN2(
+                         projection_transition_is_sane_final_review(P1, P2,
+                           projection_transition_is_sane_with_si_epoch(
+                            Inner1, Inner2, RelativeToServer, RetrospectiveP)))
                     end;
                true ->
-                    true
+                    ?RETURN2(true)
             end;
         Else ->
-            Else
+            ?RETURN2(Else)
     end.
+
+projection_transition_is_sane_final_review(_P1, P2,
+                                           {expected_author2,UPI1_tail}=Else) ->
+    %% Reminder: P1 & P2 are outer projections
+    %%
+    %% We have a small problem for state transition sanity checking in the
+    %% case where we are flapping *and* a repair has finished.  One of the
+    %% sanity checks in simple_chain_state_transition_is_sane(() is that
+    %% the author of P2 in this case must be the tail of P1's UPI: i.e.,
+    %% it's the tail's responsibility to perform repair, therefore the tail
+    %% must damn well be the author of any transition that says a repair
+    %% finished successfully.
+    %%
+    %% The problem is that author_server of the inner projection does not
+    %% reflect the actual author!  See the comment with the text
+    %% "The inner projection will have a fake author" in react_to_env_A30().
+    %%
+    %% So, there's a special return value that tells us to try to check for
+    %% the correct authorship here.
+
+    if UPI1_tail == P2#projection_v1.author_server ->
+            io:format(user, "\nset new projection by author ~w is OK!!!!\n", [UPI1_tail]),
+            ?RETURN2(true);
+       true ->
+            ?RETURN2(Else)
+    end;
+projection_transition_is_sane_final_review(_P1, _P2, Else) ->
+    ?RETURN2(Else).
 
 projection_transition_is_sane_with_si_epoch(
   #projection_v1{epoch_number=Epoch1} = P1,
@@ -1662,9 +1700,9 @@ projection_transition_is_sane_with_si_epoch(
            P1, P2, RelativeToServer, RetrospectiveP) of
         true ->
             %% Must be a strictly increasing epoch.
-            Epoch2 > Epoch1;
+            ?RETURN2(Epoch2 > Epoch1);
         Else ->
-            Else
+            ?RETURN2(Else)
     end.
 
 projection_transition_is_sane_except_si_epoch(
@@ -1687,8 +1725,8 @@ projection_transition_is_sane_except_si_epoch(
               repairing=Repairing_list2,
               dbg=Dbg2} = P2,
   RelativeToServer, __TODO_RetrospectiveP) ->
+ ?RETURN2(undefined),
  try
-    put(why2, []),
     %% General notes:
     %%
     %% I'm making no attempt to be "efficient" here.  All of these data
@@ -1729,6 +1767,9 @@ projection_transition_is_sane_except_si_epoch(
     true = sets:is_disjoint(DownS2, RepairingS2),
     true = sets:is_disjoint(UPIS2, RepairingS2),
 
+    %% Hooray, all basic properties of the projection's elements are
+    %% not obviously bad.  Now let's check if the UPI+Repairing->UPI
+    %% transition is good.
     ?RETURN2(
        chain_state_transition_is_sane(AuthorServer1, UPI_list1, Repairing_list1,
                                       AuthorServer2, UPI_list2))
@@ -1974,11 +2015,10 @@ remember_partition_hack(FLU) ->
 %% {[keep,del],[error]}   %% bad transition: 'bogus' not in Repair1'''
 
 simple_chain_state_transition_is_sane(UPI1, Repair1, UPI2) ->
-    simple_chain_state_transition_is_sane(undefined, UPI1, Repair1,
-                                          undefined, UPI2).
+    ?RETURN2(simple_chain_state_transition_is_sane(undefined, UPI1, Repair1,
+                                                   undefined, UPI2)).
 
 simple_chain_state_transition_is_sane(_Author1, UPI1, Repair1, Author2, UPI2) ->
-    put(why2, []),
     {KeepsDels, Orders} = mk(UPI1, Repair1, UPI2),
     NumKeeps = length([x || keep <- KeepsDels]),
     NumOrders = length(Orders),
@@ -2003,8 +2043,8 @@ simple_chain_state_transition_is_sane(_Author1, UPI1, Repair1, Author2, UPI2) ->
                     case catch(lists:last(UPI1)) of
                         UPI1_tail when UPI1_tail == Author2 ->
                             ?RETURN2(true);
-                        _ ->
-                            ?RETURN2(false)
+                        UPI1_tail ->
+                            ?RETURN2({expected_author2,UPI1_tail})
                     end
             end
     end.
@@ -2029,8 +2069,9 @@ chain_state_transition_is_sane(Author1, UPI1, Repair1, Author2, UPI2) ->
             %% always optimal for highest availability).
             ?RETURN2(true);
        true ->
-            simple_chain_state_transition_is_sane(Author1, UPI1, Repair1,
-                                                  Author2, UPI2)
+            ?RETURN2(
+               simple_chain_state_transition_is_sane(Author1, UPI1, Repair1,
+                                                     Author2, UPI2))
     end.
 
 %% @doc Create a 2-tuple that describes how `UPI1' + `Repair1' are
