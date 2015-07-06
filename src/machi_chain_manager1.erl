@@ -763,10 +763,11 @@ rank_projection(#projection_v1{author_server=Author,
     %% Server b is no longer a member of a's MemberRank scheme, so we
     %% need to compensate for this by giving b an extremely low author
     %% ranking.
-    AuthorRank = case orddict:find(Author, MemberRank) of
-                     {ok, Rank} -> Rank;
-                     error      -> -(N*N*N*N)
-                 end,
+    AuthorRank = 0,
+    %% AuthorRank = case orddict:find(Author, MemberRank) of
+    %%                  {ok, Rank} -> Rank;
+    %%                  error      -> -(N*N*N*N)
+    %%              end,
     AuthorRank +
         (  N * length(Repairing_list)) +
         (N*N * length(UPI_list)).
