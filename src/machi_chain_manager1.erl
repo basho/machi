@@ -748,9 +748,9 @@ rank_projections(Projs, CurrentProj) ->
 
 rank_projection(#projection_v1{upi=[]}, _MemberRank, _N) ->
     -100;
-rank_projection(#projection_v1{author_server=Author,
+rank_projection(#projection_v1{author_server=_Author,
                                upi=UPI_list,
-                               repairing=Repairing_list}, MemberRank, N) ->
+                               repairing=Repairing_list}, _MemberRank, N) ->
     %% It's possible that there's "cross-talk" across projection
     %% stores.  For example, we were a chain of [a,b], then the
     %% administrator sets a's members_dict to include only a.
@@ -1055,6 +1055,34 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
             %% for repairs when the partition is healed: the quickest author
             %% after the healing will make that choice for everyone.
             %%
+            %% 2015-07-06: Ha! This works, almost all of the time.  But there
+            %% is a bug.
+            %%
+            %% The bug: if a repair has finished near the time that we fall
+            %% out of flapping mode and back to normal (one of the reasons
+            %% that we are here), then it's possible to have a situation like
+            %% this:
+            %% outer: {epoch,4638},{author,c},{upi,[e,c]},{repair,[d,a,b]}
+            %% inner: {epoch,4539},{author,e},{upi,[e,c,d]},{repair,[]}
+            %%
+            %% Code prior to today would simply use the inner projection and
+            %% only keep the outer's epoch number.  However, if we do that,
+            %% then C100 will fail a sanity check: author e cannot add d to
+            %% the end of the UPI, only C is allowed to do that.
+            %%
+            %% After checking all 5 participants, they all agree with the
+            %% outer and inner shown above.  But all 5 fail their C100
+            %% transition safety check, and so all 5 spin in an infinite loop,
+            %% cool!
+            %%
+            %% Fix for today: Send a signal (through a new func arg) to C100
+            %% that we're moving from inner to outer.  If the
+            %% 'expected_author2' error is the only sanity check that fails at
+            %% C100, then that's OK, because: 1. We've lost track of the
+            %% author, so we can't satisfy the check 100% of the time.  (We
+            %% have the option of picking the
+
+            %%
             %% TODO: Perhaps that quickest author should consult all of the
             %% other private stores, check their inner, and if there is a
             %% higher rank there, then goto C200 for a wait-and-see cycle?
@@ -1063,12 +1091,19 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
             %%       in the down list, quite odd!  Go investigate that.
 
             P_inner2A = inner_projection_or_self(P_current),
+            ResetEpoch = P_newprop10#projection_v1.epoch_number,
+            ResetAuthor = P_current#projection_v1.author_server,
+            ClauseInfo2 = [{old_author, P_inner2A#projection_v1.author_server},
+                           {reset_author, ResetAuthor},
+                           {reset_epoch, ResetEpoch}],
             P_inner2B =
-                P_inner2A#projection_v1{epoch_number=
-                                        P_newprop10#projection_v1.epoch_number,
-                                        dbg=ClauseInfo},
-            react_to_env_C100(P_inner2B, P_latest, S);
-
+                P_inner2A#projection_v1{epoch_number=ResetEpoch,
+                                        author_server=ResetAuthor,
+                                        dbg=ClauseInfo++ClauseInfo2},
+            ReactI = [{inner2b,machi_projection:make_summary(P_inner2B)}],
+            ?REACT({a30, ?LINE, ReactI}),
+io:format(user, "HEE30 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(get(react))]), timer:sleep(100),
+            react_to_env_C100(P_inner2B, P_latest, reset_loop_maybe, S);
        true ->
             ?REACT({a30, ?LINE, []}),
             react_to_env_A40(Retries, P_newprop10, P_latest,
@@ -1246,7 +1281,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                     ]}),
             put(b10_hack, false),
 
-            react_to_env_C100(P_newprop, P_latest, S);
+            react_to_env_C100(P_newprop, P_latest, undefined, S);
 
         P_newprop_flap_count >= FlapLimit ->
             %% I am flapping ... what else do I do?
@@ -1339,13 +1374,10 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
             react_to_env_C300(P_newprop, P_latest, S)
     end.
 
-react_to_env_C100(P_newprop, P_latest,
+react_to_env_C100(P_newprop, P_latest, PerhapsReset,
                   #ch_mgr{name=MyName, proj=P_current}=S) ->
     ?REACT(c100),
 
-    I_am_UPI_in_newprop_p = lists:member(MyName, P_newprop#projection_v1.upi),
-    I_am_Repairing_in_latest_p = lists:member(MyName,
-                                             P_latest#projection_v1.repairing),
     Sane = projection_transition_is_sane(P_current, P_latest, MyName),
     %% put(xxx_hack, [{p_current, machi_projection:make_summary(P_current)},
     %%                {epoch_compare, P_latest#projection_v1.epoch_number > P_current#projection_v1.epoch_number},
@@ -1356,11 +1388,28 @@ react_to_env_C100(P_newprop, P_latest,
         _ when P_current#projection_v1.epoch_number == 0 ->
             %% Epoch == 0 is reserved for first-time, just booting conditions.
             ?REACT({c100, ?LINE, [first_write]}),
+            erase(perhaps_reset_loop),
             react_to_env_C110(P_latest, S);
         true ->
             ?REACT({c100, ?LINE, [sane]}),
+            erase(perhaps_reset_loop),
             react_to_env_C110(P_latest, S);
         _AnyOtherReturnValue ->
+io:format(user, "RESETLOOP: ~p ~w ~P", [MyName, get(perhaps_reset_loop), get(react), 70]),
+            if PerhapsReset == reset_loop_maybe ->
+                    case get(perhaps_reset_loop) of
+                        undefined ->
+                            put(perhaps_reset_loop, 1);
+                        X when X > 10 ->
+                            Msg = lists:flatten(
+                                    io_lib:format("~P", [get(react), 200])),
+                            exit({not_supposed_to_happen, ?MODULE, ?LINE, Msg});
+                        X ->
+                            put(perhaps_reset_loop, X+1)
+                    end;
+               PerhapsReset == undefined ->
+                    ok
+            end,
             %% P_latest is not sane.
             %% By process of elimination, P_newprop is best,
             %% so let's write it.
@@ -1389,7 +1438,6 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
             {_,_,C} = os:timestamp(),
             MSec = trunc(C / 1000),
             {HH,MM,SS} = time(),
-io:format(user, "HEE120 ~w ~w ~P\n", [S#ch_mgr.name, self(), get(react), 150]),
             case inner_projection_exists(P_latest2) of
                 false ->
                     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
