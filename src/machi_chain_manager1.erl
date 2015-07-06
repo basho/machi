@@ -1343,11 +1343,11 @@ react_to_env_C100(P_newprop, P_latest,
     I_am_Repairing_in_latest_p = lists:member(MyName,
                                              P_latest#projection_v1.repairing),
     Sane = projection_transition_is_sane(P_current, P_latest, MyName),
-    put(xxx_hack, [{p_current, machi_projection:make_summary(P_current)},
-                   {epoch_compare, P_latest#projection_v1.epoch_number > P_current#projection_v1.epoch_number},
-                   {i_am_upi_in_newprop_p, I_am_UPI_in_newprop_p},
-                   {i_am_repairing_in_latest_p, I_am_Repairing_in_latest_p},
-                   {sane_p, Sane}]),
+    %% put(xxx_hack, [{p_current, machi_projection:make_summary(P_current)},
+    %%                {epoch_compare, P_latest#projection_v1.epoch_number > P_current#projection_v1.epoch_number},
+    %%                {i_am_upi_in_newprop_p, I_am_UPI_in_newprop_p},
+    %%                {i_am_repairing_in_latest_p, I_am_Repairing_in_latest_p},
+    %%                {sane_p, Sane}]),
     case Sane of
         _ when P_current#projection_v1.epoch_number == 0 ->
             %% Epoch == 0 is reserved for first-time, just booting conditions.
@@ -1366,8 +1366,8 @@ react_to_env_C100(P_newprop, P_latest,
 
 react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     ?REACT(c110),
-    %% Extra_todo = [],
-    Extra_todo = get(xxx_hack),
+    Extra_todo = [],
+    %% Extra_todo = get(xxx_hack),
     %% Extra_todo = [{hee, lists:reverse(get(react))}],
     P_latest2 = machi_projection:update_dbg2(P_latest, Extra_todo),
 
@@ -1385,6 +1385,7 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
             {_,_,C} = os:timestamp(),
             MSec = trunc(C / 1000),
             {HH,MM,SS} = time(),
+io:format(user, "HEE120 ~w ~w ~P\n", [S#ch_mgr.name, self(), get(react), 150]),
             case inner_projection_exists(P_latest2) of
                 false ->
                     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
@@ -1684,7 +1685,6 @@ projection_transition_is_sane_final_review(_P1, P2,
     %% the correct authorship here.
 
     if UPI1_tail == P2#projection_v1.author_server ->
-            io:format(user, "\nset new projection by author ~w is OK!!!!\n", [UPI1_tail]),
             ?RETURN2(true);
        true ->
             ?RETURN2(Else)
