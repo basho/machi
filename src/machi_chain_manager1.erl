@@ -1125,7 +1125,6 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                                           dbg=ClauseInfo++ClauseInfo2}),
             ReactI = [{inner2b,machi_projection:make_summary(P_inner2B)}],
             ?REACT({a30, ?LINE, ReactI}),
-io:format(user, "HEE30 ~w ~w ~P\n", [S#ch_mgr.name, self(), get(react), 250]), timer:sleep(100),
             react_to_env_C100(P_inner2B, P_latest, S);
        true ->
             ?REACT({a30, ?LINE, []}),
@@ -1402,11 +1401,6 @@ react_to_env_C100(P_newprop, P_latest,
     ?REACT(c100),
 
     Sane = projection_transition_is_sane(P_current, P_latest, MyName),
-    %% put(xxx_hack, [{p_current, machi_projection:make_summary(P_current)},
-    %%                {epoch_compare, P_latest#projection_v1.epoch_number > P_current#projection_v1.epoch_number},
-    %%                {i_am_upi_in_newprop_p, I_am_UPI_in_newprop_p},
-    %%                {i_am_repairing_in_latest_p, I_am_Repairing_in_latest_p},
-    %%                {sane_p, Sane}]),
     case Sane of
         _ when P_current#projection_v1.epoch_number == 0 ->
             %% Epoch == 0 is reserved for first-time, just booting conditions.
@@ -1465,8 +1459,6 @@ io:format(user, "YO: looping transition forced to none!\nNewProp: ~w\nLatest: ~w
 react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     ?REACT(c110),
     Extra_todo = [],
-    %% Extra_todo = get(xxx_hack),
-    %% Extra_todo = [{hee, lists:reverse(get(react))}],
     P_latest2 = machi_projection:update_dbg2(P_latest, Extra_todo),
 
     MyNamePid = proxy_pid(MyName, S),
@@ -1571,7 +1563,6 @@ react_to_env_C310(P_newprop, S) ->
     ?REACT({c310, ?LINE,
             [{newprop, machi_projection:make_summary(P_newprop)},
             {write_result, WriteRes}]}),
-%%    io:format(user, "HEE310 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(get(react))]),
     react_to_env_A10(S2).
 
 calculate_flaps(P_newprop, _P_current, _FlapLimit,
