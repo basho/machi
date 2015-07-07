@@ -90,6 +90,12 @@ unanimous_report2(FLU_Projs) ->
     UniqueUPIs = lists:usort([UPI || {UPI, _Repairing, _CSum} <- UPI_R_Sums]),
     Res =
         [begin
+%% TODO: this sorting by checksum is not best.
+%% If the mutation+checksum code is all being used appropriately, then
+%% checksums will always be different for any two differing projections.
+%% Then the Tag calc below will duh always find just one thing.
+%%
+%% Get rid of it.
              case lists:usort([CSum || {U, _Repairing, CSum} <- UPI_R_Sums,
                                        U == UPI]) of
                  [_1CSum] ->
@@ -115,6 +121,9 @@ unanimous_report2(FLU_Projs) ->
          end || UPI <- UniqueUPIs],
     AgreedResUPI_Rs = [UPI++Repairing ||
                           {agreed_membership, {UPI, Repairing}} <- Res],
+io:format(user, "\n", []),
+io:format(user, "Res ~p\n", [Res]),
+io:format(user, "AgreedResUPI_Rs ~p\n", [AgreedResUPI_Rs]),
     Tag = case lists:usort(lists:flatten(AgreedResUPI_Rs)) ==
                lists:sort(lists:flatten(AgreedResUPI_Rs)) of
               true ->
@@ -144,7 +153,7 @@ chain_to_projection(MyName, Epoch, UPI_list, Repairing_list, All_list) ->
 -ifndef(PULSE).
 
 simple_chain_state_transition_is_sane_test_() ->
-    {timeout, 300, fun() -> simple_chain_state_transition_is_sane_test2() end}.
+    {timeout, 60, fun() -> simple_chain_state_transition_is_sane_test2() end}.
 
 simple_chain_state_transition_is_sane_test2() ->
     %% All: A list of all FLUS for a particular test
@@ -155,6 +164,7 @@ simple_chain_state_transition_is_sane_test2() ->
     [true = check_simple_chain_state_transition_is_sane(UPI1, Repair1) ||
         %% The five elements below runs on my MacBook Pro in about 4.8 seconds
         %% All <- [ [a], [a,b], [a,b,c], [a,b,c,d], [a,b,c,d,e] ],
+        %% For elements on the same MBP is about 0.15 seconds.
         All <- [ [a], [a,b], [a,b,c], [a,b,c,d] ],
         UPI1 <- machi_util:combinations(All),
         Repair1 <- machi_util:combinations(All -- UPI1)].
@@ -186,12 +196,48 @@ check_simple_chain_state_transition_is_sane(UPI1, Repair1) ->
 
 -ifdef(EQC).
 
+%% This QuickCheck property is crippled: because the old chain state
+%% transition check, chain_mgr_legacy:projection_transition_is_sane(),
+%% is so buggy and the new check is (apparently) so much better, I
+%% have changed the ?WHENFAIL() criteria to check for either agreement
+%% _or_ a case where the legacy check says true but the new check says
+%% false.
+%%
+%% On my MacBook Pro, less than 1000 tests are required to find at
+%% least one problem case for the legacy check that the new check is
+%% correct for.  Running for two seconds can do about 3,500 test
+%% cases.
+
+compare_eqc_setup_test_() ->
+    %% Silly QuickCheck can take a long time to start up, check its
+    %% license, etcetc.
+    %%   machi_chain_manager1_test: compare_eqc_setup_test...[1.788 s] ok
+    {timeout, 30,
+     fun() -> eqc:quickcheck(eqc:testing_time(0.1, true)) end}.
+
+-define(COMPARE_TIMEOUT, 1.2).
+%% -define(COMPARE_TIMEOUT, 4.8).
+
+compare_legacy_with_v2_chain_transition_check1_test() ->
+    eqc:quickcheck(
+      ?QC_OUT(
+        eqc:testing_time(
+          ?COMPARE_TIMEOUT,
+          prop_compare_legacy_with_v2_chain_transition_check(primitive)))).
+
+compare_legacy_with_v2_chain_transition_check2_test() ->
+    eqc:quickcheck(
+      ?QC_OUT(
+        eqc:testing_time(
+          ?COMPARE_TIMEOUT,
+          prop_compare_legacy_with_v2_chain_transition_check(primitive)))).
+
 prop_compare_legacy_with_v2_chain_transition_check() ->
     prop_compare_legacy_with_v2_chain_transition_check(primitive).
 
 prop_compare_legacy_with_v2_chain_transition_check(Style) ->
     %% ?FORALL(All, nonempty(list([a,b,c,d,e])),
-    ?FORALL(All, non_empty(some([a,b,c])),
+    ?FORALL(All, non_empty(some([a,b,c,d])),
     ?FORALL({Author1, UPI1, Repair1x, Author2, UPI2, Repair2x},
          {elements(All),some(All),some(All),elements(All),some(All),some(All)},
     ?IMPLIES(length(lists:usort(UPI1 ++ Repair1x)) > 0 andalso
@@ -215,20 +261,24 @@ prop_compare_legacy_with_v2_chain_transition_check(Style) ->
             primitive ->
                 New_res = ?MGR:chain_state_transition_is_sane(
                              Author1, UPI1, Repair1, Author2, UPI2),
-                New_p = New_res;
+                New_p = case New_res of true -> true;
+                                        _    -> false
+                        end;
             whole ->
                 New_res = machi_chain_manager1:projection_transition_is_sane(
                             P1, P2, Author1, false),
                 New_p = case New_res of true -> true;
-                            _    -> false
+                                        _    -> false
                         end
         end,
         (catch ets:insert(count,
                     {{Author1, UPI1, Repair1, Author2, UPI2, Repair2}, true})),
         ?WHENFAIL(io:format(user,
-                            "Old_res (~p): ~p\nNew_res: ~p (why line ~p)\n",
-                            [catch get(why1), Old_res, New_res, catch get(why2)]),
-                  Old_p == New_p)
+                         "Old_res: ~p/~p  (~p)\nNew_res: ~p/~p (why line ~P)\n",
+                         [Old_p, Old_res, catch get(why1),
+                          New_p, New_res, catch get(why2), 30]),
+                  %% Old_p == New_p)
+                  Old_p == New_p orelse (Old_p == true andalso New_p == false))
     end))).
 
 some(L) ->
@@ -397,7 +447,14 @@ foo_TODO_UNFINISHED_KEEP_PERHAPS_unanimous_report_test() ->
     UPI5_b = [a],
     Rep5_b = [b],
     P5_b = machi_projection:new(E5, b, MembersDict, [], UPI5_b, Rep5_b, []),
-    XX =
+    {ok_disjoint, [{not_agreed, [_,_]}|_]} =
+        unanimous_report2([{a, P5}, {b, P5_b}]),
+
+    UPI5_c = [b],
+    Rep5_c = [a],
+    P5_c = machi_projection:new(E5, b, MembersDict, [], UPI5_c, Rep5_c, []),
+XX=
+    {bummer_NOT_DISJOINT, _} =
         unanimous_report2([{a, P5}, {b, P5_b}]),
 
     io:format(user, "\nXX ~p\n", [XX]).

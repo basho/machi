@@ -231,7 +231,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
       FLUFudge = if NumFLUs < 4 ->
                          2;
                     true ->
-                         3
+                         2
                          %% 13
                  end,
       [begin
