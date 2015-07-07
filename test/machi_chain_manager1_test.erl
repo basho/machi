@@ -49,14 +49,25 @@
 %%      each of the FLUs in the chain, and create a summary for each
 %%      epoch number.
 %%
-%% Report format: list({EpochNumber::non_neg_integer(), Report::rpt()})
-%%        rpt(): {ok_disjoint | bummer_NOT_DISJOINT, agree_list()}
-%% agree_list(): list(agree())
-%%      agree(): {agreed_membership, UPIandRepairing()} |
-%%               {not_agreed, ......TODO LEFT OFF HERE
+%% Report format: list({EpochNumber:non_neg_integer(), Report:rpt()})
+%%        rpt(): {'ok_disjoint', unique_upi_repair_lists()} |
+%%               {'bummer_NOT_DISJOINT', {flat(), summaries()}
+%% unique_upi_repair_lists(): list(upi_and_repair_lists_concatenated())
+%% flat(): debugging term; any duplicate in this list is an invalid FLU.
+%% summaries(): list(ProjectionSummary:string())
 %%
 %% Example:
-%% TODO LEFT OFF HERE
+%%
+%% [{1,{ok_disjoint,[[a,b,c]]}},
+%%  {4,{ok_disjoint,[[a,b,c]]}},
+%%  {6,{ok_disjoint,[[a,b,c]]}},
+%%  {16,{ok_disjoint,[[a,b,c]]}},
+%%  {22,{ok_disjoint,[[b]]}},
+%%  {1174,
+%%   {bummer_NOT_DISJOINT,{[a,a,b],
+%%                         [{a,"[{epoch,1174},{author,a},{upi,[a]},{repair,[]},{down,[b]},{d,[{ps,[{a,b},{b,a}]},{nodes_up,[a]}]},{d2,[]}]"},
+%%                          {b,"[{epoch,1174},{author,b},{upi,[b]},{repair,[a]},{down,[]},{d,[{ps,[]},{nodes_up,[a,b]}]},{d2,[]}]"}]}}},
+%%  ...]
 
 unanimous_report(Namez) ->
     UniquePrivateEs =
@@ -87,68 +98,28 @@ unanimous_report2(FLU_Projs) ->
                    Proj#projection_v1.epoch_csum} ||
                      {_FLUname, Proj} <- FLU_Projs,
                      is_record(Proj, projection_v1)],
-    UniqueUPIs = lists:usort([UPI || {UPI, _Repairing, _CSum} <- UPI_R_Sums]),
-    Res =
-        [begin
-%% TODO: this sorting by checksum is not best.
-%% If the mutation+checksum code is all being used appropriately, then
-%% checksums will always be different for any two differing projections.
-%% Then the Tag calc below will duh always find just one thing.
-%%
-%% Get rid of it.
-             case lists:usort([CSum || {U, _Repairing, CSum} <- UPI_R_Sums,
-                                       U == UPI]) of
-                 [_1CSum] ->
-                     %% Yay, there's only 1 checksum.  Let's check
-                     %% that all FLUs are in agreement.
-                     {UPI, Repairing, _CSum} =
-                         lists:keyfind(UPI, 1, UPI_R_Sums),
-                     Tmp = [{FLU, case proplists:get_value(FLU, FLU_Projs) of
-                                      P when is_record(P, projection_v1) ->
-                                          P#projection_v1.epoch_csum;
-                                      Else ->
-                                          Else
-                                  end} || FLU <- UPI ++ Repairing],
-                     case lists:usort([CSum || {_FLU, CSum} <- Tmp]) of
-                         [_] ->
-                             {agreed_membership, {UPI, Repairing}};
-                         _Else2 ->
-                             {not_agreed, ProjsSumms}
-                     end;
-                 _Else ->
-                     {not_agreed, [checksum_disagreement|ProjsSumms]}
-             end
-         end || UPI <- UniqueUPIs],
-    AgreedResUPI_Rs = [UPI++Repairing ||
-                          {agreed_membership, {UPI, Repairing}} <- Res],
-io:format(user, "\n", []),
-io:format(user, "Res ~p\n", [Res]),
-io:format(user, "AgreedResUPI_Rs ~p\n", [AgreedResUPI_Rs]),
-    Tag = case lists:usort(lists:flatten(AgreedResUPI_Rs)) ==
-               lists:sort(lists:flatten(AgreedResUPI_Rs)) of
-              true ->
-                  ok_disjoint;
-              false ->
-                  bummer_NOT_DISJOINT
-          end,
-    {Tag, Res}.
+    UniqueUPIsRepairs = lists:usort([{UPI,Repairing} ||
+                                        {UPI, Repairing, _CSum} <- UPI_R_Sums]),
+    if length(UniqueUPIsRepairs) =< 1 ->
+            {ok_disjoint, UniqueUPIsRepairs};
+        true ->
+            Flat = lists:flatten([UPI++Rep || {UPI,Rep} <- UniqueUPIsRepairs]),
+            case lists:usort(Flat) == lists:sort(Flat) of
+                true ->
+                    {ok_disjoint, UniqueUPIsRepairs};
+                false ->
+                    {bummer_NOT_DISJOINT, {lists:sort(Flat), ProjsSumms}}
+            end
+    end.
 
 all_reports_are_disjoint(Report) ->
-    [] == [X || {_Epoch, Tuple}=X <- Report,
-                element(1, Tuple) /= ok_disjoint].
-
-extract_chains_relative_to_flu(FLU, Report) ->
-    {FLU, [{Epoch, UPI, Repairing} ||
-              {Epoch, {ok_disjoint, Es}} <- Report,
-              {agreed_membership, {UPI, Repairing}} <- Es,
-              lists:member(FLU, UPI) orelse lists:member(FLU, Repairing)]}.
-
-chain_to_projection(MyName, Epoch, UPI_list, Repairing_list, All_list) ->
-    MemberDict = orddict:from_list([{FLU, #p_srvr{name=FLU}} ||
-                                       FLU <- All_list]),
-    machi_projection:new(Epoch, MyName, MemberDict,
-                         All_list -- (UPI_list ++ Repairing_list),
-                         UPI_list, Repairing_list, [{artificial_by, ?MODULE}]).
+    case [X || {_Epoch, Tuple}=X <- Report,
+               element(1, Tuple) /= ok_disjoint] of
+        [] ->
+            true;
+        Else ->
+            Else
+    end.
 
 -ifndef(PULSE).
 
@@ -421,7 +392,7 @@ nonunanimous_setup_and_fix_test() ->
         ok = machi_partition_simulator:stop()
     end.
 
-foo_TODO_UNFINISHED_KEEP_PERHAPS_unanimous_report_test() ->
+unanimous_report_test() ->
     TcpPort = 63877,
     FluInfo = [{a,TcpPort+0,"./data.a"}, {b,TcpPort+1,"./data.b"}],
     P_s = [#p_srvr{name=Name, address="localhost", port=Port} ||
@@ -431,33 +402,43 @@ foo_TODO_UNFINISHED_KEEP_PERHAPS_unanimous_report_test() ->
     E5 = 5,
     UPI5 = [a,b],
     Rep5 = [],
+    UPIRep5 = [{UPI5, Rep5}],
     P5 = machi_projection:new(E5, a, MembersDict, [], UPI5, Rep5, []),
-    {ok_disjoint, [{agreed_membership, {UPI5, Rep5}}]} =
+    {ok_disjoint, UPIRep5} =
         unanimous_report2([{a, P5}, {b, P5}]),
-    {ok_disjoint, [{not_agreed, _}]} =
+    {ok_disjoint, UPIRep5} =
         unanimous_report2([{a, not_in_this_epoch}, {b, P5}]),
-    {ok_disjoint, [{not_agreed, _}]} =
+    {ok_disjoint, UPIRep5} =
         unanimous_report2([{a, P5}, {b, not_in_this_epoch}]),
 
-    P5_other_csum = machi_projection:update_checksum(
-                    P5#projection_v1{author_server=b}),
-    {ok_disjoint, [{not_agreed, _}]} =
-        unanimous_report2([{a, P5}, {b, P5_other_csum}]),
-
     UPI5_b = [a],
-    Rep5_b = [b],
-    P5_b = machi_projection:new(E5, b, MembersDict, [], UPI5_b, Rep5_b, []),
-    {ok_disjoint, [{not_agreed, [_,_]}|_]} =
-        unanimous_report2([{a, P5}, {b, P5_b}]),
+    Rep5_b = [],
+    P5_b = machi_projection:new(E5, b, MembersDict, [b], UPI5_b, Rep5_b, []),
+    {bummer_NOT_DISJOINT, _} = unanimous_report2([{a, P5}, {b, P5_b}]),
 
     UPI5_c = [b],
     Rep5_c = [a],
     P5_c = machi_projection:new(E5, b, MembersDict, [], UPI5_c, Rep5_c, []),
-XX=
     {bummer_NOT_DISJOINT, _} =
-        unanimous_report2([{a, P5}, {b, P5_b}]),
+        unanimous_report2([{a, P5}, {b, P5_c}]),
 
-    io:format(user, "\nXX ~p\n", [XX]).
+    P_s3 = [#p_srvr{name=Name, address="localhost", port=Port} ||
+              {Name,Port,_Dir} <- FluInfo ++ [{c,TcpPort+0,"./data.c"}]],
+    MembersDict3 = machi_projection:make_members_dict(P_s3),
+
+    UPI5_d = [c],
+    Rep5_d = [a],
+    P5_d = machi_projection:new(E5, b, MembersDict3, [b], UPI5_d, Rep5_d, []),
+    {bummer_NOT_DISJOINT, _} = unanimous_report2([{a, P5}, {b, P5_d}]),
+
+    UPI5_e = [b],
+    Rep5_e = [c],
+    UPIRep5be = [{UPI5_b, Rep5_b}, {UPI5_e, Rep5_e}],
+    P5_e = machi_projection:new(E5, b, MembersDict3, [a], UPI5_e, Rep5_e, []),
+    {bummer_NOT_DISJOINT, _} = unanimous_report2([{a, P5},   {b, P5_e}]),
+    {ok_disjoint, UPIRep5be} = unanimous_report2([{a, P5_b}, {b, P5_e}]),
+
+    ok.
 
 -endif. % !PULSE
 -endif. % TEST

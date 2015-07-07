@@ -327,17 +327,15 @@ prop_pulse() ->
                                     Ps, FLU)} ||
               {FLU, Ps} <- PrivProjs],
         SaneP = lists:all(fun({_FLU, SaneRes}) -> SaneRes == true end, Sane),
-
-        %% The final report item should say that all are agreed_membership.
+        %% On a really bad day, this could trigger a badmatch exception....
         {_LastEpoch, {ok_disjoint, LastRepXs}} = lists:last(Report),
-        AgreedOrNot = lists:usort([element(1, X) || X <- LastRepXs]),
         
         %% TODO: Check that we've converged to a single chain with no repairs.
         SingleChainNoRepair = case LastRepXs of
-                                  [{agreed_membership,{_UPI,[]}}] ->
+                                  [{_UPI,[]}] ->
                                       true;
                                   _ ->
-                                      LastRepXs
+                                      false
                               end,
 
         ok = shutdown_hard(),
@@ -350,12 +348,11 @@ prop_pulse() ->
             ?QC_FMT("PrivProjs = ~p\n", [PrivProjs]),
             ?QC_FMT("Sane = ~p\n", [Sane]),
             ?QC_FMT("SingleChainNoRepair failure =\n    ~p\n", [SingleChainNoRepair])
-,erlang:halt(0)
+%% ,erlang:halt(0)
         end,
         conjunction([{res, Res == true orelse Res == ok},
                      {all_disjoint, AllDisjointP},
                      {sane, SaneP},
-                     {all_agreed_at_end, AgreedOrNot == [agreed_membership]},
                      {single_chain_no_repair, SingleChainNoRepair}
                     ]))
     end)).

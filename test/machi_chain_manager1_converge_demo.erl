@@ -243,41 +243,41 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
 
            {stable,true} = {stable,private_projections_are_stable(Namez, DoIt)},
            io:format(user, "\nSweet, private projections are stable\n", []),
-io:format(user, "Rolling sanity check ... ", []),
-PrivProjs = [{Name, begin
-                        {ok, Ps8} = ?FLU_PC:get_all_projections(FLU, private,
-                                                                infinity),
-                        Max = 3*1000,
-                        Ps9 = if length(Ps8) < Max ->
-                                      Ps8;
-                                 true ->
-                                      NumToDel = length(Ps8) - Max,
-                                      io:format(user, "trunc a bit... ", []),
-                                      [begin
-                                           FilesToDel = lists:sublist(filelib:wildcard(Dir ++ "/projection/private/*"), NumToDel),
-                                           [_ = file:delete(File) || File <- FilesToDel]
-                                       end || Dir <- filelib:wildcard("/tmp/c/data*")],
-                                      lists:nthtail(Max, Ps8)
-                              end,
-                        [P || P <- Ps9,
-                              P#projection_v1.epoch_number /= 0]
-                    end} || {Name, FLU} <- Namez],
-try
-    [{FLU, true} = {FLU, ?MGR:projection_transitions_are_sane_retrospective(Psx, FLU)} ||
-        {FLU, Psx} <- PrivProjs]
-catch _Err:_What ->
-        io:format(user, "PrivProjs ~p\n", [PrivProjs]),
-        exit({line, ?LINE, _Err, _What})
-end,
-io:format(user, "Yay!\n", []),
-%%       ReportXXX = machi_chain_manager1_test:unanimous_report(Namez),
-%%       true = machi_chain_manager1_test:all_reports_are_disjoint(ReportXXX),
-%% io:format(user, "\nLast Reports: ~p\n", [lists:nthtail(length(ReportXXX)-8,ReportXXX)]),
+           io:format(user, "Rolling sanity check ... ", []),
+           PrivProjs = [{Name, begin
+                                   {ok, Ps8} = ?FLU_PC:get_all_projections(FLU, private,
+                                                                           infinity),
+                                   Max = 3*1000,
+                                   Ps9 = if length(Ps8) < Max ->
+                                                 Ps8;
+                                            true ->
+                                                 NumToDel = length(Ps8) - Max,
+                                                 io:format(user, "trunc a bit... ", []),
+                                                 [begin
+                                                      FilesToDel = lists:sublist(filelib:wildcard(Dir ++ "/projection/private/*"), NumToDel),
+                                                      [_ = file:delete(File) || File <- FilesToDel]
+                                                  end || Dir <- filelib:wildcard("/tmp/c/data*")],
+                                                 lists:nthtail(Max, Ps8)
+                                         end,
+                                   [P || P <- Ps9,
+                                         P#projection_v1.epoch_number /= 0]
+                               end} || {Name, FLU} <- Namez],
+           try
+               [{FLU, true} = {FLU, ?MGR:projection_transitions_are_sane_retrospective(Psx, FLU)} ||
+                   {FLU, Psx} <- PrivProjs]
+           catch _Err:_What ->
+                   io:format(user, "PrivProjs ~p\n", [PrivProjs]),
+                   exit({line, ?LINE, _Err, _What})
+           end,
+           io:format(user, "Yay!\n", []),
+           ReportXX = machi_chain_manager1_test:unanimous_report(Namez),
+           io:format(user, "ReportXX ~P\n", [ReportXX, 30]),
+           true = machi_chain_manager1_test:all_reports_are_disjoint(ReportXX),
+           io:format(user, "Yay for ReportXX!\n", []),
            timer:sleep(1250),
            ok
        end || {Partition, Count} <- PartitionCounts
       ],
-       %% exit(end_experiment),
 
       io:format(user, "\nSET partitions = []\n", []),
       io:format(user, "We should see convergence to 1 correct chain.\n", []),
@@ -298,7 +298,7 @@ io:format(user, "Yay!\n", []),
       %% members appear in only one unique chain, i.e., the sets of
       %% unique chains are disjoint.
       true = machi_chain_manager1_test:all_reports_are_disjoint(Report),
-%% io:format(user, "\nLast Reports: ~p\n", [lists:nthtail(length(Report)-8,Report)]),
+      %% io:format(user, "\nLast Reports: ~p\n", [lists:nthtail(length(Report)-8,Report)]),
 
       %% For each chain transition experienced by a particular FLU,
       %% confirm that each state transition is OK.
@@ -348,9 +348,9 @@ make_partition_list(All_list) ->
                                        X /= A, X /= C, A /= C],
     %% Concat = _X_Ys1,
     %% Concat = _X_Ys2,
-    %% Concat = _X_Ys1 ++ _X_Ys2,
+    Concat = _X_Ys1 ++ _X_Ys2,
     %% Concat = _X_Ys3,
-    Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
+    %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
     random_sort(lists:usort([lists:sort(L) || L <- Concat])).
 
     %% [ [{a,b},{b,d},{c,b}],
