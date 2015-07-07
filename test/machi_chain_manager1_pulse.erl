@@ -106,15 +106,15 @@ postcondition(_S, {call, _, _Func, _Args}, _Res) ->
 all_list_extra() ->
     [ %% Genenerators assume that this list is at least 2 items
        {#p_srvr{name=a, address="localhost", port=7400,
-                props=[{chmgr, a_chmgr}]}, "./data.pulse.a"}
+                props=[{chmgr, a_chmgr}]}, "/tmp/c/data.pulse.a"}
      , {#p_srvr{name=b, address="localhost", port=7401,
-                props=[{chmgr, b_chmgr}]}, "./data.pulse.b"}
+                props=[{chmgr, b_chmgr}]}, "/tmp/c/data.pulse.b"}
      , {#p_srvr{name=c, address="localhost", port=7402,
-                props=[{chmgr, c_chmgr}]}, "./data.pulse.c"}
+                props=[{chmgr, c_chmgr}]}, "/tmp/c//data.pulse.c"}
      , {#p_srvr{name=d, address="localhost", port=7403,
-                props=[{chmgr, d_chmgr}]}, "./data.pulse.d"}
+                props=[{chmgr, d_chmgr}]}, "/tmp/c/data.pulse.d"}
      , {#p_srvr{name=e, address="localhost", port=7404,
-                props=[{chmgr, e_chmgr}]}, "./data.pulse.e"}
+                props=[{chmgr, e_chmgr}]}, "/tmp/c/data.pulse.e"}
     ].
 
 all_list() ->
@@ -126,7 +126,10 @@ setup(Num, Seed) ->
     All_list = lists:sublist(all_list(), Num),
     All_listE = lists:sublist(all_list_extra(), Num),
     %% shutdown_hard() has taken care of killing all relevant procs.
-    [machi_flu1_test:clean_up_data_dir(Dir) || {_P, Dir} <- All_listE],
+    [begin
+         machi_flu1_test:clean_up_data_dir(Dir),
+         filelib:ensure_dir(Dir ++ "/not-used")
+     end || {_P, Dir} <- All_listE],
     ?QC_FMT(",z~w", [?LINE]),
 
     %% Start partition simulator
@@ -318,7 +321,11 @@ prop_pulse() ->
         %% written during any given epoch, confirm that all chain
         %% members appear in only one unique chain, i.e., the sets of
         %% unique chains are disjoint.
-        AllDisjointP = ?MGRTEST:all_reports_are_disjoint(Report),
+        {AllDisjointP, AllDisjointDetail} =
+            case ?MGRTEST:all_reports_are_disjoint(Report) of
+                true -> {true, true};
+                Else -> {false, Else}
+            end,
 
         %% For each chain transition experienced by a particular FLU,
         %% confirm that each state transition is OK.
@@ -331,29 +338,31 @@ prop_pulse() ->
         {_LastEpoch, {ok_disjoint, LastRepXs}} = lists:last(Report),
         
         %% TODO: Check that we've converged to a single chain with no repairs.
-        SingleChainNoRepair = case LastRepXs of
-                                  [{_UPI,[]}] ->
-                                      true;
-                                  _ ->
-                                      false
-                              end,
+        {SingleChainNoRepair_p, SingleChainNoRepairDetail} =
+             case LastRepXs of
+                 [LastUPI] when length(LastUPI) == S2#state.num_pids ->
+                     {true, true};
+                 _ ->
+                     {false, LastRepXs}
+             end,
 
         ok = shutdown_hard(),
         ?WHENFAIL(
         begin
+            ?QC_FMT("PrivProjs = ~p\n", [PrivProjs]),
+            ?QC_FMT("Report = ~p\n", [Report]),
             ?QC_FMT("Cmds = ~p\n", [Cmds]),
             ?QC_FMT("Res = ~p\n", [Res]),
             ?QC_FMT("Diag = ~s\n", [Diag]),
-            ?QC_FMT("Report = ~p\n", [Report]),
-            ?QC_FMT("PrivProjs = ~p\n", [PrivProjs]),
             ?QC_FMT("Sane = ~p\n", [Sane]),
-            ?QC_FMT("SingleChainNoRepair failure =\n    ~p\n", [SingleChainNoRepair])
+            ?QC_FMT("AllDisjointDetail = ~p\n", [AllDisjointDetail]),
+            ?QC_FMT("SingleChainNoRepair failure = ~p\n", [SingleChainNoRepairDetail])
 %% ,erlang:halt(0)
         end,
         conjunction([{res, Res == true orelse Res == ok},
                      {all_disjoint, AllDisjointP},
                      {sane, SaneP},
-                     {single_chain_no_repair, SingleChainNoRepair}
+                     {single_chain_no_repair, SingleChainNoRepair_p}
                     ]))
     end)).
 

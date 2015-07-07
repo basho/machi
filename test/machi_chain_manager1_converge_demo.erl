@@ -154,7 +154,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
     %% Faster test startup, commented: timer:sleep(3000),
 
     TcpPort = 62877,
-    ok = filelib:ensure_dir("/tmp/c/data.a"),
+    ok = filelib:ensure_dir("/tmp/c/not-used"),
     FluInfo = [{a,TcpPort+0,"/tmp/c/data.a"}, {b,TcpPort+1,"/tmp/c/data.b"},
                {c,TcpPort+2,"/tmp/c/data.c"}, {d,TcpPort+3,"/tmp/c/data.d"},
                {e,TcpPort+4,"/tmp/c/data.e"}, {f,TcpPort+5,"/tmp/c/data.f"}],

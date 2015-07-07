@@ -54,7 +54,7 @@
 %%               {'bummer_NOT_DISJOINT', {flat(), summaries()}
 %% unique_upi_repair_lists(): list(upi_and_repair_lists_concatenated())
 %% flat(): debugging term; any duplicate in this list is an invalid FLU.
-%% summaries(): list(ProjectionSummary:string())
+%% summaries(): list({FLU, ProjectionSummary:string() | 'not_in_this_epoch'})
 %%
 %% Example:
 %%
@@ -98,15 +98,14 @@ unanimous_report2(FLU_Projs) ->
                    Proj#projection_v1.epoch_csum} ||
                      {_FLUname, Proj} <- FLU_Projs,
                      is_record(Proj, projection_v1)],
-    UniqueUPIsRepairs = lists:usort([{UPI,Repairing} ||
-                                        {UPI, Repairing, _CSum} <- UPI_R_Sums]),
-    if length(UniqueUPIsRepairs) =< 1 ->
-            {ok_disjoint, UniqueUPIsRepairs};
+    UniqueUPIs = lists:usort([UPI || {UPI, _Repairing, _CSum} <- UPI_R_Sums]),
+    if length(UniqueUPIs) =< 1 ->
+            {ok_disjoint, UniqueUPIs};
         true ->
-            Flat = lists:flatten([UPI++Rep || {UPI,Rep} <- UniqueUPIsRepairs]),
+            Flat = lists:flatten(UniqueUPIs),
             case lists:usort(Flat) == lists:sort(Flat) of
                 true ->
-                    {ok_disjoint, UniqueUPIsRepairs};
+                    {ok_disjoint, UniqueUPIs};
                 false ->
                     {bummer_NOT_DISJOINT, {lists:sort(Flat), ProjsSumms}}
             end
