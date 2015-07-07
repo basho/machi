@@ -231,14 +231,15 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
       FLUFudge = if NumFLUs < 4 ->
                          2;
                     true ->
-                         8
+                         3
                          %% 13
                  end,
       [begin
            machi_partition_simulator:always_these_partitions(Partition),
            io:format(user, "\nSET partitions = ~w (~w of ~w) at ~w\n",
                      [Partition, Count, length(AllPs), time()]),
-           [DoIt(40, 10, 50) || _ <- lists:seq(0, trunc(NumFLUs*FLUFudge)) ],
+           %% [DoIt(40, 10, 50) || _ <- lists:seq(0, trunc(NumFLUs*FLUFudge)) ],
+           [DoIt(20, 10, 50) || _ <- lists:seq(0, trunc(NumFLUs*FLUFudge)*2) ],
 
            {stable,true} = {stable,private_projections_are_stable(Namez, DoIt)},
            io:format(user, "\nSweet, private projections are stable\n", []),
@@ -246,11 +247,17 @@ io:format(user, "Rolling sanity check ... ", []),
 PrivProjs = [{Name, begin
                         {ok, Ps8} = ?FLU_PC:get_all_projections(FLU, private,
                                                                 infinity),
-                        Ps9 = if length(Ps8) < 5*1000 ->
+                        Max = 3*1000,
+                        Ps9 = if length(Ps8) < Max ->
                                       Ps8;
                                  true ->
+                                      NumToDel = length(Ps8) - Max,
                                       io:format(user, "trunc a bit... ", []),
-                                      lists:nthtail(3*1000, Ps8)
+                                      [begin
+                                           FilesToDel = lists:sublist(filelib:wildcard(Dir ++ "/projection/private/*"), NumToDel),
+                                           [_ = file:delete(File) || File <- FilesToDel]
+                                       end || Dir <- filelib:wildcard("/tmp/c/data*")],
+                                      lists:nthtail(Max, Ps8)
                               end,
                         [P || P <- Ps9,
                               P#projection_v1.epoch_number /= 0]
@@ -339,12 +346,12 @@ make_partition_list(All_list) ->
                                        A <- All_list, B <- All_list, A /= B,
                                        C <- All_list, D <- All_list, C /= D,
                                        X /= A, X /= C, A /= C],
-    %% Concat = _X_Ys1.
-    %% Concat = _X_Ys2.
-    %% Concat = _X_Ys1 ++ _X_Ys2.
-    %% Concat = _X_Ys3.
-    %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
-    %% random_sort(lists:usort([lists:sort(L) || L <- Concat])).
+    %% Concat = _X_Ys1,
+    %% Concat = _X_Ys2,
+    %% Concat = _X_Ys1 ++ _X_Ys2,
+    %% Concat = _X_Ys3,
+    Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
+    random_sort(lists:usort([lists:sort(L) || L <- Concat])).
 
     %% [ [{a,b},{b,d},{c,b}],
     %%   [{a,b},{b,d},{c,b}, {a,b},{b,a},{a,c},{c,a},{a,d},{d,a}],
@@ -360,14 +367,16 @@ make_partition_list(All_list) ->
     %% [ [{b,d}] ].
 
     %% [ [{a,b}], [], [{a,b}], [], [{a,b}] ].
-    [
-     [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
-     [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
-     [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
-     [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
-     [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
-     [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], []
-    ].
+
+    %% [
+    %%  %% [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
+    %%  %% [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
+    %%  %% [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
+    %%  %% [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
+    %%  [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
+    %%  [{b,a},{d,e}], 
+    %%  [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], []
+    %% ].
 
     %% [ [{a,b}, {b,a}] ].
 
@@ -398,11 +407,11 @@ make_partition_list(All_list) ->
     %%   [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {b,c}],
     %%   [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {c,d}] ].
 
-    %% [ [{a,b}, {a,b},{b,a},{a,c},{c,a},{a,d},{d,a}],
-    %%   [{a,b}, {b,a},{a,b},{b,c},{c,b},{b,d},{d,b}],
-    %%   [{a,b}],
-    %%   [{a,b}, {c,a},{a,c},{c,b},{b,c},{c,d},{d,c}],
-    %%   [{a,b}, {d,a},{a,d},{d,b},{b,d},{d,c},{c,d}] ].
+%    [ [{a,b}, {a,b},{b,a},{a,c},{c,a},{a,d},{d,a}],
+%      [{a,b}, {b,a},{a,b},{b,c},{c,b},{b,d},{d,b}],
+%      [{a,b}],
+%      [{a,b}, {c,a},{a,c},{c,b},{b,c},{c,d},{d,c}],
+%      [{a,b}, {d,a},{a,d},{d,b},{b,d},{d,c},{c,d}] ].
 
 todo_why_does_this_crash_sometimes(FLUName, FLU, PPPepoch) ->
     try
