@@ -66,7 +66,7 @@ smoke_test2() ->
                             end || Pid <- [a_chmgr,b_chmgr,c_chmgr] ]
                   end,
         _ = lists:foldl(
-              fun(_, [{c,[a,b,c]}]=Acc) -> Acc;
+              fun(_, [{a,[a,b,c]}]=Acc) -> Acc;
                  (_, _Acc)  ->
                       TickAll(),                % has some sleep time inside
                       Xs = [begin
