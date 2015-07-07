@@ -1417,21 +1417,48 @@ react_to_env_C100(P_newprop, P_latest,
             ?REACT({c100, ?LINE, [sane]}),
             erase(perhaps_reset_loop),
             react_to_env_C110(P_latest, S);
-        _AnyOtherReturnValue ->
+        {expected_author2,_ExpectedAuthor2}=_ExpectedErr ->
             case get(perhaps_reset_loop) of
                 undefined ->
-                    put(perhaps_reset_loop, 1);
+                    put(perhaps_reset_loop, 1),
+                    ?REACT({c100, ?LINE, [not_sane, get(why2), _ExpectedErr]}),
+                    react_to_env_C300(P_newprop, P_latest, S);
                 X when X > 15 ->
-                    Msg = lists:flatten(
-                            io_lib:format("~P", [get(react), 300])),
-                    exit({not_supposed_to_happen, ?MODULE, ?LINE, Msg});
+                    %% Ha, yes, this is possible.  For example:
+                    %% outer: author=e,upi=[b,a,d],repair=[c,e]
+                    %% inner: author=e,upi=[b,e],  repair=[]
+                    %% In this case, the transition from inner to outer by A30
+                    %% has chosen the wrong author.  We have two choices.
+                    %% 1. Accept this transition, because it really was the
+                    %%    safe & transition-approved UPI+repeairing that we
+                    %%    were using while we were flapping.  I'm 99% certain
+                    %%    that this is safe.  TODO: Verify
+                    %% 2. I'm not yet 100% certain that #1 is safe, so instead
+                    %%    we fall back to the one thing that we know is safe:
+                    %%    the 'none' projection, which lets the chain rebuild
+                    %%    itself normally during future iterations.
+                    #projection_v1{epoch_number=Epoch_latest,
+                                   all_members=All_list,
+                                   members_dict=MembersDict} = P_latest,
+                    P_none0 = make_none_projection(MyName, All_list, MembersDict),
+                    P_none1 = P_none0#projection_v1{epoch_number=Epoch_latest},
+                    Dbg = [{none_projection,true}],
+                    P_none = machi_projection:update_checksum(
+                               P_none1#projection_v1{dbg=Dbg}),
+io:format(user, "YO: looping transition forced to none!\nNewProp: ~w\nLatest: ~w\nNone: ~w\n", [machi_projection:make_summary(P_newprop), machi_projection:make_summary(P_latest), machi_projection:make_summary(P_none)]),
+                    %% Recurse to self!
+                    react_to_env_C100(P_none, P_none, S);
                 X ->
-                    put(perhaps_reset_loop, X+1)
-            end,
+                    put(perhaps_reset_loop, X+1),
+                    ?REACT({c100, ?LINE, [not_sane, get(why2), _ExpectedErr]}),
+                    react_to_env_C300(P_newprop, P_latest, S)
+            end;
+        _AnyOtherReturnValue ->
             %% P_latest is not sane.
             %% By process of elimination, P_newprop is best,
             %% so let's write it.
             ?REACT({c100, ?LINE, [not_sane, get(why2), _AnyOtherReturnValue]}),
+            erase(perhaps_reset_loop),
             react_to_env_C300(P_newprop, P_latest, S)
     end.
 
