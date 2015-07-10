@@ -975,12 +975,12 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                 P_inner2 = machi_projection:update_checksum(
                            P_inner#projection_v1{epoch_number=FinalInnerEpoch,
                                                  creation_time=FinalCreation}),
-                InnerInfo = [{inner_summary,
-                              machi_projection:make_summary(P_inner2)}],
-                DbgX = replace(P_newprop3#projection_v1.dbg, InnerInfo),
-                ?REACT({a30, ?LINE, DbgX}),
-                {P_newprop3#projection_v1{dbg=DbgX,
-                                          inner=P_inner2}, S_i};
+                InnerInfo = [],
+                ?REACT({a30, ?LINE, [{inner_summary,
+                                    machi_projection:make_summary(P_inner2)}]}),
+                P_newprop4 = machi_projection:update_checksum(
+                               P_newprop3#projection_v1{inner=P_inner2}),
+                {P_newprop4, S_i};
             {_, P_newprop3_flap_count} ->
                 ?REACT({a30, ?LINE,[{newprop3_flap_count,P_newprop3_flap_count},
                                     {flap_limit, FlapLimit}]}),
