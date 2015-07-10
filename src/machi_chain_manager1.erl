@@ -851,7 +851,9 @@ react_to_env_A20(Retries, #ch_mgr{name=MyName}=S) ->
     UnanimousFLUs = lists:sort(proplists:get_value(unanimous_flus, ReadExtra)),
     UPI_Repairing_FLUs = lists:sort(P_latest#projection_v1.upi ++
                                     P_latest#projection_v1.repairing),
-    All_UPI_Repairing_were_unanimous = UPI_Repairing_FLUs == UnanimousFLUs,
+    All_UPI_Repairing_were_unanimous =
+        ordsets:is_subset(ordsets:from_list(UPI_Repairing_FLUs),
+                          ordsets:from_list(UnanimousFLUs)),
     NotUnanimousFLUs = lists:sort(proplists:get_value(not_unanimous_flus,
                                                       ReadExtra, [xxx])),
     NotUnanimousPs = lists:sort(proplists:get_value(not_unanimous_answers,
@@ -861,8 +863,8 @@ react_to_env_A20(Retries, #ch_mgr{name=MyName}=S) ->
                             P <- NotUnanimousPs,
                             is_record(P, projection_v1)],
     BadAnswerFLUs = lists:sort(proplists:get_value(bad_answer_flus, ReadExtra)),
-    ?REACT({a20,?LINE,[{unanimous_flus,UnanimousFLUs},
-                       {upi_repairing,UPI_Repairing_FLUs},
+    ?REACT({a20,?LINE,[{upi_repairing,UPI_Repairing_FLUs},
+                       {unanimous_flus,UnanimousFLUs},
                        {all_upi_repairing_were_unanimous,All_UPI_Repairing_were_unanimous},
                        {not_unanimous_flus, NotUnanimousFLUs},
                        {not_unanimous_answers, NotUnanimousSumms},
