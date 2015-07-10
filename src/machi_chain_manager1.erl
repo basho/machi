@@ -975,7 +975,6 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                 P_inner2 = machi_projection:update_checksum(
                            P_inner#projection_v1{epoch_number=FinalInnerEpoch,
                                                  creation_time=FinalCreation}),
-                InnerInfo = [],
                 ?REACT({a30, ?LINE, [{inner_summary,
                                     machi_projection:make_summary(P_inner2)}]}),
                 P_newprop4 = machi_projection:update_checksum(
@@ -1074,8 +1073,15 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
             %%
             %% So, we're going to use P_inner2B as our new proposal and run
             %% it through the regular system, as we did prior to 2015-04-14.
-            react_to_env_A40(Retries, P_inner2B, P_latest,
-                             LatestUnanimousP, S10);
+            %%
+            %% OK, but we need to avoid a possible infinite loop by trying to
+            %% use the inner projection as-is.  Because we're moving from
+            %% inner to outer projections, the partition situation has
+            %% altered significantly.  Use calc_projection() to find out what
+            %% nodes are down *now* (as best as we can tell right now).
+            {P_o, S_o} = calc_projection(unused, unused,
+                                         P_inner2B, MyName, [], [], S10),
+            react_to_env_A40(Retries, P_o, P_latest, LatestUnanimousP, S_o);
        true ->
             ?REACT({a30, ?LINE, []}),
             react_to_env_A40(Retries, P_newprop10, P_latest,
