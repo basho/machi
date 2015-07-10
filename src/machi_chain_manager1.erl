@@ -1029,7 +1029,11 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
     Kicker_p = case {Latest_authors_flap_count_current,
                      Latest_authors_flap_count_latest} of
                    {NotUndef, undefined} when NotUndef /= undefined ->
-                       true;
+                       %% OK, someone else has switched from non-zero flap
+                       %% count to zero flap count.  But ... do not kick out
+                       %% of our flapping mode locally if we do not have an
+                       %% inner projection.
+                       inner_projection_exists(P_current);
                    {_, _} ->
                        false
                end,
