@@ -228,20 +228,20 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
       [DoIt(30, 0, 0) || _ <- lists:seq(1,2)],
       AllPs = make_partition_list(All_list),
       PartitionCounts = lists:zip(AllPs, lists:seq(1, length(AllPs))),
-      FLUFudge = if NumFLUs < 4 ->
-                         2;
-                    true ->
-                         2
-                         %% 13
-                 end,
+      MaxIters = NumFLUs * (NumFLUs + 1) * 6,
       [begin
            machi_partition_simulator:always_these_partitions(Partition),
            io:format(user, "\nSET partitions = ~w (~w of ~w) at ~w\n",
                      [Partition, Count, length(AllPs), time()]),
-           %% [DoIt(40, 10, 50) || _ <- lists:seq(0, trunc(NumFLUs*FLUFudge)) ],
-           [DoIt(20, 10, 50) || _ <- lists:seq(0, trunc(NumFLUs*FLUFudge)*2) ],
-
-           {stable,true} = {stable,private_projections_are_stable(Namez, DoIt)},
+           true = lists:foldl(
+                    fun(_, true) ->
+                            true;
+                       (_, _) ->
+                            %% Run a few iterations
+                            [DoIt(10, 10, 50) || _ <- lists:seq(1, 6)],
+                            %% If stable, return true to short circuit remaining
+                            private_projections_are_stable(Namez, DoIt)
+                    end, false, lists:seq(0, MaxIters)),
            io:format(user, "\nSweet, private projections are stable\n", []),
            io:format(user, "Rolling sanity check ... ", []),
            MaxFiles = 3*1000,
@@ -447,10 +447,10 @@ private_projections_are_stable(Namez, PollFunc) ->
     if Private1 == Private2 ->
             ok;
        true ->
-            io:format(user, "Oops: Private1: ~p\n", [Private1]),
-            io:format(user, "Oops: Private2: ~p\n", [Private2])
+            io:format(user, "Private1: ~p, ", [Private1]),
+            io:format(user, "Private2: ~p, ", [Private2])
     end,
-    true = (Private1 == Private2).
+    Private1 == Private2.
 
 get_latest_inner_proj_summ(FLU) ->
     {ok, Proj} = ?FLU_PC:read_latest_projection(FLU, private),
