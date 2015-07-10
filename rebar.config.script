@@ -8,15 +8,17 @@ case PulseBuild of
     true ->
         PulseOpts =
             [{pulse_no_side_effect,
-              [{erlang,display,1}
-               ]},
+              [{erlang,display,1},
+               {os,getenv,1}
+              ]},
              {pulse_side_effect,
               [  {does_not_exist_yet, some_func, '_'}
 
               , {prim_file, '_', '_'}
               , {file, '_', '_'}
               , {filelib, '_', '_'}
-              , {os, '_', '_'} ]},
+              %% , {os, '_', '_'}
+              ]},
 
              {pulse_replace_module,
               [ {gen_server, pulse_gen_server}

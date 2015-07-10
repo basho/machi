@@ -38,7 +38,8 @@
 -compile({pulse_replace_module, [{application, pulse_application}]}).
 %% The following functions contains side_effects but are run outside
 %% PULSE, i.e. PULSE needs to leave them alone
--compile({pulse_skip,[{prop_pulse_test_,0}, {shutdown_hard,0}]}).
+-compile({pulse_skip,[{prop_pulse_test_,0}, {prop_pulse_regression_test_,0},
+                      {shutdown_hard,0}]}).
 -compile({pulse_no_side_effect,[{file,'_','_'}, {erlang, now, 0}]}).
 
 %% Used for output within EUnit...
@@ -75,6 +76,44 @@ gen_old_threshold() ->
 gen_no_partition_threshold() ->
     noshrink(choose(1, 100)).
 
+gen_commands(new) ->
+    non_empty(commands(?MODULE));
+gen_commands(regression) ->
+    %% These regression tests include only few, very limited command
+    %% sequences that have been helpful in turning up bugs in the past.
+    %% For this style test, QuickCheck is basically just choosing random
+    %% seeds + PULSE execution to see if one of the oldies-but-goodies can
+    %% find another execution/interleaving that still shows a problem.
+    Cmd_a = [{set,{var,1},
+              {call,machi_chain_manager1_pulse,setup,[3,{846,1222,4424}]}},
+             {set,{var,2},
+              {call,machi_chain_manager1_pulse,do_ticks,[6,{var,1},13,48]}}],
+    Cmd_b = [{set,{var,1},
+              {call,machi_chain_manager1_pulse,setup,[4,{354,7401,1237}]}},
+             {set,{var,2},
+              {call,machi_chain_manager1_pulse,do_ticks,[10,{var,1},15,77]}},
+             {set,{var,3},
+              {call,machi_chain_manager1_pulse,do_ticks,[7,{var,1},92,39]}}],
+    Cmd_c = [{set,{var,1},
+              {call,machi_chain_manager1_pulse,setup,[2,{5202,467,3157}]}},
+             {set,{var,2},
+              {call,machi_chain_manager1_pulse,do_ticks,[8,{var,1},98,3]}},
+             {set,{var,3},
+              {call,machi_chain_manager1_pulse,do_ticks,[5,{var,1},56,49]}},
+             {set,{var,4},
+              {call,machi_chain_manager1_pulse,do_ticks,[10,{var,1},33,72]}},
+             {set,{var,5},
+              {call,machi_chain_manager1_pulse,do_ticks,[10,{var,1},88,20]}},
+             {set,{var,6},
+              {call,machi_chain_manager1_pulse,do_ticks,[8,{var,1},67,10]}},
+             {set,{var,7},
+              {call,machi_chain_manager1_pulse,do_ticks,[5,{var,1},86,25]}},
+             {set,{var,8},
+              {call,machi_chain_manager1_pulse,do_ticks,[6,{var,1},74,88]}},
+             {set,{var,9},
+              {call,machi_chain_manager1_pulse,do_ticks,[8,{var,1},78,39]}}],
+    noshrink(oneof([Cmd_a, Cmd_b, Cmd_c])).
+
 command(#state{step=0}) ->
     {call, ?MODULE, setup, [gen_num_pids(), gen_seed()]};
 command(S) ->
@@ -104,17 +143,18 @@ postcondition(_S, {call, _, _Func, _Args}, _Res) ->
     true.
 
 all_list_extra() ->
+    {PortBase, DirBase} = get_port_dir_base(),
     [ %% Genenerators assume that this list is at least 2 items
-       {#p_srvr{name=a, address="localhost", port=7400,
-                props=[{chmgr, a_chmgr}]}, "/tmp/c/data.pulse.a"}
-     , {#p_srvr{name=b, address="localhost", port=7401,
-                props=[{chmgr, b_chmgr}]}, "/tmp/c/data.pulse.b"}
-     , {#p_srvr{name=c, address="localhost", port=7402,
-                props=[{chmgr, c_chmgr}]}, "/tmp/c//data.pulse.c"}
-     , {#p_srvr{name=d, address="localhost", port=7403,
-                props=[{chmgr, d_chmgr}]}, "/tmp/c/data.pulse.d"}
-     , {#p_srvr{name=e, address="localhost", port=7404,
-                props=[{chmgr, e_chmgr}]}, "/tmp/c/data.pulse.e"}
+       {#p_srvr{name=a, address="localhost", port=PortBase+0,
+                props=[{chmgr, a_chmgr}]}, DirBase ++ "/data.pulse.a"}
+     , {#p_srvr{name=b, address="localhost", port=PortBase+1,
+                props=[{chmgr, b_chmgr}]}, DirBase ++ "/data.pulse.b"}
+     , {#p_srvr{name=c, address="localhost", port=PortBase+2,
+                props=[{chmgr, c_chmgr}]}, DirBase ++ "//data.pulse.c"}
+     , {#p_srvr{name=d, address="localhost", port=PortBase+3,
+                props=[{chmgr, d_chmgr}]}, DirBase ++ "/data.pulse.d"}
+     , {#p_srvr{name=e, address="localhost", port=PortBase+4,
+                props=[{chmgr, e_chmgr}]}, DirBase ++ "/data.pulse.e"}
     ].
 
 all_list() ->
@@ -222,48 +262,6 @@ dump_state() ->
     {_PSimPid, _SupPid, ProxiesDict, _AlE} = get(manager_pids_hack),
     Report = ?MGRTEST:unanimous_report(ProxiesDict),
     Namez = ProxiesDict,
-    %% ?QC_FMT("Report ~p\n", [Report]),
-
-    %% Diag1 = [begin
-    %%              {ok, Ps} = ?FLU_PC:get_all_projections(Proxy, Type),
-    %%              [io_lib:format("~p ~p ~p: ~w\n", [FLUName, Type, P#projection_v1.epoch_number, machi_projection:make_summary(P)]) || P <- Ps]
-    %%          end || {FLUName, Proxy} <- orddict:to_list(ProxiesDict),
-    %%                 Type <- [public] ],
-    %% P_lists0 = [{FLUName, Type,
-    %%              element(2,?FLU_PC:get_all_projections(Proxy, Type))} ||
-    %%                {FLUName, Proxy} <- orddict:to_list(ProxiesDict),
-    %%                Type <- [public,private]],
-    %% P_lists = [{FLUName, Type, P} || {FLUName, Type, Ps} <- P_lists0,
-    %%                                  P <- Ps],
-    %% AllDict = lists:foldl(fun({FLU, Type, P}, D) ->
-    %%                               K = {FLU, Type, P#projection_v1.epoch_number},
-    %%                               dict:store(K, P, D)
-    %%                       end, dict:new(), lists:flatten(P_lists)),
-    %% DumbFinderBackward =
-    %%     fun(FLUName) ->
-    %%             fun(E, error_unwritten) ->
-    %%                     case dict:find({FLUName, private, E}, AllDict) of
-    %%                         {ok, T} -> T;
-    %%                         error   -> error_unwritten
-    %%                     end;
-    %%                (_E, Acc) ->
-    %%                     Acc
-    %%             end
-    %%     end,
-    %% UniquePrivateEs =
-    %%     lists:usort(lists:flatten(
-    %%                   [element(2,?FLU_PC:list_all_projections(Proxy,private)) ||
-    %%                       {_FLUName, Proxy} <- orddict:to_list(ProxiesDict)])),
-    %% Diag2 = [[
-    %%             io_lib:format("~p private: ~w\n",
-    %%                           [FLUName,
-    %%                            machi_projection:make_summary(
-    %%                               lists:foldl(DumbFinderBackward(FLUName),
-    %%                                           error_unwritten,
-    %%                                           lists:seq(Epoch, 0, -1)))])
-    %%           || {FLUName, _FLU} <- Namez]
-    %%          || Epoch <- UniquePrivateEs],
-
     PrivProjs = [{Name, begin
                             {ok, Ps} = ?FLU_PC:get_all_projections(Proxy,
                                                                    private),
@@ -282,7 +280,10 @@ dump_state() ->
   end.
 
 prop_pulse() ->
-    ?FORALL({Cmds0, Seed}, {non_empty(commands(?MODULE)), pulse:seed()},
+    prop_pulse(new).
+
+prop_pulse(Style) when Style == new; Style == regression ->
+    ?FORALL({Cmds0, Seed}, {gen_commands(Style), pulse:seed()},
     ?IMPLIES(1 < length(Cmds0) andalso length(Cmds0) < 11,
     begin
         ok = shutdown_hard(),
@@ -308,13 +309,6 @@ prop_pulse() ->
                                    {_H, _S, _R} = run_commands(?MODULE, Cmds)
                            end, [{seed, Seed},
                                  {strategy, unfair}]),
-        %% ?QC_FMT("S2 ~p\n", [S2]),
-        case S2#state.dump_state of
-            undefined ->
-                ?QC_FMT("BUMMER Cmds = ~p\n", [Cmds]);
-            _ ->
-                ok
-        end,
         {Report, PrivProjs, Diag} = S2#state.dump_state,
 
         %% Report is ordered by Epoch.  For each private projection
@@ -349,7 +343,7 @@ prop_pulse() ->
         ok = shutdown_hard(),
         ?WHENFAIL(
         begin
-            ?QC_FMT("PrivProjs = ~p\n", [PrivProjs]),
+            ?QC_FMT("PrivProjs = ~P\n", [PrivProjs, 100]),
             ?QC_FMT("Report = ~p\n", [Report]),
             ?QC_FMT("Cmds = ~p\n", [Cmds]),
             ?QC_FMT("Res = ~p\n", [Res]),
@@ -366,7 +360,41 @@ prop_pulse() ->
                     ]))
     end)).
 
-prop_pulse_test_() ->
+-define(FIXTURE(TIMEOUT, EXTRATO, FUN), {timeout, (Timeout+ExtraTO+600), FUN}).
+
+prop_pulse_new_test_() ->
+    {Timeout, ExtraTO} = get_timeouts(),
+    F = fun() ->
+             ?assert(eqc:quickcheck(eqc:testing_time(Timeout,
+                                                   ?QC_OUT(prop_pulse(new)))))
+        end,
+    case os:getenv("PULSE_SKIP_NEW") of
+        false ->
+            ?FIXTURE(Timeout, ExtraTO, F);
+        _ ->
+            {timeout, 5,
+             fun() -> timer:sleep(200),
+                      io:format(user, " (skip new style) ", []) end}
+    end.
+
+%% See gen_commands() for more detail on the regression tests.
+
+prop_pulse_regression_test_() ->
+    {Timeout, ExtraTO} = get_timeouts(),
+    F = fun() ->
+             ?assert(eqc:quickcheck(eqc:testing_time(Timeout,
+                                             ?QC_OUT(prop_pulse(regression)))))
+        end,
+    case os:getenv("PULSE_SKIP_REGRESSION") of
+        false ->
+            ?FIXTURE(Timeout, ExtraTO, F);
+        _ ->
+            {timeout, 5,
+             fun() -> timer:sleep(200),
+                      io:format(user, " (skip regression style) ", []) end}
+    end.
+
+get_timeouts() ->
     Timeout = case os:getenv("PULSE_TIME") of
                   false -> 60;
                   Val   -> list_to_integer(Val)
@@ -375,20 +403,14 @@ prop_pulse_test_() ->
                   false -> 0;
                   Val2  -> list_to_integer(Val2)
               end,
-    {timeout, (Timeout+ExtraTO+600),     % 600 = a bit more fudge time
-     fun() ->
-             ?assert(eqc:quickcheck(eqc:testing_time(Timeout,
-                                                     ?QC_OUT(prop_pulse()))))
-     end}.
+    {Timeout, ExtraTO}.
 
 shutdown_hard() ->
-    ?QC_FMT("shutdown(", []),
     (catch unlink(whereis(machi_partition_simulator))),
     [begin
          Pid = whereis(X),
          spawn(fun() -> (catch X:stop()) end),
          timer:sleep(50),
-         (catch unlink(Pid)),
          timer:sleep(10),
          (catch exit(Pid, shutdown)),
          timer:sleep(1),
@@ -437,5 +459,21 @@ private_projections_are_stable_check(ProxiesDict, All_listE) ->
 
 get_chmgr(#p_srvr{props=Ps}) ->
     proplists:get_value(chmgr, Ps).
+
+%%    {PortBase, DirBase} = get_port_dir_base(),
+get_port_dir_base() ->
+    I = case os:getenv("PULSE_BASE_PORT") of
+            false ->
+                0;
+            II ->
+                list_to_integer(II)
+        end,
+    D = case os:getenv("PULSE_BASE_DIR") of
+            false ->
+                "/tmp/c/";
+            DD ->
+                DD
+        end,
+    {7400 + (I * 100), D ++ "/" ++ integer_to_list(I)}.
 
 -endif. % PULSE

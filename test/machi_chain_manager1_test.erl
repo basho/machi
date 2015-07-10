@@ -401,13 +401,13 @@ unanimous_report_test() ->
     E5 = 5,
     UPI5 = [a,b],
     Rep5 = [],
-    UPIRep5 = [{UPI5, Rep5}],
+    Report5 = [UPI5],
     P5 = machi_projection:new(E5, a, MembersDict, [], UPI5, Rep5, []),
-    {ok_disjoint, UPIRep5} =
+    {ok_disjoint, Report5} =
         unanimous_report2([{a, P5}, {b, P5}]),
-    {ok_disjoint, UPIRep5} =
+    {ok_disjoint, Report5} =
         unanimous_report2([{a, not_in_this_epoch}, {b, P5}]),
-    {ok_disjoint, UPIRep5} =
+    {ok_disjoint, Report5} =
         unanimous_report2([{a, P5}, {b, not_in_this_epoch}]),
 
     UPI5_b = [a],
@@ -427,15 +427,16 @@ unanimous_report_test() ->
 
     UPI5_d = [c],
     Rep5_d = [a],
+    Report5d = [UPI5, UPI5_d],
     P5_d = machi_projection:new(E5, b, MembersDict3, [b], UPI5_d, Rep5_d, []),
-    {bummer_NOT_DISJOINT, _} = unanimous_report2([{a, P5}, {b, P5_d}]),
+    {ok_disjoint, Report5d} = unanimous_report2([{a, P5}, {b, P5_d}]),
 
     UPI5_e = [b],
     Rep5_e = [c],
-    UPIRep5be = [{UPI5_b, Rep5_b}, {UPI5_e, Rep5_e}],
+    Report5be = [UPI5_b, UPI5_e],
     P5_e = machi_projection:new(E5, b, MembersDict3, [a], UPI5_e, Rep5_e, []),
     {bummer_NOT_DISJOINT, _} = unanimous_report2([{a, P5},   {b, P5_e}]),
-    {ok_disjoint, UPIRep5be} = unanimous_report2([{a, P5_b}, {b, P5_e}]),
+    {ok_disjoint, Report5be} = unanimous_report2([{a, P5_b}, {b, P5_e}]),
 
     ok.
 

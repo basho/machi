@@ -244,20 +244,14 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
            {stable,true} = {stable,private_projections_are_stable(Namez, DoIt)},
            io:format(user, "\nSweet, private projections are stable\n", []),
            io:format(user, "Rolling sanity check ... ", []),
+           MaxFiles = 3*1000,
            PrivProjs = [{Name, begin
-                                   {ok, Ps8} = ?FLU_PC:get_all_projections(FLU, private,
-                                                                           infinity),
-                                   Max = 3*1000,
-                                   Ps9 = if length(Ps8) < Max ->
+                                   {ok, Ps8} = ?FLU_PC:get_all_projections(
+                                                  FLU, private, infinity),
+                                   Ps9 = if length(Ps8) < MaxFiles ->
                                                  Ps8;
                                             true ->
-                                                 NumToDel = length(Ps8) - Max,
-                                                 io:format(user, "trunc a bit... ", []),
-                                                 [begin
-                                                      FilesToDel = lists:sublist(filelib:wildcard(Dir ++ "/projection/private/*"), NumToDel),
-                                                      [_ = file:delete(File) || File <- FilesToDel]
-                                                  end || Dir <- filelib:wildcard("/tmp/c/data*")],
-                                                 lists:nthtail(Max, Ps8)
+                                                 lists:nthtail(MaxFiles, Ps8)
                                          end,
                                    [P || P <- Ps9,
                                          P#projection_v1.epoch_number /= 0]
@@ -271,9 +265,20 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
            end,
            io:format(user, "Yay!\n", []),
            ReportXX = machi_chain_manager1_test:unanimous_report(Namez),
-           io:format(user, "ReportXX ~P\n", [ReportXX, 30]),
            true = machi_chain_manager1_test:all_reports_are_disjoint(ReportXX),
            io:format(user, "Yay for ReportXX!\n", []),
+
+           [begin
+                Privs = filelib:wildcard(Dir ++ "/projection/private/*"),
+                FilesToDel1 = lists:sublist(Privs,
+                                            max(0, length(Privs)-MaxFiles)),
+                [_ = file:delete(File) || File <- FilesToDel1],
+                Pubs = filelib:wildcard(Dir ++ "/projection/public/*"),
+                FilesToDel2 = lists:sublist(Pubs,
+                                            max(0, length(Pubs)-MaxFiles)),
+                [_ = file:delete(File) || File <- FilesToDel2]
+            end || Dir <- filelib:wildcard("/tmp/c/data*")],
+
            timer:sleep(1250),
            ok
        end || {Partition, Count} <- PartitionCounts
@@ -348,10 +353,10 @@ make_partition_list(All_list) ->
                                        X /= A, X /= C, A /= C],
     %% Concat = _X_Ys1,
     %% Concat = _X_Ys2,
-    Concat = _X_Ys1 ++ _X_Ys2,
-    %% Concat = _X_Ys3,
-    %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
-    random_sort(lists:usort([lists:sort(L) || L <- Concat])).
+    %% Concat = _X_Ys1 ++ _X_Ys2,
+    %% %% Concat = _X_Ys3,
+    %% %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
+    %% random_sort(lists:usort([lists:sort(L) || L <- Concat])).
 
     %% [ [{a,b},{b,d},{c,b}],
     %%   [{a,b},{b,d},{c,b}, {a,b},{b,a},{a,c},{c,a},{a,d},{d,a}],
@@ -392,6 +397,16 @@ make_partition_list(All_list) ->
     %%   [{a,b}, {c,b},       {c,d}],
     %%   [{a,b}, {b,c},       {d,c}] ].
 
+    [
+     %% [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
+     %% [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
+     %% [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
+     %% [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
+     [{a,b}], [], [{a,b}], [], [{a,b}]
+     %% [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
+     %% [{b,a},{d,e}],
+     %% [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], []
+    ].
     %% [ [{a,b}, {b,c}, {c,d}, {d,e}],
     %%   [{b,a}, {b,c}, {c,d}, {d,e}],
     %%   [{a,b}, {c,b}, {c,d}, {d,e}],
@@ -407,11 +422,11 @@ make_partition_list(All_list) ->
     %%   [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {b,c}],
     %%   [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {c,d}] ].
 
-%    [ [{a,b}, {a,b},{b,a},{a,c},{c,a},{a,d},{d,a}],
-%      [{a,b}, {b,a},{a,b},{b,c},{c,b},{b,d},{d,b}],
-%      [{a,b}],
-%      [{a,b}, {c,a},{a,c},{c,b},{b,c},{c,d},{d,c}],
-%      [{a,b}, {d,a},{a,d},{d,b},{b,d},{d,c},{c,d}] ].
+    %% [ [{a,b}, {a,b},{b,a},{a,c},{c,a},{a,d},{d,a}],
+    %%   [{a,b}, {b,a},{a,b},{b,c},{c,b},{b,d},{d,b}],
+    %%   [{a,b}],
+    %%   [{a,b}, {c,a},{a,c},{c,b},{b,c},{c,d},{d,c}],
+    %%   [{a,b}, {d,a},{a,d},{d,b},{b,d},{d,c},{c,d}] ].
 
 todo_why_does_this_crash_sometimes(FLUName, FLU, PPPepoch) ->
     try

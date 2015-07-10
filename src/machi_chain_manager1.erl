@@ -852,8 +852,22 @@ react_to_env_A20(Retries, #ch_mgr{name=MyName}=S) ->
     UPI_Repairing_FLUs = lists:sort(P_latest#projection_v1.upi ++
                                     P_latest#projection_v1.repairing),
     All_UPI_Repairing_were_unanimous = UPI_Repairing_FLUs == UnanimousFLUs,
-    %% TODO: investigate if the condition below is more correct?
-    %% All_UPI_Repairing_were_unanimous = (UPI_Repairing_FLUs -- UnanimousFLUs) == [],
+    NotUnanimousFLUs = lists:sort(proplists:get_value(not_unanimous_flus,
+                                                      ReadExtra, [xxx])),
+    NotUnanimousPs = lists:sort(proplists:get_value(not_unanimous_answers,
+                                                    ReadExtra, [xxx])),
+    NotUnanimousSumms = [machi_projection:make_summary(
+                       P#projection_v1{dbg2=[omitted]}) ||
+                            P <- NotUnanimousPs,
+                            is_record(P, projection_v1)],
+    BadAnswerFLUs = lists:sort(proplists:get_value(bad_answer_flus, ReadExtra)),
+    ?REACT({a20,?LINE,[{unanimous_flus,UnanimousFLUs},
+                       {upi_repairing,UPI_Repairing_FLUs},
+                       {all_upi_repairing_were_unanimous,All_UPI_Repairing_were_unanimous},
+                       {not_unanimous_flus, NotUnanimousFLUs},
+                       {not_unanimous_answers, NotUnanimousSumms},
+                       {bad_answer_flus, BadAnswerFLUs}
+                      ]}),
     LatestUnanimousP =
         if UnanimousTag == unanimous
            andalso
@@ -861,8 +875,7 @@ react_to_env_A20(Retries, #ch_mgr{name=MyName}=S) ->
                 ?REACT({a20,?LINE}),
                 true;
            UnanimousTag == unanimous ->
-                ?REACT({a20,?LINE,[{upi_repairing,UPI_Repairing_FLUs},
-                                   {unanimous,UnanimousFLUs}]}),
+                ?REACT({a20,?LINE}),
                 false;
            UnanimousTag == not_unanimous ->
                 ?REACT({a20,?LINE}),
@@ -1458,7 +1471,7 @@ io:format(user, "YO: looping transition forced to none!\nNewProp: ~w\nLatest: ~w
 
 react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     ?REACT(c110),
-    Extra_todo = [],
+    Extra_todo = [{react,get(react)}],
     P_latest2 = machi_projection:update_dbg2(P_latest, Extra_todo),
 
     MyNamePid = proxy_pid(MyName, S),
@@ -1475,13 +1488,14 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
             {_,_,C} = os:timestamp(),
             MSec = trunc(C / 1000),
             {HH,MM,SS} = time(),
+            P_latest2x = P_latest2#projection_v1{dbg2=[]}, % limit verbose len.
             case inner_projection_exists(P_latest2) of
                 false ->
                     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
                         true ->
                             io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses plain: ~w\n",
                               [HH,MM,SS,MSec, S#ch_mgr.name,
-                               machi_projection:make_summary(P_latest2)]);
+                               machi_projection:make_summary(P_latest2x)]);
                         _ ->
                             ok
                     end;
@@ -1489,9 +1503,10 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
                     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
                         true ->
                             P_inner = inner_projection_or_self(P_latest2),
+                            P_innerx = P_inner#projection_v1{dbg2=[]}, % limit verbose len.
                             io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w\n",
                               [HH,MM,SS,MSec, S#ch_mgr.name,
-                               machi_projection:make_summary(P_inner)]);
+                               machi_projection:make_summary(P_innerx)]);
                         _ ->
                             ok
                     end
