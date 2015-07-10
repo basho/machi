@@ -1040,86 +1040,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                                            Latest_authors_flap_count_latest}},
                           {move_from_inner, MoveFromInnerToNorm_p}],
             ?REACT({a30, ?LINE, ClauseInfo}),
-            %% %% 2015-04-14: YEAH, this appears to work!
-            %% %% 1. Create a "safe" projection that is upi=[],repairing=[]
-            %% %% 2. Declare it to be best & latest by pure fiat.
-            %% %%    (The C100 transition will double-check that it's safe.)
-            %% %% 3. Jump to C100.  Then, for the next iteration,
-            %% %%    our P_current state to a smallest-possible-score
-            %% %%    state ... and let the chain reassemble itself from
-            %% %%    length zero.
-            %% #projection_v1{epoch_number=Epoch_newprop10, all_members=All_list,
-            %%                members_dict=MembersDict} = P_newprop10,
-            %% P_noneprop0 = make_none_projection(MyName, All_list, MembersDict),
-            %% P_noneprop1 = P_noneprop0#projection_v1{epoch_number=Epoch_newprop10},
-            %% %% Just to be clear, we clobber any flapping info by setting dbg.
-            %% P_noneprop = P_noneprop1#projection_v1{dbg=ClauseInfo},
-            %% react_to_env_C100(P_noneprop, P_latest, S);
-
-            %% 2015-04-14: Let's experiment with using the current inner
-            %% projection (or, if there really is no inner, just P_current).
-            %% This is safe because it's already P_current and by assumption,
-            %% anything that made it through the logical maze to get here
-            %% is safe.  So re-using it with a higher epoch number doesn't
-            %% make any significant change.
-            %%
-            %% Yeah, it appears to work, also, nice!  This can help save some
-            %% repair operations (compared to the other safe thing to do
-            %% here, which uses make_none_projection() to build & repair the
-            %% entire chain from scratch).  Note that this isn't a guarantee
-            %% that repair steps will be minimized: for a 4-member cluster
-            %% that has an asymmetric partition which organizes 3 clusters of
-            %% inner-upi=[a], inner-upi=[b], and inner-upi[c,d], there is no
-            %% guarantee (yet?) that the [c,d] chain will be the UPI basis
-            %% for repairs when the partition is healed: the quickest author
-            %% after the healing will make that choice for everyone.
-            %%
-            %% 2015-07-06: Ha! This works, almost all of the time.  But there
-            %% is a bug.
-            %%
-            %% The bug: if a repair has finished near the time that we fall
-            %% out of flapping mode and back to normal (one of the reasons
-            %% that we are here), then it's possible to have a situation like
-            %% this:
-            %% outer: {epoch,4638},{author,c},{upi,[e,c]},{repair,[d,a,b]}
-            %% inner: {epoch,4539},{author,e},{upi,[e,c,d]},{repair,[]}
-            %%
-            %% Code prior to today would simply use the inner projection and
-            %% only keep the outer's epoch number.  However, if we do that,
-            %% then C100 will fail a sanity check: author e cannot add d to
-            %% the end of the UPI, only C is allowed to do that.
-            %%
-            %% After checking all 5 participants, they all agree with the
-            %% outer and inner shown above.  But all 5 fail their C100
-            %% transition safety check, and so all 5 spin in an infinite loop,
-            %% cool!
-            %%
-            %% Fix for today: We are going to game the system.  We know that
-            %% C100 is going to be checking authorship relative to P_current's
-            %% UPI's tail.  Therefore, we're just going to set it here.
-            %% Why???  Because we have been using this projection safely for
-            %% the entire flapping period!  ... The only other way I see is to
-            %% allow C100 to carve out an exception if the repair finished
-            %% PLUS author_server check fails PLUS if we came from here, but
-            %% that feels a bit fragile to me: if some code factoring happens
-            %% in projection_transition_is_saneprojection_transition_is_sane()
-            %% or elsewhere that causes the author_server check to be
-            %% something-other-than-the-final-thing-checked, then such a
-            %% refactoring would likely cause an even harder bug to find &
-            %% fix.  Conditions tested: 5 FLUs plus alternating partitions of:
-            %% [
-            %%  [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
-            %%  [{b,a},{d,e}],
-            %%  [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], []
-            %% ].
-            %%
-            %% TODO: Perhaps that quickest author should consult all of the
-            %% other private stores, check their inner, and if there is a
-            %% higher rank there, then goto C200 for a wait-and-see cycle?
-            %% TODO: 2015-07-04 The suggestion in TODO above appears very good.
-            %%       Also, at least some of the time, MyName is included
-            %%       in the down list, quite odd!  Go investigate that.
-
+            %% Move from inner projection to outer.
             P_inner2A = inner_projection_or_self(P_current),
             ResetEpoch = P_newprop10#projection_v1.epoch_number,
             ResetAuthor = case P_current#projection_v1.upi of
@@ -1140,7 +1061,17 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                                           dbg=ClauseInfo++ClauseInfo2}),
             ReactI = [{inner2b,machi_projection:make_summary(P_inner2B)}],
             ?REACT({a30, ?LINE, ReactI}),
-            react_to_env_C100(P_inner2B, P_latest, S);
+            %% In the past, we've tried:
+            %%     react_to_env_C100(P_inner2B, P_latest, S);
+            %%
+            %% But we *know* that direct transition is racy/buggy: if
+            %% P_latest UPIs are not unanimous, then we run the risk of
+            %% non-disjoint UPIs; state B10 exists for a reason!
+            %%
+            %% So, we're going to use P_inner2B as our new proposal and run
+            %% it through the regular system, as we did prior to 2015-04-14.
+            react_to_env_A40(Retries, P_inner2B, P_latest,
+                             LatestUnanimousP, S10);
        true ->
             ?REACT({a30, ?LINE, []}),
             react_to_env_A40(Retries, P_newprop10, P_latest,
