@@ -344,7 +344,7 @@ code_change(_OldVsn, S, _Extra) ->
 make_none_projection(MyName, All_list, MembersDict) ->
     Down_list = All_list,
     UPI_list = [],
-    machi_projection:new(MyName, MembersDict, UPI_list, Down_list, [], []).
+    machi_projection:new(MyName, MembersDict, Down_list, UPI_list, [], []).
 
 get_my_private_proj_boot_info(MgrOpts, DefaultDict, DefaultProj) ->
     get_my_proj_boot_info(MgrOpts, DefaultDict, DefaultProj, private).

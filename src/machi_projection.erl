@@ -35,7 +35,7 @@
 
 %% @doc Create a new projection record.
 
-new(MyName, MemberDict, UPI_list, Down_list, Repairing_list, Ps) ->
+new(MyName, MemberDict, Down_list, UPI_list, Repairing_list, Ps) ->
     new(0, MyName, MemberDict, Down_list, UPI_list, Repairing_list, Ps).
 
 %% @doc Create a new projection record.

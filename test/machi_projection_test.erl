@@ -78,9 +78,12 @@ compare_test() ->
 
 try_it(MyName, All_list, UPI_list, Down_list, Repairing_list, Ps) ->
     try
-        P = machi_projection:new(MyName, All_list, UPI_list, Down_list,
+        P = machi_projection:new(MyName, All_list, Down_list, UPI_list,
                                  Repairing_list, Ps),
-        is_record(P, projection_v1)
+        Down_list = P#projection_v1.down,
+        UPI_list = P#projection_v1.upi,
+        Repairing_list = P#projection_v1.repairing,
+        true
     catch _:_ ->
             false
     end.
