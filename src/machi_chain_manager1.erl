@@ -1037,12 +1037,12 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                        false
                end,
 
+    ClauseInfo = [{inner_kicker, Kicker_p},
+                  {inner_kicker2, {Latest_authors_flap_count_current,
+                                   Latest_authors_flap_count_latest}},
+                  {move_from_inner, MoveFromInnerToNorm_p}],
+    ?REACT({a30, ?LINE, ClauseInfo}),
     if MoveFromInnerToNorm_p orelse Kicker_p ->
-            ClauseInfo = [{inner_kicker, Kicker_p},
-                          {inner_kicker2, {Latest_authors_flap_count_current,
-                                           Latest_authors_flap_count_latest}},
-                          {move_from_inner, MoveFromInnerToNorm_p}],
-            ?REACT({a30, ?LINE, ClauseInfo}),
             %% Move from inner projection to outer.
             P_inner2A = inner_projection_or_self(P_current),
             ResetEpoch = P_newprop10#projection_v1.epoch_number,
