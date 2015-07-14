@@ -914,7 +914,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                 P_current_inner = inner_projection_or_self(P_current),
                 {P_i, S_i} = calc_projection(unused, unused,
                                              P_current_inner,
-                                             MyName, AllHosed, [], S),
+                                             MyName, AllHosed, [], S3),
                 %% The inner projection will have a fake author, which
                 %% everyone will agree is the largest UPI member's
                 %% name.
