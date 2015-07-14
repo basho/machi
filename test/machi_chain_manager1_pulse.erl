@@ -112,7 +112,11 @@ gen_commands(regression) ->
               {call,machi_chain_manager1_pulse,do_ticks,[6,{var,1},74,88]}},
              {set,{var,9},
               {call,machi_chain_manager1_pulse,do_ticks,[8,{var,1},78,39]}}],
-    noshrink(oneof([Cmd_a, Cmd_b, Cmd_c])).
+    Cmd_d = [{set,{var,1},
+              {call,machi_chain_manager1_pulse,setup,[5,{436,5950,9085}]}},
+             {set,{var,2},
+              {call,machi_chain_manager1_pulse,do_ticks,[7,{var,1},19,80]}}],
+    noshrink(oneof([Cmd_a, Cmd_b, Cmd_c, Cmd_d])).
 
 command(#state{step=0}) ->
     {call, ?MODULE, setup, [gen_num_pids(), gen_seed()]};
