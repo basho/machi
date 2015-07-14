@@ -1998,8 +1998,10 @@ perhaps_call_t(S, Partitions, FLU, DoIt) ->
         perhaps_call(S, Partitions, FLU, DoIt)
     catch
         exit:timeout ->
+            remember_partition_hack(FLU),
             {error, partition};
         exit:{timeout,_} ->
+            remember_partition_hack(FLU),
             {error, partition}
     end.
 
