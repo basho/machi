@@ -71,7 +71,12 @@ gen_seed() ->
     noshrink({choose(1, 10000), choose(1, 10000), choose(1, 10000)}).
 
 gen_old_threshold() ->
-    noshrink(choose(1, 100)).
+    noshrink(frequency([
+                        {10, {keep}},
+                        {10, choose(1, 100)},
+                        {10, oneof([{island1}])},
+                        {10, oneof([{asymm1}, {asymm2}, {asymm3}])}
+                       ])).
 
 gen_no_partition_threshold() ->
     noshrink(choose(1, 100)).
@@ -125,8 +130,7 @@ command(S) ->
                { 1, {call, ?MODULE, change_partitions,
                      [gen_old_threshold(), gen_no_partition_threshold()]}},
                {50, {call, ?MODULE, do_ticks,
-                     %% [choose(5, 200), S#state.pids,
-                     [choose(5, 10), S#state.pids,
+                     [choose(5, 50), S#state.pids,
                       gen_old_threshold(), gen_no_partition_threshold()]}}
               ]).
 
@@ -212,9 +216,27 @@ setup(Num, Seed) ->
     ?QC_FMT("),", []),
     Res.
 
-change_partitions(OldThreshold, NoPartitionThreshold) ->
+change_partitions(OldThreshold, NoPartitionThreshold)
+  when is_integer(OldThreshold) ->
     machi_partition_simulator:reset_thresholds(OldThreshold,
-                                               NoPartitionThreshold).
+                                               NoPartitionThreshold);
+change_partitions({keep}, _NoPartitionThreshold) ->
+    ok;
+change_partitions({island1}, _NoPartitionThreshold) ->
+    AB = [a,b],
+    NotAB = all_list() -- AB,
+    Partitions = lists:usort([{X, Y} || X <- AB, Y <- NotAB] ++
+                             [{X, Y} || X <- NotAB, Y <- AB]),
+    machi_partition_simulator:always_these_partitions(Partitions);
+change_partitions({asymm1}, _NoPartitionThreshold) ->
+    Partitions = [{a,b}],
+    machi_partition_simulator:always_these_partitions(Partitions);
+change_partitions({asymm2}, _NoPartitionThreshold) ->
+    Partitions = [{a,b},{a,c},{a,d},{a,e},{b,a},{b,c},{b,e},{c,a},{c,b},{c,d},{c,e},{d,a},{d,c},{d,e},{e,a},{e,b},{e,c},{e,d}],
+    machi_partition_simulator:always_these_partitions(Partitions);
+change_partitions({asymm3}, _NoPartitionThreshold) ->
+    Partitions = [{a,b},{a,c},{a,d},{a,e},{b,a},{b,d},{b,e},{c,d},{d,a},{d,c},{d,e},{e,a},{e,b},{e,d}],
+    machi_partition_simulator:always_these_partitions(Partitions).
 
 always_last_partitions() ->
     machi_partition_simulator:always_last_partitions().
@@ -236,12 +258,11 @@ do_ticks(Num, PidsMaybe, OldThreshold, NoPartitionThreshold) ->
             undefined -> get(manager_pids_hack);
             _         -> PidsMaybe
         end,
-    if is_integer(OldThreshold) ->
-            machi_partition_simulator:reset_thresholds(OldThreshold,
-                                                       NoPartitionThreshold);
-       true ->
+    if is_atom(OldThreshold) ->
             ?QC_FMT("{e=~w},", [get_biggest_private_epoch_number(ProxiesDict)]),
-            machi_partition_simulator:no_partitions()
+            machi_partition_simulator:no_partitions();
+       true ->
+            change_partitions(OldThreshold, NoPartitionThreshold)
     end,
     Res = exec_ticks(Num, All_listE),
     if not is_integer(OldThreshold) ->
@@ -302,7 +323,7 @@ prop_pulse(Style) when Style == new; Style == regression ->
                        {call, ?MODULE, private_stable_check, []}}],
         LastTriggerTicks = {set,{var,99999997},
                             {call, ?MODULE, do_ticks, [123, undefined, no, no]}},
-        Cmds1 = lists:duplicate(2, LastTriggerTicks),
+        Cmds1 = lists:duplicate(4, LastTriggerTicks),
         Cmds = Cmds0 ++
                Stabilize1 ++
                Cmds1 ++
@@ -347,7 +368,7 @@ prop_pulse(Style) when Style == new; Style == regression ->
         ok = shutdown_hard(),
         ?WHENFAIL(
         begin
-            ?QC_FMT("PrivProjs = ~P\n", [PrivProjs, 100]),
+            ?QC_FMT("PrivProjs = ~P\n", [PrivProjs, 50]),
             ?QC_FMT("Report = ~p\n", [Report]),
             ?QC_FMT("Cmds = ~p\n", [Cmds]),
             ?QC_FMT("Res = ~p\n", [Res]),
@@ -430,7 +451,8 @@ exec_ticks(Num, All_listE) ->
                           [begin
                                erlang:yield(),
                                M_name = P#p_srvr.name,
-                               Max = 10,
+                               %% Max = 10,
+                               Max = 25,
                                Elapsed =
                                    ?MGR:sleep_ranked_order(1, Max, M_name, all_list()),
                                Res = ?MGR:test_react_to_env(get_chmgr(P)),
