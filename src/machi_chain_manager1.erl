@@ -694,6 +694,9 @@ calc_up_nodes_sim(MyName, AllMembers, RunEnv1) ->
                       [{network_partitions, Partitions2},
                        {network_islands, Islands2},
                        {up_nodes, UpNodes}]),
+    catch ?REACT({calc_up_nodes,?LINE,[{partitions,Partitions2},
+                                       {islands,Islands2},
+                                       {up_nodes, UpNodes}]}),
     {UpNodes, Partitions2, RunEnv2}.
 
 replace(PropList, Items) ->
@@ -1459,7 +1462,7 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     end,
     react_to_env_C120(P_latest, [], S).
 
-react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H} = S) ->
+react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H}=S) ->
     ?REACT(c120),
     H2 = queue:in(P_latest, H),
     H3 = case queue:len(H2) of
@@ -1525,7 +1528,7 @@ react_to_env_C310(P_newprop, S) ->
 
 calculate_flaps(P_newprop, _P_current, _FlapLimit,
                 #ch_mgr{name=MyName, proj_history=H, flap_start=FlapStart,
-                        flaps=Flaps, runenv=RunEnv1} = S) ->
+                        flaps=Flaps, runenv=RunEnv1}=S) ->
     HistoryPs = queue:to_list(H),
     Ps = HistoryPs ++ [P_newprop],
     UniqueProposalSummaries = lists:usort([{P#projection_v1.upi,
@@ -2073,6 +2076,10 @@ simple_chain_state_transition_is_sane(_Author1, UPI1, Repair1, Author2, UPI2) ->
     Answer1 = false == lists:member(error, Orders)
               andalso Orders == lists:sort(Orders)
               andalso length(UPI2) == NumKeeps + NumOrders,
+    catch (put(react, [{sane,author1,_Author1, upi1,UPI1, repair1,Repair1,
+                        author2,Author2, upi2,UPI2,
+                        keepsdels,KeepsDels, orders,Orders, numKeeps,NumKeeps,
+                        numOrders,NumOrders, answer1,Answer1}|get(react)])),
     if not Answer1 ->
             ?RETURN2(Answer1);
        true ->
