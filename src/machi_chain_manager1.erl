@@ -1246,7 +1246,6 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         andalso
         UnanimousLatestInnerNotRelevant_p ->
             ?REACT({b10, ?LINE, []}),
-            put(b10_hack, false),
 
             %% Do not go to C100, because we want to ignore this latest
             %% proposal.  Write ours instead via C300.
@@ -1260,7 +1259,6 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                      {newprop_epoch,P_newprop#projection_v1.epoch_number},
                      {newprop_author,P_newprop#projection_v1.author_server}
                     ]}),
-            put(b10_hack, false),
 
             react_to_env_C100(P_newprop, P_latest, S);
 
@@ -1269,62 +1267,72 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
             ?REACT({b10, ?LINE, [i_am_flapping,
                                  {newprop_flap_count, P_newprop_flap_count},
                                  {flap_limit, FlapLimit}]}),
-            _B10Hack = get(b10_hack),
             case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
                 true ->
                     io:format(user, "{FLAP: ~w flaps ~w}!  ", [S#ch_mgr.name, P_newprop_flap_count]);
                 _ ->
                     ok
             end,
+            %% MEANWHILE, we have learned some things about this
+            %% algorithm in the past many months.  With the introduction
+            %% of the "inner projection" concept, we know that the inner
+            %% projection may be stable but the "outer" projection will
+            %% continue to be flappy for as long as there's an
+            %% asymmetric network partition somewhere.  We now know that
+            %% that flappiness is OK and that the only problem with it
+            %% is that it needs to be slowed down so that we don't have
+            %% zillions of public projection proposals written every
+            %% second.
+            %%
+            %% It doesn't matter if the FlapLimit count mechanism
+            %% doesn't give an accurate sense of global flapping state.
+            %% FlapLimit is enough to be able to tell us to slow down.
 
-            if
-                %% MEANWHILE, we have learned some things about this
-                %% algorithm in the past few months.  With the introduction
-                %% of the "inner projection" concept, we know that the inner
-                %% projection may be stable but the "outer" projection will
-                %% continue to be flappy for as long as there's an
-                %% asymmetric network partition somewhere.  We now know that
-                %% that flappiness is OK and that the only problem with it
-                %% is that it needs to be slowed down so that we don't have
-                %% zillions of public projection proposals written every
-                %% second.
-                %%
-                %% It doesn't matter if the FlapLimit count mechanism
-                %% doesn't give an accurate sense of global flapping state.
-                %% FlapLimit is enough to be able to tell us to slow down.
-
-                true ->
-                    %% We already know that I'm flapping.  We need to
-                    %% signal to the rest of the world that I'm writing
-                    %% and flapping and churning, so we cannot always
-                    %% go to A50 from here.
-                    %%
-                    %% If we do go to A50, then recommend that we poll less
-                    %% frequently.
-                    {X, S2} = gimme_random_uniform(100, S),
-                    if X < 80 ->
-                            ?REACT({b10, ?LINE, [flap_stop]}),
-                            ThrottleTime = if P_newprop_flap_count <  500 -> 1;
-                                              P_newprop_flap_count < 1000 -> 5;
-                                              P_newprop_flap_count < 5000 -> 10;
-                                              true                        -> 30
-                                           end,
-                            FinalProps = [{my_flap_limit, FlapLimit},
-                                          {throttle_seconds, ThrottleTime}],
-                            react_to_env_A50(P_latest, FinalProps, S2);
-                       true ->
-                            %% It is our moral imperative to write so that
-                            %% the flap cycle continues enough times so that
-                            %% everyone notices then eventually falls into
-                            %% consensus.
-                            ?REACT({b10, ?LINE, [flap_continue]}),
-                            react_to_env_C300(P_newprop, P_latest, S2)
-                    end
+            %% We already know that I'm flapping.  We need to
+            %% signal to the rest of the world that I'm writing
+            %% and flapping and churning, so we cannot always
+            %% go to A50 from here.
+            %%
+            %% If we do go to A50, then recommend that we poll less
+            %% frequently.
+            {X, S2} = gimme_random_uniform(100, S),
+            if X < 80 ->
+                    ?REACT({b10, ?LINE, [flap_stop]}),
+                    ThrottleTime = if P_newprop_flap_count <  500 -> 1;
+                                      P_newprop_flap_count < 1000 -> 5;
+                                      P_newprop_flap_count < 5000 -> 10;
+                                      true                        -> 30
+                                   end,
+                    FinalProps = [{my_flap_limit, FlapLimit},
+                                  {throttle_seconds, ThrottleTime}],
+                    react_to_env_A50(P_latest, FinalProps, S2);
+               true ->
+                    %% It is our moral imperative to write so that
+                    %% the flap cycle continues enough times so that
+                    %% everyone notices then eventually falls into
+                    %% consensus.
+                    #projection_v1{all_members=All_list,
+                                   down=Down_list,
+                                   flap=OldFlap} = P_newprop,
+                    #flap_i{all_flap_counts=AllFlapCounts} = OldFlap,
+                    PossibleFlappers = All_list -- Down_list,
+                    SeenFlappers =
+                        [FLU || {FLU, {{{epk,_},_}, Cnt}} <- AllFlapCounts,
+                                Cnt >= FlapLimit],
+                    FlappingAll = (PossibleFlappers -- SeenFlappers) == [],
+                    %% io:format(user, ", ~w of ~w is ~W, ", [lists:sort(SeenFlappers), lists:sort(PossibleFlappers), FlappingAll, 5]),
+                    NewFlap = OldFlap#flap_i{flapping_me=true,
+                                             flapping_all=FlappingAll},
+                    P_newprop2 = machi_projection:update_checksum(
+                                   P_newprop#projection_v1{flap=NewFlap}),
+                    ?REACT({b10, ?LINE, [flap_continue,
+                                        {flapping_me, true},
+                                        {flapping_all, FlappingAll}]}),
+                    react_to_env_C300(P_newprop2, P_latest, S2)
             end;
 
         Retries > 2 ->
             ?REACT({b10, ?LINE, [{retries, Retries}]}),
-            put(b10_hack, false),
 
             %% The author of P_latest is too slow or crashed.
             %% Let's try to write P_newprop and see what happens!
@@ -1337,7 +1345,6 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                     [{rank_latest, Rank_latest},
                      {rank_newprop, Rank_newprop},
                      {latest_author, P_latest#projection_v1.author_server}]}),
-            put(b10_hack, false),
 
             %% TODO: Is a UnanimousLatestInnerNotRelevant_p test needed in this clause???
 
@@ -1349,7 +1356,6 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         true ->
             ?REACT({b10, ?LINE}),
             ?REACT({b10, ?LINE, [{retries,Retries},{rank_latest, Rank_latest},                     {rank_newprop, Rank_newprop},                     {latest_author, P_latest#projection_v1.author_server}]}), % TODO debug delete me!
-            put(b10_hack, false),
 
             %% P_newprop is best, so let's write it.
             react_to_env_C300(P_newprop, P_latest, S)
@@ -1359,6 +1365,10 @@ react_to_env_C100(P_newprop, P_latest,
                   #ch_mgr{name=MyName, proj=P_current}=S) ->
     ?REACT(c100),
 
+    %% Note: The value of `Sane' may be `true', `false', or `term() /= true'.
+    %%       The error value `false' is reserved for chain order violations.
+    %%       Any other non-true value can be used for projection structure
+    %%       construction errors, checksum error, etc.
     Sane = projection_transition_is_sane(P_current, P_latest, MyName),
     case Sane of
         _ when P_current#projection_v1.epoch_number == 0 ->
@@ -1682,6 +1692,11 @@ projection_transition_is_sane_retrospective(P1, P2, RelativeToServer) ->
 projection_transition_is_sane(P1, P2, RelativeToServer) ->
     projection_transition_is_sane(P1, P2, RelativeToServer, false).
 
+%% @doc Check if a projection transition is sane &amp; safe.
+%%
+%% NOTE: The return value convention is `true' for sane/safe and
+%% `term() /= true' for any unsafe/insane value.
+
 projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
     put(why2, []),
     case projection_transition_is_sane_with_si_epoch(
@@ -1741,6 +1756,12 @@ projection_transition_is_sane_final_review(_P1, P2,
 projection_transition_is_sane_final_review(_P1, _P2, Else) ->
     ?RETURN2(Else).
 
+%% @doc Check if a projection transition is sane &amp; safe with a
+%%      strictly increasing epoch number.
+%%
+%% NOTE: The return value convention is `true' for sane/safe and
+%% `term() /= true' for any unsafe/insane value.
+
 projection_transition_is_sane_with_si_epoch(
   #projection_v1{epoch_number=Epoch1} = P1,
   #projection_v1{epoch_number=Epoch2} = P2,
@@ -1749,10 +1770,21 @@ projection_transition_is_sane_with_si_epoch(
            P1, P2, RelativeToServer, RetrospectiveP) of
         true ->
             %% Must be a strictly increasing epoch.
-            ?RETURN2(Epoch2 > Epoch1);
+            case Epoch2 > Epoch1 of
+                true ->
+                    ?RETURN2(true);
+                false ->
+                    ?RETURN2({epoch_not_si, Epoch2, 'not_gt', Epoch1})
+            end;
         Else ->
             ?RETURN2(Else)
     end.
+
+%% @doc Check if a projection transition is sane &amp; safe with the
+%%      exception of a strictly increasing epoch number (equality is ok).
+%%
+%% NOTE: The return value convention is `true' for sane/safe and
+%% `term() /= true' for any unsafe/insane value.
 
 projection_transition_is_sane_except_si_epoch(
   #projection_v1{epoch_number=Epoch1,
@@ -1816,6 +1848,9 @@ projection_transition_is_sane_except_si_epoch(
     true = sets:is_disjoint(DownS2, RepairingS2),
     true = sets:is_disjoint(UPIS2, RepairingS2),
 
+    %% We won't check the checksum of P1, but we will of P2.
+    P2 = machi_projection:update_checksum(P2),
+
     %% Hooray, all basic properties of the projection's elements are
     %% not obviously bad.  Now let's check if the UPI+Repairing->UPI
     %% transition is good.
@@ -1828,6 +1863,8 @@ projection_transition_is_sane_except_si_epoch(
          S1 = machi_projection:make_summary(P1),
          S2 = machi_projection:make_summary(P2),
          Trace = erlang:get_stacktrace(),
+         %% There are basic data structure checks only, do not return `false'
+         %% here.
          {err, _Type, _Err, from, S1, to, S2, relative_to, RelativeToServer,
           history, (catch lists:sort([no_history])),
           stack, Trace}
@@ -2069,17 +2106,26 @@ simple_chain_state_transition_is_sane(UPI1, Repair1, UPI2) ->
     ?RETURN2(simple_chain_state_transition_is_sane(undefined, UPI1, Repair1,
                                                    undefined, UPI2)).
 
+%% @doc Simple check if a projection transition is sane &amp; safe: we assume
+%% that the caller has checked basic projection data structure contents.
+%%
+%% NOTE: The return value convention is `true' for sane/safe and
+%% `term() /= true' for any unsafe/insane value.
+
 simple_chain_state_transition_is_sane(_Author1, UPI1, Repair1, Author2, UPI2) ->
     {KeepsDels, Orders} = mk(UPI1, Repair1, UPI2),
     NumKeeps = length([x || keep <- KeepsDels]),
     NumOrders = length(Orders),
-    Answer1 = false == lists:member(error, Orders)
-              andalso Orders == lists:sort(Orders)
-              andalso length(UPI2) == NumKeeps + NumOrders,
-    catch (put(react, [{sane,author1,_Author1, upi1,UPI1, repair1,Repair1,
-                        author2,Author2, upi2,UPI2,
-                        keepsdels,KeepsDels, orders,Orders, numKeeps,NumKeeps,
-                        numOrders,NumOrders, answer1,Answer1}|get(react)])),
+    NoErrorInOrders = (false == lists:member(error, Orders)),
+    OrdersOK = (Orders == lists:sort(Orders)),
+    UPI2LengthOK = (length(UPI2) == NumKeeps + NumOrders),
+    Answer1 = NoErrorInOrders andalso OrdersOK andalso UPI2LengthOK,
+    catch ?REACT({simple, ?LINE,
+                  [{sane, answer1,Answer1,
+                    author1,_Author1, upi1,UPI1, repair1,Repair1,
+                    author2,Author2, upi2,UPI2,
+                    keepsdels,KeepsDels, orders,Orders, numKeeps,NumKeeps,
+                    numOrders,NumOrders, answer1,Answer1}]}),
     if not Answer1 ->
             ?RETURN2(Answer1);
        true ->
@@ -2103,6 +2149,14 @@ simple_chain_state_transition_is_sane(_Author1, UPI1, Repair1, Author2, UPI2) ->
                     end
             end
     end.
+
+%% @doc Check if a projection transition is sane &amp; safe: we assume
+%% that the caller has checked basic projection data structure contents.
+%%
+%% NOTE: The return value convention is `true' for sane/safe and `term() /=
+%% true' for any unsafe/insane value.  This function (and its callee
+%% functions) are the only functions (throughout all of the chain state
+%% transition sanity checking functions) that is allowed to return `false'.
 
 chain_state_transition_is_sane(Author1, UPI1, Repair1, Author2, UPI2) ->
     ToSelfOnly_p = if UPI2 == [Author2] -> true;
