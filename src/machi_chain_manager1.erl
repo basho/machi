@@ -990,7 +990,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                     [FLU || {FLU, {{{epk,_},_}, Cnt}} <- AllFlapCounts,
                             Cnt >= FlapLimit],
                 FlappingAll = (PossibleFlappers -- SeenFlappers) == [],
-                erlang:display({'YOYO',MyName,FlappingAll}),
+                %% erlang:display({'YOYO',MyName,NewEpoch,FlappingAll}),
 
                 NewFlap = OldFlap#flap_i{flapping_me=true,
                                          flapping_all=FlappingAll},
@@ -1364,16 +1364,21 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
     end.
 
 react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
-                                            flap=Flap_latest}=P_latest,
+                                            flap=Flap_latest0}=P_latest,
                   #ch_mgr{name=MyName, proj=P_current}=S) ->
     ?REACT(c100),
 
     Sane = projection_transition_is_sane(P_current, P_latest, MyName),
 %% deadlock more frequent here???? if Sane == true -> ok;  true -> io:format(user, "insane-~w-~w,", [MyName, P_newprop#projection_v1.epoch_number]) end, %%% DELME!!!
-?REACT({c100, ?LINE, [zoo, {me,MyName}, {author_latest,Author_latest},
-      {flap_latest,Flap_latest},
-      {flapping_me,Flap_latest#flap_i.flapping_me},
-      {flapping_all,Flap_latest#flap_i.flapping_all}]}),
+    Flap_latest = if is_record(Flap_latest0, flap_i) ->
+                          Flap_latest0;
+                     true ->
+                          #flap_i{flapping_me=false, flapping_all=false}
+                  end,
+    ?REACT({c100, ?LINE, [zoo, {me,MyName}, {author_latest,Author_latest},
+                          {flap_latest,Flap_latest},
+                          {flapping_me,Flap_latest#flap_i.flapping_me},
+                          {flapping_all,Flap_latest#flap_i.flapping_all}]}),
 
     %% Note: The value of `Sane' may be `true', `false', or `term() /= true'.
     %%       The error value `false' is reserved for chain order violations.
@@ -1411,6 +1416,21 @@ react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
             %% harsh: we fall back to the "none projection" and let the chain
             %% reassemble from there.  Hopefully this case is quite rare,
             %% since asymmetric partitions (we assume) are pretty rare?
+            %%
+            %% Examples of overlapping membership insanity:
+            %% Key: {author, UPI, Reparing}
+            %%
+            %%     {a,[a,b],[c,d,e]},
+            %%     {b,[a,b],[c,d,e]},
+            %%     {c,[e,b],[a,c,d]},
+            %%     {d,[a,b],[c,d,e]},
+            %%     {e,[e,b],[a,c,d]},
+            %% OR
+            %%     [{a,[c,e],[a,b,d]},
+            %%      {b,[e,a,b,c,d],[]},
+            %%      {c,[c,e],[a,b,d]},
+            %%      {d,[c,e],[a,b,d]},
+            %%      {e,[c,e],[a,b,d]}]
             react_to_env_C103(P_latest, S);
           {expected_author2,_}=_ExpectedErr when Author_latest == MyName andalso
                    is_record(Flap_latest, flap_i) andalso
@@ -2250,3 +2270,37 @@ mk([], [], [], Acc) ->
     {lists:reverse(Acc), []};
 mk([], Repair1, UPI2, Acc) ->
     {lists:reverse(Acc), machi_util:mk_order(UPI2, Repair1)}.
+
+scan_dir(Dir, FileFilterFun, FoldEachFun, FoldEachAcc) ->
+    Files = filelib:wildcard(Dir ++ "/*"),
+    Xs = [binary_to_term(element(2, file:read_file(File))) || File <- Files],
+    Xs2 = FileFilterFun(Xs),
+    lists:foldl(FoldEachFun, FoldEachAcc, Xs2).
+
+get_ps(#projection_v1{epoch_number=Epoch, dbg=Dbg}, Acc) ->
+    [{Epoch, proplists:get_value(ps, Dbg, [])}|Acc].
+
+strip_dbg2(P) ->
+    P#projection_v1{dbg2=[stripped]}.
+
+has_not_sane(#projection_v1{epoch_number=Epoch, dbg2=Dbg2}, Acc) ->
+    Reacts = proplists:get_value(react, Dbg2, []),
+    case [X || {_State,_Line, [not_sane|_]}=X <- Reacts] of
+        [] ->
+            Acc;
+        Xs->
+            [{Epoch, Xs}|Acc]
+    end.
+
+all_hosed_history(#projection_v1{epoch_number=_Epoch, flap=Flap},
+                  {OldAllHosed,Acc}) ->
+    AllHosed = if Flap == undefined ->
+                       [];
+                  true ->
+                       Flap#flap_i.all_hosed
+               end,
+    if AllHosed == OldAllHosed ->
+            {OldAllHosed, Acc};
+       true ->
+            {AllHosed, [AllHosed|Acc]}
+    end.
