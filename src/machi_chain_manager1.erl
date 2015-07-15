@@ -980,8 +980,27 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                                                  creation_time=FinalCreation}),
                 ?REACT({a30, ?LINE, [{inner_summary,
                                     machi_projection:make_summary(P_inner2)}]}),
+                %% Adjust the outer projection's #flap_i info.
+                #projection_v1{all_members=All_list,
+                               down=Down_list,
+                               flap=OldFlap} = P_newprop3,
+                #flap_i{all_flap_counts=AllFlapCounts} = OldFlap,
+                PossibleFlappers = All_list -- Down_list,
+                SeenFlappers =
+                    [FLU || {FLU, {{{epk,_},_}, Cnt}} <- AllFlapCounts,
+                            Cnt >= FlapLimit],
+                FlappingAll = (PossibleFlappers -- SeenFlappers) == [],
+                erlang:display({'YOYO',MyName,FlappingAll}),
+
+                NewFlap = OldFlap#flap_i{flapping_me=true,
+                                         flapping_all=FlappingAll},
+                ?REACT({a30, ?LINE, [flap_continue,
+                                     {flapping_me, true},
+                                     {flapping_all, FlappingAll}]}),
+                %% Put it all together.
                 P_newprop4 = machi_projection:update_checksum(
-                               P_newprop3#projection_v1{inner=P_inner2}),
+                               P_newprop3#projection_v1{flap=NewFlap,
+                                                        inner=P_inner2}),
                 {P_newprop4, S_i};
             {_, P_newprop3_flap_count} ->
                 ?REACT({a30, ?LINE,[{newprop3_flap_count,P_newprop3_flap_count},
@@ -1311,24 +1330,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                     %% the flap cycle continues enough times so that
                     %% everyone notices then eventually falls into
                     %% consensus.
-                    #projection_v1{all_members=All_list,
-                                   down=Down_list,
-                                   flap=OldFlap} = P_newprop,
-                    #flap_i{all_flap_counts=AllFlapCounts} = OldFlap,
-                    PossibleFlappers = All_list -- Down_list,
-                    SeenFlappers =
-                        [FLU || {FLU, {{{epk,_},_}, Cnt}} <- AllFlapCounts,
-                                Cnt >= FlapLimit],
-                    FlappingAll = (PossibleFlappers -- SeenFlappers) == [],
-                    %% io:format(user, ", ~w of ~w is ~W, ", [lists:sort(SeenFlappers), lists:sort(PossibleFlappers), FlappingAll, 5]),
-                    NewFlap = OldFlap#flap_i{flapping_me=true,
-                                             flapping_all=FlappingAll},
-                    P_newprop2 = machi_projection:update_checksum(
-                                   P_newprop#projection_v1{flap=NewFlap}),
-                    ?REACT({b10, ?LINE, [flap_continue,
-                                        {flapping_me, true},
-                                        {flapping_all, FlappingAll}]}),
-                    react_to_env_C300(P_newprop2, P_latest, S2)
+                    react_to_env_C300(P_newprop, P_latest, S2)
             end;
 
         Retries > 2 ->
@@ -1367,7 +1369,7 @@ react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
     ?REACT(c100),
 
     Sane = projection_transition_is_sane(P_current, P_latest, MyName),
-if Sane == true -> ok;  true -> io:format(user, "insane-~w-~w,", [MyName, P_newprop#projection_v1.epoch_number]) end, %%% DELME!!!
+%% deadlock more frequent here???? if Sane == true -> ok;  true -> io:format(user, "insane-~w-~w,", [MyName, P_newprop#projection_v1.epoch_number]) end, %%% DELME!!!
 ?REACT({c100, ?LINE, [zoo, {me,MyName}, {author_latest,Author_latest},
       {flap_latest,Flap_latest},
       {flapping_me,Flap_latest#flap_i.flapping_me},
