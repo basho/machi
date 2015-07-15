@@ -1361,15 +1361,22 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
             react_to_env_C300(P_newprop, P_latest, S)
     end.
 
-react_to_env_C100(P_newprop, P_latest,
+react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
+                                            flap=Flap_latest}=P_latest,
                   #ch_mgr{name=MyName, proj=P_current}=S) ->
     ?REACT(c100),
+
+    Sane = projection_transition_is_sane(P_current, P_latest, MyName),
+if Sane == true -> ok;  true -> io:format(user, "insane-~w-~w,", [MyName, P_newprop#projection_v1.epoch_number]) end, %%% DELME!!!
+?REACT({c100, ?LINE, [zoo, {me,MyName}, {author_latest,Author_latest},
+      {flap_latest,Flap_latest},
+      {flapping_me,Flap_latest#flap_i.flapping_me},
+      {flapping_all,Flap_latest#flap_i.flapping_all}]}),
 
     %% Note: The value of `Sane' may be `true', `false', or `term() /= true'.
     %%       The error value `false' is reserved for chain order violations.
     %%       Any other non-true value can be used for projection structure
     %%       construction errors, checksum error, etc.
-    Sane = projection_transition_is_sane(P_current, P_latest, MyName),
     case Sane of
         _ when P_current#projection_v1.epoch_number == 0 ->
             %% Epoch == 0 is reserved for first-time, just booting conditions.
@@ -1380,6 +1387,36 @@ react_to_env_C100(P_newprop, P_latest,
             ?REACT({c100, ?LINE, [sane]}),
             erase(perhaps_reset_loop),
             react_to_env_C110(P_latest, S);
+        %% 20150715: I've seen this loop happen with {expected_author2,X}
+        %% where nobody agrees, weird.
+        false when Author_latest == MyName andalso
+                   is_record(Flap_latest, flap_i) andalso
+                   Flap_latest#flap_i.flapping_me == true andalso
+                   Flap_latest#flap_i.flapping_all == true ->
+            ?REACT({c100, ?LINE}),
+            io:format(user, "\n\n1YOYO ~w breaking the cycle of ~p\n", [MyName, machi_projection:make_summary(P_latest)]),
+            %% This is a fun case.  We had just enough asymmetric partition
+            %% to cause the chain to fragment into two *incompatible* and
+            %% *overlapping membership* chains, but the chain fragmentation
+            %% happened "quickly" enough so that by the time everyone's flap
+            %% counters hit the flap_limit, the asymmetric partition has
+            %% disappeared ... we'd be stuck in a flapping state forever (or
+            %% until the partition situation changes again, which might be a
+            %% very long time).
+            %%
+            %% Alas, this case took a long time to find in model checking
+            %% zillions of asymmetric partitions.  Our solution is a bit
+            %% harsh: we fall back to the "none projection" and let the chain
+            %% reassemble from there.  Hopefully this case is quite rare,
+            %% since asymmetric partitions (we assume) are pretty rare?
+            react_to_env_C103(P_latest, S);
+          {expected_author2,_}=_ExpectedErr when Author_latest == MyName andalso
+                   is_record(Flap_latest, flap_i) andalso
+                   Flap_latest#flap_i.flapping_me == true andalso
+                   Flap_latest#flap_i.flapping_all == true ->
+            ?REACT({c100, ?LINE}),
+            io:format(user, "\n\n2YOYO ~w breaking the cycle of ~p\n", [MyName, machi_projection:make_summary(P_latest)]),
+            react_to_env_C103(P_latest, S);
         {expected_author2,_ExpectedAuthor2}=_ExpectedErr ->
             case get(perhaps_reset_loop) of
                 undefined ->
@@ -1400,17 +1437,8 @@ react_to_env_C100(P_newprop, P_latest,
                     %%    we fall back to the one thing that we know is safe:
                     %%    the 'none' projection, which lets the chain rebuild
                     %%    itself normally during future iterations.
-                    #projection_v1{epoch_number=Epoch_latest,
-                                   all_members=All_list,
-                                   members_dict=MembersDict} = P_latest,
-                    P_none0 = make_none_projection(MyName, All_list, MembersDict),
-                    P_none1 = P_none0#projection_v1{epoch_number=Epoch_latest},
-                    Dbg = [{none_projection,true}],
-                    P_none = machi_projection:update_checksum(
-                               P_none1#projection_v1{dbg=Dbg}),
-io:format(user, "YO: looping transition forced to none!\nNewProp: ~w\nLatest: ~w\nNone: ~w\n", [machi_projection:make_summary(P_newprop), machi_projection:make_summary(P_latest), machi_projection:make_summary(P_none)]),
-                    %% Recurse to self!
-                    react_to_env_C100(P_none, P_none, S);
+                    ?REACT({c100, ?LINE}),
+                    react_to_env_C103(P_latest, S);
                 X ->
                     put(perhaps_reset_loop, X+1),
                     ?REACT({c100, ?LINE, [not_sane, get(why2), _ExpectedErr]}),
@@ -1424,6 +1452,20 @@ io:format(user, "YO: looping transition forced to none!\nNewProp: ~w\nLatest: ~w
             erase(perhaps_reset_loop),
             react_to_env_C300(P_newprop, P_latest, S)
     end.
+
+react_to_env_C103(#projection_v1{epoch_number=Epoch_latest,
+                                   all_members=All_list,
+                                   members_dict=MembersDict} = P_latest,
+                  #ch_mgr{name=MyName}=S) ->
+    #projection_v1{epoch_number=Epoch_latest,
+                   all_members=All_list,
+                   members_dict=MembersDict} = P_latest,
+    P_none0 = make_none_projection(MyName, All_list, MembersDict),
+    P_none1 = P_none0#projection_v1{epoch_number=Epoch_latest,
+                                   dbg=[{none_projection,true}]},
+    P_none = machi_projection:update_checksum(P_none1),
+    %% Use it, darn it, because it's 100% safe.
+    react_to_env_C100(P_none, P_none, S).
 
 react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     ?REACT(c110),
