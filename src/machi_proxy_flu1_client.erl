@@ -47,6 +47,10 @@
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+-ifdef(PULSE).
+-compile({parse_transform, pulse_instrument}).
+-include_lib("pulse_otp/include/pulse_otp.hrl").
+-endif.
 -endif. % TEST.
 
 -export([start_link/1]).

@@ -469,8 +469,8 @@ shutdown_hard() ->
 exec_ticks(Num, All_listE) ->
     Parent = self(),
     Pids = [spawn_link(fun() ->
+                          %% ?V("tick-~w,", [self()]),
                           [begin
-                               erlang:yield(),
                                M_name = P#p_srvr.name,
                                %% Max = 10,
                                Max = 25,

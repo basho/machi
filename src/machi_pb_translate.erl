@@ -26,6 +26,11 @@
 -include("machi_pb.hrl").
 -include("machi_projection.hrl").
 
+-ifdef(PULSE).
+-compile({parse_transform, pulse_instrument}).
+-include_lib("pulse_otp/include/pulse_otp.hrl").
+-endif.
+
 -export([from_pb_request/1,
          from_pb_response/1,
          to_pb_request/2,
