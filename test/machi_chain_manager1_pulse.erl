@@ -40,6 +40,7 @@
 %% The following functions contains side_effects but are run outside
 %% PULSE, i.e. PULSE needs to leave them alone
 -compile({pulse_skip,[{prop_pulse_test_,0}, {prop_pulse_regression_test_,0},
+                      {prop_pulse,1},
                       {shutdown_hard,0}]}).
 -compile({pulse_no_side_effect,[{file,'_','_'}, {erlang, now, 0}]}).
 
@@ -180,13 +181,25 @@ setup(Num, Seed) ->
      end || {_P, Dir} <- All_listE],
     ?V(",z~w", [?LINE]),
 
-    %% Start partition simulator
-    {ok, PSimPid} = machi_partition_simulator:start_link(Seed, 0, 100),
+    %% GRRR, not PULSE: {ok, _} = application:ensure_all_started(machi),
+    [begin
+         ?V(",z~w,~w", [?LINE,App]),
+         _QQ = (catch application:start(App)),
+         erlang:display({app_start,App,_QQ})
+     end || App <- [machi] ],
+    ?V(",z~w", [?LINE]),
+
+    SimSpec = {part_sim, {machi_partition_simulator, start_link,
+                          [{0,0,0}, 0, 100]},
+               permanent, 500, worker, []},
+    ?V(",z~w", [?LINE]),
+    {ok, PSimPid} = supervisor:start_child(machi_sup, SimSpec),
+    ?V(",z~w", [?LINE]),
+    ok = machi_partition_simulator:set_seed(Seed),
     _Partitions = machi_partition_simulator:get(All_list),
     ?V(",z~w", [?LINE]),
 
     %% Start FLUs and their associated procs
-    {ok, SupPid} = machi_flu_sup:start_link(),
     FluOpts = [{use_partition_simulator, true}, {active_mode, false}],
     [begin
          #p_srvr{name=Name, port=Port} = P,
@@ -197,6 +210,7 @@ setup(Num, Seed) ->
     ?V(",z~w", [?LINE]),
     [machi_chain_manager1:set_chain_members(get_chmgr(P), Dict) ||
         {P, _Dir} <- All_listE],
+
     %% Trigger some environment reactions for humming consensus: first
     %% do all the same server first, then round-robin evenly across
     %% servers.
@@ -211,7 +225,7 @@ setup(Num, Seed) ->
 
     ProxiesDict = ?FLU_PC:start_proxies(Dict),
 
-    Res = {PSimPid, SupPid, ProxiesDict, All_listE},
+    Res = {PSimPid, 'machi_flu_sup', ProxiesDict, All_listE},
     put(manager_pids_hack, Res),
     ?V("),", []),
     Res.
@@ -308,11 +322,14 @@ prop_pulse() ->
     prop_pulse(new).
 
 prop_pulse(Style) when Style == new; Style == regression ->
+    _ = application:start(sasl),
+    _ = application:start(crypto),
     ?FORALL({Cmds0, Seed}, {gen_commands(Style), pulse:seed()},
     ?IMPLIES(1 < length(Cmds0) andalso length(Cmds0) < 11,
     begin
 erlang:display({prop,?MODULE,?LINE,self()}),
         ok = shutdown_hard(),
+erlang:display({prop,?MODULE,?LINE,self()}),
         %% PULSE can be really unfair, of course, including having exec_ticks
         %% run where all of FLU a does its ticks then FLU b.  Such a situation
         %% doesn't always allow unanimous private projection store values:
@@ -337,8 +354,8 @@ erlang:display({prop,?MODULE,?LINE,self()}),
                            fun() ->
                                    ?V("PROP-~w,", [self()]),
                                    %% {_H, _S, _R} = run_commands(?MODULE, Cmds)
-QAQA = run_commands(?MODULE, Cmds)
-,?V("pid681=~p", [process_info(list_to_pid("<0.681.0>"))]), QAQA
+                                   _QAQA = run_commands(?MODULE, Cmds)
+                                   %% ,?V("pid681=~p", [process_info(list_to_pid("<0.681.0>"))]), _QAQA
                            end, [{seed, Seed},
                                  {strategy, unfair}]),
         ok = shutdown_hard(),
@@ -457,8 +474,20 @@ get_do_shrink() ->
     end.
 
 shutdown_hard() ->
+erlang:display({hard,?MODULE,?LINE,self()}),
+    %% HANG: [catch machi_flu_psup:stop_flu_package(FLU) || FLU <- all_list()],
+    erlang:display({apps,?LINE,application:which_applications()}),
+    %%erlang:display({apps,?LINE,application:which_applications()}),
+    [begin
+erlang:display({hard,?MODULE,?LINE,self()}),
+         _STOP = application:stop(App),
+         erlang:display({stop, App, _STOP})
+     end || App <- [machi] ],
+    timer:sleep(100),
+
     (catch unlink(whereis(machi_partition_simulator))),
     [begin
+erlang:display({hard,?MODULE,?LINE,self(),X}),
          Pid = whereis(X),
          %%%%%%DELME deadlock source? spawn(fun() -> ?QC_FMT("shutdown-~w,", [self()]), (catch X:stop()) end),
          timer:sleep(50),
@@ -466,7 +495,7 @@ shutdown_hard() ->
          (catch exit(Pid, shutdown)),
          timer:sleep(1),
          (catch exit(Pid, kill))
-     end || X <- [machi_partition_simulator, machi_flu_sup] ],
+     end || X <- [machi_partition_simulator, machi_flu_sup, machi_sup] ],
     timer:sleep(100),
     ok.
 

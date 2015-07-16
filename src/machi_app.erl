@@ -27,10 +27,16 @@
 
 -behaviour(application).
 
+-ifdef(PULSE).
+-compile({parse_transform, pulse_instrument}).
+-include_lib("pulse_otp/include/pulse_otp.hrl").
+-endif.
+
 %% Application callbacks
 -export([start/2, stop/1]).
 
 start(_StartType, _StartArgs) ->
+    erlang:display({machi_app,self()}),
     case machi_sup:start_link() of
         {ok, Pid} ->
             {ok, Pid};
