@@ -171,7 +171,7 @@ all_list() ->
     [P#p_srvr.name || {P, _Dir} <- all_list_extra()].
 
 setup(Num, Seed) ->
-    ?V("\nsetup(~w,~w", [self(), Num]),
+    ?V("\nsetup(~w", [Num]),
     All_list = lists:sublist(all_list(), Num),
     All_listE = lists:sublist(all_list_extra(), Num),
     %% shutdown_hard() has taken care of killing all relevant procs.
@@ -183,18 +183,14 @@ setup(Num, Seed) ->
 
     %% GRRR, not PULSE: {ok, _} = application:ensure_all_started(machi),
     [begin
-         ?V(",z~w,~w", [?LINE,App]),
-         _QQ = (catch application:start(App)),
-         erlang:display({app_start,App,_QQ})
+         _QQ = (catch application:start(App))
      end || App <- [machi] ],
     ?V(",z~w", [?LINE]),
 
     SimSpec = {part_sim, {machi_partition_simulator, start_link,
                           [{0,0,0}, 0, 100]},
                permanent, 500, worker, []},
-    ?V(",z~w", [?LINE]),
     {ok, PSimPid} = supervisor:start_child(machi_sup, SimSpec),
-    ?V(",z~w", [?LINE]),
     ok = machi_partition_simulator:set_seed(Seed),
     _Partitions = machi_partition_simulator:get(All_list),
     ?V(",z~w", [?LINE]),
@@ -207,9 +203,9 @@ setup(Num, Seed) ->
      end || {P, Dir} <- All_listE],
     %% Set up the chain
     Dict = orddict:from_list([{P#p_srvr.name, P} || {P, _Dir} <- All_listE]),
-    ?V(",z~w", [?LINE]),
     [machi_chain_manager1:set_chain_members(get_chmgr(P), Dict) ||
         {P, _Dir} <- All_listE],
+    ?V(",z~w", [?LINE]),
 
     %% Trigger some environment reactions for humming consensus: first
     %% do all the same server first, then round-robin evenly across
@@ -217,7 +213,6 @@ setup(Num, Seed) ->
     [begin
          _QQa = machi_chain_manager1:test_react_to_env(get_chmgr(P))
      end || {P, _Dir} <- All_listE, _I <- lists:seq(1,20), _Repeat <- [1,2]],
-    ?V(",z~w", [?LINE]),
     [begin
          _QQa = machi_chain_manager1:test_react_to_env(get_chmgr(P))
      end || _I <- lists:seq(1,20), {P, _Dir} <- All_listE, _Repeat <- [1,2]],
@@ -307,10 +302,7 @@ dump_state() ->
                             [P || P <- Ps,
                                   P#projection_v1.epoch_number /= 0]
                         end} || {Name, Proxy} <- ProxiesDict],
-    ?V("~w,", [ [{X,whereis(X)} || X <- [machi_sup, machi_flu_sup, machi_partition_simulator]] ]),
-    ?V("~w,", [catch application:stop(machi)]),
-    [?V("~w,", [timer:sleep(10)]) || _ <- lists:seq(1,50)],
-    ?V("~w,", [ [{X,whereis(X)} || X <- [machi_sup, machi_flu_sup, machi_partition_simulator]] ]),
+    ?V("~w", [catch application:stop(machi)]),
     ?V(")", []),
     Diag1 = Diag2 = "skip_diags",
     {Report, PrivProjs, lists:flatten([Diag1, Diag2])}
@@ -325,14 +317,11 @@ prop_pulse() ->
     prop_pulse(new).
 
 prop_pulse(Style) when Style == new; Style == regression ->
-    _ = application:start(sasl),
     _ = application:start(crypto),
     ?FORALL({Cmds0, Seed}, {gen_commands(Style), pulse:seed()},
     ?IMPLIES(1 < length(Cmds0) andalso length(Cmds0) < 11,
     begin
-erlang:display({prop,?MODULE,?LINE,self()}),
         ok = shutdown_hard(),
-erlang:display({prop,?MODULE,?LINE,self()}),
         %% PULSE can be really unfair, of course, including having exec_ticks
         %% run where all of FLU a does its ticks then FLU b.  Such a situation
         %% doesn't always allow unanimous private projection store values:
@@ -355,14 +344,9 @@ erlang:display({prop,?MODULE,?LINE,self()}),
         pulse:verbose([format]),
         {_H2, S2, Res} = pulse:run(
                            fun() ->
-                                   ?V("PROP-~w,", [self()]),
-                                   %% {_H, _S, _R} = run_commands(?MODULE, Cmds)
-                                   _QAQA = run_commands(?MODULE, Cmds)
-, erlang:display({prop,?MODULE,?LINE,self()}), _QAQA
-                                   %% ,?V("pid681=~p", [process_info(list_to_pid("<0.681.0>"))]), _QAQA
+                                   {_H, _S, _R} = run_commands(?MODULE, Cmds)
                            end, [{seed, Seed},
                                  {strategy, unfair}]),
-erlang:display({prop,?MODULE,?LINE,self()}),
         ok = shutdown_hard(),
         {Report, PrivProjs, Diag} = S2#state.dump_state,
 
@@ -479,37 +463,16 @@ get_do_shrink() ->
     end.
 
 shutdown_hard() ->
-erlang:display({hard,?MODULE,?LINE,self()}),
-    %% HANG: [catch machi_flu_psup:stop_flu_package(FLU) || FLU <- all_list()],
-    erlang:display({apps,?LINE,application:which_applications()}),
-    %%erlang:display({apps,?LINE,application:which_applications()}),
     [begin
-erlang:display({hard,?MODULE,?LINE,self()}),
-         _STOP = application:stop(App),
-         erlang:display({stop, App, _STOP})
+         _STOP = application:stop(App)
      end || App <- [machi] ],
     timer:sleep(100),
 
-    (catch unlink(whereis(machi_partition_simulator))),
-    [begin
-         Pid = whereis(X),
-erlang:display({hard,?MODULE,?LINE,self(),X,Pid}),
-okokokokokokwhaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-         %% %%%%%%DELME deadlock source? spawn(fun() -> ?QC_FMT("shutdown-~w,", [self()]), (catch X:stop()) end),
-         %% timer:sleep(50),
-         %% timer:sleep(10),
-         %% (catch exit(Pid, shutdown)),
-         %% timer:sleep(1),
-         %% (catch exit(Pid, kill))
-     %% end || X <- [machi_partition_simulator] ],
-     end || X <- [machi_partition_simulator, machi_flu_sup, machi_sup] ],
-    timer:sleep(100),
     ok.
 
 exec_ticks(Num, All_listE) ->
     Parent = self(),
     Pids = [spawn_link(fun() ->
-                          ?V("tick-~w,", [self()]),
                           [begin
                                M_name = P#p_srvr.name,
                                %% Max = 10,

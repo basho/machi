@@ -102,7 +102,6 @@ start_link(FluName, TcpPort, DataDir, Props) ->
                           [FluName, TcpPort, DataDir, Props]).
 
 init([FluName, TcpPort, DataDir, Props0]) ->
-    erlang:display({flu_psup,self()}),
     RestartStrategy = one_for_all,
     MaxRestarts = 1000,
     MaxSecondsBetweenRestarts = 3600,

@@ -751,10 +751,8 @@ run_middleworker_job(Fun, ArgList, WTimeout) ->
     Parent = self(),
     MiddleWorker =
         spawn(fun() ->
-?V("Goo1-~w,", [self()]),
                   PidsMons =
                       [spawn_monitor(fun() ->
-?V("Goo1-~w,", [self()]),
                                              Res = (catch Fun(Arg)),
                                              exit(Res)
                                      end) || Arg <- ArgList],

@@ -47,11 +47,8 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 init([]) ->
-    erlang:display({flu_sup,?LINE,self()}),
-    {_, Ps} = process_info(self(), links),
-    erlang:display({flu_sup,self(), links, Ps}),
-    [unlink(P) || P <- Ps],
-    erlang:display({flu_sup,?LINE,self()}),
+    %% {_, Ps} = process_info(self(), links),
+    %% [unlink(P) || P <- Ps],
     RestartStrategy = one_for_one,
     MaxRestarts = 1000,
     MaxSecondsBetweenRestarts = 3600,

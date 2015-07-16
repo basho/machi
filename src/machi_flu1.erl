@@ -142,7 +142,6 @@ ets_table_name(FluName) when is_atom(FluName) ->
 %%     list_to_atom(binary_to_list(FluName) ++ "_epoch").
 
 main2(FluName, TcpPort, DataDir, Rest) ->
-    ?V("flu-~w,", [self()]),
     {Props, DbgProps} =  case proplists:get_value(dbg, Rest) of
                              undefined ->
                                  {Rest, []};
@@ -223,7 +222,6 @@ start_append_server(S, AckPid) ->
 %%     spawn_link(fun() -> run_projection_server(S) end).
 
 run_listen_server(#state{flu_name=FluName, tcp_port=TcpPort}=S) ->
-    ?V("listen-~w,", [self()]),
     register(make_listener_regname(FluName), self()),
     SockOpts = ?PB_PACKET_OPTS ++
         [{reuseaddr, true}, {mode, binary}, {active, false}],
@@ -239,7 +237,6 @@ run_listen_server(#state{flu_name=FluName, tcp_port=TcpPort}=S) ->
 
 run_append_server(FluPid, AckPid, #state{flu_name=Name,
                                          wedged=Wedged_p,epoch_id=EpochId}=S) ->
-    ?V("append-~w,", [self()]),
     %% Reminder: Name is the "main" name of the FLU, i.e., no suffix
     register(Name, self()),
     TID = ets:new(ets_table_name(Name),
@@ -252,7 +249,7 @@ run_append_server(FluPid, AckPid, #state{flu_name=Name,
 
 listen_server_loop(LSock, S) ->
     {ok, Sock} = gen_tcp:accept(LSock),
-    spawn_link(fun() -> ?V("net_server-~w,", [self()]), net_server_loop(Sock, S) end),
+    spawn_link(fun() -> net_server_loop(Sock, S) end),
     listen_server_loop(LSock, S).
 
 append_server_loop(FluPid, #state{data_dir=DataDir,wedged=Wedged_p,
@@ -263,7 +260,7 @@ append_server_loop(FluPid, #state{data_dir=DataDir,wedged=Wedged_p,
             From ! wedged,
             append_server_loop(FluPid, S);
         {seq_append, From, Prefix, Chunk, CSum, Extra} ->
-            spawn(fun() -> ?V("appendX-~w,", [self()]), append_server_dispatch(From, Prefix,
+            spawn(fun() -> append_server_dispatch(From, Prefix,
                                                  Chunk, CSum, Extra,
                                                  DataDir, AppendServerPid) end),
             append_server_loop(FluPid, S);
@@ -297,36 +294,22 @@ append_server_loop(FluPid, #state{data_dir=DataDir,wedged=Wedged_p,
     end.
 
 net_server_loop(Sock, S) ->
-    ?V("~w ~w,", [self(), ?LINE]),
     case gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT) of
         {ok, Bin} ->
-    ?V("~w ~w,", [self(), ?LINE]),
             {RespBin, S2} = 
                 case machi_pb:decode_mpb_ll_request(Bin) of
                     LL_req when LL_req#mpb_ll_request.do_not_alter == 2 ->
-    ?V("~w ~w,", [self(), ?LINE]),
-                        ZARF = (catch do_pb_ll_request(LL_req, S)),
-    %% ?V("~w ~w ~p,", [self(), ?LINE, ZARF]),
-                        {R, NewS} = ZARF,
-                        %% {R, NewS} = do_pb_ll_request(LL_req, S),
-    ?V("~w ~w,", [self(), ?LINE]),
+                        {R, NewS} = do_pb_ll_request(LL_req, S),
                         {machi_pb:encode_mpb_ll_response(R), mode(low, NewS)};
                     _ ->
-    ?V("~w ~w,", [self(), ?LINE]),
                         HL_req = machi_pb:decode_mpb_request(Bin),
-    ?V("~w ~w,", [self(), ?LINE]),
                         1 = HL_req#mpb_request.do_not_alter,
-    ?V("~w ~w,", [self(), ?LINE]),
                         {R, NewS} = do_pb_hl_request(HL_req, make_high_clnt(S)),
-    ?V("~w ~w,", [self(), ?LINE]),
                         {machi_pb:encode_mpb_response(R), mode(high, NewS)}
                 end,
-    ?V("~w ~w,", [self(), ?LINE]),
             ok = gen_tcp:send(Sock, RespBin),
-    ?V("~w ~w,", [self(), ?LINE]),
             net_server_loop(Sock, S2);
         {error, SockError} ->
-    ?V("~w ~w,", [self(), ?LINE]),
             Msg = io_lib:format("Socket error ~w", [SockError]),
             R = #mpb_ll_response{req_id= <<>>,
                                  generic=#mpb_errorresp{code=1, msg=Msg}},
@@ -356,13 +339,10 @@ make_high_clnt(S) ->
     S.
 
 do_pb_ll_request(#mpb_ll_request{req_id=ReqID}, #state{pb_mode=high}=S) ->
-    ?V("~w ~w,", [self(), ?LINE]),
     Result = {high_error, 41, "Low protocol request while in high mode"},
     {machi_pb_translate:to_pb_response(ReqID, unused, Result), S};
 do_pb_ll_request(PB_request, S) ->
-    ?V("~w ~w,", [self(), ?LINE]),
     Req = machi_pb_translate:from_pb_request(PB_request),
-    ?V("~w ~w,", [self(), ?LINE]),
     {ReqID, Cmd, Result, S2} = 
         case Req of
             {RqID, {LowCmd, _}=CMD}
@@ -370,19 +350,13 @@ do_pb_ll_request(PB_request, S) ->
                    LowCmd == low_wedge_status; LowCmd == low_list_files ->
                 %% Skip wedge check for projection commands!
                 %% Skip wedge check for these unprivileged commands
-    ?V("~w ~w,", [self(), ?LINE]),
                 {Rs, NewS} = do_pb_ll_request3(CMD, S),
-    ?V("~w ~w,", [self(), ?LINE]),
                 {RqID, CMD, Rs, NewS};
             {RqID, CMD} ->
-    ?V("~w ~w,", [self(), ?LINE]),
                 EpochID = element(2, CMD),      % by common convention
-    ?V("~w ~w,", [self(), ?LINE]),
                 {Rs, NewS} = do_pb_ll_request2(EpochID, CMD, S),
-    ?V("~w ~w,", [self(), ?LINE]),
                 {RqID, CMD, Rs, NewS}
         end,
-    ?V("~w ~w,", [self(), ?LINE]),
     {machi_pb_translate:to_pb_response(ReqID, Cmd, Result), S2}.
 
 do_pb_ll_request2(EpochID, CMD, S) ->
@@ -432,7 +406,6 @@ do_pb_ll_request3({low_delete_migration, _EpochID, File}, S) ->
 do_pb_ll_request3({low_trunc_hack, _EpochID, File}, S) ->
     {do_server_trunc_hack(File, S), S};
 do_pb_ll_request3({low_proj, PCMD}, S) ->
-    ?V("~w ~w,", [self(), ?LINE]),
     {do_server_proj_request(PCMD, S), S}.
 
 do_pb_hl_request(#mpb_request{req_id=ReqID}, #state{pb_mode=low}=S) ->
@@ -746,7 +719,6 @@ write_server_find_pid(Prefix) ->
 
 start_seq_append_server(Prefix, DataDir, AppendServerPid) ->
     proc_lib:spawn_link(fun() ->
-?V("appendY-~w,", [self()]),
                                 %% The following is only necessary to
                                 %% make nice process relationships in
                                 %% 'appmon' and related tools.
