@@ -355,9 +355,11 @@ erlang:display({prop,?MODULE,?LINE,self()}),
                                    ?V("PROP-~w,", [self()]),
                                    %% {_H, _S, _R} = run_commands(?MODULE, Cmds)
                                    _QAQA = run_commands(?MODULE, Cmds)
+, erlang:display({prop,?MODULE,?LINE,self()}), _QAQA
                                    %% ,?V("pid681=~p", [process_info(list_to_pid("<0.681.0>"))]), _QAQA
                            end, [{seed, Seed},
                                  {strategy, unfair}]),
+erlang:display({prop,?MODULE,?LINE,self()}),
         ok = shutdown_hard(),
         {Report, PrivProjs, Diag} = S2#state.dump_state,
 
