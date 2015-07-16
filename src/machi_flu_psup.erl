@@ -61,6 +61,13 @@
 
 -behaviour(supervisor).
 
+-include("machi_verbose.hrl").
+
+-ifdef(PULSE).
+-compile({parse_transform, pulse_instrument}).
+-include_lib("pulse_otp/include/pulse_otp.hrl").
+-endif.
+
 %% External API
 -export([make_package_spec/4, start_flu_package/4, stop_flu_package/1]).
 %% Internal API
@@ -92,6 +99,7 @@ start_link(FluName, TcpPort, DataDir, Props) ->
                           [FluName, TcpPort, DataDir, Props]).
 
 init([FluName, TcpPort, DataDir, Props0]) ->
+    erlang:display({flu_psup,self()}),
     RestartStrategy = one_for_all,
     MaxRestarts = 1000,
     MaxSecondsBetweenRestarts = 3600,

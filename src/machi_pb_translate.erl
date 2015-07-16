@@ -181,7 +181,7 @@ from_pb_request(#mpb_request{req_id=ReqID,
 from_pb_request(#mpb_request{req_id=ReqID}) ->
     {ReqID, {high_error, 999966, "Unknown request"}};
 from_pb_request(_Else) ->
-    io:format(user, "\nRRR from_pb_request(~p)\n", [_Else]), timer:sleep(2000),
+    io:format(user, "\nRRR from_pb_request(~p)\n", [_Else]), %%timer:sleep(2000),
     {<<>>, {high_error, 999667, "Unknown PB request"}}.
 
 from_pb_response(#mpb_ll_response{

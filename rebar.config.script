@@ -16,6 +16,11 @@ case PulseBuild of
              {pulse_side_effect,
               [  {does_not_exist_yet, some_func, '_'}
 
+              , {machi_flu1_client, '_', '_'}
+              , {machi_projection_store, '_', '_'}
+              , {machi_proxy_flu1_client, '_', '_'}
+              , {machi_pb_translate, '_', '_'}
+
               , {prim_file, '_', '_'}
               , {file, '_', '_'}
               , {filelib, '_', '_'}

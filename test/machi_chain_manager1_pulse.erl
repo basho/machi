@@ -170,7 +170,7 @@ all_list() ->
     [P#p_srvr.name || {P, _Dir} <- all_list_extra()].
 
 setup(Num, Seed) ->
-    ?V("\nsetup(~w", [Num]),
+    ?V("\nsetup(~w,~w", [self(), Num]),
     All_list = lists:sublist(all_list(), Num),
     All_listE = lists:sublist(all_list_extra(), Num),
     %% shutdown_hard() has taken care of killing all relevant procs.
@@ -245,7 +245,7 @@ private_stable_check() ->
     {_PSimPid, _SupPid, ProxiesDict, All_listE} = get(manager_pids_hack),
     Res = private_projections_are_stable_check(ProxiesDict, All_listE),
     if not Res ->
-            ?V("BUMMER: private stable check failed!\n", []);
+            ?QC_FMT("BUMMER: private stable check failed!\n", []);
        true ->
             ok
     end,
@@ -311,6 +311,7 @@ prop_pulse(Style) when Style == new; Style == regression ->
     ?FORALL({Cmds0, Seed}, {gen_commands(Style), pulse:seed()},
     ?IMPLIES(1 < length(Cmds0) andalso length(Cmds0) < 11,
     begin
+erlang:display({prop,?MODULE,?LINE,self()}),
         ok = shutdown_hard(),
         %% PULSE can be really unfair, of course, including having exec_ticks
         %% run where all of FLU a does its ticks then FLU b.  Such a situation
@@ -334,9 +335,13 @@ prop_pulse(Style) when Style == new; Style == regression ->
         pulse:verbose([format]),
         {_H2, S2, Res} = pulse:run(
                            fun() ->
-                                   {_H, _S, _R} = run_commands(?MODULE, Cmds)
+                                   ?V("PROP-~w,", [self()]),
+                                   %% {_H, _S, _R} = run_commands(?MODULE, Cmds)
+QAQA = run_commands(?MODULE, Cmds)
+,?V("pid681=~p", [process_info(list_to_pid("<0.681.0>"))]), QAQA
                            end, [{seed, Seed},
                                  {strategy, unfair}]),
+        ok = shutdown_hard(),
         {Report, PrivProjs, Diag} = S2#state.dump_state,
 
         %% Report is ordered by Epoch.  For each private projection
@@ -368,7 +373,6 @@ prop_pulse(Style) when Style == new; Style == regression ->
                      {false, LastRepXs}
              end,
 
-        ok = shutdown_hard(),
         ?WHENFAIL(
         begin
             %% ?QC_FMT("PrivProjs = ~P\n", [PrivProjs, 50]),
@@ -456,20 +460,20 @@ shutdown_hard() ->
     (catch unlink(whereis(machi_partition_simulator))),
     [begin
          Pid = whereis(X),
-         spawn(fun() -> (catch X:stop()) end),
+         %%%%%%DELME deadlock source? spawn(fun() -> ?QC_FMT("shutdown-~w,", [self()]), (catch X:stop()) end),
          timer:sleep(50),
          timer:sleep(10),
          (catch exit(Pid, shutdown)),
          timer:sleep(1),
          (catch exit(Pid, kill))
      end || X <- [machi_partition_simulator, machi_flu_sup] ],
-    timer:sleep(1),
+    timer:sleep(100),
     ok.
 
 exec_ticks(Num, All_listE) ->
     Parent = self(),
     Pids = [spawn_link(fun() ->
-                          %% ?V("tick-~w,", [self()]),
+                          ?V("tick-~w,", [self()]),
                           [begin
                                M_name = P#p_srvr.name,
                                %% Max = 10,

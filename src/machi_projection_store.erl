@@ -41,11 +41,13 @@
 -module(machi_projection_store).
 
 -include("machi_projection.hrl").
+-define(V(X,Y), ok).
+%% -include("machi_verbose.hrl").
 
--ifdef(PULSE).
--compile({parse_transform, pulse_instrument}).
--include_lib("pulse_otp/include/pulse_otp.hrl").
--endif.
+%% -ifdef(PULSE).
+%% -compile({parse_transform, pulse_instrument}).
+%% -include_lib("pulse_otp/include/pulse_otp.hrl").
+%% -endif.
 
 %% API
 -export([
@@ -106,6 +108,7 @@ read_latest_projection(PidSpec, ProjType) ->
 
 read_latest_projection(PidSpec, ProjType, Timeout)
   when ProjType == 'public' orelse ProjType == 'private' ->
+    ?V("~w ~w ~w,", [self(), ?MODULE, ?LINE]),
     g_call(PidSpec, {read_latest_projection, ProjType}, Timeout).
 
 %% @doc Fetch the projection record type `ProjType' for epoch number `Epoch' .
@@ -170,6 +173,7 @@ g_call(PidSpec, Arg, Timeout) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init([DataDir, NotifyWedgeStateChanges]) ->
+    ?V("pstore-~w,", [self()]),
     lclock_init(),
     PublicDir = machi_util:make_projection_filename(DataDir, "public"),
     PrivateDir = machi_util:make_projection_filename(DataDir, "private"),
@@ -197,7 +201,9 @@ handle_call({{read_latest_projection, ProjType}, LC1}, _From, S) ->
     {EpochNum, _CSum} = if ProjType == public  -> S#state.max_public_epochid;
                            ProjType == private -> S#state.max_private_epochid
             end,
+    ?V("~w ~w ~w,", [self(), ?MODULE, ?LINE]),
     {Reply, NewS} = do_proj_read(ProjType, EpochNum, S),
+    ?V("~w ~w ~w,", [self(), ?MODULE, ?LINE]),
     {reply, {Reply, LC2}, NewS};
 handle_call({{read, ProjType, Epoch}, LC1}, _From, S) ->
     LC2 = lclock_update(LC1),

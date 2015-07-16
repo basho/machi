@@ -2059,6 +2059,7 @@ do_repair(
                               repairing=[_|_]=Repairing,
                               members_dict=MembersDict}}=_S_copy,
   Opts, ap_mode=RepairMode) ->
+?V("RePaiR-~w,", [self()]),
     T1 = os:timestamp(),
     RepairId = proplists:get_value(repair_id, Opts, id1),
     error_logger:info_msg("Repair start: tail ~p of ~p -> ~p, ~p ID ~w\n",
