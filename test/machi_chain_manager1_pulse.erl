@@ -307,14 +307,17 @@ dump_state() ->
                             [P || P <- Ps,
                                   P#projection_v1.epoch_number /= 0]
                         end} || {Name, Proxy} <- ProxiesDict],
-
+    ?V("~w,", [ [{X,whereis(X)} || X <- [machi_sup, machi_flu_sup, machi_partition_simulator]] ]),
+    ?V("~w,", [catch application:stop(machi)]),
+    [?V("~w,", [timer:sleep(10)]) || _ <- lists:seq(1,50)],
+    ?V("~w,", [ [{X,whereis(X)} || X <- [machi_sup, machi_flu_sup, machi_partition_simulator]] ]),
     ?V(")", []),
     Diag1 = Diag2 = "skip_diags",
     {Report, PrivProjs, lists:flatten([Diag1, Diag2])}
   catch XX:YY ->
         ?V("OUCH: ~p ~p @ ~p\n", [XX, YY, erlang:get_stacktrace()]),
         ?V("Exiting now to move to manual post-mortem....\n", []),
-        erlang:halt(0),
+        erlang:halt(66),
         false
   end.
 
@@ -489,14 +492,16 @@ erlang:display({hard,?MODULE,?LINE,self()}),
 
     (catch unlink(whereis(machi_partition_simulator))),
     [begin
-erlang:display({hard,?MODULE,?LINE,self(),X}),
          Pid = whereis(X),
-         %%%%%%DELME deadlock source? spawn(fun() -> ?QC_FMT("shutdown-~w,", [self()]), (catch X:stop()) end),
-         timer:sleep(50),
-         timer:sleep(10),
-         (catch exit(Pid, shutdown)),
-         timer:sleep(1),
-         (catch exit(Pid, kill))
+erlang:display({hard,?MODULE,?LINE,self(),X,Pid}),
+okokokokokokwhaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+         %% %%%%%%DELME deadlock source? spawn(fun() -> ?QC_FMT("shutdown-~w,", [self()]), (catch X:stop()) end),
+         %% timer:sleep(50),
+         %% timer:sleep(10),
+         %% (catch exit(Pid, shutdown)),
+         %% timer:sleep(1),
+         %% (catch exit(Pid, kill))
+     %% end || X <- [machi_partition_simulator] ],
      end || X <- [machi_partition_simulator, machi_flu_sup, machi_sup] ],
     timer:sleep(100),
     ok.

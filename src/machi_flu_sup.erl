@@ -33,6 +33,9 @@
 -ifdef(PULSE).
 -compile({parse_transform, pulse_instrument}).
 -include_lib("pulse_otp/include/pulse_otp.hrl").
+-define(SHUTDOWN, infinity).
+-else.
+-define(SHUTDOWN, 5000).
 -endif.
 
 %% API
