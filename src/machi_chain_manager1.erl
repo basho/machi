@@ -53,6 +53,7 @@
 
 -include("machi_projection.hrl").
 -include("machi_chain_manager.hrl").
+-include("machi_verbose.hrl").
 
 -record(ch_mgr, {
           name            :: pv1_server(),
@@ -73,9 +74,6 @@
           members_dict    :: p_srvr_dict(),
           proxies_dict    :: orddict:orddict()
          }).
-
--define(D(X), io:format(user, "~s ~p\n", [??X, X])).
--define(Dw(X), io:format(user, "~s ~w\n", [??X, X])).
 
 -define(FLU_PC, machi_proxy_flu1_client).
 -define(TO, (2*1000)).                          % default timeout
@@ -990,7 +988,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                     [FLU || {FLU, {{{epk,_},_}, Cnt}} <- AllFlapCounts,
                             Cnt >= FlapLimit],
                 FlappingAll = (PossibleFlappers -- SeenFlappers) == [],
-                %% erlang:display({'YOYO',MyName,NewEpoch,FlappingAll}),
+                ?V("~w,", [{'YOYO',MyName,NewEpoch,FlappingAll}]),
 
                 NewFlap = OldFlap#flap_i{flapping_me=true,
                                          flapping_all=FlappingAll},
@@ -1288,7 +1286,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                                  {flap_limit, FlapLimit}]}),
             case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
                 true ->
-                    io:format(user, "{FLAP: ~w flaps ~w}!  ", [S#ch_mgr.name, P_newprop_flap_count]);
+                    ?V("{FLAP: ~w flaps ~w}!  ", [S#ch_mgr.name, P_newprop_flap_count]);
                 _ ->
                     ok
             end,
@@ -1369,7 +1367,7 @@ react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
     ?REACT(c100),
 
     Sane = projection_transition_is_sane(P_current, P_latest, MyName),
-%% deadlock more frequent here???? if Sane == true -> ok;  true -> io:format(user, "insane-~w-~w,", [MyName, P_newprop#projection_v1.epoch_number]) end, %%% DELME!!!
+if Sane == true -> ok;  true -> ?V("insane-~w-~w,", [MyName, P_newprop#projection_v1.epoch_number]) end, %%% DELME!!!
     Flap_latest = if is_record(Flap_latest0, flap_i) ->
                           Flap_latest0;
                      true ->
@@ -1401,7 +1399,7 @@ react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
                    Flap_latest#flap_i.flapping_me == true andalso
                    Flap_latest#flap_i.flapping_all == true ->
             ?REACT({c100, ?LINE}),
-            io:format(user, "\n\n1YOYO ~w breaking the cycle of ~p\n", [MyName, machi_projection:make_summary(P_latest)]),
+            ?V("\n\n1YOYO ~w breaking the cycle of ~p\n", [MyName, machi_projection:make_summary(P_latest)]),
             %% This is a fun case.  We had just enough asymmetric partition
             %% to cause the chain to fragment into two *incompatible* and
             %% *overlapping membership* chains, but the chain fragmentation
@@ -1437,7 +1435,7 @@ react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
                    Flap_latest#flap_i.flapping_me == true andalso
                    Flap_latest#flap_i.flapping_all == true ->
             ?REACT({c100, ?LINE}),
-            io:format(user, "\n\n2YOYO ~w breaking the cycle of ~p\n", [MyName, machi_projection:make_summary(P_latest)]),
+            ?V("\n\n2YOYO ~w breaking the cycle of ~p\n", [MyName, machi_projection:make_summary(P_latest)]),
             react_to_env_C103(P_latest, S);
         {expected_author2,_ExpectedAuthor2}=_ExpectedErr ->
             case get(perhaps_reset_loop) of
@@ -1500,7 +1498,7 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     %% timeout exception.
     %% ok = ?FLU_PC:write_projection(MyNamePid, private, P_latest2, ?TO*30),
     Goo = P_latest2#projection_v1.epoch_number,
-    %% io:format(user, "HEE110 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(get(react))]),
+    %% ?V("HEE110 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(get(react))]),
 
     {ok,Goo} = {?FLU_PC:write_projection(MyNamePid, private, P_latest2, ?TO*30),Goo},
     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
@@ -1513,7 +1511,7 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
                 false ->
                     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
                         true ->
-                            io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses plain: ~w\n",
+                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses plain: ~w\n",
                               [HH,MM,SS,MSec, S#ch_mgr.name,
                                machi_projection:make_summary(P_latest2x)]);
                         _ ->
@@ -1524,7 +1522,7 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
                         true ->
                             P_inner = inner_projection_or_self(P_latest2),
                             P_innerx = P_inner#projection_v1{dbg2=[]}, % limit verbose len.
-                            io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w\n",
+                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w\n",
                               [HH,MM,SS,MSec, S#ch_mgr.name,
                                machi_projection:make_summary(P_innerx)]);
                         _ ->
@@ -1551,7 +1549,7 @@ react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H}=S) ->
                  H2
          end,
     %% HH = [if is_atom(X) -> X; is_tuple(X) -> {element(1,X), element(2,X)} end || X <- get(react), is_atom(X) orelse size(X) == 3],
-    %% io:format(user, "HEE120 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(HH)]),
+    %% ?V("HEE120 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(HH)]),
 
     ?REACT({c120, [{latest, machi_projection:make_summary(P_latest)}]}),
     {{now_using, FinalProps, P_latest#projection_v1.epoch_number},
@@ -1565,7 +1563,7 @@ react_to_env_C200(Retries, P_latest, S) ->
         %% Actually implement it?  None of the above?
         yo:tell_author_yo(P_latest#projection_v1.author_server)
     catch _Type:_Err ->
-            %% io:format(user, "TODO: tell_author_yo is broken: ~p ~p\n",
+            %% ?V("TODO: tell_author_yo is broken: ~p ~p\n",
             %%           [_Type, _Err]),
             ok
     end,

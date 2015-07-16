@@ -27,6 +27,7 @@
 -compile(export_all).
 
 -include("machi_projection.hrl").
+-include("machi_verbose.hrl").
 -include_lib("eqc/include/eqc.hrl").
 -include_lib("eqc/include/eqc_statem.hrl").
 
@@ -169,8 +170,7 @@ all_list() ->
     [P#p_srvr.name || {P, _Dir} <- all_list_extra()].
 
 setup(Num, Seed) ->
-    ?QC_FMT("\nsetup(~w", [Num]),
-    error_logger:tty(false),
+    ?V("\nsetup(~w", [Num]),
     All_list = lists:sublist(all_list(), Num),
     All_listE = lists:sublist(all_list_extra(), Num),
     %% shutdown_hard() has taken care of killing all relevant procs.
@@ -178,12 +178,12 @@ setup(Num, Seed) ->
          machi_flu1_test:clean_up_data_dir(Dir),
          filelib:ensure_dir(Dir ++ "/not-used")
      end || {_P, Dir} <- All_listE],
-    ?QC_FMT(",z~w", [?LINE]),
+    ?V(",z~w", [?LINE]),
 
     %% Start partition simulator
     {ok, PSimPid} = machi_partition_simulator:start_link(Seed, 0, 100),
     _Partitions = machi_partition_simulator:get(All_list),
-    ?QC_FMT(",z~w", [?LINE]),
+    ?V(",z~w", [?LINE]),
 
     %% Start FLUs and their associated procs
     {ok, SupPid} = machi_flu_sup:start_link(),
@@ -194,7 +194,7 @@ setup(Num, Seed) ->
      end || {P, Dir} <- All_listE],
     %% Set up the chain
     Dict = orddict:from_list([{P#p_srvr.name, P} || {P, _Dir} <- All_listE]),
-    ?QC_FMT(",z~w", [?LINE]),
+    ?V(",z~w", [?LINE]),
     [machi_chain_manager1:set_chain_members(get_chmgr(P), Dict) ||
         {P, _Dir} <- All_listE],
     %% Trigger some environment reactions for humming consensus: first
@@ -203,17 +203,17 @@ setup(Num, Seed) ->
     [begin
          _QQa = machi_chain_manager1:test_react_to_env(get_chmgr(P))
      end || {P, _Dir} <- All_listE, _I <- lists:seq(1,20), _Repeat <- [1,2]],
-    ?QC_FMT(",z~w", [?LINE]),
+    ?V(",z~w", [?LINE]),
     [begin
          _QQa = machi_chain_manager1:test_react_to_env(get_chmgr(P))
      end || _I <- lists:seq(1,20), {P, _Dir} <- All_listE, _Repeat <- [1,2]],
-    ?QC_FMT(",z~w", [?LINE]),
+    ?V(",z~w", [?LINE]),
 
     ProxiesDict = ?FLU_PC:start_proxies(Dict),
 
     Res = {PSimPid, SupPid, ProxiesDict, All_listE},
     put(manager_pids_hack, Res),
-    ?QC_FMT("),", []),
+    ?V("),", []),
     Res.
 
 change_partitions(OldThreshold, NoPartitionThreshold)
@@ -245,28 +245,28 @@ private_stable_check() ->
     {_PSimPid, _SupPid, ProxiesDict, All_listE} = get(manager_pids_hack),
     Res = private_projections_are_stable_check(ProxiesDict, All_listE),
     if not Res ->
-            io:format(user, "BUMMER: private stable check failed!\n", []);
+            ?V("BUMMER: private stable check failed!\n", []);
        true ->
             ok
     end,
     Res.
 
 do_ticks(Num, PidsMaybe, OldThreshold, NoPartitionThreshold) ->
-    io:format(user, "~p,~p,~p|", [Num, OldThreshold, NoPartitionThreshold]),
+    ?V("~p,~p,~p|", [Num, OldThreshold, NoPartitionThreshold]),
     {_PSimPid, _SupPid, ProxiesDict, All_listE} =
         case PidsMaybe of
             undefined -> get(manager_pids_hack);
             _         -> PidsMaybe
         end,
     if is_atom(OldThreshold) ->
-            ?QC_FMT("{e=~w},", [get_biggest_private_epoch_number(ProxiesDict)]),
+            ?V("{e=~w},", [get_biggest_private_epoch_number(ProxiesDict)]),
             machi_partition_simulator:no_partitions();
        true ->
             change_partitions(OldThreshold, NoPartitionThreshold)
     end,
     Res = exec_ticks(Num, All_listE),
     if not is_integer(OldThreshold) ->
-            ?QC_FMT("{e=~w},", [get_biggest_private_epoch_number(ProxiesDict)]);
+            ?V("{e=~w},", [get_biggest_private_epoch_number(ProxiesDict)]);
        true ->
             ok
     end,
@@ -283,7 +283,7 @@ get_biggest_private_epoch_number(ProxiesDict) ->
 
 dump_state() ->
   try
-    ?QC_FMT("dump_state(", []),
+    ?V("dump_state(", []),
     {_PSimPid, _SupPid, ProxiesDict, _AlE} = get(manager_pids_hack),
     Report = ?MGRTEST:unanimous_report(ProxiesDict),
     Namez = ProxiesDict,
@@ -294,12 +294,12 @@ dump_state() ->
                                   P#projection_v1.epoch_number /= 0]
                         end} || {Name, Proxy} <- ProxiesDict],
 
-    ?QC_FMT(")", []),
+    ?V(")", []),
     Diag1 = Diag2 = "skip_diags",
     {Report, PrivProjs, lists:flatten([Diag1, Diag2])}
   catch XX:YY ->
-        ?QC_FMT("OUCH: ~p ~p @ ~p\n", [XX, YY, erlang:get_stacktrace()]),
-        ?QC_FMT("Exiting now to move to manual post-mortem....\n", []),
+        ?V("OUCH: ~p ~p @ ~p\n", [XX, YY, erlang:get_stacktrace()]),
+        ?V("Exiting now to move to manual post-mortem....\n", []),
         erlang:halt(0),
         false
   end.
@@ -329,6 +329,9 @@ prop_pulse(Style) when Style == new; Style == regression ->
                Cmds1 ++
                Stabilize2 ++
             [{set,{var,99999999}, {call, ?MODULE, dump_state, []}}],
+
+        error_logger:tty(false),
+        pulse:verbose([format]),
         {_H2, S2, Res} = pulse:run(
                            fun() ->
                                    {_H, _S, _R} = run_commands(?MODULE, Cmds)
@@ -368,7 +371,7 @@ prop_pulse(Style) when Style == new; Style == regression ->
         ok = shutdown_hard(),
         ?WHENFAIL(
         begin
-            ?QC_FMT("PrivProjs = ~P\n", [PrivProjs, 50]),
+            %% ?QC_FMT("PrivProjs = ~P\n", [PrivProjs, 50]),
             ?QC_FMT("Report = ~p\n", [Report]),
             ?QC_FMT("Cmds = ~p\n", [Cmds]),
             ?QC_FMT("Res = ~p\n", [Res]),
@@ -376,7 +379,7 @@ prop_pulse(Style) when Style == new; Style == regression ->
             ?QC_FMT("Sane = ~p\n", [Sane]),
             ?QC_FMT("AllDisjointDetail = ~p\n", [AllDisjointDetail]),
             ?QC_FMT("SingleChainNoRepair failure = ~p\n", [SingleChainNoRepairDetail])
-%% ,erlang:halt(0)
+,?QC_FMT("\n\nHalting now!!!!!!!!!!\n\n", []),timer:sleep(500),erlang:halt(1)
         end,
         conjunction([{res, Res == true orelse Res == ok},
                      {all_disjoint, AllDisjointP},
