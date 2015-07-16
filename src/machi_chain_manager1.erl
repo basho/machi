@@ -987,7 +987,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                 PossibleFlappers = All_list -- Down_list,
                 SeenFlappers =
                     [FLU || {FLU, {{{epk,_},_}, Cnt}} <- AllFlapCounts,
-                            Cnt >= FlapLimit],
+                            Cnt >= FlapLimit] ++ [MyName],
                 FlappingAll = (PossibleFlappers -- SeenFlappers) == [],
                 ?V("~w,", [{'YOYO',MyName,NewEpoch,FlappingAll}]),
 
@@ -995,6 +995,11 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                                          flapping_all=FlappingAll},
                 ?REACT({a30, ?LINE, [flap_continue,
                                      {flapping_me, true},
+                                     {all_list, All_list},
+                                     {down_list, Down_list},
+                                     {possible_flappers, PossibleFlappers},
+                                     {seen_flappers, SeenFlappers},
+                                     {all_flap_counts, AllFlapCounts},
                                      {flapping_all, FlappingAll}]}),
                 %% Put it all together.
                 P_newprop4 = machi_projection:update_checksum(
