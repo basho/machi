@@ -389,9 +389,9 @@ prop_pulse(Style) when Style == new; Style == regression ->
 
 prop_pulse_new_test_() ->
     {Timeout, ExtraTO} = get_timeouts(),
+    DoShrink = get_do_shrink(),
     F = fun() ->
-             ?assert(eqc:quickcheck(eqc:testing_time(Timeout,
-                                                   ?QC_OUT(prop_pulse(new)))))
+             ?assert(do_quickcheck(DoShrink, Timeout, new))
         end,
     case os:getenv("PULSE_SKIP_NEW") of
         false ->
@@ -406,9 +406,9 @@ prop_pulse_new_test_() ->
 
 prop_pulse_regression_test_() ->
     {Timeout, ExtraTO} = get_timeouts(),
+    DoShrink = get_do_shrink(),
     F = fun() ->
-             ?assert(eqc:quickcheck(eqc:testing_time(Timeout,
-                                             ?QC_OUT(prop_pulse(regression)))))
+             ?assert(do_quickcheck(DoShrink, Timeout, regression))
         end,
     case os:getenv("PULSE_SKIP_REGRESSION") of
         false ->
@@ -418,6 +418,17 @@ prop_pulse_regression_test_() ->
              fun() -> timer:sleep(200),
                       io:format(user, " (skip regression style) ", []) end}
     end.
+
+do_quickcheck(Timeout, Style) ->
+    do_quickcheck(true, Timeout, Style).
+
+do_quickcheck(true, Timeout, Style) ->
+    eqc:quickcheck(eqc:testing_time(Timeout,
+                                    ?QC_OUT(prop_pulse(Style))));
+do_quickcheck(false, Timeout, Style) ->
+  noshrink(
+    eqc:quickcheck(eqc:testing_time(Timeout,
+                                    ?QC_OUT(prop_pulse(Style))))).
 
 get_timeouts() ->
     Timeout = case os:getenv("PULSE_TIME") of
@@ -429,6 +440,14 @@ get_timeouts() ->
                   Val2  -> list_to_integer(Val2)
               end,
     {Timeout, ExtraTO}.
+
+get_do_shrink() ->
+    case os:getenv("PULSE_NOSHRINK") of
+        false ->
+            false;
+        _ ->
+            true
+    end.
 
 shutdown_hard() ->
     (catch unlink(whereis(machi_partition_simulator))),
@@ -442,7 +461,6 @@ shutdown_hard() ->
          (catch exit(Pid, kill))
      end || X <- [machi_partition_simulator, machi_flu_sup] ],
     timer:sleep(1),
-    ?QC_FMT(")", []),
     ok.
 
 exec_ticks(Num, All_listE) ->
