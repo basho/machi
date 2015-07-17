@@ -171,7 +171,7 @@ all_list() ->
     [P#p_srvr.name || {P, _Dir} <- all_list_extra()].
 
 setup(Num, Seed) ->
-    ?V("\nsetup(~w", [Num]),
+    ?V("\nsetup(~w,~w", [Num, Seed]),
     All_list = lists:sublist(all_list(), Num),
     All_listE = lists:sublist(all_list_extra(), Num),
     %% shutdown_hard() has taken care of killing all relevant procs.
