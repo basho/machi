@@ -295,14 +295,17 @@ dump_state() ->
     ?V("dump_state(", []),
     {_PSimPid, _SupPid, ProxiesDict, _AlE} = get(manager_pids_hack),
     Report = ?MGRTEST:unanimous_report(ProxiesDict),
+    ?V(",z~w", [?LINE]),
     Namez = ProxiesDict,
     PrivProjs = [{Name, begin
                             {ok, Ps} = ?FLU_PC:get_all_projections(Proxy,
                                                                    private),
+                            ?V(",z~w", [?LINE]),
                             [P || P <- Ps,
                                   P#projection_v1.epoch_number /= 0]
                         end} || {Name, Proxy} <- ProxiesDict],
-    ?V("~w", [catch application:stop(machi)]),
+    ?V(",z~w", [?LINE]),
+    ?V(",~w", [catch application:stop(machi)]),
     ?V(")", []),
     Diag1 = Diag2 = "skip_diags",
     {Report, PrivProjs, lists:flatten([Diag1, Diag2])}
