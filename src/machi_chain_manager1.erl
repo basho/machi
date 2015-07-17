@@ -1525,7 +1525,17 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     Goo = P_latest2#projection_v1.epoch_number,
     %% ?V("HEE110 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(get(react))]),
 
-    {ok,Goo} = {?FLU_PC:write_projection(MyNamePid, private, P_latest2, ?TO*30),Goo},
+    case {?FLU_PC:write_projection(MyNamePid, private, P_latest2,?TO*30),Goo} of
+        {ok, Goo} ->
+            ok;
+        Else ->
+            Summ = machi_projection:make_summary(P_latest),
+            io:format(user, "C11 error by ~w: ~w, ~w, ~w\n",
+                      [MyName, Else, Summ, get(react)]),
+            error_logger:error_msg("C11 error by ~w: ~w, ~w, ~w\n",
+                                   [MyName, Else, Summ, get(react)]),
+            exit({c110_failure, MyName, Else, Summ})
+    end,
     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
         true ->
             {_,_,C} = os:timestamp(),
