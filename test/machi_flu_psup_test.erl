@@ -125,15 +125,8 @@ partial_stop_restart2() ->
         Proj_mCSum = Proj_m#projection_v1.epoch_csum,
         [{ok, {false, {Epoch_m, Proj_mCSum}}} = WedgeStatus(P) || % *not* wedged
              P <- Ps], 
-        {ok, {false, EpochID2}} = WedgeStatus(hd(Ps)),
-        [{ok,_} = Append(P, EpochID2) || P <- Ps],            % *not* wedged
-        %% The file we're assigned should be different with the epoch change.
-        {ok, {_,_,File2}} = Append(hd(Ps), EpochID2),
-        true = (File1 /= File2),
-        %% If we use the old epoch, then we're told that it's bad
-        {error, bad_epoch} = Append(hd(Ps), EpochID1),
-        %% If we use the current epoch again, then it's OK and given same File2
-        {ok, {_,_,File2}} = Append(hd(Ps), EpochID2),
+        {ok, {false, EpochID1}} = WedgeStatus(hd(Ps)),
+        [{ok,_} = Append(P, EpochID1) || P <- Ps],            % *not* wedged
 
         %% Stop all but 'a'.
         [ok = machi_flu_psup:stop_flu_package(Name) || {Name,_} <- tl(Ps)],
@@ -148,7 +141,7 @@ partial_stop_restart2() ->
         true = (machi_projection:update_dbg2(Proj_m, []) ==
                     machi_projection:update_dbg2(Proj_m, [])),
         %% Confirm that 'a' is wedged
-        {error, wedged} = Append(hd(Ps), EpochID2),
+        {error, wedged} = Append(hd(Ps), EpochID1),
         {_, #p_srvr{address=Addr_a, port=TcpPort_a}} = hd(Ps),
         {error, wedged} = machi_flu1_client:read_chunk(
                             Addr_a, TcpPort_a, ?DUMMY_PV1_EPOCH,
@@ -166,7 +159,7 @@ partial_stop_restart2() ->
         {ok, {false, EpochID3}} = WedgeStatus(hd(Ps)),
         %% The file we're assigned should be different with the epoch change.
         {ok, {_,_,File3}} = Append(hd(Ps), EpochID3),
-        true = (File2 /= File3),
+        true = (File1 /= File3),
 
         %% Confirm that 'a' is *not* wedged
         {ok, _} = Append(hd(Ps), EpochID3),
