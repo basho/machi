@@ -27,6 +27,14 @@
 
 -behaviour(supervisor).
 
+-ifdef(PULSE).
+-compile({parse_transform, pulse_instrument}).
+-include_lib("pulse_otp/include/pulse_otp.hrl").
+-define(SHUTDOWN, infinity).
+-else.
+-define(SHUTDOWN, 5000).
+-endif.
+
 %% API
 -export([start_link/0]).
 
@@ -39,6 +47,8 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 init([]) ->
+    %% {_, Ps} = process_info(self(), links),
+    %% [unlink(P) || P <- Ps],
     RestartStrategy = one_for_one,
     MaxRestarts = 1000,
     MaxSecondsBetweenRestarts = 3600,
@@ -46,7 +56,7 @@ init([]) ->
     SupFlags = {RestartStrategy, MaxRestarts, MaxSecondsBetweenRestarts},
 
     Restart = permanent,
-    Shutdown = 5000,
+    Shutdown = ?SHUTDOWN,
     Type = supervisor,
 
     ServerSup =

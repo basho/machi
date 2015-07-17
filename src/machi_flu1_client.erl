@@ -45,6 +45,11 @@
 -include("machi_pb.hrl").
 -include("machi_projection.hrl").
 
+-ifdef(PULSE).
+-compile({parse_transform, pulse_instrument}).
+-include_lib("pulse_otp/include/pulse_otp.hrl").
+-endif.
+
 -define(HARD_TIMEOUT, 2500).
 
 -export([

@@ -1,6 +1,8 @@
 %% -------------------------------------------------------------------
 %%
-%% Copyright (c) 2007-2015 Basho Technologies, Inc.  All Rights Reserved.
+%% Machi: a small village of replicated files
+%%
+%% Copyright (c) 2014-2015 Basho Technologies, Inc.  All Rights Reserved.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -18,30 +20,12 @@
 %%
 %% -------------------------------------------------------------------
 
-%% @doc Start the top-level supervisor for the Machi application.
-%%
-%% See {@link machi_flu_psup} for an illustration of the entire Machi
-%% application process structure.
-
--module(machi_app).
-
--behaviour(application).
-
 -ifdef(PULSE).
--compile({parse_transform, pulse_instrument}).
--include_lib("pulse_otp/include/pulse_otp.hrl").
--endif.
+-define(V(Fmt, Args), pulse:format(Fmt, Args)).
+-else.  % PULSE
+-define(V(Fmt, Args), io:format(user, Fmt, Args)).
+-endif. % PULSE
 
-%% Application callbacks
--export([start/2, stop/1]).
+-define(D(X), ?V("~s ~p\n", [??X, X])).
+-define(Dw(X), ?V("~s ~w\n", [??X, X])).
 
-start(_StartType, _StartArgs) ->
-    case machi_sup:start_link() of
-        {ok, Pid} ->
-            {ok, Pid};
-        Error ->
-            Error
-                end.
-
-stop(_State) ->
-    ok.

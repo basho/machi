@@ -1,0 +1,21 @@
+***************
+*** 348,356 ****
+                                         X /= A, X /= C, A /= C],
+      %% Concat = _X_Ys1,
+      %% Concat = _X_Ys2,
+-     Concat = _X_Ys1 ++ _X_Ys2,
+      %% Concat = _X_Ys3,
+-     %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
+      random_sort(lists:usort([lists:sort(L) || L <- Concat])).
+  
+      %% [ [{a,b},{b,d},{c,b}],
+--- 353,361 ----
+                                         X /= A, X /= C, A /= C],
+      %% Concat = _X_Ys1,
+      %% Concat = _X_Ys2,
++     %% Concat = _X_Ys1 ++ _X_Ys2,
+      %% Concat = _X_Ys3,
++     Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
+      random_sort(lists:usort([lists:sort(L) || L <- Concat])).
+  
+      %% [ [{a,b},{b,d},{c,b}],

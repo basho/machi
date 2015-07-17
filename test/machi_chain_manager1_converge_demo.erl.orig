@@ -207,7 +207,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                                                     ?MGR:sleep_ranked_order(
                                                        S_min, S_max_rand,
                                                        M_name, All_list),
-                                                _ = ?MGR:trigger_react_to_env(MMM),
+                                                _ = ?MGR:test_react_to_env(MMM),
                                                 %% Be more unfair by not
                                                 %% sleeping here.
                                                 % timer:sleep(S_max - Elapsed),
@@ -228,30 +228,36 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
       [DoIt(30, 0, 0) || _ <- lists:seq(1,2)],
       AllPs = make_partition_list(All_list),
       PartitionCounts = lists:zip(AllPs, lists:seq(1, length(AllPs))),
-      MaxIters = NumFLUs * (NumFLUs + 1) * 6,
+      FLUFudge = if NumFLUs < 4 ->
+                         2;
+                    true ->
+                         2
+                         %% 13
+                 end,
       [begin
            machi_partition_simulator:always_these_partitions(Partition),
            io:format(user, "\nSET partitions = ~w (~w of ~w) at ~w\n",
                      [Partition, Count, length(AllPs), time()]),
-           true = lists:foldl(
-                    fun(_, true) ->
-                            true;
-                       (_, _) ->
-                            %% Run a few iterations
-                            [DoIt(10, 10, 50) || _ <- lists:seq(1, 6)],
-                            %% If stable, return true to short circuit remaining
-                            private_projections_are_stable(Namez, DoIt)
-                    end, false, lists:seq(0, MaxIters)),
+           %% [DoIt(40, 10, 50) || _ <- lists:seq(0, trunc(NumFLUs*FLUFudge)) ],
+           [DoIt(20, 10, 50) || _ <- lists:seq(0, trunc(NumFLUs*FLUFudge)*2) ],
+
+           {stable,true} = {stable,private_projections_are_stable(Namez, DoIt)},
            io:format(user, "\nSweet, private projections are stable\n", []),
            io:format(user, "Rolling sanity check ... ", []),
-           MaxFiles = 3*1000,
            PrivProjs = [{Name, begin
-                                   {ok, Ps8} = ?FLU_PC:get_all_projections(
-                                                  FLU, private, infinity),
-                                   Ps9 = if length(Ps8) < MaxFiles ->
+                                   {ok, Ps8} = ?FLU_PC:get_all_projections(FLU, private,
+                                                                           infinity),
+                                   Max = 3*1000,
+                                   Ps9 = if length(Ps8) < Max ->
                                                  Ps8;
                                             true ->
-                                                 lists:nthtail(MaxFiles, Ps8)
+                                                 NumToDel = length(Ps8) - Max,
+                                                 io:format(user, "trunc a bit... ", []),
+                                                 [begin
+                                                      FilesToDel = lists:sublist(filelib:wildcard(Dir ++ "/projection/private/*"), NumToDel),
+                                                      [_ = file:delete(File) || File <- FilesToDel]
+                                                  end || Dir <- filelib:wildcard("/tmp/c/data*")],
+                                                 lists:nthtail(Max, Ps8)
                                          end,
                                    [P || P <- Ps9,
                                          P#projection_v1.epoch_number /= 0]
@@ -265,20 +271,9 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
            end,
            io:format(user, "Yay!\n", []),
            ReportXX = machi_chain_manager1_test:unanimous_report(Namez),
+           io:format(user, "ReportXX ~P\n", [ReportXX, 30]),
            true = machi_chain_manager1_test:all_reports_are_disjoint(ReportXX),
            io:format(user, "Yay for ReportXX!\n", []),
-
-           [begin
-                Privs = filelib:wildcard(Dir ++ "/projection/private/*"),
-                FilesToDel1 = lists:sublist(Privs,
-                                            max(0, length(Privs)-MaxFiles)),
-                [_ = file:delete(File) || File <- FilesToDel1],
-                Pubs = filelib:wildcard(Dir ++ "/projection/public/*"),
-                FilesToDel2 = lists:sublist(Pubs,
-                                            max(0, length(Pubs)-MaxFiles)),
-                [_ = file:delete(File) || File <- FilesToDel2]
-            end || Dir <- filelib:wildcard("/tmp/c/data*")],
-
            timer:sleep(1250),
            ok
        end || {Partition, Count} <- PartitionCounts
@@ -422,11 +417,11 @@ make_partition_list(All_list) ->
     %%   [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {b,c}],
     %%   [{a,b},{b,a}, {a,c},{c,a}, {a,d},{d,a}, {c,d}] ].
 
-    %% [ [{a,b}, {a,b},{b,a},{a,c},{c,a},{a,d},{d,a}],
-    %%   [{a,b}, {b,a},{a,b},{b,c},{c,b},{b,d},{d,b}],
-    %%   [{a,b}],
-    %%   [{a,b}, {c,a},{a,c},{c,b},{b,c},{c,d},{d,c}],
-    %%   [{a,b}, {d,a},{a,d},{d,b},{b,d},{d,c},{c,d}] ].
+%    [ [{a,b}, {a,b},{b,a},{a,c},{c,a},{a,d},{d,a}],
+%      [{a,b}, {b,a},{a,b},{b,c},{c,b},{b,d},{d,b}],
+%      [{a,b}],
+%      [{a,b}, {c,a},{a,c},{c,b},{b,c},{c,d},{d,c}],
+%      [{a,b}, {d,a},{a,d},{d,b},{b,d},{d,c},{c,d}] ].
 
 todo_why_does_this_crash_sometimes(FLUName, FLU, PPPepoch) ->
     try
@@ -447,10 +442,10 @@ private_projections_are_stable(Namez, PollFunc) ->
     if Private1 == Private2 ->
             ok;
        true ->
-            io:format(user, "Private1: ~p, ", [Private1]),
-            io:format(user, "Private2: ~p, ", [Private2])
+            io:format(user, "Oops: Private1: ~p\n", [Private1]),
+            io:format(user, "Oops: Private2: ~p\n", [Private2])
     end,
-    Private1 == Private2.
+    true = (Private1 == Private2).
 
 get_latest_inner_proj_summ(FLU) ->
     {ok, Proj} = ?FLU_PC:read_latest_projection(FLU, private),

@@ -53,6 +53,9 @@
 
 -include("machi_projection.hrl").
 -include("machi_chain_manager.hrl").
+-include("machi_verbose.hrl").
+
+-define(NOT_FLAPPING_START, {{epk,-1},?NOT_FLAPPING}).
 
 -record(ch_mgr, {
           name            :: pv1_server(),
@@ -63,8 +66,9 @@
           ignore_timer    :: boolean(),
           proj_history    :: queue:queue(),
           flaps=0         :: integer(),
-          flap_start = ?NOT_FLAPPING
-                          :: erlang:timestamp(),
+          flap_start = ?NOT_FLAPPING_START
+                          :: {{'epk', integer()}, erlang:timestamp()},
+          flap_not_sanes  :: orddict:orddict(),
           repair_worker   :: 'undefined' | pid(),
           repair_start    :: 'undefined' | erlang:timestamp(),
           repair_final_status :: 'undefined' | term(),
@@ -73,9 +77,6 @@
           members_dict    :: p_srvr_dict(),
           proxies_dict    :: orddict:orddict()
          }).
-
--define(D(X), io:format(user, "~s ~p\n", [??X, X])).
--define(Dw(X), io:format(user, "~s ~w\n", [??X, X])).
 
 -define(FLU_PC, machi_proxy_flu1_client).
 -define(TO, (2*1000)).                          % default timeout
@@ -91,6 +92,11 @@
 -define(REPAIR_START_STABILITY_TIME, 10).
 -endif. % TEST
 
+%% Magic constant for looping "too frequently" breaker.  TODO revisit & revise.
+-define(TOO_FREQUENT_BREAKER, 10).
+
+-define(RETURN2(X), begin (catch put(why2, [?LINE|get(why2)])), X end).
+
 %% API
 -export([start_link/2, start_link/3, stop/1, ping/1,
          set_chain_members/2, set_active/2,
@@ -99,7 +105,12 @@
          terminate/2, code_change/3]).
 
 -export([make_chmgr_regname/1, projection_transitions_are_sane/2,
-         inner_projection_exists/1, inner_projection_or_self/1]).
+         inner_projection_exists/1, inner_projection_or_self/1,
+         simple_chain_state_transition_is_sane/3,
+         simple_chain_state_transition_is_sane/5,
+         chain_state_transition_is_sane/5]).
+%% Exports so that EDoc docs generated for these internal funcs.
+-export([mk/3]).
 
 -ifdef(TEST).
 
@@ -113,6 +124,7 @@
 -endif.
 -ifdef(PULSE).
 -compile({parse_transform, pulse_instrument}).
+-include_lib("pulse_otp/include/pulse_otp.hrl").
 -endif.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -214,6 +226,7 @@ init({MyName, InitMembersDict, MgrOpts}) ->
                 flap_limit=length(All_list) + 50,
                 timer='undefined',
                 proj_history=queue:new(),
+                flap_not_sanes=orddict:new(),
                 runenv=RunEnv,
                 opts=MgrOpts},
     {_, S2} = do_set_chain_members_dict(MembersDict, S),
@@ -336,7 +349,7 @@ code_change(_OldVsn, S, _Extra) ->
 make_none_projection(MyName, All_list, MembersDict) ->
     Down_list = All_list,
     UPI_list = [],
-    machi_projection:new(MyName, MembersDict, UPI_list, Down_list, [], []).
+    machi_projection:new(MyName, MembersDict, Down_list, UPI_list, [], []).
 
 get_my_private_proj_boot_info(MgrOpts, DefaultDict, DefaultProj) ->
     get_my_proj_boot_info(MgrOpts, DefaultDict, DefaultProj, private).
@@ -686,6 +699,9 @@ calc_up_nodes_sim(MyName, AllMembers, RunEnv1) ->
                       [{network_partitions, Partitions2},
                        {network_islands, Islands2},
                        {up_nodes, UpNodes}]),
+    catch ?REACT({calc_up_nodes,?LINE,[{partitions,Partitions2},
+                                       {islands,Islands2},
+                                       {up_nodes, UpNodes}]}),
     {UpNodes, Partitions2, RunEnv2}.
 
 replace(PropList, Items) ->
@@ -740,9 +756,9 @@ rank_projections(Projs, CurrentProj) ->
 
 rank_projection(#projection_v1{upi=[]}, _MemberRank, _N) ->
     -100;
-rank_projection(#projection_v1{author_server=Author,
+rank_projection(#projection_v1{author_server=_Author,
                                upi=UPI_list,
-                               repairing=Repairing_list}, MemberRank, N) ->
+                               repairing=Repairing_list}, _MemberRank, N) ->
     %% It's possible that there's "cross-talk" across projection
     %% stores.  For example, we were a chain of [a,b], then the
     %% administrator sets a's members_dict to include only a.
@@ -755,10 +771,11 @@ rank_projection(#projection_v1{author_server=Author,
     %% Server b is no longer a member of a's MemberRank scheme, so we
     %% need to compensate for this by giving b an extremely low author
     %% ranking.
-    AuthorRank = case orddict:find(Author, MemberRank) of
-                     {ok, Rank} -> Rank;
-                     error      -> -(N*N*N*N)
-                 end,
+    AuthorRank = 0,
+    %% AuthorRank = case orddict:find(Author, MemberRank) of
+    %%                  {ok, Rank} -> Rank;
+    %%                  error      -> -(N*N*N*N)
+    %%              end,
     AuthorRank +
         (  N * length(Repairing_list)) +
         (N*N * length(UPI_list)).
@@ -842,9 +859,25 @@ react_to_env_A20(Retries, #ch_mgr{name=MyName}=S) ->
     UnanimousFLUs = lists:sort(proplists:get_value(unanimous_flus, ReadExtra)),
     UPI_Repairing_FLUs = lists:sort(P_latest#projection_v1.upi ++
                                     P_latest#projection_v1.repairing),
-    All_UPI_Repairing_were_unanimous = UPI_Repairing_FLUs == UnanimousFLUs,
-    %% TODO: investigate if the condition below is more correct?
-    %% All_UPI_Repairing_were_unanimous = (UPI_Repairing_FLUs -- UnanimousFLUs) == [],
+    All_UPI_Repairing_were_unanimous =
+        ordsets:is_subset(ordsets:from_list(UPI_Repairing_FLUs),
+                          ordsets:from_list(UnanimousFLUs)),
+    NotUnanimousFLUs = lists:sort(proplists:get_value(not_unanimous_flus,
+                                                      ReadExtra, [xxx])),
+    NotUnanimousPs = lists:sort(proplists:get_value(not_unanimous_answers,
+                                                    ReadExtra, [xxx])),
+    NotUnanimousSumms = [machi_projection:make_summary(
+                       P#projection_v1{dbg2=[omitted]}) ||
+                            P <- NotUnanimousPs,
+                            is_record(P, projection_v1)],
+    BadAnswerFLUs = lists:sort(proplists:get_value(bad_answer_flus, ReadExtra)),
+    ?REACT({a20,?LINE,[{upi_repairing,UPI_Repairing_FLUs},
+                       {unanimous_flus,UnanimousFLUs},
+                       {all_upi_repairing_were_unanimous,All_UPI_Repairing_were_unanimous},
+                       {not_unanimous_flus, NotUnanimousFLUs},
+                       {not_unanimous_answers, NotUnanimousSumms},
+                       {bad_answer_flus, BadAnswerFLUs}
+                      ]}),
     LatestUnanimousP =
         if UnanimousTag == unanimous
            andalso
@@ -852,8 +885,7 @@ react_to_env_A20(Retries, #ch_mgr{name=MyName}=S) ->
                 ?REACT({a20,?LINE}),
                 true;
            UnanimousTag == unanimous ->
-                ?REACT({a20,?LINE,[{upi_repairing,UPI_Repairing_FLUs},
-                                   {unanimous,UnanimousFLUs}]}),
+                ?REACT({a20,?LINE}),
                 false;
            UnanimousTag == not_unanimous ->
                 ?REACT({a20,?LINE}),
@@ -870,6 +902,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
     {P_newprop1, S2} = calc_projection(S, MyName),
     ?REACT({a30, ?LINE, [{current, machi_projection:make_summary(S#ch_mgr.proj)}]}),
     ?REACT({a30, ?LINE, [{newprop1, machi_projection:make_summary(P_newprop1)}]}),
+    ?REACT({a30, ?LINE, [{latest, machi_projection:make_summary(P_latest)}]}),
 
     %% Are we flapping yet?
     {P_newprop2, S3} = calculate_flaps(P_newprop1, P_current, FlapLimit, S2),
@@ -886,15 +919,29 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
         case get_flap_count(P_newprop3) of
             {_, P_newprop3_flap_count} when P_newprop3_flap_count >= FlapLimit ->
                 AllHosed = get_all_hosed(P_newprop3),
-                {P_i, S_i} = calc_projection(S3, MyName, AllHosed),
+                P_current_inner = inner_projection_or_self(P_current),
+                {P_i, S_i} = calc_projection(unused, unused,
+                                             P_current_inner,
+                                             MyName, AllHosed, [], S3),
+                %% The inner projection will have a fake author, which
+                %% everyone will agree is the largest UPI member's
+                %% name.
+                BiggestUPIMember =
+                    if P_i#projection_v1.upi == [] ->
+                            %% Oops, ok, fall back to author
+                            P_i#projection_v1.author_server;
+                       true ->
+                            lists:last(lists:sort(P_i#projection_v1.upi))
+                    end,
+                P_i2 = P_i#projection_v1{author_server=BiggestUPIMember},
                 P_inner = case lists:member(MyName, AllHosed) of
                               false ->
-                                  P_i;
+                                  P_i2;
                               true ->
-                                  P_i#projection_v1{
+                                  P_i2#projection_v1{
                                     upi=[MyName],
                                     repairing=[],
-                                    down=P_i#projection_v1.all_members
+                                    down=P_i2#projection_v1.all_members
                                          -- [MyName]}
                           end,
                 FinalInnerEpoch =
@@ -936,13 +983,22 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                 P_inner2 = machi_projection:update_checksum(
                            P_inner#projection_v1{epoch_number=FinalInnerEpoch,
                                                  creation_time=FinalCreation}),
-                InnerInfo = [{inner_summary,
-                              machi_projection:make_summary(P_inner2)}],
-                DbgX = replace(P_newprop3#projection_v1.dbg, InnerInfo),
-                ?REACT({a30, ?LINE, [qqqwww|DbgX]}),
-                {P_newprop3#projection_v1{dbg=DbgX,
-                                          inner=P_inner2}, S_i};
-            _ ->
+                ?REACT({a30, ?LINE, [{inner_summary,
+                                    machi_projection:make_summary(P_inner2)}]}),
+                %% Adjust the outer projection's #flap_i info.
+                ?V("~w,", [{'YOYO',MyName,NewEpoch}]),
+                #projection_v1{flap=OldFlap} = P_newprop3,
+                NewFlap = OldFlap#flap_i{flapping_me=true},
+                ?REACT({a30, ?LINE, [flap_continue,
+                                     {flapping_me, true}]}),
+                %% Put it all together.
+                P_newprop4 = machi_projection:update_checksum(
+                               P_newprop3#projection_v1{flap=NewFlap,
+                                                        inner=P_inner2}),
+                {P_newprop4, S_i};
+            {_, P_newprop3_flap_count} ->
+                ?REACT({a30, ?LINE,[{newprop3_flap_count,P_newprop3_flap_count},
+                                    {flap_limit, FlapLimit}]}),
                 {P_newprop3, S3}
         end,
 
@@ -988,59 +1044,60 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
     Kicker_p = case {Latest_authors_flap_count_current,
                      Latest_authors_flap_count_latest} of
                    {NotUndef, undefined} when NotUndef /= undefined ->
-                       true;
+                       %% OK, someone else has switched from non-zero flap
+                       %% count to zero flap count.  But ... do not kick out
+                       %% of our flapping mode locally if we do not have an
+                       %% inner projection.
+                       inner_projection_exists(P_current);
                    {_, _} ->
                        false
                end,
 
+    ClauseInfo = [{inner_kicker, Kicker_p},
+                  {inner_kicker2, {Latest_authors_flap_count_current,
+                                   Latest_authors_flap_count_latest}},
+                  {move_from_inner, MoveFromInnerToNorm_p}],
+    ?REACT({a30, ?LINE, ClauseInfo}),
     if MoveFromInnerToNorm_p orelse Kicker_p ->
-            ClauseInfo = [{inner_kicker, Kicker_p},
-                          {move_from_inner, MoveFromInnerToNorm_p}],
-            ?REACT({a30, ?LINE, ClauseInfo}),
-            %% %% 2015-04-14: YEAH, this appears to work!
-            %% %% 1. Create a "safe" projection that is upi=[],repairing=[]
-            %% %% 2. Declare it to be best & latest by pure fiat.
-            %% %%    (The C100 transition will double-check that it's safe.)
-            %% %% 3. Jump to C100.  Then, for the next iteration,
-            %% %%    our P_current state to a smallest-possible-score
-            %% %%    state ... and let the chain reassemble itself from
-            %% %%    length zero.
-            %% #projection_v1{epoch_number=Epoch_newprop10, all_members=All_list,
-            %%                members_dict=MembersDict} = P_newprop10,
-            %% P_noneprop0 = make_none_projection(MyName, All_list, MembersDict),
-            %% P_noneprop1 = P_noneprop0#projection_v1{epoch_number=Epoch_newprop10},
-            %% %% Just to be clear, we clobber any flapping info by setting dbg.
-            %% P_noneprop = P_noneprop1#projection_v1{dbg=ClauseInfo},
-            %% react_to_env_C100(P_noneprop, P_latest, S);
-
-            %% 2015-04-14: Let's experiment with using the current inner
-            %% projection (or, if there really is no inner, just P_current).
-            %% This is safe because it's already P_current and by assumption,
-            %% anything that made it through the logical maze to get here
-            %% is safe.  So re-using it with a higher epoch number doesn't
-            %% make any significant change.
-            %%
-            %% Yeah, it appears to work, also, nice!  This can help save some
-            %% repair operations (compared to the other safe thing to do
-            %% here, which uses make_none_projection() to build & repair the
-            %% entire chain from scratch).  Note that this isn't a guarantee
-            %% that repair steps will be minimized: for a 4-member cluster
-            %% that has an asymmetric partition which organizes 3 clusters of
-            %% inner-upi=[a], inner-upi=[b], and inner-upi[c,d], there is no
-            %% guarantee (yet?) that the [c,d] chain will be the UPI basis
-            %% for repairs when the partition is healed: the quickest author
-            %% after the healing will make that choice for everyone.
-            %% TODO: Perhaps that quickest author should consult all of the
-            %% other private stores, check their inner, and if there is a
-            %% higher rank there, then goto C200 for a wait-and-see cycle?
-
+            %% Move from inner projection to outer.
             P_inner2A = inner_projection_or_self(P_current),
+            ResetEpoch = P_newprop10#projection_v1.epoch_number,
+            ResetAuthor = case P_current#projection_v1.upi of
+                              [] ->
+                                  %% Drat, fall back to current's author.
+                                  P_current#projection_v1.author_server;
+                              _ ->
+                                  lists:last(P_current#projection_v1.upi)
+                          end,
+            ClauseInfo2 = [{move_from_inner_to_outer, true},
+                           {old_author, P_inner2A#projection_v1.author_server},
+                           {reset_author, ResetAuthor},
+                           {reset_epoch, ResetEpoch}],
             P_inner2B =
-                P_inner2A#projection_v1{epoch_number=
-                                        P_newprop10#projection_v1.epoch_number,
-                                        dbg=ClauseInfo},
-            react_to_env_C100(P_inner2B, P_latest, S);
-
+                machi_projection:update_checksum(
+                  P_inner2A#projection_v1{epoch_number=ResetEpoch,
+                                          author_server=ResetAuthor,
+                                          dbg=ClauseInfo++ClauseInfo2}),
+            ReactI = [{inner2b,machi_projection:make_summary(P_inner2B)}],
+            ?REACT({a30, ?LINE, ReactI}),
+            %% In the past, we've tried:
+            %%     react_to_env_C100(P_inner2B, P_latest, S);
+            %%
+            %% But we *know* that direct transition is racy/buggy: if
+            %% P_latest UPIs are not unanimous, then we run the risk of
+            %% non-disjoint UPIs; state B10 exists for a reason!
+            %%
+            %% So, we're going to use P_inner2B as our new proposal and run
+            %% it through the regular system, as we did prior to 2015-04-14.
+            %%
+            %% OK, but we need to avoid a possible infinite loop by trying to
+            %% use the inner projection as-is.  Because we're moving from
+            %% inner to outer projections, the partition situation has
+            %% altered significantly.  Use calc_projection() to find out what
+            %% nodes are down *now* (as best as we can tell right now).
+            {P_o, S_o} = calc_projection(unused, unused,
+                                         P_inner2B, MyName, [], [], S10),
+            react_to_env_A40(Retries, P_o, P_latest, LatestUnanimousP, S_o);
        true ->
             ?REACT({a30, ?LINE, []}),
             react_to_env_A40(Retries, P_newprop10, P_latest,
@@ -1202,7 +1259,6 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         andalso
         UnanimousLatestInnerNotRelevant_p ->
             ?REACT({b10, ?LINE, []}),
-            put(b10_hack, false),
 
             %% Do not go to C100, because we want to ignore this latest
             %% proposal.  Write ours instead via C300.
@@ -1216,7 +1272,6 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                      {newprop_epoch,P_newprop#projection_v1.epoch_number},
                      {newprop_author,P_newprop#projection_v1.author_server}
                     ]}),
-            put(b10_hack, false),
 
             react_to_env_C100(P_newprop, P_latest, S);
 
@@ -1225,62 +1280,55 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
             ?REACT({b10, ?LINE, [i_am_flapping,
                                  {newprop_flap_count, P_newprop_flap_count},
                                  {flap_limit, FlapLimit}]}),
-            _B10Hack = get(b10_hack),
             case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
                 true ->
-                    io:format(user, "{FLAP: ~w flaps ~w}!  ", [S#ch_mgr.name, P_newprop_flap_count]);
+                    ?V("{FLAP: ~w flaps ~w}!  ", [S#ch_mgr.name, P_newprop_flap_count]);
                 _ ->
                     ok
             end,
+            %% MEANWHILE, we have learned some things about this
+            %% algorithm in the past many months.  With the introduction
+            %% of the "inner projection" concept, we know that the inner
+            %% projection may be stable but the "outer" projection will
+            %% continue to be flappy for as long as there's an
+            %% asymmetric network partition somewhere.  We now know that
+            %% that flappiness is OK and that the only problem with it
+            %% is that it needs to be slowed down so that we don't have
+            %% zillions of public projection proposals written every
+            %% second.
+            %%
+            %% It doesn't matter if the FlapLimit count mechanism
+            %% doesn't give an accurate sense of global flapping state.
+            %% FlapLimit is enough to be able to tell us to slow down.
 
-            if
-                %% MEANWHILE, we have learned some things about this
-                %% algorithm in the past few months.  With the introduction
-                %% of the "inner projection" concept, we know that the inner
-                %% projection may be stable but the "outer" projection will
-                %% continue to be flappy for as long as there's an
-                %% asymmetric network partition somewhere.  We now know that
-                %% that flappiness is OK and that the only problem with it
-                %% is that it needs to be slowed down so that we don't have
-                %% zillions of public projection proposals written every
-                %% second.
-                %%
-                %% It doesn't matter if the FlapLimit count mechanism
-                %% doesn't give an accurate sense of global flapping state.
-                %% FlapLimit is enough to be able to tell us to slow down.
-
-                true ->
-                    %% We already know that I'm flapping.  We need to
-                    %% signal to the rest of the world that I'm writing
-                    %% and flapping and churning, so we cannot always
-                    %% go to A50 from here.
-                    %%
-                    %% If we do go to A50, then recommend that we poll less
-                    %% frequently.
-                    {X, S2} = gimme_random_uniform(100, S),
-                    if X < 80 ->
-                            ?REACT({b10, ?LINE, [flap_stop]}),
-                            ThrottleTime = if P_newprop_flap_count <  500 -> 1;
-                                              P_newprop_flap_count < 1000 -> 5;
-                                              P_newprop_flap_count < 5000 -> 10;
-                                              true                        -> 30
-                                           end,
-                            FinalProps = [{my_flap_limit, FlapLimit},
-                                          {throttle_seconds, ThrottleTime}],
-                            react_to_env_A50(P_latest, FinalProps, S2);
-                       true ->
-                            %% It is our moral imperative to write so that
-                            %% the flap cycle continues enough times so that
-                            %% everyone notices then eventually falls into
-                            %% consensus.
-                            ?REACT({b10, ?LINE, [flap_continue]}),
-                            react_to_env_C300(P_newprop, P_latest, S2)
-                    end
+            %% We already know that I'm flapping.  We need to
+            %% signal to the rest of the world that I'm writing
+            %% and flapping and churning, so we cannot always
+            %% go to A50 from here.
+            %%
+            %% If we do go to A50, then recommend that we poll less
+            %% frequently.
+            {X, S2} = gimme_random_uniform(100, S),
+            if X < 80 ->
+                    ?REACT({b10, ?LINE, [flap_stop]}),
+                    ThrottleTime = if P_newprop_flap_count <  500 -> 1;
+                                      P_newprop_flap_count < 1000 -> 5;
+                                      P_newprop_flap_count < 5000 -> 10;
+                                      true                        -> 30
+                                   end,
+                    FinalProps = [{my_flap_limit, FlapLimit},
+                                  {throttle_seconds, ThrottleTime}],
+                    react_to_env_A50(P_latest, FinalProps, S2);
+               true ->
+                    %% It is our moral imperative to write so that
+                    %% the flap cycle continues enough times so that
+                    %% everyone notices then eventually falls into
+                    %% consensus.
+                    react_to_env_C300(P_newprop, P_latest, S2)
             end;
 
         Retries > 2 ->
             ?REACT({b10, ?LINE, [{retries, Retries}]}),
-            put(b10_hack, false),
 
             %% The author of P_latest is too slow or crashed.
             %% Let's try to write P_newprop and see what happens!
@@ -1293,7 +1341,6 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                     [{rank_latest, Rank_latest},
                      {rank_newprop, Rank_newprop},
                      {latest_author, P_latest#projection_v1.author_server}]}),
-            put(b10_hack, false),
 
             %% TODO: Is a UnanimousLatestInnerNotRelevant_p test needed in this clause???
 
@@ -1305,46 +1352,168 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         true ->
             ?REACT({b10, ?LINE}),
             ?REACT({b10, ?LINE, [{retries,Retries},{rank_latest, Rank_latest},                     {rank_newprop, Rank_newprop},                     {latest_author, P_latest#projection_v1.author_server}]}), % TODO debug delete me!
-            put(b10_hack, false),
 
             %% P_newprop is best, so let's write it.
             react_to_env_C300(P_newprop, P_latest, S)
     end.
 
-react_to_env_C100(P_newprop, P_latest,
-                  #ch_mgr{name=MyName, proj=P_current}=S) ->
+react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
+                                            flap=Flap_latest0}=P_latest,
+                  #ch_mgr{name=MyName, proj=P_current,
+                          flap_not_sanes=NotSanesDict0}=S) ->
     ?REACT(c100),
 
-    I_am_UPI_in_newprop_p = lists:member(MyName, P_newprop#projection_v1.upi),
-    I_am_Repairing_in_latest_p = lists:member(MyName,
-                                             P_latest#projection_v1.repairing),
-    Current_sane_p = projection_transition_is_sane(P_current, P_latest,
-                                                   MyName),
-    put(xxx_hack, [{p_current, machi_projection:make_summary(P_current)},
-                   {epoch_compare, P_latest#projection_v1.epoch_number > P_current#projection_v1.epoch_number},
-                   {i_am_upi_in_newprop_p, I_am_UPI_in_newprop_p},
-                   {i_am_repairing_in_latest_p, I_am_Repairing_in_latest_p}]),
-    case Current_sane_p of
+    Sane = projection_transition_is_sane(P_current, P_latest, MyName),
+    if Sane == true -> ok;  true -> ?V("insane-~w-~w,", [MyName, P_newprop#projection_v1.epoch_number]) end, %%% DELME!!!
+    Flap_latest = if is_record(Flap_latest0, flap_i) ->
+                          Flap_latest0;
+                     true ->
+                          #flap_i{flapping_me=false}
+                  end,
+    ?REACT({c100, ?LINE, [zoo, {me,MyName}, {author_latest,Author_latest},
+                          {flap_latest,Flap_latest},
+                          {flapping_me,Flap_latest#flap_i.flapping_me}]}),
+
+    %% Note: The value of `Sane' may be `true', `false', or `term() /= true'.
+    %%       The error value `false' is reserved for chain order violations.
+    %%       Any other non-true value can be used for projection structure
+    %%       construction errors, checksum error, etc.
+    case Sane of
         _ when P_current#projection_v1.epoch_number == 0 ->
             %% Epoch == 0 is reserved for first-time, just booting conditions.
             ?REACT({c100, ?LINE, [first_write]}),
+            erase(perhaps_reset_loop),
             react_to_env_C110(P_latest, S);
         true ->
             ?REACT({c100, ?LINE, [sane]}),
+            erase(perhaps_reset_loop),
             react_to_env_C110(P_latest, S);
+        %% 20150715: I've seen this loop happen with {expected_author2,X}
+        %% where nobody agrees, weird.
+        false when Author_latest == MyName andalso
+                   is_record(Flap_latest, flap_i) andalso
+                   Flap_latest#flap_i.flapping_me == true ->
+            ?REACT({c100, ?LINE}),
+            ?V("\n\n1YOYO ~w breaking the cycle of ~p\n", [MyName, machi_projection:make_summary(P_latest)]),
+            %% This is a fun case.  We had just enough asymmetric partition
+            %% to cause the chain to fragment into two *incompatible* and
+            %% *overlapping membership* chains, but the chain fragmentation
+            %% happened "quickly" enough so that by the time everyone's flap
+            %% counters hit the flap_limit, the asymmetric partition has
+            %% disappeared ... we'd be stuck in a flapping state forever (or
+            %% until the partition situation changes again, which might be a
+            %% very long time).
+            %%
+            %% Alas, this case took a long time to find in model checking
+            %% zillions of asymmetric partitions.  Our solution is a bit
+            %% harsh: we fall back to the "none projection" and let the chain
+            %% reassemble from there.  Hopefully this case is quite rare,
+            %% since asymmetric partitions (we assume) are pretty rare?
+            %%
+            %% Examples of overlapping membership insanity (at same instant):
+            %% Key: {author, suggested UPI, suggested Reparing}
+            %%
+            %%     {a,[a,b],[c,d,e]},
+            %%     {b,[a,b],[c,d,e]},
+            %%     {c,[e,b],[a,c,d]},
+            %%     {d,[a,b],[c,d,e]},
+            %%     {e,[e,b],[a,c,d]},
+            %% OR
+            %%     [{a,[c,e],[a,b,d]},
+            %%      {b,[e,a,b,c,d],[]},
+            %%      {c,[c,e],[a,b,d]},
+            %%      {d,[c,e],[a,b,d]},
+            %%      {e,[c,e],[a,b,d]}]
+            %%
+            %% So, I'd tried this kind of "if everyone is doing it, then we
+            %% 'agree' and we can do something different" strategy before,
+            %% and it didn't work then.  Silly me.  Distributed systems
+            %% lesson #823: do not forget the past.  In a situation created
+            %% by PULSE, of all=[a,b,c,d,e], b & d & e were scheduled
+            %% completely unfairly.  So a & c were the only authors ever to
+            %% suceessfully write a suggested projection to a public store.
+            %% Oops.
+            %%
+            %% So, we're going to keep track in #ch_mgr state for the number
+            %% of times that this insane judgement has happened.
+
+            react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
+                                    P_newprop, P_latest, S);
+        {expected_author2,_}=_ExpectedErr when Author_latest == MyName andalso
+                   is_record(Flap_latest, flap_i) andalso
+                   Flap_latest#flap_i.flapping_me == true ->
+            ?REACT({c100, ?LINE}),
+            react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
+                                    P_newprop, P_latest, S);
+        {expected_author2,_ExpectedAuthor2}=_ExpectedErr ->
+            case get(perhaps_reset_loop) of
+                undefined ->
+                    put(perhaps_reset_loop, 1),
+                    ?REACT({c100, ?LINE, [not_sane, get(why2), _ExpectedErr]}),
+                    react_to_env_C300(P_newprop, P_latest, S);
+                X when X > ?TOO_FREQUENT_BREAKER ->
+                    %% Ha, yes, this is possible.  For example:
+                    %% outer: author=e,upi=[b,a,d],repair=[c,e]
+                    %% inner: author=e,upi=[b,e],  repair=[]
+                    %% In this case, the transition from inner to outer by A30
+                    %% has chosen the wrong author.  We have two choices.
+                    %% 1. Accept this transition, because it really was the
+                    %%    safe & transition-approved UPI+repeairing that we
+                    %%    were using while we were flapping.  I'm 99% certain
+                    %%    that this is safe.  TODO: Verify
+                    %% 2. I'm not yet 100% certain that #1 is safe, so instead
+                    %%    we fall back to the one thing that we know is safe:
+                    %%    the 'none' projection, which lets the chain rebuild
+                    %%    itself normally during future iterations.
+                    ?REACT({c100, ?LINE}),
+                    react_to_env_C103(P_latest, S);
+                X ->
+                    put(perhaps_reset_loop, X+1),
+                    ?REACT({c100, ?LINE, [not_sane, get(why2), _ExpectedErr]}),
+                    react_to_env_C300(P_newprop, P_latest, S)
+            end;
         _AnyOtherReturnValue ->
             %% P_latest is not sane.
             %% By process of elimination, P_newprop is best,
             %% so let's write it.
-            ?REACT({c100, ?LINE, [not_sane]}),
+            ?REACT({c100, ?LINE, [not_sane, get(why2), _AnyOtherReturnValue]}),
+            erase(perhaps_reset_loop),
             react_to_env_C300(P_newprop, P_latest, S)
     end.
 
+react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
+                        P_newprop, P_latest, S) ->
+    NotSanesDict = orddict:update_counter(Author_latest, 1, NotSanesDict0),
+    S2 = S#ch_mgr{flap_not_sanes=NotSanesDict},
+    case orddict:fetch(Author_latest, NotSanesDict) of
+        N when N > ?TOO_FREQUENT_BREAKER ->
+            ?V("\n\nYOYO ~w breaking the cycle of ~p\n", [MyName, machi_projection:make_summary(P_latest)]),
+            ?REACT({c100, ?LINE, [{not_sanes_author_count, N}]}),
+            react_to_env_C103(P_latest, S2);
+        N ->
+            ?REACT({c100, ?LINE, [{not_sanes_author_count, N}]}),
+            react_to_env_C300(P_newprop, P_latest, S2)
+    end.
+
+react_to_env_C103(#projection_v1{epoch_number=Epoch_latest,
+                                   all_members=All_list,
+                                   members_dict=MembersDict} = P_latest,
+                  #ch_mgr{name=MyName}=S) ->
+    #projection_v1{epoch_number=Epoch_latest,
+                   all_members=All_list,
+                   members_dict=MembersDict} = P_latest,
+    P_none0 = make_none_projection(MyName, All_list, MembersDict),
+    P_none1 = P_none0#projection_v1{epoch_number=Epoch_latest,
+                                    dbg=[{none_projection,true}]},
+    P_none = machi_projection:update_checksum(P_none1),
+    %% Use it, darn it, because it's 100% safe.  And exit flapping state.
+    react_to_env_C100(P_none, P_none, S#ch_mgr{flaps=0,
+                                               flap_start=?NOT_FLAPPING_START,
+                                               flap_not_sanes=orddict:new()}).
+
 react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     ?REACT(c110),
-    %% Extra_todo = [],
-    Extra_todo = get(xxx_hack),
-    %% Extra_todo = [{hee, lists:reverse(get(react))}],
+    Extra_todo = [{react,get(react)}],
     P_latest2 = machi_projection:update_dbg2(P_latest, Extra_todo),
 
     MyNamePid = proxy_pid(MyName, S),
@@ -1352,19 +1521,34 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     %% This is the local projection store.  Use a larger timeout, so
     %% that things locally are pretty horrible if we're killed by a
     %% timeout exception.
-    {ok,Goo} = {?FLU_PC:write_projection(MyNamePid, private, P_latest2, ?TO*30),Goo},
+    %% ok = ?FLU_PC:write_projection(MyNamePid, private, P_latest2, ?TO*30),
+    Goo = P_latest2#projection_v1.epoch_number,
+    %% ?V("HEE110 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(get(react))]),
+
+    case {?FLU_PC:write_projection(MyNamePid, private, P_latest2,?TO*30),Goo} of
+        {ok, Goo} ->
+            ok;
+        Else ->
+            Summ = machi_projection:make_summary(P_latest),
+            io:format(user, "C11 error by ~w: ~w, ~w, ~w\n",
+                      [MyName, Else, Summ, get(react)]),
+            error_logger:error_msg("C11 error by ~w: ~w, ~w, ~w\n",
+                                   [MyName, Else, Summ, get(react)]),
+            exit({c110_failure, MyName, Else, Summ})
+    end,
     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
         true ->
             {_,_,C} = os:timestamp(),
             MSec = trunc(C / 1000),
             {HH,MM,SS} = time(),
+            P_latest2x = P_latest2#projection_v1{dbg2=[]}, % limit verbose len.
             case inner_projection_exists(P_latest2) of
                 false ->
                     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
                         true ->
-                            io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses plain: ~w\n",
+                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses plain: ~w\n",
                               [HH,MM,SS,MSec, S#ch_mgr.name,
-                               machi_projection:make_summary(P_latest2)]);
+                               machi_projection:make_summary(P_latest2x)]);
                         _ ->
                             ok
                     end;
@@ -1372,9 +1556,10 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
                     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
                         true ->
                             P_inner = inner_projection_or_self(P_latest2),
-                            io:format(user, "\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w\n",
+                            P_innerx = P_inner#projection_v1{dbg2=[]}, % limit verbose len.
+                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w\n",
                               [HH,MM,SS,MSec, S#ch_mgr.name,
-                               machi_projection:make_summary(P_inner)]);
+                               machi_projection:make_summary(P_innerx)]);
                         _ ->
                             ok
                     end
@@ -1384,7 +1569,7 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     end,
     react_to_env_C120(P_latest, [], S).
 
-react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H} = S) ->
+react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H}=S) ->
     ?REACT(c120),
     H2 = queue:in(P_latest, H),
     H3 = case queue:len(H2) of
@@ -1399,7 +1584,7 @@ react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H} = S) ->
                  H2
          end,
     %% HH = [if is_atom(X) -> X; is_tuple(X) -> {element(1,X), element(2,X)} end || X <- get(react), is_atom(X) orelse size(X) == 3],
-    %% io:format(user, "HEE120 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(HH)]),
+    %% ?V("HEE120 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(HH)]),
 
     ?REACT({c120, [{latest, machi_projection:make_summary(P_latest)}]}),
     {{now_using, FinalProps, P_latest#projection_v1.epoch_number},
@@ -1411,8 +1596,8 @@ react_to_env_C200(Retries, P_latest, S) ->
         AuthorProxyPid = proxy_pid(P_latest#projection_v1.author_server, S),
         ?FLU_PC:kick_projection_reaction(AuthorProxyPid, [])
     catch _Type:_Err ->
-            io:format(user, "TODO: tell_author_yo error is probably ignorable: ~p ~p\n",
-                      [_Type, _Err]),
+            %% ?V("TODO: tell_author_yo is broken: ~p ~p\n",
+            %%           [_Type, _Err]),
             ok
     end,
     react_to_env_C210(Retries, S).
@@ -1444,12 +1629,12 @@ react_to_env_C310(P_newprop, S) ->
     ?REACT({c310, ?LINE,
             [{newprop, machi_projection:make_summary(P_newprop)},
             {write_result, WriteRes}]}),
-%%    io:format(user, "HEE310 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(get(react))]),
     react_to_env_A10(S2).
 
 calculate_flaps(P_newprop, _P_current, _FlapLimit,
                 #ch_mgr{name=MyName, proj_history=H, flap_start=FlapStart,
-                        flaps=Flaps, runenv=RunEnv1} = S) ->
+                        flaps=Flaps, flap_not_sanes=NotSanesDict0,
+                        runenv=RunEnv1}=S) ->
     HistoryPs = queue:to_list(H),
     Ps = HistoryPs ++ [P_newprop],
     UniqueProposalSummaries = lists:usort([{P#projection_v1.upi,
@@ -1511,6 +1696,7 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
                true ->
                     NewFlapStart = FlapStart
             end,
+            NotSanesDict = NotSanesDict0,
 
             %% Wow, this behavior is almost spooky.
             %%
@@ -1539,7 +1725,8 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
             AllHosed = lists:usort(DownUnion ++ HosedTransUnion ++ BadFLUs);
         {_N, _} ->
             NewFlaps = 0,
-            NewFlapStart = {{epk,-1},?NOT_FLAPPING},
+            NewFlapStart = ?NOT_FLAPPING_START,
+            NotSanesDict = orddict:new(),
             AllFlapCounts = [],
             AllHosed = []
     end,
@@ -1562,7 +1749,8 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
     %% It isn't doing what I'd originally intended.  Fix it.
     {machi_projection:update_checksum(P_newprop#projection_v1{
                                                          flap=FlappingI}),
-     S#ch_mgr{flaps=NewFlaps, flap_start=NewFlapStart, runenv=RunEnv1}}.
+     S#ch_mgr{flaps=NewFlaps, flap_start=NewFlapStart,
+              flap_not_sanes=NotSanesDict, runenv=RunEnv1}}.
 
 make_flapping_i() ->
     make_flapping_i({{epk,-1},?NOT_FLAPPING}, 0, [], [], []).
@@ -1595,15 +1783,109 @@ projection_transitions_are_sane([P1, P2|T], RelativeToServer, RetrospectiveP) ->
             Else
     end.
 
-projection_transition_is_sane(P1, P2, RelativeToServer) ->
-    projection_transition_is_sane(P1, P2, RelativeToServer, false).
-
 -ifdef(TEST).
 projection_transition_is_sane_retrospective(P1, P2, RelativeToServer) ->
     projection_transition_is_sane(P1, P2, RelativeToServer, true).
 -endif. % TEST
 
-projection_transition_is_sane(
+projection_transition_is_sane(P1, P2, RelativeToServer) ->
+    projection_transition_is_sane(P1, P2, RelativeToServer, false).
+
+%% @doc Check if a projection transition is sane &amp; safe.
+%%
+%% NOTE: The return value convention is `true' for sane/safe and
+%% `term() /= true' for any unsafe/insane value.
+
+projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
+    put(why2, []),
+    case projection_transition_is_sane_with_si_epoch(
+           P1, P2, RelativeToServer, RetrospectiveP) of
+        true ->
+            HasInner1 = inner_projection_exists(P1),
+            HasInner2 = inner_projection_exists(P2),
+            if HasInner1 orelse HasInner2 ->
+                    Inner1 = inner_projection_or_self(P1),
+                    Inner2 = inner_projection_or_self(P2),
+                    if HasInner1 andalso HasInner2 ->
+                       %% In case of inner->inner transition, we must allow
+                       %% the epoch number to remain constant.  Thus, we
+                       %% call the function that does not check for a
+                       %% strictly-increasing epoch.
+                       ?RETURN2(
+                         projection_transition_is_sane_final_review(P1, P2,
+                           projection_transition_is_sane_except_si_epoch(
+                            Inner1, Inner2, RelativeToServer, RetrospectiveP)));
+                   true ->
+                       ?RETURN2(
+                         projection_transition_is_sane_final_review(P1, P2,
+                           projection_transition_is_sane_with_si_epoch(
+                            Inner1, Inner2, RelativeToServer, RetrospectiveP)))
+                    end;
+               true ->
+                    ?RETURN2(true)
+            end;
+        Else ->
+            ?RETURN2(Else)
+    end.
+
+projection_transition_is_sane_final_review(_P1, P2,
+                                           {expected_author2,UPI1_tail}=Else) ->
+    %% Reminder: P1 & P2 are outer projections
+    %%
+    %% We have a small problem for state transition sanity checking in the
+    %% case where we are flapping *and* a repair has finished.  One of the
+    %% sanity checks in simple_chain_state_transition_is_sane(() is that
+    %% the author of P2 in this case must be the tail of P1's UPI: i.e.,
+    %% it's the tail's responsibility to perform repair, therefore the tail
+    %% must damn well be the author of any transition that says a repair
+    %% finished successfully.
+    %%
+    %% The problem is that author_server of the inner projection does not
+    %% reflect the actual author!  See the comment with the text
+    %% "The inner projection will have a fake author" in react_to_env_A30().
+    %%
+    %% So, there's a special return value that tells us to try to check for
+    %% the correct authorship here.
+
+    if UPI1_tail == P2#projection_v1.author_server ->
+            ?RETURN2(true);
+       true ->
+            ?RETURN2(Else)
+    end;
+projection_transition_is_sane_final_review(_P1, _P2, Else) ->
+    ?RETURN2(Else).
+
+%% @doc Check if a projection transition is sane &amp; safe with a
+%%      strictly increasing epoch number.
+%%
+%% NOTE: The return value convention is `true' for sane/safe and
+%% `term() /= true' for any unsafe/insane value.
+
+projection_transition_is_sane_with_si_epoch(
+  #projection_v1{epoch_number=Epoch1} = P1,
+  #projection_v1{epoch_number=Epoch2} = P2,
+  RelativeToServer, RetrospectiveP) ->
+    case projection_transition_is_sane_except_si_epoch(
+           P1, P2, RelativeToServer, RetrospectiveP) of
+        true ->
+            %% Must be a strictly increasing epoch.
+            case Epoch2 > Epoch1 of
+                true ->
+                    ?RETURN2(true);
+                false ->
+                    ?RETURN2({epoch_not_si, Epoch2, 'not_gt', Epoch1})
+            end;
+        Else ->
+            ?RETURN2(Else)
+    end.
+
+%% @doc Check if a projection transition is sane &amp; safe with the
+%%      exception of a strictly increasing epoch number (equality is ok).
+%%
+%% NOTE: The return value convention is `true' for sane/safe and
+%% `term() /= true' for any unsafe/insane value.
+
+projection_transition_is_sane_except_si_epoch(
   #projection_v1{epoch_number=Epoch1,
               epoch_csum=CSum1,
               creation_time=CreationTime1,
@@ -1622,17 +1904,14 @@ projection_transition_is_sane(
               upi=UPI_list2,
               repairing=Repairing_list2,
               dbg=Dbg2} = P2,
-  RelativeToServer, RetrospectiveP) ->
+  RelativeToServer, __TODO_RetrospectiveP) ->
+ ?RETURN2(undefined),
  try
     %% General notes:
     %%
     %% I'm making no attempt to be "efficient" here.  All of these data
-    %% structures are small, and they're not called zillions of times per
+    %% structures are small, and the funcs aren't called zillions of times per
     %% second.
-    %%
-    %% The chain sequence/order checks at the bottom of this function aren't
-    %% as easy-to-read as they ought to be.  However, I'm moderately confident
-    %% that it isn't buggy.  TODO: refactor them for clarity.
 
     true = is_integer(Epoch1) andalso is_integer(Epoch2),
     true = is_binary(CSum1) andalso is_binary(CSum2),
@@ -1645,8 +1924,9 @@ projection_transition_is_sane(
     true = is_list(Repairing_list1) andalso is_list(Repairing_list2),
     true = is_list(Dbg1) andalso is_list(Dbg2),
 
-    true = Epoch2 > Epoch1,
-    All_list1 = All_list2,                 % todo will probably change
+    %% Don't check for strictly increasing epoch here: that's the job of
+    %% projection_transition_is_sane_with_si_epoch().
+    true = Epoch2 >= Epoch1,
 
     %% No duplicates
     true = lists:sort(Down_list2) == lists:usort(Down_list2),
@@ -1654,6 +1934,7 @@ projection_transition_is_sane(
     true = lists:sort(Repairing_list2) == lists:usort(Repairing_list2),
 
     %% Disjoint-ness
+    All_list1 = All_list2,                 % todo will probably change
     true = lists:sort(All_list2) == lists:sort(Down_list2 ++ UPI_list2 ++
                                                    Repairing_list2),
     [] = [X || X <- Down_list2, not lists:member(X, All_list2)],
@@ -1666,251 +1947,27 @@ projection_transition_is_sane(
     true = sets:is_disjoint(DownS2, RepairingS2),
     true = sets:is_disjoint(UPIS2, RepairingS2),
 
-    %% Additions to the UPI chain may only be at the tail
-    UPI_common_prefix = find_common_prefix(UPI_list1, UPI_list2),
-    true =
-     if UPI_common_prefix == [] ->
-            if UPI_list1 == [] orelse UPI_list2 == [] ->
-                    %% If the common prefix is empty, then one of the
-                    %% inputs must be empty.
-                    true;
-               true ->
-                    %% Otherwise, we have a case of UPI changing from
-                    %% one of these two situations:
-                    %%
-                    %% UPI_list1 -> UPI_list2
-                    %% -------------------------------------------------
-                    %% [d,c,b,a] -> [c,a]
-                    %% [d,c,b,a] -> [c,a,repair_finished_added_to_tail].
-                    NotUPI2 = (Down_list2 ++ Repairing_list2),
-                    case lists:prefix(UPI_list1 -- NotUPI2, UPI_list2) of
-                        true ->
-                            true;
-                        false ->
-                            %% Here's a possible failure scenario:
-                            %% UPI_list1        -> UPI_list2
-                            %% Repairing_list1  -> Repairing_list2
-                            %% -----------------------------------
-                            %% [a,b,c] author=a -> [c,a] author=c
-                            %% []                  [b]
-                            %% 
-                            %% ... where RelativeToServer=b.  In this case, b
-                            %% has been partitioned for a while and has only
-                            %% now just learned of several epoch transitions.
-                            %% If the author of both is also in the UPI of
-                            %% both, then those authors would not have allowed
-                            %% a bad transition, so we will assume this
-                            %% transition is OK.
-                            lists:member(AuthorServer1, UPI_list1)
-                            andalso
-                            lists:member(AuthorServer2, UPI_list2)
-                    end
-            end;
-       true ->
-            true
-    end,
-    true = lists:prefix(UPI_common_prefix, UPI_list1),
-    true = lists:prefix(UPI_common_prefix, UPI_list2),
-    UPI_1_suffix = UPI_list1 -- UPI_common_prefix,
-    UPI_2_suffix = UPI_list2 -- UPI_common_prefix,
+    %% We won't check the checksum of P1, but we will of P2.
+    P2 = machi_projection:update_checksum(P2),
 
-    MoreCheckingP =
-        RelativeToServer == undefined
-        orelse
-        not (lists:member(RelativeToServer, Down_list2) orelse
-             lists:member(RelativeToServer, Repairing_list2)),
-    
-    UPIs_are_disjointP = ordsets:is_disjoint(ordsets:from_list(UPI_list1),
-                                             ordsets:from_list(UPI_list2)),
-    case UPI_2_suffix -- UPI_list1 of
-        [] ->
-            true;
-        [_|_] = _Added_by_2 ->
-            if RetrospectiveP ->
-                    %% Any servers added to the UPI must be added from the
-                    %% repairing list ... but in retrospective mode (where
-                    %% we're checking only the transitions where all
-                    %% UPI+repairing participants have unanimous private
-                    %% projections!), and if we're under asymmetric
-                    %% partition/churn, then we may not see the repairing
-                    %% list.  So we will not check that condition here.
-                    true;
-               not RetrospectiveP ->
-                    %% We're not retrospective.  So, if some server was
-                    %% added by to the UPI, then that means that it was
-                    %% added by repair.  And repair is coordinated by the
-                    %% UPI tail/last.
-%io:format(user, "g: UPI_list1=~w, UPI_list2=~w, UPI_2_suffix=~w, ",
-%          [UPI_list1, UPI_list2, UPI_2_suffix]),
-%io:format(user, "g", []),
-                    true = UPI_list1 == [] orelse
-                           UPIs_are_disjointP orelse
-                           (lists:last(UPI_list1) == AuthorServer2)
-            end
-    end,
-
-    if not MoreCheckingP ->
-            ok;
-        MoreCheckingP ->
-            %% Where did elements in UPI_2_suffix come from?
-            %% Only two sources are permitted.
-            Oops_check_UPI_2_suffix =
-                [lists:member(X, Repairing_list1) % X added after repair done
-                 orelse
-                 lists:member(X, UPI_list1)  % X in UPI_list1 after common pref
-                 || X <- UPI_2_suffix],
-            %% Grrrrr, ok, so this check isn't good, at least at bootstrap time.
-            %% TODO: false = lists:member(false, Oops_check_UPI_2_suffix),
-
-            %% The UPI_2_suffix must exactly be equal to: ordered items from
-            %% UPI_list1 concat'ed with ordered items from Repairing_list1.
-            %% Both temp vars below preserve relative order!
-            UPI_2_suffix_from_UPI1 = [X || X <- UPI_1_suffix,
-                                           lists:member(X, UPI_list2)],
-            UPI_2_suffix_from_Repairing1 = [X || X <- UPI_2_suffix,
-                                                 lists:member(X, Repairing_list1)],
-            %% true?
-            UPI_2_concat = (UPI_2_suffix_from_UPI1 ++ UPI_2_suffix_from_Repairing1),
-            if UPI_2_suffix == UPI_2_concat ->
-                    ok;
-               true ->
-                    %% 'make dialyzer' will believe that this can never succeed.
-                    %% 'make dialyzer-test' will not complain, however.
-                    if RetrospectiveP ->
-                            %% We are in retrospective mode.  But there are
-                            %% some transitions that are difficult to find
-                            %% when standing outside of all of the FLUs and
-                            %% examining their behavior.  (In contrast to
-                            %% this same function being called "in the path"
-                            %% of a projection transition by a particular FLU
-                            %% which knows exactly its prior projection and
-                            %% exactly what it intends to do.)  Perhaps this
-                            %% exception clause here can go away with
-                            %% better/more clever retrospection analysis?
-                            %%
-                            %% Here's a case that PULSE found:
-                            %% FLU B:
-                            %%   E=257: UPI=[c,a], REPAIRING=[b]
-                            %%   E=284: UPI=[c,a], REPAIRING=[b]
-                            %% FLU a:
-                            %%   E=251: UPI=[c], REPAIRING=[a,b]
-                            %%   E=284: UPI=[c,a], REPAIRING=[b]
-                            %% FLU c:
-                            %%   E=282: UPI=[c], REPAIRING=[a,b]
-                            %%   E=284: UPI=[c,a], REPAIRING=[b]
-                            %%
-                            %% From the perspective of each individual FLU,
-                            %% the unanimous transition at epoch #284 is
-                            %% good.  The repair that is done by FLU c -> a
-                            %% is likewise good.
-                            %%
-                            %% From a retrospective point of view (and the
-                            %% current implementation), there's a bad-looking
-                            %% transition from epoch #269 to #284.  This is
-                            %% from the point of view of the last two
-                            %% unanimous private projection store epochs:
-                            %%
-                            %%   E=269: UPI=[c], REPAIRING=[], DOWN=[a,b]
-                            %%   E=284: UPI=[c,a], REPAIRING=[b]
-                            %%
-                            %% The retrospective view by
-                            %% machi_chain_manager1_pulse.erl just can't
-                            %% reason correctly about this situation.  We
-                            %% will instead rely on the non-retrospective
-                            %% sanity checking that each FLU does before it
-                            %% writes to its private projection store and
-                            %% then adopts that projection (and unwedges
-                            %% itself, etc etc).
-
-                            if UPIs_are_disjointP ->
-                                    true;
-                               true ->
-                                    exit({todo, revisit, ?MODULE, ?LINE,
-                                          [
-                                           {oops_check_UPI_2_suffix, Oops_check_UPI_2_suffix},
-                                           {upi_2_suffix, UPI_2_suffix},
-                                           {upi_2_concat, UPI_2_concat},
-                                           {retrospectivep, RetrospectiveP}
-                                          ]}),
-                                    io:format(user, "|~p,~p TODO revisit|",
-                                              [?MODULE, ?LINE]),
-                                    ok
-                            end;
-                       true ->
-                            %% The following is OK: We're shifting from a
-                            %% normal projection to an inner one.  The old
-                            %% normal has a UPI that has nothing to do with
-                            %% RelativeToServer a.k.a. me.
-                            %% Or else the UPI_list1 is empty, and I'm
-                            %% the only member of UPI_list2
-                            %% But the new/suffix is definitely me.
-                            %% from:
-                            %% {epoch,847},{author,c},{upi,[c]},{repair,[]},
-                            %%                                   {down,[a,b,d]}
-                            %% to:
-                            %% {epoch,848},{author,a},{upi,[a]},{repair,[]},
-                            %%                                   {down,[b,c,d]}
-                            FirstCase_p = (UPI_2_suffix == [AuthorServer2])
-                                andalso
-                                ((inner_projection_exists(P1) == false
-                                  andalso
-                                  inner_projection_exists(P2) == true)
-                                 orelse UPI_list1 == []),
-
-                            %% Here's another case that's alright:
-                            %%
-                            %% {a,{err,exit,
-                            %%     {upi_2_suffix_error,[c]}, ....
-                            %%
-                            %% from:
-                            %% {epoch,937},{author,a},{upi,[a,b]},{repair,[]},
-                            %%                                       {down,[c]}
-                            %% to:
-                            %% {epoch,943},{author,a},{upi,{a,b,c},{repair,[]},
-                            %%                                        {down,[]}
-
-                            %% The author server doesn't matter.  However,
-                            %% there were two other epochs in between, 939
-                            %% and 941, where there wasn't universal agreement
-                            %% of private projections.  The repair controller
-                            %% at the tail, 'b', had decided that the repair
-                            %% of 'c' was finished @ epoch 941.
-                            SecondCase_p = ((UPI_2_suffix -- Repairing_list1)
-                                            == []),
-                            if FirstCase_p ->
-                                    true;
-                               SecondCase_p ->
-                                    true;
-                               UPIs_are_disjointP ->
-                                    %% If there's no overlap at all between
-                                    %% UPI_list1 & UPI_list2, then we're OK
-                                    %% here.
-                                    true;
-                               true ->
-                                    exit({upi_2_suffix_error, UPI_2_suffix})
-                            end
-                    end
-            end
-    end,
-    true
+    %% Hooray, all basic properties of the projection's elements are
+    %% not obviously bad.  Now let's check if the UPI+Repairing->UPI
+    %% transition is good.
+    ?RETURN2(
+       chain_state_transition_is_sane(AuthorServer1, UPI_list1, Repairing_list1,
+                                      AuthorServer2, UPI_list2))
  catch
      _Type:_Err ->
+         ?RETURN2(oops),
          S1 = machi_projection:make_summary(P1),
          S2 = machi_projection:make_summary(P2),
          Trace = erlang:get_stacktrace(),
+         %% There are basic data structure checks only, do not return `false'
+         %% here.
          {err, _Type, _Err, from, S1, to, S2, relative_to, RelativeToServer,
           history, (catch lists:sort([no_history])),
           stack, Trace}
  end.
-
-find_common_prefix([], _) ->
-    [];
-find_common_prefix(_, []) ->
-    [];
-find_common_prefix([H|L1], [H|L2]) ->
-    [H|find_common_prefix(L1, L2)];
-find_common_prefix(_, _) ->
-    [].
 
 sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list) ->
     USec = calc_sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list),
@@ -2047,6 +2104,7 @@ do_repair(
                               repairing=[_|_]=Repairing,
                               members_dict=MembersDict}}=_S_copy,
   Opts, ap_mode=RepairMode) ->
+?V("RePaiR-~w,", [self()]),
     T1 = os:timestamp(),
     RepairId = proplists:get_value(repair_id, Opts, id1),
     error_logger:info_msg("Repair start: tail ~p of ~p -> ~p, ~p ID ~w\n",
@@ -2089,8 +2147,10 @@ perhaps_call_t(S, Partitions, FLU, DoIt) ->
         perhaps_call(S, Partitions, FLU, DoIt)
     catch
         exit:timeout ->
+            remember_partition_hack(FLU),
             {error, partition};
         exit:{timeout,_} ->
+            remember_partition_hack(FLU),
             {error, partition}
     end.
 
@@ -2125,3 +2185,167 @@ remember_partition_hack(FLU) ->
     put(remember_partition_hack, [FLU|get(remember_partition_hack)]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% @doc A simple technique for checking chain state transition safety.
+%%
+%% Math tells us that any change state `UPI1' plus `Repair1' to state
+%% `UPI2' is OK as long as `UPI2' is a concatenation of some
+%% order-preserving combination from `UPI1' with some order-preserving
+%% combination from `Repair1'.
+%%
+%% ```
+%%   Good_UPI2s = [ X ++ Y || X <- machi_util:ordered_combinations(UPI1),
+%%                            Y <- machi_util:ordered_combinations(Repair1)]'''
+%%
+%% Rather than creating that list and then checking if `UPI2' is in
+%% it, we try a `diff'-like technique to check for basic state
+%% transition safety.  See docs for {@link mk/3} for more detail.
+%%
+%% ```
+%% 2> machi_chain_manager1:mk([a,b], [], [a]).
+%% {[keep,del],[]}        %% good transition
+%% 3> machi_chain_manager1:mk([a,b], [], [b,a]).
+%% {[del,keep],[]}        %% bad transition: too few 'keep' for UPI2's length 2
+%% 4> machi_chain_manager1:mk([a,b], [c,d,e], [a,d]).
+%% {[keep,del],[2]}       %% good transition
+%% 5> machi_chain_manager1:mk([a,b], [c,d,e], [a,bogus]).
+%% {[keep,del],[error]}   %% bad transition: 'bogus' not in Repair1'''
+
+simple_chain_state_transition_is_sane(UPI1, Repair1, UPI2) ->
+    ?RETURN2(simple_chain_state_transition_is_sane(undefined, UPI1, Repair1,
+                                                   undefined, UPI2)).
+
+%% @doc Simple check if a projection transition is sane &amp; safe: we assume
+%% that the caller has checked basic projection data structure contents.
+%%
+%% NOTE: The return value convention is `true' for sane/safe and
+%% `term() /= true' for any unsafe/insane value.
+
+simple_chain_state_transition_is_sane(_Author1, UPI1, Repair1, Author2, UPI2) ->
+    {KeepsDels, Orders} = mk(UPI1, Repair1, UPI2),
+    NumKeeps = length([x || keep <- KeepsDels]),
+    NumOrders = length(Orders),
+    NoErrorInOrders = (false == lists:member(error, Orders)),
+    OrdersOK = (Orders == lists:sort(Orders)),
+    UPI2LengthOK = (length(UPI2) == NumKeeps + NumOrders),
+    Answer1 = NoErrorInOrders andalso OrdersOK andalso UPI2LengthOK,
+    catch ?REACT({simple, ?LINE,
+                  [{sane, answer1,Answer1,
+                    author1,_Author1, upi1,UPI1, repair1,Repair1,
+                    author2,Author2, upi2,UPI2,
+                    keepsdels,KeepsDels, orders,Orders, numKeeps,NumKeeps,
+                    numOrders,NumOrders, answer1,Answer1}]}),
+    if not Answer1 ->
+            ?RETURN2(Answer1);
+       true ->
+            if Orders == [] ->
+                    %% No repairing have joined UPI2. Keep original answer.
+                    ?RETURN2(Answer1);
+               Author2 == undefined ->
+                    %% At least one Repairing1 element is now in UPI2.
+                    %% We need Author2 to make better decision.  Go
+                    %% with what we know, silly caller for not giving
+                    %% us what we need.
+                    ?RETURN2(Answer1);
+               Author2 /= undefined ->
+                    %% At least one Repairing1 element is now in UPI2.
+                    %% We permit only the tail to author such a UPI2.
+                    case catch(lists:last(UPI1)) of
+                        UPI1_tail when UPI1_tail == Author2 ->
+                            ?RETURN2(true);
+                        UPI1_tail ->
+                            ?RETURN2({expected_author2,UPI1_tail})
+                    end
+            end
+    end.
+
+%% @doc Check if a projection transition is sane &amp; safe: we assume
+%% that the caller has checked basic projection data structure contents.
+%%
+%% NOTE: The return value convention is `true' for sane/safe and `term() /=
+%% true' for any unsafe/insane value.  This function (and its callee
+%% functions) are the only functions (throughout all of the chain state
+%% transition sanity checking functions) that is allowed to return `false'.
+
+chain_state_transition_is_sane(Author1, UPI1, Repair1, Author2, UPI2) ->
+    ToSelfOnly_p = if UPI2 == [Author2] -> true;
+                      true              -> false
+                   end,
+    Disjoint_UPIs = ordsets:is_disjoint(ordsets:from_list(UPI1),
+                                        ordsets:from_list(UPI2)),
+    %% This if statement contains the only exceptions that we make to
+    %% the judgement of simple_chain_state_transition_is_sane().
+    if ToSelfOnly_p ->
+            %% The transition is to UPI2=[Author2].
+            %% For AP mode, this transition is always safe (though not
+            %% always optimal for highest availability).
+            ?RETURN2(true);
+       Disjoint_UPIs ->
+            %% The transition from UPI1 -> UPI2 where the two are
+            %% disjoint/no FLUs in common.
+            %% For AP mode, this transition is always safe (though not
+            %% always optimal for highest availability).
+            ?RETURN2(true);
+       true ->
+            ?RETURN2(
+               simple_chain_state_transition_is_sane(Author1, UPI1, Repair1,
+                                                     Author2, UPI2))
+    end.
+
+%% @doc Create a 2-tuple that describes how `UPI1' + `Repair1' are
+%%      transformed into `UPI2' in a chain state change.
+%%
+%% The 1st part of the 2-tuple is a list of `keep' and `del' instructions,
+%% relative to the items in UPI1 and whether they are present (`keep') or
+%% absent (`del') in `UPI2'.
+%%
+%% The 2nd part of the 2-tuple is `list(non_neg_integer()|error)' that
+%% describes the relative order of items in `Repair1' that appear in
+%% `UPI2'.  The `error' atom is used to denote items not present in
+%% `Repair1'.
+
+mk(UPI1, Repair1, UPI2) ->
+    mk(UPI1, Repair1, UPI2, []).
+
+mk([X|UPI1], Repair1, [X|UPI2], Acc) ->
+    mk(UPI1, Repair1, UPI2, [keep|Acc]);
+mk([X|UPI1], Repair1, UPI2, Acc) ->
+    mk(UPI1, Repair1, UPI2 -- [X], [del|Acc]);
+mk([], [], [], Acc) ->
+    {lists:reverse(Acc), []};
+mk([], Repair1, UPI2, Acc) ->
+    {lists:reverse(Acc), machi_util:mk_order(UPI2, Repair1)}.
+
+scan_dir(Dir, FileFilterFun, FoldEachFun, FoldEachAcc) ->
+    Files = filelib:wildcard(Dir ++ "/*"),
+    Xs = [binary_to_term(element(2, file:read_file(File))) || File <- Files],
+    Xs2 = FileFilterFun(Xs),
+    lists:foldl(FoldEachFun, FoldEachAcc, Xs2).
+
+get_ps(#projection_v1{epoch_number=Epoch, dbg=Dbg}, Acc) ->
+    [{Epoch, proplists:get_value(ps, Dbg, [])}|Acc].
+
+strip_dbg2(P) ->
+    P#projection_v1{dbg2=[stripped]}.
+
+has_not_sane(#projection_v1{epoch_number=Epoch, dbg2=Dbg2}, Acc) ->
+    Reacts = proplists:get_value(react, Dbg2, []),
+    case [X || {_State,_Line, [not_sane|_]}=X <- Reacts] of
+        [] ->
+            Acc;
+        Xs->
+            [{Epoch, Xs}|Acc]
+    end.
+
+all_hosed_history(#projection_v1{epoch_number=_Epoch, flap=Flap},
+                  {OldAllHosed,Acc}) ->
+    AllHosed = if Flap == undefined ->
+                       [];
+                  true ->
+                       Flap#flap_i.all_hosed
+               end,
+    if AllHosed == OldAllHosed ->
+            {OldAllHosed, Acc};
+       true ->
+            {AllHosed, [AllHosed|Acc]}
+    end.

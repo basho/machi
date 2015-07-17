@@ -26,6 +26,11 @@
 -include("machi_pb.hrl").
 -include("machi_projection.hrl").
 
+-ifdef(PULSE).
+-compile({parse_transform, pulse_instrument}).
+-include_lib("pulse_otp/include/pulse_otp.hrl").
+-endif.
+
 -export([from_pb_request/1,
          from_pb_response/1,
          to_pb_request/2,
@@ -180,7 +185,7 @@ from_pb_request(#mpb_request{req_id=ReqID,
 from_pb_request(#mpb_request{req_id=ReqID}) ->
     {ReqID, {high_error, 999966, "Unknown request"}};
 from_pb_request(_Else) ->
-    io:format(user, "\nRRR from_pb_request(~p)\n", [_Else]), timer:sleep(2000),
+    io:format(user, "\nRRR from_pb_request(~p)\n", [_Else]), %%timer:sleep(2000),
     {<<>>, {high_error, 999667, "Unknown PB request"}}.
 
 from_pb_response(#mpb_ll_response{

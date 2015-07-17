@@ -61,6 +61,16 @@
 
 -behaviour(supervisor).
 
+-include("machi_verbose.hrl").
+
+-ifdef(PULSE).
+-compile({parse_transform, pulse_instrument}).
+-include_lib("pulse_otp/include/pulse_otp.hrl").
+-define(SHUTDOWN, infinity).
+-else.
+-define(SHUTDOWN, 5000).
+-endif.
+
 %% External API
 -export([make_package_spec/4, start_flu_package/4, stop_flu_package/1]).
 %% Internal API
@@ -73,7 +83,7 @@
 make_package_spec(FluName, TcpPort, DataDir, Props) ->
     {FluName, {machi_flu_psup, start_link,
                [FluName, TcpPort, DataDir, Props]},
-     permanent, 5000, supervisor, []}.
+     permanent, ?SHUTDOWN, supervisor, []}.
 
 start_flu_package(FluName, TcpPort, DataDir, Props) ->
     Spec = make_package_spec(FluName, TcpPort, DataDir, Props),
@@ -103,15 +113,15 @@ init([FluName, TcpPort, DataDir, Props0]) ->
     ProjSpec = {ProjRegName,
                {machi_projection_store, start_link,
                 [ProjRegName, DataDir, FluName]},
-               permanent, 5000, worker, []},
+               permanent, ?SHUTDOWN, worker, []},
     MgrSpec = {make_mgr_supname(FluName),
                {machi_chain_manager1, start_link,
                 [FluName, [], Props]},
-               permanent, 5000, worker, []},
+               permanent, ?SHUTDOWN, worker, []},
     FluSpec = {FluName,
                {machi_flu1, start_link,
                 [ [{FluName, TcpPort, DataDir}|Props] ]},
-               permanent, 5000, worker, []},
+               permanent, ?SHUTDOWN, worker, []},
     {ok, {SupFlags, [ProjSpec, MgrSpec, FluSpec]}}.
 
 make_p_regname(FluName) when is_atom(FluName) ->

@@ -35,7 +35,7 @@
 
 %% @doc Create a new projection record.
 
-new(MyName, MemberDict, UPI_list, Down_list, Repairing_list, Ps) ->
+new(MyName, MemberDict, Down_list, UPI_list, Repairing_list, Ps) ->
     new(0, MyName, MemberDict, Down_list, UPI_list, Repairing_list, Ps).
 
 %% @doc Create a new projection record.
@@ -141,15 +141,26 @@ compare(#projection_v1{epoch_number=E1},
 %% @doc Create a proplist-style summary of a projection record.
 
 make_summary(#projection_v1{epoch_number=EpochNum,
+                            epoch_csum= <<_CSum4:4/binary, _/binary>>=_CSum,
                             all_members=_All_list,
                             down=Down_list,
                             author_server=Author,
                             upi=UPI_list,
                             repairing=Repairing_list,
+                            inner=Inner,
+                            flap=Flap,
                             dbg=Dbg, dbg2=Dbg2}) ->
+    InnerInfo = if is_record(Inner, projection_v1) ->
+                        [{inner, make_summary(Inner)}];
+                   true ->
+                        []
+                end,
     [{epoch,EpochNum},{author,Author},
-     {upi,UPI_list},{repair,Repairing_list},{down,Down_list},
-     {d,Dbg}, {d2,Dbg2}].
+     {upi,UPI_list},{repair,Repairing_list},{down,Down_list}] ++
+        InnerInfo ++
+        [{flap, Flap}] ++
+        %% [{flap, lists:flatten(io_lib:format("~p", [Flap]))}] ++
+        [{d,Dbg}, {d2,Dbg2}].
 
 %% @doc Make a `p_srvr_dict()' out of a list of `p_srvr()' or out of a
 %% `p_srvr_dict()'.

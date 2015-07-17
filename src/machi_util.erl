@@ -38,7 +38,11 @@
          info_msg/2, verb/1, verb/2,
          mbytes/1,
          %% TCP protocol helpers
-         connect/2, connect/3
+         connect/2, connect/3,
+         %% List twiddling
+         permutations/1, perms/1,
+         combinations/1, ordered_combinations/1,
+         mk_order/2
         ]).
 -compile(export_all).
 
@@ -301,3 +305,29 @@ escript_connect(Host, Port, Timeout) when is_integer(Port) ->
     {ok, Sock} = gen_tcp:connect(Host, Port, [{active,false}, {mode,binary},
                                               {packet, raw}], Timeout),
     Sock.
+
+permutations(L) ->
+    perms(L).
+
+perms([]) -> [[]];
+perms(L)  -> [[H|T] || H <- L, T <- perms(L--[H])].
+
+combinations(L) ->
+    lists:usort(perms(L) ++ lists:append([ combinations(L -- [X]) || X <- L])).
+
+ordered_combinations(Master) ->
+    [L || L <- combinations(Master), is_ordered(L, Master)].
+
+is_ordered(L, Reference) ->
+    L_order = mk_order(L, Reference),
+    lists:all(fun(X) -> is_integer(X) end, L_order) andalso
+        L_order == lists:sort(L_order).
+
+mk_order(UPI2, Repair1) ->
+    R1 = length(Repair1),
+    Repair1_order_d = orddict:from_list(lists:zip(Repair1, lists:seq(1, R1))),
+    UPI2_order = [case orddict:find(X, Repair1_order_d) of
+                      {ok, Idx} -> Idx;
+                      error     -> error
+                  end || X <- UPI2],
+    UPI2_order.

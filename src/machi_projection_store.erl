@@ -41,6 +41,13 @@
 -module(machi_projection_store).
 
 -include("machi_projection.hrl").
+-define(V(X,Y), ok).
+%% -include("machi_verbose.hrl").
+
+%% -ifdef(PULSE).
+%% -compile({parse_transform, pulse_instrument}).
+%% -include_lib("pulse_otp/include/pulse_otp.hrl").
+%% -endif.
 
 %% API
 -export([

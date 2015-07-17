@@ -70,6 +70,8 @@
 -include("machi.hrl").
 -include("machi_pb.hrl").
 -include("machi_projection.hrl").
+-define(V(X,Y), ok).
+%% -include("machi_verbose.hrl").
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -316,7 +318,8 @@ net_server_loop(Sock, S) ->
             %% TODO: Weird that sometimes neither catch nor try/catch
             %%       can prevent OTP's SASL from logging an error here.
             %%       Error in process <0.545.0> with exit value: {badarg,[{erlang,port_command,.......
-            _ = (catch gen_tcp:send(Sock, Resp)), timer:sleep(1000),
+            %% TODO: is this what causes the intermittent PULSE deadlock errors?
+            %% _ = (catch gen_tcp:send(Sock, Resp)), timer:sleep(1000),
             (catch gen_tcp:close(Sock)),
             exit(normal)
     end.

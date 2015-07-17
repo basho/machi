@@ -108,6 +108,7 @@
 
 -include("machi.hrl").
 -include("machi_projection.hrl").
+-include("machi_verbose.hrl").
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").

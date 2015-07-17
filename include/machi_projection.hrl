@@ -38,6 +38,7 @@
 
 -record(flap_i, {
           flap_count :: {term(), term()},
+          flapping_me = false :: boolean(),
           all_hosed :: list(),
           all_flap_counts :: list(),
           bad :: list()

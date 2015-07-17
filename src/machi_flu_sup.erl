@@ -28,6 +28,16 @@
 
 -behaviour(supervisor).
 
+-include("machi_verbose.hrl").
+
+-ifdef(PULSE).
+-compile({parse_transform, pulse_instrument}).
+-include_lib("pulse_otp/include/pulse_otp.hrl").
+-define(SHUTDOWN, infinity).
+-else.
+-define(SHUTDOWN, 5000).
+-endif.
+
 %% API
 -export([start_link/0]).
 
@@ -45,10 +55,17 @@ init([]) ->
     MaxSecondsBetweenRestarts = 3600,
     SupFlags = {RestartStrategy, MaxRestarts, MaxSecondsBetweenRestarts},
 
-    Ps = application:get_env(machi, initial_flus, []),
+    Ps = get_initial_flus(),
     FLU_specs = [machi_flu_psup:make_package_spec(FluName, TcpPort,
                                                   DataDir, Props) ||
                     {FluName, TcpPort, DataDir, Props} <- Ps],
 
     {ok, {SupFlags, FLU_specs}}.
 
+-ifdef(PULSE).
+get_initial_flus() ->
+    [].
+-else.  % PULSE
+get_initial_flus() ->
+    application:get_env(machi, initial_flus, []).
+-endif. % PULSE
