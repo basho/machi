@@ -439,9 +439,8 @@ do_quickcheck(true, Timeout, Style) ->
     eqc:quickcheck(eqc:testing_time(Timeout,
                                     ?QC_OUT(prop_pulse(Style))));
 do_quickcheck(false, Timeout, Style) ->
-  noshrink(
     eqc:quickcheck(eqc:testing_time(Timeout,
-                                    ?QC_OUT(prop_pulse(Style))))).
+                                    ?QC_OUT(noshrink(prop_pulse(Style))))).
 
 get_timeouts() ->
     Timeout = case os:getenv("PULSE_TIME") of
@@ -457,9 +456,9 @@ get_timeouts() ->
 get_do_shrink() ->
     case os:getenv("PULSE_NOSHRINK") of
         false ->
-            false;
+            true;
         _ ->
-            true
+            false
     end.
 
 shutdown_hard() ->
