@@ -1390,8 +1390,7 @@ react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
             react_to_env_C110(P_latest, S);
         %% 20150715: I've seen this loop happen with {expected_author2,X}
         %% where nobody agrees, weird.
-        false when Author_latest == MyName andalso
-                   is_record(Flap_latest, flap_i) andalso
+        false when is_record(Flap_latest, flap_i) andalso
                    Flap_latest#flap_i.flapping_me == true ->
             ?REACT({c100, ?LINE}),
             ?V("\n\n1YOYO ~w breaking the cycle of ~p\n", [MyName, machi_projection:make_summary(P_latest)]),
@@ -1439,7 +1438,7 @@ react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
 
             react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
                                     P_newprop, P_latest, S);
-        {expected_author2,_}=_ExpectedErr when Author_latest == MyName andalso
+        {expected_author2,_}=_ExpectedErr when
                    is_record(Flap_latest, flap_i) andalso
                    Flap_latest#flap_i.flapping_me == true ->
             ?REACT({c100, ?LINE}),
