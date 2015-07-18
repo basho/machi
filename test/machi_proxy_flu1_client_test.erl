@@ -121,12 +121,14 @@ flu_restart_test() ->
         {ok, Prox1} = ?MUT:start_link(I),
         try
             FakeEpoch = ?DUMMY_PV1_EPOCH,
-            Data = <<"data!">>,
+            Data   = <<"data!">>,
+            Dataxx = <<"Fake!">>,
             {ok, {Off1,Size1,File1}} = ?MUT:append_chunk(Prox1,
                                           FakeEpoch, <<"prefix">>, Data,
                                           infinity),
             P_a = #p_srvr{name=a, address="localhost", port=6622},
-            P1 = machi_projection:new(1, a, [P_a], [], [a], [], []),
+            P1   = machi_projection:new(1, a, [P_a], [], [a], [], []),
+            P1xx = P1#projection_v1{dbg2=["not exactly the same as P1!!!"]},
             EpochID = {P1#projection_v1.epoch_number,
                        P1#projection_v1.epoch_csum},
             ok = ?MUT:write_projection(Prox1, public, P1),
@@ -182,18 +184,31 @@ flu_restart_test() ->
                     (line) -> io:format("line ~p, ", [?LINE]);
                     (stop) -> ?MUT:read_projection(Prox1, private, 7)
                  end,
-                 fun(run) -> {error, written} =
+                 fun(run) -> ok =
                                  ?MUT:write_projection(Prox1, public, P1),
                              ok;
                     (line) -> io:format("line ~p, ", [?LINE]);
                     (stop) -> ?MUT:write_projection(Prox1, public, P1)
                  end,
-                 fun(run) -> {error, written} =
+                 fun(run) -> ok =
                                  ?MUT:write_projection(Prox1, private, P1),
                              ok;
                     (line) -> io:format("line ~p, ", [?LINE]);
                     (stop) -> ?MUT:write_projection(Prox1, private, P1)
                  end,
+                 fun(run) -> {error, written} =
+                                 ?MUT:write_projection(Prox1, public, P1xx),
+                             ok;
+                    (line) -> io:format("line ~p, ", [?LINE]);
+                    (stop) -> ?MUT:write_projection(Prox1, public, P1xx)
+                 end,
+                 fun(run) -> {error, written} =
+                                 ?MUT:write_projection(Prox1, private, P1xx),
+                             ok;
+                    (line) -> io:format("line ~p, ", [?LINE]);
+                    (stop) -> ?MUT:write_projection(Prox1, private, P1xx)
+                 end,
+
                  fun(run) -> {ok, [_]} =
                                  ?MUT:get_all_projections(Prox1, public),
                              ok;
@@ -249,9 +264,7 @@ flu_restart_test() ->
                     (line) -> io:format("line ~p, ", [?LINE]);
                     (stop) -> ?MUT:wedge_status(Prox1)
                  end,
-                 %% NOTE: When write-once enforcement is enabled, this test
-                 %% will fail: change ok -> {error, written}
-                 fun(run) -> %% {error, written} =
+                 fun(run) ->
                              ok =
                                  ?MUT:write_chunk(Prox1, FakeEpoch, File1, Off1,
                                                   Data, infinity),
@@ -259,6 +272,17 @@ flu_restart_test() ->
                     (line) -> io:format("line ~p, ", [?LINE]);
                     (stop) -> ?MUT:write_chunk(Prox1, FakeEpoch, File1, Off1,
                                                Data, infinity)
+                 end,
+                 %% NOTE: When write-once enforcement is enabled, this test
+                 %% will fail: change ok -> {error, written}
+                 fun(run) -> %% {error, written} =
+                             ok =
+                                 ?MUT:write_chunk(Prox1, FakeEpoch, File1, Off1,
+                                                  Dataxx, infinity),
+                             ok;
+                    (line) -> io:format("line ~p, ", [?LINE]);
+                    (stop) -> ?MUT:write_chunk(Prox1, FakeEpoch, File1, Off1,
+                                               Dataxx, infinity)
                  end
                 ],
 
