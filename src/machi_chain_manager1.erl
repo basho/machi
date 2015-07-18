@@ -68,7 +68,7 @@
           flaps=0         :: integer(),
           flap_start = ?NOT_FLAPPING_START
                           :: {{'epk', integer()}, erlang:timestamp()},
-          flap_not_sanes  :: orddict:orddict(),
+          not_sanes       :: orddict:orddict(),
           repair_worker   :: 'undefined' | pid(),
           repair_start    :: 'undefined' | erlang:timestamp(),
           repair_final_status :: 'undefined' | term(),
@@ -226,7 +226,7 @@ init({MyName, InitMembersDict, MgrOpts}) ->
                 flap_limit=length(All_list) + 50,
                 timer='undefined',
                 proj_history=queue:new(),
-                flap_not_sanes=orddict:new(),
+                not_sanes=orddict:new(),
                 runenv=RunEnv,
                 opts=MgrOpts},
     {_, S2} = do_set_chain_members_dict(MembersDict, S),
@@ -805,8 +805,46 @@ do_react_to_env(#ch_mgr{name=MyName,
              S2#ch_mgr{proj=NewProj, members_dict=NewMembersDict}}
     end;
 do_react_to_env(S) ->
+    %% The not_sanes manager counting dictionary is not strictly
+    %% limited to flapping scenarios.  (Though the mechanism first
+    %% started as a way to deal with rare flapping scenarios.)
+    %%
+    %% I believe that the problem cannot happen in real life, but it can
+    %% happen in simulated environments, especially if the simulation for
+    %% repair can be approximately infinitely fast.
+    %%
+    %% For example:
+    %%   P_current: epoch=1135, UPI=[b,e,a], Repairing=[c,d], author=e
+    %%
+    %%   Now a partition happens, a & b are on an island, c & d & e on
+    %%   the other island.
+    %%
+    %%   P_newprop: epoch=1136, UPI=[e,c], Repairing=[d], author=e
+    %%
+    %% Why does e think that this is feasible?  Well, the old UPI was
+    %% [b,e,a], and we know that a & b are partitioned away from e.
+    %% Therefore e chooses the best UPI, [e].  However, the simulator
+    %% now also says, hey, there are nodes in the repairing list, so
+    %% let's simulate a repair ... and the repair goes infinitely
+    %% quickly ...and the epoch is stable during the repair period
+    %% (i.e., both e/repairer and c/repairee remained in the same
+    %% epoch 1135) ... so e decides that the simulated repair is
+    %% "finished" and it's time to add the repairee to the tail of the
+    %% UPI ... so that's why 1136's UPI=[e,c].
+    %%
+    %% I'll try to add a condition to the simulated repair to try to
+    %% make slightly fewer assumptions in a row.  However, I believe
+    %% it's a good idea to keep this too-many-not_sane-transition-
+    %% attempts counter very generic (i.e., not specific for flapping
+    %% as it once was).
+    %%
+    %% The not_sanes counter dict should be reset each time we start
+    %% an iteration.  One could argue that state only for a single
+    %% iteration shouldn't go in #ch_mgr but should be a separate arg
+    %% threaded through each of the FSM funcs.
+    %% TODO possible refactoring task?
     put(react, []),
-    react_to_env_A10(S).
+    react_to_env_A10(S#ch_mgr{not_sanes=orddict:new()}).
 
 react_to_env_A10(S) ->
     ?REACT(a10),
@@ -986,7 +1024,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                 ?REACT({a30, ?LINE, [{inner_summary,
                                     machi_projection:make_summary(P_inner2)}]}),
                 %% Adjust the outer projection's #flap_i info.
-                ?V("~w,", [{'YOYO',MyName,NewEpoch}]),
+                ?V("~w,", [{'FLAP',MyName,NewEpoch}]),
                 #projection_v1{flap=OldFlap} = P_newprop3,
                 NewFlap = OldFlap#flap_i{flapping_me=true},
                 ?REACT({a30, ?LINE, [flap_continue,
@@ -1360,7 +1398,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
 react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
                                             flap=Flap_latest0}=P_latest,
                   #ch_mgr{name=MyName, proj=P_current,
-                          flap_not_sanes=NotSanesDict0}=S) ->
+                          not_sanes=NotSanesDict0}=S) ->
     ?REACT(c100),
 
     Sane = projection_transition_is_sane(P_current, P_latest, MyName),
@@ -1382,18 +1420,16 @@ react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
         _ when P_current#projection_v1.epoch_number == 0 ->
             %% Epoch == 0 is reserved for first-time, just booting conditions.
             ?REACT({c100, ?LINE, [first_write]}),
-            erase(perhaps_reset_loop),
+            if Sane == true -> ok;  true -> ?V("insane-~w-~w@~w,", [MyName, P_newprop#projection_v1.epoch_number, ?LINE]) end, %%% DELME!!!
             react_to_env_C110(P_latest, S);
         true ->
             ?REACT({c100, ?LINE, [sane]}),
-            erase(perhaps_reset_loop),
+            if Sane == true -> ok;  true -> ?V("insane-~w-~w@~w,", [MyName, P_newprop#projection_v1.epoch_number, ?LINE]) end, %%% DELME!!!
             react_to_env_C110(P_latest, S);
         %% 20150715: I've seen this loop happen with {expected_author2,X}
         %% where nobody agrees, weird.
-        false when is_record(Flap_latest, flap_i) andalso
-                   Flap_latest#flap_i.flapping_me == true ->
+        _ ->
             ?REACT({c100, ?LINE}),
-            ?V("\n\n1YOYO ~w breaking the cycle of ~p\n", [MyName, machi_projection:make_summary(P_latest)]),
             %% This is a fun case.  We had just enough asymmetric partition
             %% to cause the chain to fragment into two *incompatible* and
             %% *overlapping membership* chains, but the chain fragmentation
@@ -1435,62 +1471,30 @@ react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
             %%
             %% So, we're going to keep track in #ch_mgr state for the number
             %% of times that this insane judgement has happened.
-
+            %%
+            %% See also: comment in do_react_to_env() about
+            %% non-flapping-scenario that can also cause us to want to
+            %% collapse to the none_projection to break a
+            %% livelock/infinite loop.
             react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
-                                    P_newprop, P_latest, S);
-        {expected_author2,_}=_ExpectedErr when
-                   is_record(Flap_latest, flap_i) andalso
-                   Flap_latest#flap_i.flapping_me == true ->
-            ?REACT({c100, ?LINE}),
-            react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
-                                    P_newprop, P_latest, S);
-        {expected_author2,_ExpectedAuthor2}=_ExpectedErr ->
-            case get(perhaps_reset_loop) of
-                undefined ->
-                    put(perhaps_reset_loop, 1),
-                    ?REACT({c100, ?LINE, [not_sane, get(why2), _ExpectedErr]}),
-                    react_to_env_C300(P_newprop, P_latest, S);
-                X when X > ?TOO_FREQUENT_BREAKER ->
-                    %% Ha, yes, this is possible.  For example:
-                    %% outer: author=e,upi=[b,a,d],repair=[c,e]
-                    %% inner: author=e,upi=[b,e],  repair=[]
-                    %% In this case, the transition from inner to outer by A30
-                    %% has chosen the wrong author.  We have two choices.
-                    %% 1. Accept this transition, because it really was the
-                    %%    safe & transition-approved UPI+repeairing that we
-                    %%    were using while we were flapping.  I'm 99% certain
-                    %%    that this is safe.  TODO: Verify
-                    %% 2. I'm not yet 100% certain that #1 is safe, so instead
-                    %%    we fall back to the one thing that we know is safe:
-                    %%    the 'none' projection, which lets the chain rebuild
-                    %%    itself normally during future iterations.
-                    ?REACT({c100, ?LINE}),
-                    react_to_env_C103(P_latest, S);
-                X ->
-                    put(perhaps_reset_loop, X+1),
-                    ?REACT({c100, ?LINE, [not_sane, get(why2), _ExpectedErr]}),
-                    react_to_env_C300(P_newprop, P_latest, S)
-            end;
-        _AnyOtherReturnValue ->
-            %% P_latest is not sane.
-            %% By process of elimination, P_newprop is best,
-            %% so let's write it.
-            ?REACT({c100, ?LINE, [not_sane, get(why2), _AnyOtherReturnValue]}),
-            erase(perhaps_reset_loop),
-            react_to_env_C300(P_newprop, P_latest, S)
+                                    P_newprop, P_latest, S)
     end.
 
 react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
                         P_newprop, P_latest, S) ->
     NotSanesDict = orddict:update_counter(Author_latest, 1, NotSanesDict0),
-    S2 = S#ch_mgr{flap_not_sanes=NotSanesDict},
+    S2 = S#ch_mgr{not_sanes=NotSanesDict},
     case orddict:fetch(Author_latest, NotSanesDict) of
         N when N > ?TOO_FREQUENT_BREAKER ->
             ?V("\n\nYOYO ~w breaking the cycle of ~p\n", [MyName, machi_projection:make_summary(P_latest)]),
             ?REACT({c100, ?LINE, [{not_sanes_author_count, N}]}),
             react_to_env_C103(P_latest, S2);
         N ->
+           ?V("YOYO,~w,~w,~w,",[MyName, P_latest#projection_v1.epoch_number,N]),
             ?REACT({c100, ?LINE, [{not_sanes_author_count, N}]}),
+            %% P_latest is not sane.
+            %% By process of elimination, P_newprop is best,
+            %% so let's write it.
             react_to_env_C300(P_newprop, P_latest, S2)
     end.
 
@@ -1507,8 +1511,7 @@ react_to_env_C103(#projection_v1{epoch_number=Epoch_latest,
     P_none = machi_projection:update_checksum(P_none1),
     %% Use it, darn it, because it's 100% safe.  And exit flapping state.
     react_to_env_C100(P_none, P_none, S#ch_mgr{flaps=0,
-                                               flap_start=?NOT_FLAPPING_START,
-                                               flap_not_sanes=orddict:new()}).
+                                               flap_start=?NOT_FLAPPING_START}).
 
 react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     ?REACT(c110),
@@ -1632,8 +1635,7 @@ react_to_env_C310(P_newprop, S) ->
 
 calculate_flaps(P_newprop, _P_current, _FlapLimit,
                 #ch_mgr{name=MyName, proj_history=H, flap_start=FlapStart,
-                        flaps=Flaps, flap_not_sanes=NotSanesDict0,
-                        runenv=RunEnv1}=S) ->
+                        flaps=Flaps, runenv=RunEnv1}=S) ->
     HistoryPs = queue:to_list(H),
     Ps = HistoryPs ++ [P_newprop],
     UniqueProposalSummaries = lists:usort([{P#projection_v1.upi,
@@ -1695,7 +1697,6 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
                true ->
                     NewFlapStart = FlapStart
             end,
-            NotSanesDict = NotSanesDict0,
 
             %% Wow, this behavior is almost spooky.
             %%
@@ -1725,7 +1726,6 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
         {_N, _} ->
             NewFlaps = 0,
             NewFlapStart = ?NOT_FLAPPING_START,
-            NotSanesDict = orddict:new(),
             AllFlapCounts = [],
             AllHosed = []
     end,
@@ -1748,8 +1748,7 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
     %% It isn't doing what I'd originally intended.  Fix it.
     {machi_projection:update_checksum(P_newprop#projection_v1{
                                                          flap=FlappingI}),
-     S#ch_mgr{flaps=NewFlaps, flap_start=NewFlapStart,
-              flap_not_sanes=NotSanesDict, runenv=RunEnv1}}.
+     S#ch_mgr{flaps=NewFlaps, flap_start=NewFlapStart, runenv=RunEnv1}}.
 
 make_flapping_i() ->
     make_flapping_i({{epk,-1},?NOT_FLAPPING}, 0, [], [], []).
