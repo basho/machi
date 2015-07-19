@@ -567,6 +567,7 @@ calc_projection(#ch_mgr{proj=LastProj, runenv=RunEnv} = S,
 calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                 RelativeToServer, AllHosed, Dbg,
                 #ch_mgr{name=MyName,
+                        proj=CurrentProj,
                         runenv=RunEnv1,
                         repair_final_status=RepairFS}=S) ->
     #projection_v1{epoch_number=OldEpochNum,
@@ -584,6 +585,11 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
     Down = AllMembers -- Up,
 
     NewUPI_list = [X || X <- OldUPI_list, lists:member(X, Up)],
+    #projection_v1{upi=CurrentUPI_list} = CurrentProj,
+    LastInCurrentUPI = case CurrentUPI_list of
+                           []    -> does_not_exist_because_upi_is_empty;
+                           [_|_] -> lists:last(CurrentUPI_list)
+                       end,
     LastInNewUPI = case NewUPI_list of
                        []    -> does_not_exist_because_upi_is_empty;
                        [_|_] -> lists:last(NewUPI_list)
@@ -606,7 +612,8 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                 SameEpoch_p = check_latest_private_projections_same_epoch(
                                 NewUPI_list ++ Repairing_list2,
                                 S#ch_mgr.proj, Partitions, S),
-                if Simulator_p andalso SameEpoch_p ->
+                if Simulator_p andalso SameEpoch_p
+                   andalso RelativeToServer == LastInCurrentUPI ->
                         D_foo=[{repair_airquote_done, {we_agree, (S#ch_mgr.proj)#projection_v1.epoch_number}}],
                         {NewUPI_list ++ [H], T, RunEnv2};
                    not Simulator_p
