@@ -69,6 +69,7 @@
           flap_start = ?NOT_FLAPPING_START
                           :: {{'epk', integer()}, erlang:timestamp()},
           not_sanes       :: orddict:orddict(),
+          sane_transitions = 0 :: non_neg_integer(),
           repair_worker   :: 'undefined' | pid(),
           repair_start    :: 'undefined' | erlang:timestamp(),
           repair_final_status :: 'undefined' | term(),
@@ -845,13 +846,23 @@ do_react_to_env(S) ->
     %% attempts counter very generic (i.e., not specific for flapping
     %% as it once was).
     %%
-    %% The not_sanes counter dict should be reset each time we start
-    %% an iteration.  One could argue that state only for a single
-    %% iteration shouldn't go in #ch_mgr but should be a separate arg
-    %% threaded through each of the FSM funcs.
-    %% TODO possible refactoring task?
+    %% The not_sanes counter dict should be reset when we have had at
+    %% least 3 state transitions that did not have a not_sane
+    %% suggested projection transition or whenever we fall back to the
+    %% none_projection.
+    %%
+    %% We'll probably implement a very simple counter that may/will be
+    %% *inaccurate* by at most one -- so any reset test should ignore
+    %% counter values of 0 & 1.
+    %%
     put(react, []),
-    react_to_env_A10(S#ch_mgr{not_sanes=orddict:new()}).
+    if S#ch_mgr.sane_transitions > 3 ->         % TODO review this constant
+            %% ?V("Skr,~w,", [S#ch_mgr.name]),
+            react_to_env_A10(S#ch_mgr{not_sanes=orddict:new()});
+       true ->
+            %% ?V("Sk,~w,~w,", [S#ch_mgr.name, S#ch_mgr.sane_transitions]),
+            react_to_env_A10(S)
+    end.
 
 react_to_env_A10(S) ->
     ?REACT(a10),
@@ -1435,8 +1446,8 @@ react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
             react_to_env_C110(P_latest, S);
         %% 20150715: I've seen this loop happen with {expected_author2,X}
         %% where nobody agrees, weird.
-        _ ->
-            ?REACT({c100, ?LINE}),
+        DoctorSays ->
+            ?REACT({c100, ?LINE, [{not_sane, DoctorSays}]}),
             %% This is a fun case.  We had just enough asymmetric partition
             %% to cause the chain to fragment into two *incompatible* and
             %% *overlapping membership* chains, but the chain fragmentation
@@ -1490,7 +1501,7 @@ react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
 react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
                         P_newprop, P_latest, S) ->
     NotSanesDict = orddict:update_counter(Author_latest, 1, NotSanesDict0),
-    S2 = S#ch_mgr{not_sanes=NotSanesDict},
+    S2 = S#ch_mgr{not_sanes=NotSanesDict, sane_transitions=0},
     case orddict:fetch(Author_latest, NotSanesDict) of
         N when N > ?TOO_FREQUENT_BREAKER ->
             ?V("\n\nYOYO ~w breaking the cycle of ~p\n", [MyName, machi_projection:make_summary(P_latest)]),
@@ -1506,9 +1517,9 @@ react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
     end.
 
 react_to_env_C103(#projection_v1{epoch_number=Epoch_latest,
-                                   all_members=All_list,
-                                   members_dict=MembersDict} = P_latest,
-                  #ch_mgr{name=MyName}=S) ->
+                                 all_members=All_list,
+                                 members_dict=MembersDict} = P_latest,
+                  #ch_mgr{name=MyName, proj=P_current}=S) ->
     #projection_v1{epoch_number=Epoch_latest,
                    all_members=All_list,
                    members_dict=MembersDict} = P_latest,
@@ -1517,8 +1528,16 @@ react_to_env_C103(#projection_v1{epoch_number=Epoch_latest,
                                     dbg=[{none_projection,true}]},
     P_none = machi_projection:update_checksum(P_none1),
     %% Use it, darn it, because it's 100% safe.  And exit flapping state.
+    ?REACT({c103, ?LINE,
+            [{current_epoch, P_current#projection_v1.epoch_number},
+             {none_projection_epoch, Epoch_latest}]}),
+    %% Reset the not_sanes count dictionary here, or else an already
+    %% ?TOO_FREQUENT_BREAKER count for an author might prevent a
+    %% transition from C100_inner()->C300, which can lead to infinite
+    %% looping C100->C103->C100.
     react_to_env_C100(P_none, P_none, S#ch_mgr{flaps=0,
-                                               flap_start=?NOT_FLAPPING_START}).
+                                               flap_start=?NOT_FLAPPING_START,
+                                               not_sanes=orddict:new()}).
 
 react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     ?REACT(c110),
@@ -1578,7 +1597,8 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     end,
     react_to_env_C120(P_latest, [], S).
 
-react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H}=S) ->
+react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H,
+                                                sane_transitions=Xtns}=S) ->
     ?REACT(c120),
     H2 = queue:in(P_latest, H),
     H3 = case queue:len(H2) of
@@ -1597,7 +1617,7 @@ react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H}=S) ->
 
     ?REACT({c120, [{latest, machi_projection:make_summary(P_latest)}]}),
     {{now_using, FinalProps, P_latest#projection_v1.epoch_number},
-     S#ch_mgr{proj=P_latest, proj_history=H3}}.
+     S#ch_mgr{proj=P_latest, proj_history=H3, sane_transitions=Xtns + 1}}.
 
 react_to_env_C200(Retries, P_latest, S) ->
     ?REACT(c200),
