@@ -1042,7 +1042,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                 ?REACT({a30, ?LINE, [{inner_summary,
                                     machi_projection:make_summary(P_inner2)}]}),
                 %% Adjust the outer projection's #flap_i info.
-                ?V("~w,", [{'FLAP',MyName,NewEpoch}]),
+                %% ?V("~w,", [{'FLAP',MyName,NewEpoch}]),
                 #projection_v1{flap=OldFlap} = P_newprop3,
                 NewFlap = OldFlap#flap_i{flapping_me=true},
                 ?REACT({a30, ?LINE, [flap_continue,
@@ -1572,22 +1572,28 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
             P_latest2x = P_latest2#projection_v1{dbg2=[]}, % limit verbose len.
             case inner_projection_exists(P_latest2) of
                 false ->
-                    case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
-                        true ->
+                    Last2 = get(last_verbose),
+                    Summ2 = machi_projection:make_summary(P_latest2x),
+                    case proplists:get_value(private_write_verbose,
+                                             S#ch_mgr.opts) of
+                        true when Summ2 /= Last2 ->
+                            put(last_verbose, Summ2),
                             ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses plain: ~w\n",
-                              [HH,MM,SS,MSec, S#ch_mgr.name,
-                               machi_projection:make_summary(P_latest2x)]);
+                              [HH,MM,SS,MSec, S#ch_mgr.name, Summ2]);
                         _ ->
                             ok
                     end;
                 true ->
-                    case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
-                        true ->
-                            P_inner = inner_projection_or_self(P_latest2),
-                            P_innerx = P_inner#projection_v1{dbg2=[]}, % limit verbose len.
+                    Last2 = get(last_verbose),
+                    P_inner = inner_projection_or_self(P_latest2),
+                    P_innerx = P_inner#projection_v1{dbg2=[]}, % limit verbose len.
+                    Summ2 = machi_projection:make_summary(P_innerx),
+                    case proplists:get_value(private_write_verbose,
+                                             S#ch_mgr.opts) of
+                        true when Summ2 /= Last2 ->
+                            put(last_verbose, Summ2),
                             ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w\n",
-                              [HH,MM,SS,MSec, S#ch_mgr.name,
-                               machi_projection:make_summary(P_innerx)]);
+                              [HH,MM,SS,MSec, S#ch_mgr.name, Summ2]);
                         _ ->
                             ok
                     end
