@@ -214,6 +214,7 @@ init({MyName, InitMembersDict, MgrOpts}) ->
     Opt = fun(Key, Default) -> proplists:get_value(Key, MgrOpts, Default) end,
     RunEnv = [{seed, Opt(seed, now())},
               {use_partition_simulator, Opt(use_partition_simulator, false)},
+              {simulate_repair, Opt(simulate_repair, true)},
               {network_partitions, Opt(network_partitions, [])},
               {network_islands, Opt(network_islands, [])},
               {up_nodes, Opt(up_nodes, not_init_yet)}],
@@ -597,6 +598,7 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                    end,
     Repairing_list2 = [X || X <- OldRepairing_list, lists:member(X, Up)],
     Simulator_p = proplists:get_value(use_partition_simulator, RunEnv2, false),
+    SimRepair_p = proplists:get_value(simulate_repair, RunEnv2, true),
     {NewUPI_list3, Repairing_list3, RunEnv3} =
         case {NewUp, Repairing_list2} of
             {[], []} ->
@@ -613,11 +615,11 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                 SameEpoch_p = check_latest_private_projections_same_epoch(
                                 NewUPI_list ++ Repairing_list2,
                                 S#ch_mgr.proj, Partitions, S),
-                if Simulator_p andalso SameEpoch_p
-                   andalso RelativeToServer == LastInCurrentUPI ->
+                if Simulator_p andalso SimRepair_p andalso
+                   SameEpoch_p andalso RelativeToServer == LastInCurrentUPI ->
                         D_foo=[{repair_airquote_done, {we_agree, (S#ch_mgr.proj)#projection_v1.epoch_number}}],
                         {NewUPI_list ++ [H], T, RunEnv2};
-                   not Simulator_p
+                   not (Simulator_p andalso SimRepair_p)
                    andalso
                    RepairFS == {repair_final_status, ok} ->
                         D_foo=[{repair_done, {repair_final_status, ok, (S#ch_mgr.proj)#projection_v1.epoch_number}}],
@@ -1338,7 +1340,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                                  {flap_limit, FlapLimit}]}),
             case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
                 true ->
-                    ?V("{FLAP: ~w flaps ~w}!  ", [S#ch_mgr.name, P_newprop_flap_count]);
+                    ok; %% ?V("{FLAP: ~w flaps ~w}!  ", [S#ch_mgr.name, P_newprop_flap_count]);
                 _ ->
                     ok
             end,
@@ -2102,66 +2104,85 @@ gobble_calls(StaticCall) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-perhaps_start_repair(
-  #ch_mgr{name=MyName,
-          repair_worker=undefined,
-          proj=#projection_v1{creation_time=Start,
-                              upi=[_|_]=UPI,
-                              repairing=[_|_]}}=S) ->
-    RepairId = {MyName, os:timestamp()},
-    RepairOpts = [{repair_mode, repair}, verbose, {repair_id, RepairId}],
-    %% RepairOpts = [{repair_mode, check}, verbose],
-    RepairFun = fun() -> do_repair(S, RepairOpts, ap_mode) end,
-    LastUPI = lists:last(UPI),
-    IgnoreStabilityTime_p = proplists:get_value(ignore_stability_time,
-                                                S#ch_mgr.opts, false),
-    case timer:now_diff(os:timestamp(), Start) div 1000000 of
-        N when MyName == LastUPI andalso
-               (IgnoreStabilityTime_p orelse
-                N >= ?REPAIR_START_STABILITY_TIME) ->
-            {WorkerPid, _Ref} = spawn_monitor(RepairFun),
-            S#ch_mgr{repair_worker=WorkerPid,
-                     repair_start=os:timestamp(),
-                     repair_final_status=undefined};
+perhaps_start_repair(#ch_mgr{name=MyName,
+                             repair_worker=undefined,
+                             proj=P_current}=S) ->
+    case inner_projection_or_self(P_current) of
+        #projection_v1{creation_time=Start,
+                       upi=[_|_]=UPI,
+                       repairing=[_|_]} ->
+            RepairId = {MyName, os:timestamp()},
+            RepairOpts = [{repair_mode,repair}, verbose, {repair_id,RepairId}],
+            %% RepairOpts = [{repair_mode, check}, verbose],
+            RepairFun = fun() -> do_repair(S, RepairOpts, ap_mode) end,
+            LastUPI = lists:last(UPI),
+            IgnoreStabilityTime_p = proplists:get_value(ignore_stability_time,
+                                                        S#ch_mgr.opts, false),
+            case timer:now_diff(os:timestamp(), Start) div 1000000 of
+                N when MyName == LastUPI andalso
+                       (IgnoreStabilityTime_p orelse
+                        N >= ?REPAIR_START_STABILITY_TIME) ->
+                    {WorkerPid, _Ref} = spawn_monitor(RepairFun),
+                    S#ch_mgr{repair_worker=WorkerPid,
+                             repair_start=os:timestamp(),
+                             repair_final_status=undefined};
+                _ ->
+                    S
+            end;
         _ ->
             S
     end;
 perhaps_start_repair(S) ->
     S.
 
-do_repair(
-  #ch_mgr{name=MyName,
-          proj=#projection_v1{upi=UPI,
-                              repairing=[_|_]=Repairing,
-                              members_dict=MembersDict}}=_S_copy,
-  Opts, ap_mode=RepairMode) ->
-?V("RePaiR-~w,", [self()]),
-    T1 = os:timestamp(),
-    RepairId = proplists:get_value(repair_id, Opts, id1),
-    error_logger:info_msg("Repair start: tail ~p of ~p -> ~p, ~p ID ~w\n",
-                          [MyName, UPI, Repairing, RepairMode, RepairId]),
-
+do_repair(#ch_mgr{name=MyName,
+                  proj=#projection_v1{upi=UPI,
+                                      repairing=[_|_]=Repairing,
+                                      members_dict=MembersDict}}=S,
+          Opts, ap_mode=RepairMode) ->
     ETS = ets:new(repair_stats, [private, set]),
     ETS_T_Keys = [t_in_files, t_in_chunks, t_in_bytes,
                   t_out_files, t_out_chunks, t_out_bytes,
                   t_bad_chunks, t_elapsed_seconds],
     [ets:insert(ETS, {K, 0}) || K <- ETS_T_Keys],
 
-    Res = machi_chain_repair:repair(ap_mode, MyName, Repairing, UPI,
-                                    MembersDict, ETS, Opts),
-    T2 = os:timestamp(),
-    Elapsed = (timer:now_diff(T2, T1) div 1000) / 1000,
-    ets:insert(ETS, {t_elapsed_seconds, Elapsed}),
-    Summary = case Res of ok -> "success";
+    {ok, MyProj} = ?FLU_PC:read_latest_projection(proxy_pid(MyName, S),
+                                                  private),
+    MyEpochID = machi_projection:get_epoch_id(MyProj),
+    RepairEpochIDs = [case ?FLU_PC:read_latest_projection(proxy_pid(Rep, S),
+                                                          private) of
+                          {ok, Proj} ->
+                              machi_projection:get_epoch_id(Proj);
+                          _ ->
+                              unknown
+                      end || Rep <- Repairing],
+    case lists:usort(RepairEpochIDs) of
+        [MyEpochID] ->
+            T1 = os:timestamp(),
+            RepairId = proplists:get_value(repair_id, Opts, id1),
+            error_logger:info_msg(
+              "Repair start: tail ~p of ~p -> ~p, ~p ID ~w\n",
+              [MyName, UPI, Repairing, RepairMode, RepairId]),
+
+            Res = machi_chain_repair:repair(ap_mode, MyName, Repairing, UPI,
+                                            MembersDict, ETS, Opts),
+            T2 = os:timestamp(),
+            Elapsed = (timer:now_diff(T2, T1) div 1000) / 1000,
+            ets:insert(ETS, {t_elapsed_seconds, Elapsed}),
+            Summary = case Res of ok -> "success";
                           _  -> "FAILURE"
-              end,
-    Stats = [{K, ets:lookup_element(ETS, K, 2)} || K <- ETS_T_Keys],
-    error_logger:info_msg("Repair ~s: tail ~p of ~p finished ~p repair ID ~w: "
-                          "~p\nStats ~p\n",
-                          [Summary, MyName, UPI, RepairMode, RepairId,
-                           Res, Stats]),
-    ets:delete(ETS),
-    exit({repair_final_status, Res}).
+                      end,
+            Stats = [{K, ets:lookup_element(ETS, K, 2)} || K <- ETS_T_Keys],
+            error_logger:info_msg(
+              "Repair ~s: tail ~p of ~p finished ~p repair ID ~w: "
+              "~p\nStats ~p\n",
+              [Summary, MyName, UPI, RepairMode, RepairId,
+               Res, Stats]),
+            ets:delete(ETS),
+            exit({repair_final_status, Res});
+        _ ->
+            exit(not_all_in_same_epoch)
+    end.
 
 sanitize_repair_state(#ch_mgr{repair_final_status=Res,
                               proj=#projection_v1{upi=[_|_]}}=S)

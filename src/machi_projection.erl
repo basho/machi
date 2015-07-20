@@ -29,6 +29,7 @@
          update_checksum/1,
          update_dbg2/2,
          compare/2,
+         get_epoch_id/1,
          make_summary/1,
          make_members_dict/1
         ]).
@@ -137,6 +138,11 @@ compare(#projection_v1{epoch_number=E1},
     if E1 =< E2 -> -1;
        E1 >  E2 ->  1
     end.
+
+%% @doc Return the epoch_id of the projection.
+
+get_epoch_id(#projection_v1{epoch_number=Epoch, epoch_csum=CSum}) ->
+    {Epoch, CSum}.
 
 %% @doc Create a proplist-style summary of a projection record.
 
