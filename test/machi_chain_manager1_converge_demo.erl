@@ -129,6 +129,8 @@ long_doc() ->
     n of a naive/1st draft detection algorithm.
 ".
 
+%% ' silly Emacs syntax highlighting....
+
 %% convergence_demo_test_() ->
 %%     {timeout, 98*300, fun() -> convergence_demo_testfun() end}.
 
@@ -157,7 +159,9 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
     ok = filelib:ensure_dir("/tmp/c/not-used"),
     FluInfo = [{a,TcpPort+0,"/tmp/c/data.a"}, {b,TcpPort+1,"/tmp/c/data.b"},
                {c,TcpPort+2,"/tmp/c/data.c"}, {d,TcpPort+3,"/tmp/c/data.d"},
-               {e,TcpPort+4,"/tmp/c/data.e"}, {f,TcpPort+5,"/tmp/c/data.f"}],
+               {e,TcpPort+4,"/tmp/c/data.e"}, {f,TcpPort+5,"/tmp/c/data.f"},
+               {g,TcpPort+6,"/tmp/c/data.g"}, {h,TcpPort+7,"/tmp/c/data.h"},
+               {i,TcpPort+8,"/tmp/c/data.i"}, {j,TcpPort+9,"/tmp/c/data.j"}],
     FLU_biglist = [X || {X,_,_} <- FluInfo],
     All_list = lists:sublist(FLU_biglist, NumFLUs),
     io:format(user, "\nSET # of FLUs = ~w members ~w).\n",
@@ -444,19 +448,16 @@ private_projections_are_stable(Namez, PollFunc) ->
     Private1 = [get_latest_inner_proj_summ(FLU) || {_Name, FLU} <- Namez],
     PollFunc(5, 1, 10),
     Private2 = [get_latest_inner_proj_summ(FLU) || {_Name, FLU} <- Namez],
-    if Private1 == Private2 ->
-            ok;
-       true ->
-            io:format(user, "Private1: ~p, ", [Private1]),
-            io:format(user, "Private2: ~p, ", [Private2])
-    end,
-    Private1 == Private2.
+    Is = [Inner_p || {_,_,_,_,Inner_p} <- Private1],
+    %% We want either all true or all false (inner or not).
+    Private1 == Private2 andalso length(lists:usort(Is)) == 1.
 
 get_latest_inner_proj_summ(FLU) ->
     {ok, Proj} = ?FLU_PC:read_latest_projection(FLU, private),
     #projection_v1{epoch_number=E, upi=UPI, repairing=Repairing, down=Down} =
         machi_chain_manager1:inner_projection_or_self(Proj),
-    {E, UPI, Repairing, Down}.
+    Inner_p = machi_chain_manager1:inner_projection_exists(Proj),
+    {E, UPI, Repairing, Down, Inner_p}.
 
 random_sort(L) ->
     random:seed(now()),
