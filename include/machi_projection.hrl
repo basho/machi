@@ -54,6 +54,7 @@
           epoch_csum      :: pv1_csum(),
           author_server   :: pv1_server(),
           all_members     :: [pv1_server()],
+          witnesses = []  :: [pv1_server()],
           creation_time   :: pv1_timestamp(),
           mode = ap_mode  :: pv1_consistency_mode(),
           upi             :: [pv1_server()],

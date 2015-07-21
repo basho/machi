@@ -100,7 +100,7 @@
 
 %% API
 -export([start_link/2, start_link/3, stop/1, ping/1,
-         set_chain_members/2, set_active/2,
+         set_chain_members/2, set_chain_members/3, set_active/2,
          trigger_react_to_env/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
@@ -154,7 +154,17 @@ ping(Pid) ->
 %% with lowest rank, i.e. name z* first, name a* last.
 
 set_chain_members(Pid, MembersDict) ->
-    gen_server:call(Pid, {set_chain_members, MembersDict}, infinity).
+    set_chain_members(Pid, MembersDict, []).
+
+set_chain_members(Pid, MembersDict, Witness_list) ->
+    case lists:all(fun(Witness) -> orddict:is_key(Witness, MembersDict) end,
+                   Witness_list) of
+        true ->
+            Cmd = {set_chain_members, MembersDict, Witness_list},
+            gen_server:call(Pid, Cmd, infinity);
+        false ->
+            {error, bad_arg}
+    end.
 
 set_active(Pid, Boolean) when Boolean == true; Boolean == false ->
     gen_server:call(Pid, {set_active, Boolean}, infinity).
@@ -241,7 +251,7 @@ init({MyName, InitMembersDict, MgrOpts}) ->
 
 handle_call({ping}, _From, S) ->
     {reply, pong, S};
-handle_call({set_chain_members, MembersDict}, _From,
+handle_call({set_chain_members, MembersDict, Witness_list}, _From,
             #ch_mgr{name=MyName,
                     proj=#projection_v1{all_members=OldAll_list,
                                         epoch_number=OldEpoch,
@@ -261,14 +271,15 @@ handle_call({set_chain_members, MembersDict}, _From,
                                       creation_time=now(),
                                       epoch_number=NewEpoch,
                                       all_members=All_list,
+                                      witnesses=Witness_list,
                                       upi=NewUPI,
                                       repairing=[],
                                       down=NewDown,
                                       members_dict=MembersDict}),
     %% Reset all flapping state.
     NewProj2 = NewProj#projection_v1{flap=make_flapping_i()},
-    S3 = S2#ch_mgr{proj=NewProj2,
-                   proj_history=queue:new()},
+    S3 = clear_flapping_state(S2#ch_mgr{proj=NewProj2,
+                                        proj_history=queue:new()}),
     {_QQ, S4} = do_react_to_env(S3),
     {reply, Reply, S4};
 handle_call({set_active, Boolean}, _From, #ch_mgr{timer=TRef}=S) ->
@@ -314,6 +325,7 @@ handle_info(tick_check_environment, #ch_mgr{ignore_timer=true}=S) ->
     {noreply, S};
 handle_info(tick_check_environment, S) ->
     {{_Delta, Props, _Epoch}, S1} = do_react_to_env(S),
+io:format(user, "tick ~p ~p ~p\n~p\n", [S#ch_mgr.name, _Delta, _Epoch, get(react)]),
     S2 = sanitize_repair_state(S1),
     S3 = perhaps_start_repair(S2),
     case proplists:get_value(throttle_seconds, Props) of
@@ -1537,9 +1549,7 @@ react_to_env_C103(#projection_v1{epoch_number=Epoch_latest,
     %% ?TOO_FREQUENT_BREAKER count for an author might prevent a
     %% transition from C100_inner()->C300, which can lead to infinite
     %% looping C100->C103->C100.
-    react_to_env_C100(P_none, P_none, S#ch_mgr{flaps=0,
-                                               flap_start=?NOT_FLAPPING_START,
-                                               not_sanes=orddict:new()}).
+    react_to_env_C100(P_none, P_none, clear_flapping_state(S)).
 
 react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     ?REACT(c110),
@@ -2401,3 +2411,8 @@ all_hosed_history(#projection_v1{epoch_number=_Epoch, flap=Flap},
        true ->
             {AllHosed, [AllHosed|Acc]}
     end.
+
+clear_flapping_state(S) ->
+    S#ch_mgr{flaps=0,
+             flap_start=?NOT_FLAPPING_START,
+             not_sanes=orddict:new()}.
