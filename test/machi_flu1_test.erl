@@ -42,16 +42,15 @@ clean_up_data_dir(DataDir) ->
 setup_test_flu(RegName, TcpPort, DataDir) ->
     setup_test_flu(RegName, TcpPort, DataDir, []).
 
-setup_test_flu(RegName, TcpPort, DataDir, DbgProps) ->
-    case proplists:get_value(save_data_dir, DbgProps) of
+setup_test_flu(RegName, TcpPort, DataDir, Props) ->
+    case proplists:get_value(save_data_dir, Props) of
         true ->
             ok;
         _ ->
             clean_up_data_dir(DataDir)
     end,
 
-    {ok, FLU1} = ?FLU:start_link([{RegName, TcpPort, DataDir},
-                                  {dbg, DbgProps}]),
+    {ok, FLU1} = ?FLU:start_link([{RegName, TcpPort, DataDir}|Props]),
     %% TODO the process structuring/racy-ness of the various processes
     %% of the FLU needs to be deterministic to remove this sleep race
     %% "prevention".
@@ -169,27 +168,32 @@ flu_projection_smoke_test() ->
 
     FLU1 = setup_test_flu(projection_test_flu, TcpPort, DataDir),
     try
-        [begin
-             {ok, {0,_}} = ?FLU_C:get_latest_epochid(Host, TcpPort, T),
-             {error, not_written} =
-                 ?FLU_C:read_latest_projection(Host, TcpPort, T),
-             {ok, []} = ?FLU_C:list_all_projections(Host, TcpPort, T),
-             {ok, []} = ?FLU_C:get_all_projections(Host, TcpPort, T),
-
-             P_a = #p_srvr{name=a, address="localhost", port=4321},
-             P1 = machi_projection:new(1, a, [P_a], [], [a], [], []),
-             ok = ?FLU_C:write_projection(Host, TcpPort, T, P1),
-             {error, written} = ?FLU_C:write_projection(Host, TcpPort, T, P1),
-             {ok, P1} = ?FLU_C:read_projection(Host, TcpPort, T, 1),
-             {ok, {1,_}} = ?FLU_C:get_latest_epochid(Host, TcpPort, T),
-             {ok, P1} = ?FLU_C:read_latest_projection(Host, TcpPort, T),
-             {ok, [1]} = ?FLU_C:list_all_projections(Host, TcpPort, T),
-             {ok, [P1]} = ?FLU_C:get_all_projections(Host, TcpPort, T),
-             {error, not_written} = ?FLU_C:read_projection(Host, TcpPort, T, 2)
-         end || T <- [public, private] ]
+        [ok = flu_projection_common(Host, TcpPort, T) ||
+            T <- [public, private] ]
+%% ,        {ok, {false, EpochID1}} = ?FLU_C:wedge_status(Host, TcpPort),
+%% io:format(user, "EpochID1 ~p\n", [EpochID1])
     after
         ok = ?FLU:stop(FLU1)
     end.
+
+flu_projection_common(Host, TcpPort, T) ->
+    {ok, {0,_}} = ?FLU_C:get_latest_epochid(Host, TcpPort, T),
+    {error, not_written} =
+        ?FLU_C:read_latest_projection(Host, TcpPort, T),
+    {ok, []} = ?FLU_C:list_all_projections(Host, TcpPort, T),
+    {ok, []} = ?FLU_C:get_all_projections(Host, TcpPort, T),
+
+    P_a = #p_srvr{name=a, address="localhost", port=4321},
+    P1 = machi_projection:new(1, a, [P_a], [], [a], [], []),
+    ok = ?FLU_C:write_projection(Host, TcpPort, T, P1),
+    {error, written} = ?FLU_C:write_projection(Host, TcpPort, T, P1),
+    {ok, P1} = ?FLU_C:read_projection(Host, TcpPort, T, 1),
+    {ok, {1,_}} = ?FLU_C:get_latest_epochid(Host, TcpPort, T),
+    {ok, P1} = ?FLU_C:read_latest_projection(Host, TcpPort, T),
+    {ok, [1]} = ?FLU_C:list_all_projections(Host, TcpPort, T),
+    {ok, [P1]} = ?FLU_C:get_all_projections(Host, TcpPort, T),
+    {error, not_written} = ?FLU_C:read_projection(Host, TcpPort, T, 2),
+    ok.
 
 bad_checksum_test() ->
     Host = "localhost",
@@ -205,10 +209,47 @@ bad_checksum_test() ->
         {error, bad_checksum} = ?FLU_C:append_chunk(Host, TcpPort,
                                                     ?DUMMY_PV1_EPOCH,
                                                     Prefix, Chunk1_badcs),
-        {error, bad_checksum} = ?FLU_C:write_chunk(Host, TcpPort,
-                                                   ?DUMMY_PV1_EPOCH,
-                                                   <<"foo-file">>, 99832,
-                                                   Chunk1_badcs),
+        ok
+    after
+        ok = ?FLU:stop(FLU1)
+    end.
+
+witness_test() ->
+    Host = "localhost",
+    TcpPort = 32961,
+    DataDir = "./data",
+
+    Opts = [{initial_wedged, false}, {witness_mode, true}],
+    FLU1 = setup_test_flu(projection_test_flu, TcpPort, DataDir, Opts),
+    try
+        Prefix = <<"some prefix">>,
+        Chunk1 = <<"yo yo yo">>,
+
+        %% All of the projection commands are ok.
+        [ok = flu_projection_common(Host, TcpPort, T) ||
+            T <- [public, private] ],
+
+        %% Projection has moved beyond initial 0, so get the current EpochID
+        {ok, EpochID1} = ?FLU_C:get_latest_epochid(Host, TcpPort, private),
+
+        %% Witness-protected ops all fail
+        {error, bad_arg} = ?FLU_C:append_chunk(Host, TcpPort, EpochID1,
+                                               Prefix, Chunk1),
+        File = <<"foofile">>,
+        {error, bad_arg} = ?FLU_C:read_chunk(Host, TcpPort, EpochID1,
+                                             File, 9999, 9999),
+        {error, bad_arg} = ?FLU_C:checksum_list(Host, TcpPort, EpochID1,
+                                                File),
+        {error, bad_arg} = ?FLU_C:list_files(Host, TcpPort, EpochID1),
+        {ok, {false, EpochID1}} = ?FLU_C:wedge_status(Host, TcpPort),
+        {ok, _} = ?FLU_C:get_latest_epochid(Host, TcpPort, public),
+        {ok, _} = ?FLU_C:read_latest_projection(Host, TcpPort, public),
+        {error, not_written} = ?FLU_C:read_projection(Host, TcpPort,
+                                                      public, 99999),
+        %% write_projection already tested by flu_projection_common
+        {ok, _} = ?FLU_C:get_all_projections(Host, TcpPort, public),
+        {ok, _} = ?FLU_C:list_all_projections(Host, TcpPort, public),
+
         ok
     after
         ok = ?FLU:stop(FLU1)
