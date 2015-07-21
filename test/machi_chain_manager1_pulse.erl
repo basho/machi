@@ -172,6 +172,7 @@ all_list() ->
 
 setup(Num, Seed) ->
     ?V("\nsetup(~w,~w", [Num, Seed]),
+    [catch erlang:garbage_collect(P) || P <- processes()],
     All_list = lists:sublist(all_list(), Num),
     All_listE = lists:sublist(all_list_extra(), Num),
     %% shutdown_hard() has taken care of killing all relevant procs.
@@ -322,7 +323,7 @@ prop_pulse() ->
 prop_pulse(Style) when Style == new; Style == regression ->
     _ = application:start(crypto),
     ?FORALL({Cmds0, Seed}, {gen_commands(Style), pulse:seed()},
-    ?IMPLIES(1 < length(Cmds0) andalso length(Cmds0) < 11,
+    ?IMPLIES(length(Cmds0) < 11,
     begin
         ok = shutdown_hard(),
         %% PULSE can be really unfair, of course, including having exec_ticks

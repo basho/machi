@@ -223,8 +223,26 @@ write_projection(PidSpec, ProjType, Proj) ->
 %% @doc Write a projection `Proj' of type `ProjType'.
 
 write_projection(PidSpec, ProjType, Proj, Timeout) ->
-    gen_server:call(PidSpec, {req, {write_projection, ProjType, Proj}},
-                    Timeout).
+    case gen_server:call(PidSpec, {req, {write_projection, ProjType, Proj}},
+                         Timeout) of
+        {error, written}=Err ->
+            Epoch = Proj#projection_v1.epoch_number,
+            case read_projection(PidSpec, ProjType, Epoch, Timeout) of
+                {ok, Proj2} when Proj2 == Proj ->
+                    %% The proxy made (at least) two attempts to write
+                    %% this projection.  An earlier one appeared to
+                    %% have failed, so the proxy retried.  The later
+                    %% attempt returned to us {error,written} because
+                    %% the earlier attempt was actually received &
+                    %% processed by the server.  So, we consider this
+                    %% a successful write.
+                    ok;
+                _ ->
+                    Err
+            end;
+        Else ->
+            Else
+    end.
 
 %% @doc Get all projections from the FLU's projection store.
 
@@ -277,8 +295,19 @@ write_chunk(PidSpec, EpochID, File, Offset, Chunk) ->
 %% with `Prefix' at `Offset'.
 
 write_chunk(PidSpec, EpochID, File, Offset, Chunk, Timeout) ->
-    gen_server:call(PidSpec, {req, {write_chunk, EpochID, File, Offset, Chunk}},
-                    Timeout).
+    case gen_server:call(PidSpec, {req, {write_chunk, EpochID, File, Offset, Chunk}},
+                         Timeout) of
+        {error, written}=Err ->
+            case read_chunk(PidSpec, EpochID, File, Offset, Chunk, Timeout) of
+                {ok, Chunk2} when Chunk2 == Chunk ->
+                    %% See equivalent comment inside write_projection().
+                    ok;
+                _ ->
+                    Err
+            end;
+        Else ->
+            Else
+    end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
