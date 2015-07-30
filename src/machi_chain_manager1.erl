@@ -586,6 +586,8 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                         repair_final_status=RepairFS}=S) ->
     #projection_v1{epoch_number=OldEpochNum,
                    members_dict=MembersDict,
+                   all_members=OldAll_list,
+                   witnesses=OldWitness_list,
                    upi=OldUPI_list,
                    repairing=OldRepairing_list
                   } = LastProj,
@@ -661,11 +663,21 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                 {TentativeUPI, TentativeRepairing}
         end,
 
-    P = machi_projection:new(OldEpochNum + 1,
-                             MyName, MembersDict, Down, NewUPI, NewRepairing,
-                             D_foo ++
-                                 Dbg ++ [{ps, Partitions},{nodes_up, Up}]),
-    {P, S#ch_mgr{runenv=RunEnv3}}.
+    P = case NewUPI -- OldWitness_list of
+            [] ->
+                io:format(user, "\nNONE proj ~p\n", [OldEpochNum+1]),
+                NP = make_none_projection(MyName, OldAll_list, MembersDict),
+                NP#projection_v1{epoch_number=OldEpochNum + 1};
+            _ ->
+                machi_projection:new(OldEpochNum + 1,
+                                     MyName, MembersDict,
+                                     Down, NewUPI, NewRepairing,
+                                     D_foo ++
+                                       Dbg ++ [{ps, Partitions},{nodes_up, Up}])
+        end,
+    P2 = machi_projection:update_checksum(
+           P#projection_v1{witnesses=OldWitness_list}),
+    {P2, S#ch_mgr{runenv=RunEnv3}}.
 
 check_latest_private_projections_same_epoch(FLUs, MyProj, Partitions, S) ->
     %% NOTE: The caller must provide us with the FLUs list for all
