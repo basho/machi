@@ -277,7 +277,7 @@ these constraints.
 1. CoC client chooses ~p~ and ~T~ (i.e., the file prefix & target cluster)
 2. CoC client knows the CoC ~Map~
 3. CoC client calculates a value ~K~ such that ~rs_hash_with_float(K,Map) = T~, using the method described below.
-4. CoC client requests @ cluster ~T~: ~append_chunk(p,...) -> {ok,p.K.s.z,ByteOffset}~
+4. CoC client requests @ cluster ~T~: ~append_chunk(p,K,...) -> {ok,p.K.s.z,ByteOffset}~
 5. CoC stores/uses the file name ~p.K.s.z~.
 
 ** The details: CoC file read
