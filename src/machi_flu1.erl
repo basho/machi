@@ -795,7 +795,9 @@ seq_append_server_loop(DataDir, Prefix, File, {FHd,FHc}=FH_, EpochID,
         {seq_append, From, Prefix, Chunk, TaggedCSum, Extra, R_EpochID}
           when R_EpochID == EpochID ->
             if Chunk /= <<>> ->
-                    ok = file:pwrite(FHd, Offset, Chunk);
+                 %% Do we want better error handling here than just a bad match crash?
+                 %% Does the error tuple need to propagate to somewhere?
+                    ok = try_write_position(FHd, Offset, Chunk);
                true ->
                     ok
             end,
@@ -825,6 +827,18 @@ seq_append_server_loop(DataDir, Prefix, File, {FHd,FHc}=FH_, EpochID,
                                 [Prefix, self(), FileNum, Offset]),
             exit(normal)
     end.
+
+try_write_position(FHd, Offset, Chunk) ->
+    ok = case file:pread(FHd, Offset, 1) of  %% one byte should be enough right?
+        eof ->
+            ok;
+        {ok, _} ->
+             {error, error_written};
+        {error, Reason} ->
+             {error, Reason}
+    end,
+    ok = file:pwrite(FHd, Offset, Chunk),
+    ok.
 
 make_listener_regname(BaseName) ->
     list_to_atom(atom_to_list(BaseName) ++ "_listener").
