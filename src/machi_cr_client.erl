@@ -432,12 +432,11 @@ witnesses_use_our_epoch([], _S) ->
 witnesses_use_our_epoch([FLU|RestFLUs],
                         #state{epoch_id=EpochID, proxies_dict=PD}=S) ->
     Proxy = orddict:fetch(FLU, PD),
+    %% Check both that the EpochID is the same *and* not wedged!
     case ?FLU_PC:wedge_status(Proxy, ?TIMEOUT) of
         {ok, {false, EID}} when EID == EpochID ->
-io:format(user, "Yay, ~p uses ~P\n", [FLU, EID, 5]),
             witnesses_use_our_epoch(RestFLUs, S);
         _Else ->
-io:format(user, "Bummer, ~p uses ~P at ~p\n", [FLU, _Else, 7, now()]),
             false
     end.
 

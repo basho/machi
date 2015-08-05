@@ -82,7 +82,6 @@ run_ticks(MgrList) ->
     _ = lists:foldl(
           fun(_, [{_,[a,b,c]}]=Acc) -> Acc;
              (_, _Acc)  ->
-                  io:format(user, "TickAll ~p\n", [_Acc]),
                   TickAll(),                % has some sleep time inside
                   Xs = [begin
                             {ok, Prj} = machi_projection_store:read_latest_projection(PStore, private),
@@ -212,20 +211,26 @@ witness_smoke_test2() ->
             machi_cr_client:append_chunk(C1, Prefix, Chunk1_badcs),
         {ok, Chunk1} = machi_cr_client:read_chunk(C1, File1, Off1, Size1),
 
-        %% Let's wedge OurWitness and see what happens
+        %% Let's wedge OurWitness and see what happens: timeout/partition.
         #p_srvr{name=WitName, address=WitAddr, port=WitPort} =
             orddict:fetch(OurWitness, D),
         machi_flu1:wedge_myself(WitName, EpochID),
         {ok, {true, EpochID}} = machi_flu1_client:wedge_status(WitAddr,
                                                                WitPort),
-        {'EXIT', {timeout, _}} =
-            (catch machi_cr_client:append_chunk(C1, Prefix, Chunk1, 2*1000)),
-        run_ticks([a_chmgr,b_chmgr,c_chmgr]),
-io:format(user, "line ~p at ~p\n", [?LINE, now()]),
-        {ok, Chunk1} = machi_cr_client:read_chunk(C1, File1, Off1, Size1),
-io:format(user, "line ~p at ~p\n", [?LINE, now()]),
-        {'EXIT', {timeout, _}} =
-            (catch machi_cr_client:append_chunk(C1, Prefix, Chunk1, 2*1000)),
+        {error, partition} =
+            machi_cr_client:append_chunk(C1, Prefix, Chunk1, 1*1000),
+
+        %% no-op:
+        %% run_ticks([a_chmgr,b_chmgr,c_chmgr]),
+
+        %% The witness's wedge status should cause timeout/partition
+        %% for write_chunk also.
+        Chunk10 = <<"It's a different chunk!">>,
+        Size10 = byte_size(Chunk10),
+        File10 = File1,
+        Offx = Off1 + (1 * Size10),
+        {error, partition} =
+            machi_cr_client:write_chunk(C1, File10, Offx, Chunk10, 1*1000),
 
         ok
     after
