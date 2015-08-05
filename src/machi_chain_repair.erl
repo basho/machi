@@ -155,7 +155,10 @@ repair(ap_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
               [(catch machi_proxy_flu1_client:quit(Pid)) ||
                   Pid <- orddict:to_list(get(proxies_dict))]
           end,
-    Res.
+    Res;
+repair(cp_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
+    io:format(user, "\n\nYO! cp_mode repair is not fully implemented!\n\n", []),
+    repair(ap_mode, Src, Repairing, UPI, MembersDict, ETS, Opts).
 
 %% Create a list of servers where the file is completely missing.
 %% In the "demo day" implementation and in an early integration WIP,

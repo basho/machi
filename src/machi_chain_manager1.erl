@@ -70,6 +70,7 @@
                           :: {{'epk', integer()}, erlang:timestamp()},
           not_sanes       :: orddict:orddict(),
           sane_transitions = 0 :: non_neg_integer(),
+          consistency_mode:: 'ap_mode' | 'cp_mode',
           repair_worker   :: 'undefined' | pid(),
           repair_start    :: 'undefined' | erlang:timestamp(),
           repair_final_status :: 'undefined' | term(),
@@ -222,6 +223,7 @@ init({MyName, InitMembersDict, MgrOpts}) ->
         get_my_private_proj_boot_info(MgrOpts, InitMembersDict, ZeroProj),
     All_list = [P#p_srvr.name || {_, P} <- orddict:to_list(MembersDict)],
     Opt = fun(Key, Default) -> proplists:get_value(Key, MgrOpts, Default) end,
+    CMode = proplists:get_value(consistency_mode, MgrOpts, ap_mode),
     RunEnv = [{seed, Opt(seed, now())},
               {use_partition_simulator, Opt(use_partition_simulator, false)},
               {simulate_repair, Opt(simulate_repair, true)},
@@ -239,6 +241,7 @@ init({MyName, InitMembersDict, MgrOpts}) ->
                 timer='undefined',
                 proj_history=queue:new(),
                 not_sanes=orddict:new(),
+                consistency_mode=CMode,
                 runenv=RunEnv,
                 opts=MgrOpts},
     {_, S2} = do_set_chain_members_dict(MembersDict, S),
@@ -2127,6 +2130,7 @@ gobble_calls(StaticCall) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 perhaps_start_repair(#ch_mgr{name=MyName,
+                             consistency_mode=CMode,
                              repair_worker=undefined,
                              proj=P_current}=S) ->
     case inner_projection_or_self(P_current) of
@@ -2136,7 +2140,7 @@ perhaps_start_repair(#ch_mgr{name=MyName,
             RepairId = {MyName, os:timestamp()},
             RepairOpts = [{repair_mode,repair}, verbose, {repair_id,RepairId}],
             %% RepairOpts = [{repair_mode, check}, verbose],
-            RepairFun = fun() -> do_repair(S, RepairOpts, ap_mode) end,
+            RepairFun = fun() -> do_repair(S, RepairOpts, CMode) end,
             LastUPI = lists:last(UPI),
             IgnoreStabilityTime_p = proplists:get_value(ignore_stability_time,
                                                         S#ch_mgr.opts, false),
@@ -2162,7 +2166,7 @@ do_repair(#ch_mgr{name=MyName,
                                       upi=UPI0,
                                       repairing=[_|_]=Repairing,
                                       members_dict=MembersDict}}=S,
-          Opts, ap_mode=RepairMode) ->
+          Opts, RepairMode) ->
     ETS = ets:new(repair_stats, [private, set]),
     ETS_T_Keys = [t_in_files, t_in_chunks, t_in_bytes,
                   t_out_files, t_out_chunks, t_out_bytes,
@@ -2188,7 +2192,7 @@ do_repair(#ch_mgr{name=MyName,
               [MyName, UPI0, Repairing, RepairMode, RepairId]),
 
             UPI = UPI0 -- Witness_list,
-            Res = machi_chain_repair:repair(ap_mode, MyName, Repairing, UPI,
+            Res = machi_chain_repair:repair(RepairMode, MyName, Repairing, UPI,
                                             MembersDict, ETS, Opts),
             T2 = os:timestamp(),
             Elapsed = (timer:now_diff(T2, T1) div 1000) / 1000,
