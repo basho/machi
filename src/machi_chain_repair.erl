@@ -157,7 +157,7 @@ repair(ap_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
           end,
     Res;
 repair(cp_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
-    io:format(user, "\n\nYO! cp_mode repair is not fully implemented!\n\n", []),
+    io:format(user, "\n\nTODO! cp_mode repair is not fully implemented!\n\n", []),
     repair(ap_mode, Src, Repairing, UPI, MembersDict, ETS, Opts).
 
 %% Create a list of servers where the file is completely missing.

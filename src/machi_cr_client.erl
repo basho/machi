@@ -302,8 +302,24 @@ do_append_head(Prefix, Chunk, ChunkExtra, Depth, STime, #state{proj=P}=S) ->
     end.
 
 do_append_head2(Prefix, Chunk, ChunkExtra, Depth, STime,
+                #state{proj=P}=S) ->
+    [HeadFLU|_RestFLUs] = mutation_flus(P),
+    case is_witness_flu(HeadFLU, P) of
+        true ->
+            case witnesses_use_our_epoch(S) of
+                true ->
+                    do_append_head3(Prefix, Chunk, ChunkExtra, Depth, STime, S);
+                false ->
+                    %% Bummer, go back to the beginning and retry.
+                    do_append_head(Prefix, Chunk, ChunkExtra, Depth, STime, S)
+            end;
+        false ->
+            do_append_head3(Prefix, Chunk, ChunkExtra, Depth, STime, S)
+    end.
+
+do_append_head3(Prefix, Chunk, ChunkExtra, Depth, STime,
                 #state{epoch_id=EpochID, proj=P, proxies_dict=PD}=S) ->
-    [HeadFLU|RestFLUs] = mutation_flus(P),
+    [HeadFLU|RestFLUs] = non_witness_flus(mutation_flus(P), P),
     Proxy = orddict:fetch(HeadFLU, PD),
     case ?FLU_PC:append_chunk_extra(Proxy,
                                     EpochID, Prefix, Chunk, ChunkExtra,
@@ -398,6 +414,24 @@ do_append_midtail2([FLU|RestFLUs]=FLUs, Prefix, File, Offset, Chunk,
                          iolist_size(Chunk), Depth, STime, S);
         {error, not_written} ->
             exit({todo_should_never_happen,?MODULE,?LINE,File,Offset})
+    end.
+
+witnesses_use_our_epoch(#state{proj=P, epoch_id=EpochID}=S) ->
+    Witnesses = witness_flus(P#projection_v1.upi, P),
+    witnesses_use_our_epoch(Witnesses, S).
+
+witnesses_use_our_epoch([], _S) ->
+    true;
+witnesses_use_our_epoch([FLU|RestFLUs],
+                        #state{epoch_id=EpochID, proxies_dict=PD}=S) ->
+    Proxy = orddict:fetch(FLU, PD),
+    case ?FLU_PC:wedge_status(Proxy, ?TIMEOUT) of
+        {ok, {false, EID}} when EID == EpochID ->
+io:format(user, "Yay, ~p uses ~P\n", [FLU, EID, 5]),
+            witnesses_use_our_epoch(RestFLUs, S);
+        _Else ->
+io:format(user, "Bummer, ~p uses ~P at ~p\n", [FLU, _Else, 7, now()]),
+            false
     end.
 
 do_write_head(File, Offset, Chunk, 0=Depth, STime, S) ->
@@ -822,6 +856,15 @@ readonly_flus(#projection_v1{upi=UPI}) ->
     UPI;
 readonly_flus(#state{proj=P}) ->
     readonly_flus(P).
+
+is_witness_flu(F, #projection_v1{witnesses=Witness_list}) ->
+    lists:member(F, Witness_list).
+
+non_witness_flus(FLUs, P) ->
+    lists:dropwhile(fun(F) -> is_witness_flu(F, P) end, FLUs).
+
+witness_flus(FLUs, P) ->
+    lists:takewhile(fun(F) -> is_witness_flu(F, P) end, FLUs).
 
 sleep_a_while(0) ->
     ok;

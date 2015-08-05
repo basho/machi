@@ -243,8 +243,8 @@ append_server_loop(FluPid, #state{data_dir=DataDir, wedged=Wedged_p,
             append_server_loop(FluPid, S);
 QQ =
         {wedge_myself, WedgeEpochId} ->
-io:format(user, "QQ ~p\n", [QQ]),
             if not Wedged_p andalso WedgeEpochId == OldEpochId ->
+io:format(user, "QQ line ~p QQ ~p\n", [?LINE, QQ]),
                     true = ets:insert(S#state.etstab,
                                       {epoch, {true, OldEpochId}}),
                     %% Tell my chain manager that it might want to react to
@@ -255,6 +255,7 @@ io:format(user, "QQ ~p\n", [QQ]),
                           end),
                     append_server_loop(FluPid, S#state{wedged=true});
                true ->
+io:format(user, "QQ line ~p QQ ~p\n", [?LINE, QQ]),
                     append_server_loop(FluPid, S)
             end;
         {wedge_state_change, Boolean, {NewEpoch, _}=NewEpochId} ->

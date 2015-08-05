@@ -61,22 +61,7 @@ io:format(user, "setup_smoke_test(", []),
     ok = machi_chain_manager1:set_chain_members(a_chmgr, D, Witness_list),
     ok = machi_chain_manager1:set_chain_members(b_chmgr, D, Witness_list),
     ok = machi_chain_manager1:set_chain_members(c_chmgr, D, Witness_list),
-    TickAll = fun() -> [begin
-                            Pid ! tick_check_environment,
-                            timer:sleep(50)
-                        end || Pid <- [a_chmgr,b_chmgr,c_chmgr] ]
-              end,
-    _ = lists:foldl(
-          fun(_, [{a,[a,b,c]}]=Acc) -> Acc;
-             (_, _Acc)  ->
-                  TickAll(),                % has some sleep time inside
-                  Xs = [begin
-                            {ok, Prj} = machi_projection_store:read_latest_projection(PStore, private),
-                            {Prj#projection_v1.author_server,
-                             Prj#projection_v1.upi}
-                        end || PStore <- [a_pstore,b_pstore,c_pstore] ],
-                  lists:usort(Xs)
-          end, undefined, lists:seq(1,10000)),
+    run_ticks([a_chmgr,b_chmgr,c_chmgr]),
     %% Everyone is settled on the same damn epoch id.
     {ok, EpochID} = machi_flu1_client:get_latest_epochid(Host, PortBase+0,
                                                          private),
@@ -87,6 +72,26 @@ io:format(user, "setup_smoke_test(", []),
 
 io:format(user, ")\n", []),
     {D, EpochID}.
+
+run_ticks(MgrList) ->
+    TickAll = fun() -> [begin
+                            Pid ! tick_check_environment,
+                            timer:sleep(50)
+                        end || Pid <- MgrList]
+              end,
+    _ = lists:foldl(
+          fun(_, [{_,[a,b,c]}]=Acc) -> Acc;
+             (_, _Acc)  ->
+                  io:format(user, "TickAll ~p\n", [_Acc]),
+                  TickAll(),                % has some sleep time inside
+                  Xs = [begin
+                            {ok, Prj} = machi_projection_store:read_latest_projection(PStore, private),
+                            {Prj#projection_v1.author_server,
+                             Prj#projection_v1.upi}
+                        end || PStore <- [a_pstore,b_pstore,c_pstore] ],
+                  lists:usort(Xs)
+          end, undefined, lists:seq(1,10000)),
+    ok.
 
 smoke_test2() ->
     {ok, SupPid} = machi_flu_sup:start_link(),
@@ -192,8 +197,10 @@ witness_smoke_test2() ->
         Chunk1 = <<"yochunk">>,
         Host = "localhost",
         PortBase = 64444,
-        Os = [{ignore_stability_time, true}, {active_mode, false}],
-        {D, EpochID} = setup_smoke_test(Host, PortBase, Os, [a]),
+        Os = [{ignore_stability_time, true}, {active_mode, false},
+              {consistency_mode, cp_mode}],
+        OurWitness = a,
+        {D, EpochID} = setup_smoke_test(Host, PortBase, Os, [OurWitness]),
 
         %% Whew ... ok, now start some damn tests.
         {ok, C1} = machi_cr_client:start_link([P || {_,P}<-orddict:to_list(D)]),
@@ -204,6 +211,21 @@ witness_smoke_test2() ->
         {error, bad_checksum} =
             machi_cr_client:append_chunk(C1, Prefix, Chunk1_badcs),
         {ok, Chunk1} = machi_cr_client:read_chunk(C1, File1, Off1, Size1),
+
+        %% Let's wedge OurWitness and see what happens
+        #p_srvr{name=WitName, address=WitAddr, port=WitPort} =
+            orddict:fetch(OurWitness, D),
+        machi_flu1:wedge_myself(WitName, EpochID),
+        {ok, {true, EpochID}} = machi_flu1_client:wedge_status(WitAddr,
+                                                               WitPort),
+        {'EXIT', {timeout, _}} =
+            (catch machi_cr_client:append_chunk(C1, Prefix, Chunk1, 2*1000)),
+        run_ticks([a_chmgr,b_chmgr,c_chmgr]),
+io:format(user, "line ~p at ~p\n", [?LINE, now()]),
+        {ok, Chunk1} = machi_cr_client:read_chunk(C1, File1, Off1, Size1),
+io:format(user, "line ~p at ~p\n", [?LINE, now()]),
+        {'EXIT', {timeout, _}} =
+            (catch machi_cr_client:append_chunk(C1, Prefix, Chunk1, 2*1000)),
 
         ok
     after
