@@ -325,7 +325,6 @@ handle_info(tick_check_environment, #ch_mgr{ignore_timer=true}=S) ->
     {noreply, S};
 handle_info(tick_check_environment, S) ->
     {{_Delta, Props, _Epoch}, S1} = do_react_to_env(S),
-io:format(user, "tick ~p ~p ~p\n~p\n", [S#ch_mgr.name, _Delta, _Epoch, get(react)]),
     S2 = sanitize_repair_state(S1),
     S3 = perhaps_start_repair(S2),
     case proplists:get_value(throttle_seconds, Props) of
@@ -504,7 +503,9 @@ rank_and_sort_projections_with_extra(All_queried_list, FLUsRs, ProjectionType,
     if All_queried_list == []
        orelse
        length(UnwrittenRs) == length(FLUsRs) ->
-            NoneProj = make_none_projection(MyName, [], orddict:new()),
+            Witness_list = CurrentProj#projection_v1.witnesses,
+            NoneProj = make_none_projection(MyName, [], Witness_list,
+                                            orddict:new()),
             Extra2 = [{all_members_replied, true},
                       {all_queried_list, All_queried_list},
                       {flus_rs, FLUsRs},
@@ -601,7 +602,11 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
     NewUp = Up -- LastUp,
     Down = AllMembers -- Up,
 
-    NewUPI_list = [X || X <- OldUPI_list, lists:member(X, Up)],
+    NewUPI_list =
+        [W || W <- Up, lists:member(W, OldWitness_list)]
+        ++
+        [X || X <- OldUPI_list, lists:member(X, Up) andalso
+                                not lists:member(X, OldWitness_list)],
     #projection_v1{upi=CurrentUPI_list} = CurrentProj,
     LastInCurrentUPI = case CurrentUPI_list of
                            []    -> does_not_exist_because_upi_is_empty;
@@ -611,7 +616,9 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                        []    -> does_not_exist_because_upi_is_empty;
                        [_|_] -> lists:last(NewUPI_list)
                    end,
-    Repairing_list2 = [X || X <- OldRepairing_list, lists:member(X, Up)],
+    Repairing_list2 = [X || X <- OldRepairing_list,
+                            lists:member(X, Up),
+                            not lists:member(X, OldWitness_list)],
     Simulator_p = proplists:get_value(use_partition_simulator, RunEnv2, false),
     SimRepair_p = proplists:get_value(simulate_repair, RunEnv2, true),
     {NewUPI_list3, Repairing_list3, RunEnv3} =
@@ -651,32 +658,30 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                           []    -> Repairing_list3;
                           NewUp -> Repairing_list3 ++ NewUp
                       end,
-    Repairing_list5 = Repairing_list4 -- Down,
+    Repairing_list5 = (Repairing_list4 -- Down) -- OldWitness_list,
 
     TentativeUPI = NewUPI_list3,
     TentativeRepairing = Repairing_list5,
 
+    AllTentativeUPI_witnesses_p =
+        lists:all(fun(X) -> lists:member(X, OldWitness_list) end,
+                  TentativeUPI),
     {NewUPI, NewRepairing} =
-        if TentativeUPI == [] andalso TentativeRepairing /= [] ->
+        if (TentativeUPI == [] orelse AllTentativeUPI_witnesses_p)
+           andalso TentativeRepairing /= [] ->
+                %% UPI is empty or all in UPI are witnesses, so grab
+                %% the first from the repairing list and make it the
+                %% only non-witness in the UPI.
                 [FirstRepairing|TailRepairing] = TentativeRepairing,
-                {[FirstRepairing], TailRepairing};
+                {TentativeUPI ++ [FirstRepairing], TailRepairing};
            true ->
                 {TentativeUPI, TentativeRepairing}
         end,
 
-    P = case NewUPI -- OldWitness_list of
-            [] ->
-                io:format(user, "\nNONE proj ~p\n", [OldEpochNum+1]),
-                NP = make_none_projection(MyName, OldAll_list, OldWitness_list,
-                                          MembersDict),
-                NP#projection_v1{epoch_number=OldEpochNum + 1};
-            _ ->
-                machi_projection:new(OldEpochNum + 1,
-                                     MyName, MembersDict,
-                                     Down, NewUPI, NewRepairing,
-                                     D_foo ++
-                                       Dbg ++ [{ps, Partitions},{nodes_up, Up}])
-        end,
+    P = machi_projection:new(OldEpochNum + 1,
+                             MyName, MembersDict, Down, NewUPI, NewRepairing,
+                             D_foo ++
+                                 Dbg ++ [{ps, Partitions},{nodes_up, Up}]),
     P2 = machi_projection:update_checksum(
            P#projection_v1{witnesses=OldWitness_list}),
     {P2, S#ch_mgr{runenv=RunEnv3}}.
@@ -793,28 +798,18 @@ rank_projections(Projs, CurrentProj) ->
 rank_projection(#projection_v1{upi=[]}, _MemberRank, _N) ->
     -100;
 rank_projection(#projection_v1{author_server=_Author,
+                               witnesses=Witness_list,
                                upi=UPI_list,
                                repairing=Repairing_list}, _MemberRank, N) ->
-    %% It's possible that there's "cross-talk" across projection
-    %% stores.  For example, we were a chain of [a,b], then the
-    %% administrator sets a's members_dict to include only a.
-    %% However, b is still running and has written a public projection
-    %% suggestion to a, and a has seen it.  (Or perhaps b has old
-    %% chain information from one/many configurations ago, and its
-    %% projection store was not wiped clean, then b was restarted &
-    %% begins using its local outdated projection information.)
-    %%
-    %% Server b is no longer a member of a's MemberRank scheme, so we
-    %% need to compensate for this by giving b an extremely low author
-    %% ranking.
     AuthorRank = 0,
-    %% AuthorRank = case orddict:find(Author, MemberRank) of
-    %%                  {ok, Rank} -> Rank;
-    %%                  error      -> -(N*N*N*N)
-    %%              end,
-    AuthorRank +
-        (  N * length(Repairing_list)) +
-        (N*N * length(UPI_list)).
+    case UPI_list -- Witness_list of
+        [] ->
+            -100;
+        _ ->
+            AuthorRank +
+                (  N * length(Repairing_list)) +
+                (N*N * length(UPI_list))
+    end.
 
 do_set_chain_members_dict(MembersDict, #ch_mgr{proxies_dict=OldProxiesDict}=S)->
     _ = ?FLU_PC:stop_proxies(OldProxiesDict),
@@ -1194,15 +1189,18 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
     [{Rank_newprop, _}] = rank_projections([P_newprop], P_current),
     [{Rank_latest, _}] = rank_projections([P_latest], P_current),
     LatestAuthorDownP = lists:member(P_latest#projection_v1.author_server,
-                                     P_newprop#projection_v1.down),
+                                     P_newprop#projection_v1.down)
+        andalso P_latest#projection_v1.author_server /= MyName,
 
     if
         %% Epoch == 0 is reserved for first-time, just booting conditions.
-        (P_current#projection_v1.epoch_number > 0
-         andalso
-         P_latest#projection_v1.epoch_number > P_current#projection_v1.epoch_number)
-        orelse
-        not LatestUnanimousP ->
+        Rank_newprop > 0
+        andalso
+        ((P_current#projection_v1.epoch_number > 0
+          andalso
+          P_latest#projection_v1.epoch_number > P_current#projection_v1.epoch_number)
+         orelse
+         not LatestUnanimousP) ->
             ?REACT({a40, ?LINE,
                     [{latest_epoch, P_latest#projection_v1.epoch_number},
                      {current_epoch, P_current#projection_v1.epoch_number},
@@ -1214,9 +1212,11 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
             react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                              Rank_newprop, Rank_latest, S);
 
-        P_latest#projection_v1.epoch_number < P_current#projection_v1.epoch_number
-        orelse
-        P_latest /= P_current ->
+        Rank_newprop > 0
+        andalso
+        (P_latest#projection_v1.epoch_number < P_current#projection_v1.epoch_number
+         orelse
+         P_latest /= P_current) ->
             ?REACT({a40, ?LINE,
                     [{latest_epoch, P_latest#projection_v1.epoch_number},
                      {current_epoch, P_current#projection_v1.epoch_number},
@@ -1261,6 +1261,8 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
             react_to_env_C300(P_newprop, P_latest, S);
 
         %% A40b (see flowchart)
+        Rank_newprop > 0
+        andalso
         P_latest#projection_v1.author_server == MyName
         andalso
         (P_newprop#projection_v1.upi /= P_latest#projection_v1.upi
@@ -1676,11 +1678,6 @@ react_to_env_C220(Retries, S) ->
 react_to_env_C300(#projection_v1{epoch_number=_Epoch_newprop}=P_newprop,
                   #projection_v1{epoch_number=_Epoch_latest}=_P_latest, S) ->
     ?REACT(c300),
-
-    %% This logic moved to A30.
-    %% NewEpoch = erlang:max(Epoch_newprop, Epoch_latest) + 1,
-    %% P_newprop2 = P_newprop#projection_v1{epoch_number=NewEpoch},
-    %% react_to_env_C310(update_checksum(P_newprop2), S).
 
     react_to_env_C310(machi_projection:update_checksum(P_newprop), S).
 
@@ -2161,7 +2158,8 @@ perhaps_start_repair(S) ->
     S.
 
 do_repair(#ch_mgr{name=MyName,
-                  proj=#projection_v1{upi=UPI,
+                  proj=#projection_v1{witnesses=Witness_list,
+                                      upi=UPI0,
                                       repairing=[_|_]=Repairing,
                                       members_dict=MembersDict}}=S,
           Opts, ap_mode=RepairMode) ->
@@ -2187,8 +2185,9 @@ do_repair(#ch_mgr{name=MyName,
             RepairId = proplists:get_value(repair_id, Opts, id1),
             error_logger:info_msg(
               "Repair start: tail ~p of ~p -> ~p, ~p ID ~w\n",
-              [MyName, UPI, Repairing, RepairMode, RepairId]),
+              [MyName, UPI0, Repairing, RepairMode, RepairId]),
 
+            UPI = UPI0 -- Witness_list,
             Res = machi_chain_repair:repair(ap_mode, MyName, Repairing, UPI,
                                             MembersDict, ETS, Opts),
             T2 = os:timestamp(),
@@ -2201,7 +2200,7 @@ do_repair(#ch_mgr{name=MyName,
             error_logger:info_msg(
               "Repair ~s: tail ~p of ~p finished ~p repair ID ~w: "
               "~p\nStats ~p\n",
-              [Summary, MyName, UPI, RepairMode, RepairId,
+              [Summary, MyName, UPI0, RepairMode, RepairId,
                Res, Stats]),
             ets:delete(ETS),
             exit({repair_final_status, Res});
