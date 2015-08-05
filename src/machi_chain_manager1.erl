@@ -215,7 +215,7 @@ init({MyName, InitMembersDict, MgrOpts}) ->
     random:seed(now()),
     init_remember_partition_hack(),
     ZeroAll_list = [P#p_srvr.name || {_,P} <- orddict:to_list(InitMembersDict)],
-    ZeroProj = make_none_projection(MyName, ZeroAll_list, InitMembersDict),
+    ZeroProj = make_none_projection(MyName, ZeroAll_list, [], InitMembersDict),
     ok = store_zeroth_projection_maybe(ZeroProj, MgrOpts),
 
     {MembersDict, Proj} =
@@ -360,10 +360,11 @@ code_change(_OldVsn, S, _Extra) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-make_none_projection(MyName, All_list, MembersDict) ->
+make_none_projection(MyName, All_list, Witness_list, MembersDict) ->
     Down_list = All_list,
     UPI_list = [],
-    machi_projection:new(MyName, MembersDict, Down_list, UPI_list, [], []).
+    P = machi_projection:new(MyName, MembersDict, Down_list, UPI_list, [], []),
+    machi_projection:update_checksum(P#projection_v1{witnesses=Witness_list}).
 
 get_my_private_proj_boot_info(MgrOpts, DefaultDict, DefaultProj) ->
     get_my_proj_boot_info(MgrOpts, DefaultDict, DefaultProj, private).
@@ -666,7 +667,8 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
     P = case NewUPI -- OldWitness_list of
             [] ->
                 io:format(user, "\nNONE proj ~p\n", [OldEpochNum+1]),
-                NP = make_none_projection(MyName, OldAll_list, MembersDict),
+                NP = make_none_projection(MyName, OldAll_list, OldWitness_list,
+                                          MembersDict),
                 NP#projection_v1{epoch_number=OldEpochNum + 1};
             _ ->
                 machi_projection:new(OldEpochNum + 1,
@@ -1549,7 +1551,8 @@ react_to_env_C103(#projection_v1{epoch_number=Epoch_latest,
     #projection_v1{epoch_number=Epoch_latest,
                    all_members=All_list,
                    members_dict=MembersDict} = P_latest,
-    P_none0 = make_none_projection(MyName, All_list, MembersDict),
+    #projection_v1{witnesses=Witness_list} = P_current,
+    P_none0 = make_none_projection(MyName, All_list, Witness_list, MembersDict),
     P_none1 = P_none0#projection_v1{epoch_number=Epoch_latest,
                                     dbg=[{none_projection,true}]},
     P_none = machi_projection:update_checksum(P_none1),
