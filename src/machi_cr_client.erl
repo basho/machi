@@ -571,6 +571,7 @@ read_repair(ConsistencyMode, ReturnMode, File, Offset, Size, Depth,
 read_repair2(cp_mode=ConsistencyMode,
              ReturnMode, File, Offset, Size, Depth, STime,
              #state{proj=P, epoch_id=EpochID, proxies_dict=PD}=S) ->
+    %% TODO WTF was I thinking here??....
     Tail = lists:last(readonly_flus(P)),
     case ?FLU_PC:read_chunk(orddict:fetch(Tail, PD), EpochID,
                             File, Offset, Size, ?TIMEOUT) of
