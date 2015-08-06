@@ -79,12 +79,16 @@ run_ticks(MgrList) ->
               end,
     _ = lists:foldl(
           fun(_, [{_,[a,b,c]}]=Acc) -> Acc;
+             (_, [{_,[b,c]}]=Acc)   -> Acc;  %% Fragile, but for witness=[a]
+             (_, [{_,[a,c]},{yy,b_pstore}]=Acc) -> Acc;  %% Fragile, but for witness=[a]
              (_, _Acc)  ->
                   TickAll(),                % has some sleep time inside
-                  Xs = [begin
+                  Xs = [try
                             {ok, Prj} = machi_projection_store:read_latest_projection(PStore, private),
                             {Prj#projection_v1.author_server,
                              Prj#projection_v1.upi}
+                        catch _:_ ->
+                                {yy, PStore}
                         end || PStore <- [a_pstore,b_pstore,c_pstore] ],
                   lists:usort(Xs)
           end, undefined, lists:seq(1,10000)),
@@ -209,17 +213,23 @@ witness_smoke_test2() ->
             machi_cr_client:append_chunk(C1, Prefix, Chunk1_badcs),
         {ok, Chunk1} = machi_cr_client:read_chunk(C1, File1, Off1, Size1),
 
+        %% Stop 'b' and let the chain reset.
+        ok = machi_flu_psup:stop_flu_package(b),
+        run_ticks([a_chmgr,c_chmgr]),
+
+        %% The chain should now be [a,c].
         %% Let's wedge OurWitness and see what happens: timeout/partition.
-        #p_srvr{name=WitName, address=WitAddr, port=WitPort} =
+        #p_srvr{name=WitName, address=WitA, port=WitP} =
             orddict:fetch(OurWitness, D),
-        machi_flu1:wedge_myself(WitName, EpochID),
-        {ok, {true, EpochID}} = machi_flu1_client:wedge_status(WitAddr,
-                                                               WitPort),
+        {ok, {false, EpochID2}} = machi_flu1_client:wedge_status(WitA, WitP),
+        machi_flu1:wedge_myself(WitName, EpochID2),
+        {ok, {true,  EpochID2}} = machi_flu1_client:wedge_status(WitA, WitP),
+
+        %% Chunk1 is still readable: not affected by wedged witness head.
+        {ok, Chunk1} = machi_cr_client:read_chunk(C1, File1, Off1, Size1),
+        %% But because the head is wedged, an append will fail.
         {error, partition} =
             machi_cr_client:append_chunk(C1, Prefix, Chunk1, 1*1000),
-
-        %% no-op:
-        %% run_ticks([a_chmgr,b_chmgr,c_chmgr]),
 
         %% The witness's wedge status should cause timeout/partition
         %% for write_chunk also.

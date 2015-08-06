@@ -219,11 +219,15 @@ init({MyName, InitMembersDict, MgrOpts}) ->
     ZeroProj = make_none_projection(MyName, ZeroAll_list, [], InitMembersDict),
     ok = store_zeroth_projection_maybe(ZeroProj, MgrOpts),
 
-    {MembersDict, Proj} =
+    {MembersDict, Proj0} =
         get_my_private_proj_boot_info(MgrOpts, InitMembersDict, ZeroProj),
     All_list = [P#p_srvr.name || {_, P} <- orddict:to_list(MembersDict)],
+
     Opt = fun(Key, Default) -> proplists:get_value(Key, MgrOpts, Default) end,
-    CMode = proplists:get_value(consistency_mode, MgrOpts, ap_mode),
+    CMode = Opt(consistency_mode, ap_mode),
+    Proj = if CMode == ap_mode -> Proj0;
+              CMode == cp_mode -> Proj0         % TODO FIXMEFIXMEFIXME!
+           end,
     RunEnv = [{seed, Opt(seed, now())},
               {use_partition_simulator, Opt(use_partition_simulator, false)},
               {simulate_repair, Opt(simulate_repair, true)},
@@ -318,6 +322,7 @@ handle_call({trigger_react_to_env}=Call, _From, S) ->
     {TODOtodo, S2} = do_react_to_env(S),
     {reply, TODOtodo, S2};
 handle_call(_Call, _From, S) ->
+    io:format(user, "\nBad call to ~p: ~p\n", [S#ch_mgr.name, _Call]),
     {reply, whaaaaaaaaaa, S}.
 
 handle_cast(_Cast, S) ->
@@ -680,8 +685,31 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                              D_foo ++
                                  Dbg ++ [{ps, Partitions},{nodes_up, Up}]),
     P2 = if CMode == cp_mode ->
+                 %% TODO incompete logic!
                  UpWitnesses = [W || W <- Up, lists:member(W, OldWitness_list)],
-                 P;
+                 Majority = full_majority_size(length(AllMembers)),
+                 SoFar = length(NewUPI),
+                 if SoFar >= Majority ->
+                         P;
+                    true ->
+                         Need = Majority - SoFar,
+                         UpWitnesses = [W || W <- Up,
+                                             lists:member(W, OldWitness_list)],
+                         if length(UpWitnesses) >= Need ->
+                                 Ws = lists:sublist(UpWitnesses, Need),
+                                 machi_projection:update_checksum(
+                                   P#projection_v1{upi=Ws++NewUPI});
+                            true ->
+                                 P_none0 = make_none_projection(
+                                            MyName, AllMembers, OldWitness_list,
+                                            MembersDict),
+                                 P_none1 = P_none0#projection_v1{
+                                             epoch_number=OldEpochNum + 1,
+                                             dbg=[{none_projection,true},
+                                                  {not_enough_witnesses,true}]},
+                                 machi_projection:update_checksum(P_none1)
+                         end
+                 end;
             CMode == ap_mode ->
                  P
          end,
@@ -805,13 +833,16 @@ rank_projection(#projection_v1{author_server=_Author,
                                upi=UPI_list,
                                repairing=Repairing_list}, _MemberRank, N) ->
     AuthorRank = 0,
+    UPI_witn = [X || X <- UPI_list,     lists:member(X, Witness_list)],
+    UPI_full = [X || X <- UPI_list, not lists:member(X, Witness_list)],
     case UPI_list -- Witness_list of
         [] ->
             -100;
         _ ->
             AuthorRank +
-                (  N * length(Repairing_list)) +
-                (N*N * length(UPI_list))
+                (    N * length(Repairing_list)) +
+                (  N*N * length(UPI_witn)) +
+                (N*N*N * length(UPI_full))
     end.
 
 do_set_chain_members_dict(MembersDict, #ch_mgr{proxies_dict=OldProxiesDict}=S)->
@@ -1945,23 +1976,27 @@ projection_transition_is_sane_with_si_epoch(
 
 projection_transition_is_sane_except_si_epoch(
   #projection_v1{epoch_number=Epoch1,
-              epoch_csum=CSum1,
-              creation_time=CreationTime1,
-              author_server=AuthorServer1,
-              all_members=All_list1,
-              down=Down_list1,
-              upi=UPI_list1,
-              repairing=Repairing_list1,
-              dbg=Dbg1} = P1,
+                 epoch_csum=CSum1,
+                 creation_time=CreationTime1,
+                 mode=CMode1,
+                 author_server=AuthorServer1,
+                 all_members=All_list1,
+                 witnesses=Witness_list1,
+                 down=Down_list1,
+                 upi=UPI_list1,
+                 repairing=Repairing_list1,
+                 dbg=Dbg1} = P1,
   #projection_v1{epoch_number=Epoch2,
-              epoch_csum=CSum2,
-              creation_time=CreationTime2,
-              author_server=AuthorServer2,
-              all_members=All_list2,
-              down=Down_list2,
-              upi=UPI_list2,
-              repairing=Repairing_list2,
-              dbg=Dbg2} = P2,
+                 epoch_csum=CSum2,
+                 creation_time=CreationTime2,
+                 mode=CMode2,
+                 author_server=AuthorServer2,
+                 all_members=All_list2,
+                 witnesses=Witness_list2,
+                 down=Down_list2,
+                 upi=UPI_list2,
+                 repairing=Repairing_list2,
+                 dbg=Dbg2} = P2,
   RelativeToServer, __TODO_RetrospectiveP) ->
  ?RETURN2(undefined),
  try
@@ -1971,12 +2006,14 @@ projection_transition_is_sane_except_si_epoch(
     %% structures are small, and the funcs aren't called zillions of times per
     %% second.
 
+    CMode1 = CMode2,
     true = is_integer(Epoch1) andalso is_integer(Epoch2),
     true = is_binary(CSum1) andalso is_binary(CSum2),
     {_,_,_} = CreationTime1,
     {_,_,_} = CreationTime2,
     true = is_atom(AuthorServer1) andalso is_atom(AuthorServer2), % todo type may change?
     true = is_list(All_list1) andalso is_list(All_list2),
+    true = is_list(Witness_list1) andalso is_list(Witness_list2),
     true = is_list(Down_list1) andalso is_list(Down_list2),
     true = is_list(UPI_list1) andalso is_list(UPI_list2),
     true = is_list(Repairing_list1) andalso is_list(Repairing_list2),
@@ -1987,14 +2024,16 @@ projection_transition_is_sane_except_si_epoch(
     true = Epoch2 >= Epoch1,
 
     %% No duplicates
+    true = lists:sort(Witness_list2) == lists:usort(Witness_list2),
     true = lists:sort(Down_list2) == lists:usort(Down_list2),
     true = lists:sort(UPI_list2) == lists:usort(UPI_list2),
     true = lists:sort(Repairing_list2) == lists:usort(Repairing_list2),
 
     %% Disjoint-ness
     All_list1 = All_list2,                 % todo will probably change
-    true = lists:sort(All_list2) == lists:sort(Down_list2 ++ UPI_list2 ++
-                                                   Repairing_list2),
+    %% true = lists:sort(All_list2) == lists:sort(Down_list2 ++ UPI_list2 ++
+    %%                                                Repairing_list2),
+    [] = [X || X <- Witness_list2, not lists:member(X, All_list2)],
     [] = [X || X <- Down_list2, not lists:member(X, All_list2)],
     [] = [X || X <- UPI_list2, not lists:member(X, All_list2)],
     [] = [X || X <- Repairing_list2, not lists:member(X, All_list2)],
@@ -2011,9 +2050,17 @@ projection_transition_is_sane_except_si_epoch(
     %% Hooray, all basic properties of the projection's elements are
     %% not obviously bad.  Now let's check if the UPI+Repairing->UPI
     %% transition is good.
+    %%
+    %% NOTE: chain_state_transition_is_sane() only cares about strong
+    %% consistency violations and (because witness servers don't store
+    %% any data) doesn't care about witness servers.  So we remove all
+    %% witnesses from the UPI lists before calling
+    %% chain_state_transition_is_sane()
+    UPI_list1w = UPI_list1 -- Witness_list1,
+    UPI_list2w = UPI_list2 -- Witness_list2,
     ?RETURN2(
-       chain_state_transition_is_sane(AuthorServer1, UPI_list1, Repairing_list1,
-                                      AuthorServer2, UPI_list2))
+       chain_state_transition_is_sane(AuthorServer1, UPI_list1w,Repairing_list1,
+                                      AuthorServer2, UPI_list2w))
  catch
      _Type:_Err ->
          ?RETURN2(oops),
@@ -2434,3 +2481,6 @@ clear_flapping_state(S) ->
     S#ch_mgr{flaps=0,
              flap_start=?NOT_FLAPPING_START,
              not_sanes=orddict:new()}.
+
+full_majority_size(N) ->
+    (N div 2) + 1.
