@@ -666,17 +666,13 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
     TentativeUPI = NewUPI_list3,
     TentativeRepairing = Repairing_list5,
 
-    AllTentativeUPI_witnesses_p =
-        lists:all(fun(X) -> lists:member(X, OldWitness_list) end,
-                  TentativeUPI),
     {NewUPI, NewRepairing} =
-        if (TentativeUPI == [] orelse AllTentativeUPI_witnesses_p)
-           andalso TentativeRepairing /= [] ->
-                %% UPI is empty or all in UPI are witnesses, so grab
+        if TentativeUPI == [] andalso TentativeRepairing /= [] ->
+                %% UPI is empty (not including witnesses), so grab
                 %% the first from the repairing list and make it the
                 %% only non-witness in the UPI.
                 [FirstRepairing|TailRepairing] = TentativeRepairing,
-                {TentativeUPI ++ [FirstRepairing], TailRepairing};
+                {[FirstRepairing], TailRepairing};
            true ->
                 {TentativeUPI, TentativeRepairing}
         end,
