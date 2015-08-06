@@ -31,7 +31,6 @@
 smoke_test_() -> {timeout, 1*60, fun() -> smoke_test2() end}.
 
 setup_smoke_test(Host, PortBase, Os, Witness_list) ->
-io:format(user, "setup_smoke_test(", []),
     os:cmd("rm -rf ./data.a ./data.b ./data.c"),
 
     F = fun(X) -> case lists:member(X, Witness_list) of
@@ -70,7 +69,6 @@ io:format(user, "setup_smoke_test(", []),
     {ok, EpochID} = machi_flu1_client:get_latest_epochid(Host, PortBase+2,
                                                          private),
 
-io:format(user, ")\n", []),
     {D, EpochID}.
 
 run_ticks(MgrList) ->

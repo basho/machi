@@ -587,11 +587,11 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                 RelativeToServer, AllHosed, Dbg,
                 #ch_mgr{name=MyName,
                         proj=CurrentProj,
+                        consistency_mode=CMode,
                         runenv=RunEnv1,
                         repair_final_status=RepairFS}=S) ->
     #projection_v1{epoch_number=OldEpochNum,
                    members_dict=MembersDict,
-                   all_members=OldAll_list,
                    witnesses=OldWitness_list,
                    upi=OldUPI_list,
                    repairing=OldRepairing_list
@@ -606,8 +606,6 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
     Down = AllMembers -- Up,
 
     NewUPI_list =
-        [W || W <- Up, lists:member(W, OldWitness_list)]
-        ++
         [X || X <- OldUPI_list, lists:member(X, Up) andalso
                                 not lists:member(X, OldWitness_list)],
     #projection_v1{upi=CurrentUPI_list} = CurrentProj,
@@ -681,9 +679,15 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
                              MyName, MembersDict, Down, NewUPI, NewRepairing,
                              D_foo ++
                                  Dbg ++ [{ps, Partitions},{nodes_up, Up}]),
-    P2 = machi_projection:update_checksum(
-           P#projection_v1{witnesses=OldWitness_list}),
-    {P2, S#ch_mgr{runenv=RunEnv3}}.
+    P2 = if CMode == cp_mode ->
+                 UpWitnesses = [W || W <- Up, lists:member(W, OldWitness_list)],
+                 P;
+            CMode == ap_mode ->
+                 P
+         end,
+    P3 = machi_projection:update_checksum(
+           P2#projection_v1{witnesses=OldWitness_list}),
+    {P3, S#ch_mgr{runenv=RunEnv3}}.
 
 check_latest_private_projections_same_epoch(FLUs, MyProj, Partitions, S) ->
     %% NOTE: The caller must provide us with the FLUs list for all
