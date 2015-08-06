@@ -219,15 +219,28 @@ init({MyName, InitMembersDict, MgrOpts}) ->
     ZeroProj = make_none_projection(MyName, ZeroAll_list, [], InitMembersDict),
     ok = store_zeroth_projection_maybe(ZeroProj, MgrOpts),
 
+    %% Using whatever is the largest epoch number in our local private
+    %% store, this manager starts out using the "none" projection.  If
+    %% other members of the chain are running, then we'll simply adopt
+    %% whatever they're using as a basis for our next suggested
+    %% projection.
+    %%
+    %% If we're in CP mode, we have to be very careful about who we
+    %% choose to be UPI members when we (or anyone else) restarts.
+    %% However, that choice is *not* made here: it is made later
+    %% during our first humming consensus iteration.  When we start
+    %% with the none projection, we're make a safe choice before
+    %% wading into the deep waters.
     {MembersDict, Proj0} =
         get_my_private_proj_boot_info(MgrOpts, InitMembersDict, ZeroProj),
-    All_list = [P#p_srvr.name || {_, P} <- orddict:to_list(MembersDict)],
+    #projection_v1{epoch_number=CurrentEpoch,
+                   all_members=All_list, witnesses=Witness_list} = Proj0,
+    Proj1 = make_none_projection(MyName, All_list, Witness_list, MembersDict),
+    Proj = machi_projection:update_checksum(
+             Proj1#projection_v1{epoch_number=CurrentEpoch}),
 
     Opt = fun(Key, Default) -> proplists:get_value(Key, MgrOpts, Default) end,
     CMode = Opt(consistency_mode, ap_mode),
-    Proj = if CMode == ap_mode -> Proj0;
-              CMode == cp_mode -> Proj0         % TODO FIXMEFIXMEFIXME!
-           end,
     RunEnv = [{seed, Opt(seed, now())},
               {use_partition_simulator, Opt(use_partition_simulator, false)},
               {simulate_repair, Opt(simulate_repair, true)},

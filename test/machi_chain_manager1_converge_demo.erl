@@ -247,6 +247,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                             private_projections_are_stable(Namez, DoIt)
                     end, false, lists:seq(0, MaxIters)),
            io:format(user, "\nSweet, private projections are stable\n", []),
+           io:format(user, "\t~p\n", [get(stable)]),
            io:format(user, "Rolling sanity check ... ", []),
            MaxFiles = 3*1000,
            PrivProjs = [{Name, begin
@@ -359,8 +360,8 @@ make_partition_list(All_list) ->
     %% Concat = _X_Ys2,
     %% Concat = _X_Ys1 ++ _X_Ys2,
     %% %% Concat = _X_Ys3,
-    %% %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
-    %% random_sort(lists:usort([lists:sort(L) || L <- Concat])).
+    Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
+    random_sort(lists:usort([lists:sort(L) || L <- Concat])).
 
     %% [ [{a,b},{b,d},{c,b}],
     %%   [{a,b},{b,d},{c,b}, {a,b},{b,a},{a,c},{c,a},{a,d},{d,a}],
@@ -401,16 +402,16 @@ make_partition_list(All_list) ->
     %%   [{a,b}, {c,b},       {c,d}],
     %%   [{a,b}, {b,c},       {d,c}] ].
 
-    [
-     %% [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
-     %% [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
-     %% [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
-     %% [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
-     [{a,b}], [], [{a,b}], [], [{a,b}]
-     %% [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
-     %% [{b,a},{d,e}],
-     %% [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], []
-    ].
+    %% [
+    %%  %% [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
+    %%  %% [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
+    %%  %% [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
+    %%  %% [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
+    %%  [{a,b}], [], [{a,b}], [], [{a,b}]
+    %%  %% [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [],
+    %%  %% [{b,a},{d,e}],
+    %%  %% [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], [], [{a,b}], []
+    %% ].
     %% [ [{a,b}, {b,c}, {c,d}, {d,e}],
     %%   [{b,a}, {b,c}, {c,d}, {d,e}],
     %%   [{a,b}, {c,b}, {c,d}, {d,e}],
@@ -450,6 +451,7 @@ private_projections_are_stable(Namez, PollFunc) ->
     Private2 = [get_latest_inner_proj_summ(FLU) || {_Name, FLU} <- Namez],
     Is = [Inner_p || {_,_,_,_,Inner_p} <- Private1],
     %% We want either all true or all false (inner or not).
+    put(stable, Private1),
     Private1 == Private2 andalso length(lists:usort(Is)) == 1.
 
 get_latest_inner_proj_summ(FLU) ->
