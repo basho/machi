@@ -254,7 +254,7 @@ init({MyName, InitMembersDict, MgrOpts}) ->
                 %% Yes, this should be bigger, but it's a hack.  There is
                 %% no guarantee that all parties will advance to a minimum
                 %% flap awareness in the amount of time that this mgr will.
-                flap_limit=length(All_list) + 50,
+                flap_limit=length(All_list) + 10,
                 timer='undefined',
                 proj_history=queue:new(),
                 not_sanes=orddict:new(),
