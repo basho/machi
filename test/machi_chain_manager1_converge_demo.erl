@@ -449,10 +449,33 @@ private_projections_are_stable(Namez, PollFunc) ->
     Private1 = [get_latest_inner_proj_summ(FLU) || {_Name, FLU} <- Namez],
     PollFunc(5, 1, 10),
     Private2 = [get_latest_inner_proj_summ(FLU) || {_Name, FLU} <- Namez],
-    Is = [Inner_p || {_,_,_,_,Inner_p} <- Private1],
-    %% We want either all true or all false (inner or not).
+    %% Is = [Inner_p || {_,_,_,_,Inner_p} <- Private1],
     put(stable, Private1),
-    Private1 == Private2 andalso length(lists:usort(Is)) == 1.
+    io:format(user, "\nPriv1 ~p\n", [Private1]),
+    %% We want either all true or all false (inner or not) ... except
+    %% that it isn't quite that simple.  I've now witnessed a case
+    %% where the projections are stable but not everyone is
+    %% unanimously outer or unanimously inner!
+    %% Old partitions: [{a,b},{b,c},{c,a}]
+    %%                 result: all 3 had inner proj of [self]
+    %% New partitions: [{b,a},{c,b}]
+    %%                 Priv1 [{342,[c,a],[],[b],false},
+    %%                       {326,[b],[],[a,c],true},
+    %%                       {342,[c,a],[],[b],false}]
+    %%                 ... and it stays completely stable with these epoch #s.
+    %%
+    %% So, instead, if inner/outer status isn't unanimous, then we
+    %% should check to see if the sets of unique UPIs are disjoint.  If
+    %% they are, then that's sufficient!  Private1 == Private2 andalso
+    %% length(lists:usort(Is)) == 1.
+    FLUs = [FLU || {FLU,_Pid} <- Namez],
+    %% U_UPIs = lists:usort([UPI || {_Epoch,UPI,_Rep,_Down,InnerP} <- Private2]),
+    U_UPI_Rs = lists:usort([UPI++Rep ||
+                               {_Epoch,UPI,Rep,_Down,InnerP} <- Private2]),
+    Private1 == Private2 andalso
+        %% If not disjoint, then a flu will appear twice in flattented U_UPIs.
+        lists:sort(lists:flatten(U_UPI_Rs)) == lists:sort(FLUs).
+        %% lists:sort(lists:flatten(U_UPIs)) == lists:sort(FLUs).
 
 get_latest_inner_proj_summ(FLU) ->
     {ok, Proj} = ?FLU_PC:read_latest_projection(FLU, private),
