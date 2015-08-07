@@ -249,7 +249,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
            io:format(user, "\nSweet, private projections are stable\n", []),
            io:format(user, "\t~p\n", [get(stable)]),
            io:format(user, "Rolling sanity check ... ", []),
-           MaxFiles = 3*1000,
+           MaxFiles = 1*1000,
            PrivProjs = [{Name, begin
                                    {ok, Ps8} = ?FLU_PC:get_all_projections(
                                                   FLU, private, infinity),
@@ -446,12 +446,11 @@ todo_why_does_this_crash_sometimes(FLUName, FLU, PPPepoch) ->
     end.
 
 private_projections_are_stable(Namez, PollFunc) ->
-    Private1 = [get_latest_inner_proj_summ(FLU) || {_Name, FLU} <- Namez],
-    PollFunc(5, 1, 10),
-    Private2 = [get_latest_inner_proj_summ(FLU) || {_Name, FLU} <- Namez],
+    Private1 = [{Name, get_latest_inner_proj_summ(FLU)} || {Name,FLU} <- Namez],
+    [PollFunc(5, 1, 10) || _ <- lists:seq(1,2)],
+    Private2 = [{Name, get_latest_inner_proj_summ(FLU)} || {Name,FLU} <- Namez],
     %% Is = [Inner_p || {_,_,_,_,Inner_p} <- Private1],
-    put(stable, Private1),
-    io:format(user, "\nPriv1 ~p\n", [Private1]),
+    put(stable, lists:sort(Private1)),
     %% We want either all true or all false (inner or not) ... except
     %% that it isn't quite that simple.  I've now witnessed a case
     %% where the projections are stable but not everyone is
@@ -465,17 +464,36 @@ private_projections_are_stable(Namez, PollFunc) ->
     %%                 ... and it stays completely stable with these epoch #s.
     %%
     %% So, instead, if inner/outer status isn't unanimous, then we
-    %% should check to see if the sets of unique UPIs are disjoint.  If
-    %% they are, then that's sufficient!  Private1 == Private2 andalso
-    %% length(lists:usort(Is)) == 1.
+    %% should check to see if the sets of unique UPIs are disjoint.
+    %%
     FLUs = [FLU || {FLU,_Pid} <- Namez],
-    %% U_UPIs = lists:usort([UPI || {_Epoch,UPI,_Rep,_Down,InnerP} <- Private2]),
     U_UPI_Rs = lists:usort([UPI++Rep ||
-                               {_Epoch,UPI,Rep,_Down,InnerP} <- Private2]),
+                              {_Nm,{_Epoch,UPI,Rep,_Down,InnerP}} <- Private2]),
+    FLU_uses = [{Name, Epoch} ||
+                   {Name,{Epoch,_UPI,Rep,_Down,InnerP}} <- Private2],
+    Unanimous_with_all_peers_p =
+        lists:all(fun({FLU, UsesEpoch}) ->
+                          length(
+                            lists:usort(
+                              [Epoch || {Name,{Epoch,UPI,Rep,_,_}} <- Private2,
+                                        lists:member(FLU, UPI) orelse
+                                        lists:member(FLU, Rep)])) == 1
+
+                  end, FLU_uses),
+    io:format(user, "\nPriv1 ~p agree ~p\n", [lists:sort(Private1), Unanimous_with_all_peers_p]),
     Private1 == Private2 andalso
         %% If not disjoint, then a flu will appear twice in flattented U_UPIs.
-        lists:sort(lists:flatten(U_UPI_Rs)) == lists:sort(FLUs).
-        %% lists:sort(lists:flatten(U_UPIs)) == lists:sort(FLUs).
+        lists:sort(lists:flatten(U_UPI_Rs)) == lists:sort(FLUs) andalso
+        %% Another property that we want is that for each participant
+        %% X mentioned in a UPI or Repairing list of some epoch E that
+        %% X is using the same epoch E.
+        %%
+        %% It's possible (in theory) for humming consensus to agree on
+        %% the membership of UPI+Repairing but arrive those lists at
+        %% different epoch numbers.  Machi chain replication won't
+        %% work in that case: all participants need to be using the
+        %% same epoch (and csum)!  (NOTE: We ignore epoch_csum here.)
+        Unanimous_with_all_peers_p.
 
 get_latest_inner_proj_summ(FLU) ->
     {ok, Proj} = ?FLU_PC:read_latest_projection(FLU, private),
