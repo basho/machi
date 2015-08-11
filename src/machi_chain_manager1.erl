@@ -215,8 +215,12 @@ test_read_latest_public_projection(Pid, ReadRepairP) ->
 init({MyName, InitMembersDict, MgrOpts}) ->
     random:seed(now()),
     init_remember_partition_hack(),
+    Opt = fun(Key, Default) -> proplists:get_value(Key, MgrOpts, Default) end,
+    CMode = Opt(consistency_mode, ap_mode),
+    InitWitness_list = Opt(witnesses, []),
     ZeroAll_list = [P#p_srvr.name || {_,P} <- orddict:to_list(InitMembersDict)],
-    ZeroProj = make_none_projection(MyName, ZeroAll_list, [], InitMembersDict),
+    ZeroProj = make_none_projection(MyName, ZeroAll_list,
+                                    InitWitness_list, InitMembersDict),
     ok = store_zeroth_projection_maybe(ZeroProj, MgrOpts),
 
     %% Using whatever is the largest epoch number in our local private
@@ -239,8 +243,6 @@ init({MyName, InitMembersDict, MgrOpts}) ->
     Proj = machi_projection:update_checksum(
              Proj1#projection_v1{epoch_number=CurrentEpoch}),
 
-    Opt = fun(Key, Default) -> proplists:get_value(Key, MgrOpts, Default) end,
-    CMode = Opt(consistency_mode, ap_mode),
     RunEnv = [{seed, Opt(seed, now())},
               {use_partition_simulator, Opt(use_partition_simulator, false)},
               {simulate_repair, Opt(simulate_repair, true)},
@@ -318,7 +320,7 @@ handle_call({stop}, _From, S) ->
 handle_call({test_calc_projection, KeepRunenvP}, _From,
             #ch_mgr{name=MyName}=S) ->
     RelativeToServer = MyName,
-    {P, S2} = calc_projection(S, RelativeToServer),
+    {P, S2, _Up} = calc_projection(S, RelativeToServer),
     {reply, {ok, P}, if KeepRunenvP -> S2;
                         true        -> S
                      end};
@@ -728,7 +730,7 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
          end,
     P3 = machi_projection:update_checksum(
            P2#projection_v1{witnesses=OldWitness_list}),
-    {P3, S#ch_mgr{runenv=RunEnv3}}.
+    {P3, S#ch_mgr{runenv=RunEnv3}, Up}.
 
 check_latest_private_projections_same_epoch(FLUs, MyProj, Partitions, S) ->
     %% NOTE: The caller must provide us with the FLUs list for all
@@ -1023,9 +1025,9 @@ react_to_env_A20(Retries, #ch_mgr{name=MyName}=S) ->
 
 react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                  #ch_mgr{name=MyName, proj=P_current,
-                         flap_limit=FlapLimit} = S) ->
+                         consistency_mode=CMode, flap_limit=FlapLimit} = S) ->
     ?REACT(a30),
-    {P_newprop1, S2} = calc_projection(S, MyName),
+    {P_newprop1, S2, Up} = calc_projection(S, MyName),
     ?REACT({a30, ?LINE, [{current, machi_projection:make_summary(S#ch_mgr.proj)}]}),
     ?REACT({a30, ?LINE, [{newprop1, machi_projection:make_summary(P_newprop1)}]}),
     ?REACT({a30, ?LINE, [{latest, machi_projection:make_summary(P_latest)}]}),
@@ -1046,9 +1048,14 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
             {_, P_newprop3_flap_count} when P_newprop3_flap_count >= FlapLimit ->
                 AllHosed = get_all_hosed(P_newprop3),
                 P_current_inner = inner_projection_or_self(P_current),
-                {P_i, S_i} = calc_projection(unused, unused,
-                                             P_current_inner,
-                                             MyName, AllHosed, [], S3),
+                {P_i, S_i, _Up} = calc_projection(unused, unused,
+                                                  P_current_inner,
+                                                  MyName, AllHosed, [], S3),
+                ?REACT({a30, ?LINE, [{raw_all_hosed,get_all_hosed(P_newprop3)},
+                                    {up, Up},
+                                    {all_hosed, AllHosed},
+                                    {p_c_i, machi_projection:make_summary(P_current_inner)},
+                                    {p_i,machi_projection:make_summary(P_i)}]}),
                 %% The inner projection will have a fake author, which
                 %% everyone will agree is the largest UPI member's
                 %% name.
@@ -1060,7 +1067,9 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                             lists:last(lists:sort(P_i#projection_v1.upi))
                     end,
                 P_i2 = P_i#projection_v1{author_server=BiggestUPIMember},
-                P_inner = case lists:member(MyName, AllHosed) of
+                P_inner = case lists:member(MyName, AllHosed) andalso
+                               CMode == ap_mode
+                          of
                               false ->
                                   P_i2;
                               true ->
@@ -1221,8 +1230,8 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
             %% inner to outer projections, the partition situation has
             %% altered significantly.  Use calc_projection() to find out what
             %% nodes are down *now* (as best as we can tell right now).
-            {P_o, S_o} = calc_projection(unused, unused,
-                                         P_inner2B, MyName, [], [], S10),
+            {P_o, S_o, _Up2} = calc_projection(unused, unused,
+                                               P_inner2B, MyName, [], [], S10),
             react_to_env_A40(Retries, P_o, P_latest, LatestUnanimousP, S_o);
        true ->
             ?REACT({a30, ?LINE, []}),
@@ -1230,14 +1239,27 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                              LatestUnanimousP, S10)
     end.
 
+a40_latest_author_down(#projection_v1{author_server=LatestAuthor}=_P_latest,
+                       #projection_v1{upi=[], repairing=[],
+                                      all_members=AllMembers}=_P_newprop,
+                       #ch_mgr{name=MyName, runenv=RunEnv}) ->
+    %% P_newprop is the none projection.  P_newprop's down list is
+    %% bogus, we cannot use it here.
+    {Up, _Partitions, _RunEnv2} = calc_up_nodes(MyName, AllMembers, RunEnv),
+    ?REACT({a40,?LINE,[{latest_author,LatestAuthor}, {up,Up}]}),
+    lists:member(LatestAuthor, Up);
+a40_latest_author_down(#projection_v1{author_server=LatestAuthor}=_P_latest,
+                       #projection_v1{down=NewPropDown}=_P_newprop, _S) ->
+    lists:member(LatestAuthor, NewPropDown).
+
 react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                  #ch_mgr{name=MyName, proj=P_current}=S) ->
     ?REACT(a40),
     [{Rank_newprop, _}] = rank_projections([P_newprop], P_current),
     [{Rank_latest, _}] = rank_projections([P_latest], P_current),
-    LatestAuthorDownP = lists:member(P_latest#projection_v1.author_server,
-                                     P_newprop#projection_v1.down)
-        andalso P_latest#projection_v1.author_server /= MyName,
+    LatestAuthorDownP = a40_latest_author_down(P_latest, P_newprop, S)
+                        andalso
+                        P_latest#projection_v1.author_server /= MyName,
 
     if
         %% Epoch == 0 is reserved for first-time, just booting conditions.
@@ -1360,6 +1382,7 @@ react_to_env_A50(P_latest, FinalProps, S) ->
     ?REACT(a50),
     ?REACT({a50, ?LINE, [{latest_epoch, P_latest#projection_v1.epoch_number},
                          {final_props, FinalProps}]}),
+%% io:format(user, "A50: ~p: ~W\n", [S#ch_mgr.name, get(react), 60]),
     {{no_change, FinalProps, P_latest#projection_v1.epoch_number}, S}.
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
@@ -1668,8 +1691,8 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
                                              S#ch_mgr.opts) of
                         true when Summ2 /= Last2 ->
                             put(last_verbose, Summ2),
-                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w\n",
-                              [HH,MM,SS,MSec, S#ch_mgr.name, Summ2]);
+                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: (outer epoch ~w) ~w: ~w\n",
+                              [HH,MM,SS,MSec, S#ch_mgr.name, P_latest2#projection_v1.epoch_number, Summ2, get(react)]);
                         _ ->
                             ok
                     end
@@ -1826,7 +1849,9 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
             %% magically knows about both problem FLUs.  Weird/cool.
 
             AllFlapCounts = TempAllFlapCounts,
-            AllHosed = lists:usort(DownUnion ++ HosedTransUnion ++ BadFLUs);
+            AnnotatedBadFLUs = [{MyName, problem_with, FLU} || FLU <- BadFLUs],
+            AllHosed = lists:usort(DownUnion ++ HosedTransUnion ++ BadFLUs ++
+                                       AnnotatedBadFLUs);
         {_N, _} ->
             NewFlaps = 0,
             NewFlapStart = ?NOT_FLAPPING_START,
