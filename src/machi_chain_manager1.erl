@@ -1247,7 +1247,7 @@ a40_latest_author_down(#projection_v1{author_server=LatestAuthor}=_P_latest,
     %% bogus, we cannot use it here.
     {Up, _Partitions, _RunEnv2} = calc_up_nodes(MyName, AllMembers, RunEnv),
     ?REACT({a40,?LINE,[{latest_author,LatestAuthor}, {up,Up}]}),
-    lists:member(LatestAuthor, Up);
+    not lists:member(LatestAuthor, Up);
 a40_latest_author_down(#projection_v1{author_server=LatestAuthor}=_P_latest,
                        #projection_v1{down=NewPropDown}=_P_newprop, _S) ->
     lists:member(LatestAuthor, NewPropDown).
