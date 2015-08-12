@@ -7,6 +7,8 @@ erl_crash.dump
 .concrete/DEV_MODE
 .rebar
 edoc
+# ignore vim swap files
+*.swp
 
 # PB artifacts for Erlang
 include/machi_pb.hrl
