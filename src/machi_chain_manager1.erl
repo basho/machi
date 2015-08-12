@@ -388,6 +388,12 @@ make_none_projection(MyName, All_list, Witness_list, MembersDict) ->
     P = machi_projection:new(MyName, MembersDict, Down_list, UPI_list, [], []),
     machi_projection:update_checksum(P#projection_v1{witnesses=Witness_list}).
 
+make_all_projection(MyName, All_list, Witness_list, MembersDict) ->
+    Down_list = [],
+    UPI_list = All_list,
+    P = machi_projection:new(MyName, MembersDict, Down_list, UPI_list, [], []),
+    machi_projection:update_checksum(P#projection_v1{witnesses=Witness_list}).
+
 get_my_private_proj_boot_info(MgrOpts, DefaultDict, DefaultProj) ->
     get_my_proj_boot_info(MgrOpts, DefaultDict, DefaultProj, private).
 
@@ -588,28 +594,52 @@ do_read_repair(FLUsRs, _Extra, #ch_mgr{proj=CurrentProj} = S) ->
 calc_projection(S, RelativeToServer) ->
     calc_projection(S, RelativeToServer, []).
 
-calc_projection(#ch_mgr{proj=LastProj, runenv=RunEnv} = S,
+calc_projection(#ch_mgr{proj=LastProj, consistency_mode=CMode,
+                        runenv=RunEnv} = S,
                 RelativeToServer, AllHosed) ->
     Dbg = [],
     OldThreshold = proplists:get_value(old_threshold, RunEnv),
     NoPartitionThreshold = proplists:get_value(no_partition_threshold, RunEnv),
-    calc_projection(OldThreshold, NoPartitionThreshold, LastProj,
-                    RelativeToServer, AllHosed, Dbg, S).
+    if CMode == ap_mode ->
+            calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg, S);
+       CMode == cp_mode ->
+            #projection_v1{epoch_number=OldEpochNum,
+                           members_dict=MembersDict,
+                           all_members=AllMembers,
+                           witnesses=OldWitness_list,
+                           upi=OldUPI_list,
+                           repairing=OldRepairing_list
+                          } = LastProj,
+            UPI_length_ok_p =
+                length(OldUPI_list) >= full_majority_size(AllMembers),
+            case {OldEpochNum, UPI_length_ok_p} of
+                {0, _} ->
+                    calc_projection2(LastProj, RelativeToServer, AllHosed,
+                                     Dbg, S);
+                {_, true} ->
+                    calc_projection2(LastProj, RelativeToServer, AllHosed,
+                                     Dbg, S);
+                {_, false} ->
+                    case make_zerf(LastProj, S) of
+                        Zerf when is_record(Zerf, projection_v1) ->
+                            calc_projection2(Zerf, RelativeToServer, AllHosed,
+                                             Dbg, S);
+                        Zerf ->
+                            {{{yo_todo_incomplete_fix_me_cp_mode, OldEpochNum, OldUPI_list, Zerf}}}
+                    end
+            end
+    end.
 
-%% OldThreshold: Percent chance of using the old/previous network partition list
-%% NoPartitionThreshold: If the network partition changes, what percent chance
-%%                       that there are no partitions at all?
 %% AllHosed: FLUs that we must treat as if they are down, e.g., we are
 %%           in a flapping situation and wish to ignore FLUs that we
 %%           believe are bad-behaving causes of our flapping.
 
-calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
-                RelativeToServer, AllHosed, Dbg,
-                #ch_mgr{name=MyName,
-                        proj=CurrentProj,
-                        consistency_mode=CMode,
-                        runenv=RunEnv1,
-                        repair_final_status=RepairFS}=S) ->
+calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
+                 #ch_mgr{name=MyName,
+                         proj=CurrentProj,
+                         consistency_mode=CMode,
+                         runenv=RunEnv1,
+                         repair_final_status=RepairFS}=S) ->
     #projection_v1{epoch_number=OldEpochNum,
                    members_dict=MembersDict,
                    witnesses=OldWitness_list,
@@ -702,7 +732,7 @@ calc_projection(_OldThreshold, _NoPartitionThreshold, LastProj,
     P2 = if CMode == cp_mode ->
                  %% TODO incompete logic!
                  UpWitnesses = [W || W <- Up, lists:member(W, OldWitness_list)],
-                 Majority = full_majority_size(length(AllMembers)),
+                 Majority = full_majority_size(AllMembers),
                  SoFar = length(NewUPI),
                  if SoFar >= Majority ->
                          P;
@@ -928,12 +958,18 @@ do_react_to_env(S) ->
     %% counter values of 0 & 1.
     %%
     put(react, []),
-    if S#ch_mgr.sane_transitions > 3 ->         % TODO review this constant
-            %% ?V("Skr,~w,", [S#ch_mgr.name]),
-            react_to_env_A10(S#ch_mgr{not_sanes=orddict:new()});
-       true ->
-            %% ?V("Sk,~w,~w,", [S#ch_mgr.name, S#ch_mgr.sane_transitions]),
-            react_to_env_A10(S)
+    try
+        if S#ch_mgr.sane_transitions > 3 ->         % TODO review this constant
+                %% ?V("Skr,~w,", [S#ch_mgr.name]),
+                react_to_env_A10(S#ch_mgr{not_sanes=orddict:new()});
+           true ->
+                %% ?V("Sk,~w,~w,", [S#ch_mgr.name, S#ch_mgr.sane_transitions]),
+                react_to_env_A10(S)
+        end
+    catch
+        throw:{zerf,_} ->
+            Proj = S#ch_mgr.proj,
+            {{no_change, [], Proj#projection_v1.epoch_number}, S}
     end.
 
 react_to_env_A10(S) ->
@@ -1048,9 +1084,8 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
             {_, P_newprop3_flap_count} when P_newprop3_flap_count >= FlapLimit ->
                 AllHosed = get_all_hosed(P_newprop3),
                 P_current_inner = inner_projection_or_self(P_current),
-                {P_i, S_i, _Up} = calc_projection(unused, unused,
-                                                  P_current_inner,
-                                                  MyName, AllHosed, [], S3),
+                {P_i, S_i, _Up} = calc_projection2(P_current_inner,
+                                                   MyName, AllHosed, [], S3),
                 ?REACT({a30, ?LINE, [{raw_all_hosed,get_all_hosed(P_newprop3)},
                                     {up, Up},
                                     {all_hosed, AllHosed},
@@ -1230,8 +1265,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
             %% inner to outer projections, the partition situation has
             %% altered significantly.  Use calc_projection() to find out what
             %% nodes are down *now* (as best as we can tell right now).
-            {P_o, S_o, _Up2} = calc_projection(unused, unused,
-                                               P_inner2B, MyName, [], [], S10),
+            {P_o, S_o, _Up2} = calc_projection2(P_inner2B, MyName, [], [], S10),
             react_to_env_A40(Retries, P_o, P_latest, LatestUnanimousP, S_o);
        true ->
             ?REACT({a30, ?LINE, []}),
@@ -1253,13 +1287,17 @@ a40_latest_author_down(#projection_v1{author_server=LatestAuthor}=_P_latest,
     lists:member(LatestAuthor, NewPropDown).
 
 react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
-                 #ch_mgr{name=MyName, proj=P_current}=S) ->
+                 #ch_mgr{name=MyName, consistency_mode=CMode,
+                         proj=P_current}=S) ->
     ?REACT(a40),
     [{Rank_newprop, _}] = rank_projections([P_newprop], P_current),
     [{Rank_latest, _}] = rank_projections([P_latest], P_current),
     LatestAuthorDownP = a40_latest_author_down(P_latest, P_newprop, S)
                         andalso
                         P_latest#projection_v1.author_server /= MyName,
+    ?REACT({a40, ?LINE,
+            [{latest_author, P_latest#projection_v1.author_server},
+             {author_is_down_p, LatestAuthorDownP}]}),
 
     if
         %% Epoch == 0 is reserved for first-time, just booting conditions.
@@ -2520,5 +2558,130 @@ clear_flapping_state(S) ->
              flap_start=?NOT_FLAPPING_START,
              not_sanes=orddict:new()}.
 
-full_majority_size(N) ->
-    (N div 2) + 1.
+full_majority_size(N) when is_integer(N) ->
+    (N div 2) + 1;
+full_majority_size(L) when is_list(L) ->
+    full_majority_size(length(L)).
+
+make_zerf(#projection_v1{epoch_number=OldEpochNum,
+                         all_members=AllMembers,
+                         members_dict=MembersDict,
+                         witnesses=OldWitness_list,
+                         upi=OldUPI_list,
+                         repairing=OldRepairing_list
+                        } = _LastProj,
+          #ch_mgr{name=MyName,
+                  proj=CurrentProj,
+                  consistency_mode=cp_mode,
+                  runenv=RunEnv1} = S) ->
+    {Up, _Partitions, _RunEnv2} = calc_up_nodes(MyName,
+                                                AllMembers, RunEnv1),
+    MajoritySize = full_majority_size(AllMembers),
+    case length(Up) >= MajoritySize of
+        false ->
+            throw({zerf, {not_enough_up, Up, AllMembers}});
+        true ->
+            make_zerf2(OldEpochNum, Up, MajoritySize, MyName,
+                       AllMembers, OldWitness_list, MembersDict, S)
+    end.
+
+make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list, MembersDict, S) ->
+    try
+        put(epochs, []),
+        Epochs = lists:reverse(
+                   lists:usort(
+                     lists:flatten(
+                       [begin
+                            Proxy = proxy_pid(FLU, S),
+                            {ok, Es} = ?FLU_PC:list_all_projections(
+                                          Proxy, private, 5*1000),
+                            [E || E <- Es, E =< OldEpochNum]
+                        end || FLU <- Up]))),
+        put(epochs, Epochs),
+        Relation = [],
+        zerf_find_last_common(Epochs, Relation, MajoritySize, Up, S)
+    catch
+        throw:{zerf,no_common} ->
+            case lists:usort(get(epochs)) of
+                [0] ->
+                    %% Epoch 0 special case: make the "all" projection.
+                    %% calc_projection2() will then filter out any FLUs that
+                    %% aren't currently up to create the first chain.  If not
+                    %% enough are up now, then it will fail to create a first
+                    %% chain.
+                    P = make_all_projection(MyName, AllMembers, OldWitness_list,
+                                            MembersDict),
+                    machi_projection:update_checksum(
+                      P#projection_v1{epoch_number=OldEpochNum});
+                _ ->
+                    %% TODO: This corner case needs more thought.
+                    %%
+                    %% Easy case: epoch 1, All=[a,b,c], UPI=[a,b],
+                    %%            Private by a is ok, then *all* crash.
+                    %%            Upon restart, we see 'partial write' for
+                    %%            epoch 1 but not unanimous.  Nobody can
+                    %%            proceed because this case ends up getting
+                    %%            stuck here.
+                    %%
+                    %% Hard case: Is it always true that *all* possible
+                    %% private projections are not unanimous and therefore
+                    %% the chain has never had a single stable configuration
+                    %% and therefore we should act like the [epoch=0] case
+                    %% above??  I don't believe that this is correct, but I
+                    %% need to ponder more................
+                    throw({zerf, undecidable})
+            end;
+        _X:_Y ->
+            throw({zerf, {damn_exception, Up, _X, _Y, erlang:get_stacktrace()}})
+    after
+        erase(epochs)
+    end.
+
+zerf_find_last_common([], _Relation, _MajoritySize, _Up, _S) ->
+    throw({zerf, no_common});
+zerf_find_last_common(UnsearchedEpochs, Relation, MajoritySize, Up, S) ->
+    {NowEpochs, NextEpochs} = my_lists_split(5, UnsearchedEpochs),
+    Rel2 = lists:foldl(
+             fun({E, FLU}, Rel) ->
+                     Proxy = proxy_pid(FLU, S),
+                     case ?FLU_PC:read_projection(Proxy, private, E,
+                                                  5*1000) of
+                         {ok, Proj} ->
+                             %% Sort order: we want inner = bigger.
+                             OorI = case inner_projection_exists(Proj) of
+                                        true  -> z_inner;
+                                        false -> a_outer
+                                    end,
+                             K = {E, OorI, Proj#projection_v1{dbg2=[]}},
+                             Rel2 = case lists:keyfind(K, 1, Rel) of
+                                        false ->
+                                            [{K, [FLU]}|Rel];
+                                        {K, OldV} ->
+                                            NewV = lists:usort([FLU|OldV]),
+                                            NewT = {K, NewV},
+                                            lists:keyreplace(K, 1, Rel,
+                                                             NewT)
+                                    end,
+                             Rel2;
+                         {error, not_written} ->
+                             Rel
+                     end
+             end, Relation, [{E, FLU} || E <- NowEpochs, FLU <- Up]),
+    SortedRel = lists:sort(lists:reverse(Rel2)),
+    case [T || T={{E, OorI, Proj}, WrittenFLUs} <- SortedRel,
+               lists:sort(Proj#projection_v1.upi) == lists:sort(WrittenFLUs)
+               andalso
+               length(Proj#projection_v1.upi) >= MajoritySize] of
+        [] ->
+            zerf_find_last_common(NextEpochs, Rel2, MajoritySize, Up, S);
+        [{{E, OorI, Proj}, _WrittenFLUs}|_] ->
+            Proj
+    end.
+
+my_lists_split(N, L) ->
+    try
+        lists:split(N, L)
+    catch
+        error:badarg ->
+            {L, []}
+    end.
