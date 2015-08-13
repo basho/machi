@@ -249,7 +249,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                             private_projections_are_stable(Namez, DoIt)
                     end, false, lists:seq(0, MaxIters)),
            io:format(user, "\nSweet, private projections are stable\n", []),
-           io:format(user, "\t~P\n", [get(stable), 10]),
+           io:format(user, "\t~P\n", [get(stable), 14]),
            io:format(user, "Rolling sanity check ... ", []),
            MaxFiles = 1*1000,
            PrivProjs = [{Name, begin
@@ -271,6 +271,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                    exit({line, ?LINE, _Err, _What})
            end,
            io:format(user, "Yay!\n", []),
+%% io:format(user, "\n\nEXITING!\n\n", []), timer:sleep(500), erlang:halt(0),
            ReportXX = machi_chain_manager1_test:unanimous_report(Namez),
            true = machi_chain_manager1_test:all_reports_are_disjoint(ReportXX),
            io:format(user, "Yay for ReportXX!\n", []),
@@ -393,13 +394,14 @@ make_partition_list(All_list) ->
     %% [ [{a,b}, {b,a}] ].
 
     [
-      [{a,b}, {a,c}], [],
+      [{a,b}], [],
       [{b,a}, {b,c}], [],
-      [{c,b}, {c,a}], [],
+      [{c,b}, {c,a}, {d,c}]
+      %% [{c,b}, {c,a}], [],
 
-      [{b,a}, {c,a}], [],
-      [{a,b}, {c,b}], [],
-      [{b,c}, {a,c}]
+      %% [{b,a}, {c,a}], [],
+      %% [{a,b}, {c,b}], [],
+      %% [{b,c}, {a,c}]
     ].
 
     %% [ [{a,b},{b,c},{c,a}],
@@ -491,19 +493,18 @@ private_projections_are_stable(Namez, PollFunc) ->
                    WhoInEpoch = [Name ||
                                   {Name,{Epoch,_UPI,_Rep,_Dn,_W,I_}}<-Private2,
                                   Epoch == UsesEpoch],
-                   UPI_versions = [UPI ||
-                               {_Name,{Epoch,UPI,_Rep,_Dn,_W,I_}}<-Private2,
+                   WhoInEpoch_s = ordsets:from_list(WhoInEpoch),
+                   UPI_R_versions = [UPI++Rep ||
+                               {_Name,{Epoch,UPI,Rep,_Dn,_W,I_}}<-Private2,
                                Epoch == UsesEpoch],
-                   UPI_versions == [ [] ] % This FLU in minority partition
+                   UPI_R_vers_s = ordsets:from_list(hd(UPI_R_versions)),
+                   UPI_R_versions == [ [] ] % This FLU in minority partition
                    orelse
-                   (length(lists:usort(UPI_versions)) == 1
+                   (length(lists:usort(UPI_R_versions)) == 1
                     andalso
-                    (lists:sort(hd(UPI_versions)) == lists:sort(WhoInEpoch)
-                     orelse
-                     (HaveWitnesses_p andalso
-                      lists:sort(hd(UPI_versions)) == lists:sort(WhoInEpoch--Witnesses))))
+                    ordsets:is_subset(UPI_R_vers_s, WhoInEpoch_s))
                   end, FLU_uses),
-    %% io:format(user, "\nPriv1 ~P agree ~p\n", [lists:sort(Private1), 10, Unanimous_with_all_peers_p]),
+    %% io:format(user, "\nPriv1 ~P agree ~p\n", [lists:sort(Private1), 14, Unanimous_with_all_peers_p]),
 
     %%io:format(user, "U_UPI_Rs ~p\n", [U_UPI_Rs]),
     %%io:format(user, "FLUs ~p\n", [FLUs]),
