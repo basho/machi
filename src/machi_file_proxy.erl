@@ -23,7 +23,17 @@
 %% conceit at the heart of Machi's design.
 %%
 %% Read, write and append requests for a single file will be managed 
-%% through this proxy.
+%% through this proxy.  Clients can also request syncs for specific
+%% types of filehandles.
+%%
+%% As operations are requested, the proxy keeps track of how many
+%% operations it has performed (and how many errors were generated.)
+%% After a sufficient number of inactivity, the server terminates 
+%% itself.
+%%
+%% TODO:
+%% 1. Some way to transition the proxy into/out of a wedged state that 
+%% doesn't rely on message delivery.
 
 -module(machi_file_proxy).
 -behaviour(gen_server).
@@ -38,8 +48,8 @@
     read/3,
     write/3,
     write/4,
-    append/3,
-    append/5
+    append/2,
+    append/4
 ]).
 
 %% gen_server callbacks
@@ -55,14 +65,15 @@
 -define(TICK, 5*1000).
 -define(TICK_THRESHOLD, 5). %% After this + 1 more quiescent ticks, shutdown
 -define(TIMEOUT, 10*1000).
+-define(TOO_MANY_ERRORS_RATIO, 50).
 
--type op_stats() :: { Total :: non_neg_integer(), Errors :: non_neg_integer()}.
+-type op_stats() :: { Total :: non_neg_integer(), Errors :: non_neg_integer() }.
     
 -record(state, {
     data_dir :: string() | undefined,
     filename :: string() | undefined,
     data_path :: string() | undefined,
-    sealed = false :: true|false, %% XXX sealed means this file is closed to new writes; not sure if useful
+    wedged = false :: boolean(), 
     csum_file :: string()|undefined,
     csum_path :: string()|undefined,
     last_write_offset = 0 :: non_neg_integer(),
@@ -79,27 +90,28 @@
 %% Public API
 
 start_link(Filename, DataDir) ->
-    gen_server:start_link({local, to_atom(Filename)}, ?MODULE, {Filename, DataDir}, []).
+    gen_server:start_link(?MODULE, {Filename, DataDir}, []).
 
 % @doc Force a sync of all filehandles
--spec sync(Filename :: string()) -> ok|{error, term()}.
-sync(Filename) ->
-    sync(Filename, all).
+-spec sync(Pid :: pid()) -> ok|{error, term()}.
+sync(Pid) ->
+    sync(Pid, all).
 
 % @doc Force a sync of a specific filehandle type. Valid types are `all', `csum' and `data'.
--spec sync(Filename :: string(), Type :: all|data|csum) -> ok|{error, term()}.
-sync(Filename, Type) ->
-    gen_server:call(to_atom(Filename), {sync, Type}, ?TIMEOUT).
+-spec sync(Pid :: pid(), Type :: all|data|csum) -> ok|{error, term()}.
+sync(Pid, Type) ->
+    gen_server:call(Pid, {sync, Type}, ?TIMEOUT).
 
 % @doc Read file at offset for length
--spec read(Filename :: string(), Offset :: non_neg_integer(), Length :: non_neg_integer()) -> {ok, binary()}|{error, term()}.
-read(Filename, Offset, Length) ->
-    gen_server:call(to_atom(Filename), {read, Offset, Length}, ?TIMEOUT).
+-spec read(Pid :: pid(), Offset :: non_neg_integer(), 
+           Length :: non_neg_integer()) -> {ok, Data :: binary(), Checksum :: binary()}|{error, term()}.
+read(Pid, Offset, Length) ->
+    gen_server:call(Pid, {read, Offset, Length}, ?TIMEOUT).
 
 % @doc Write data at offset
--spec write(Filename :: string(), Offset :: non_neg_integer(), Data :: binary()) -> ok.
-write(Filename, Offset, Data) ->
-    write(Filename, Offset, [], Data).
+-spec write(Pid :: pid(), Offset :: non_neg_integer(), Data :: binary()) -> ok.
+write(Pid, Offset, Data) ->
+    write(Pid, Offset, [], Data).
 
 % @doc Write data at offset, including the client metadata. ClientMeta is a proplist
 % that expects the following keys and values: 
@@ -107,22 +119,23 @@ write(Filename, Offset, Data) ->
 %       <li>`client_csum_tag' - the type of checksum from the client as defined in the machi.hrl file
 %       <li>`client_csum' - the checksum value from the client
 % </ul>
--spec write(Filename :: string(), Offset :: non_neg_integer(), ClientMeta :: proplists:proplist(), 
+-spec write(Pid :: pid(), Offset :: non_neg_integer(), ClientMeta :: proplists:proplist(), 
             Data :: binary()) -> ok|{error, term()}.
-write(Filename, Offset, ClientMeta, Data) ->
-    gen_server:call(to_atom(Filename), {write, Offset, ClientMeta, Data}, ?TIMEOUT).
+write(Pid, Offset, ClientMeta, Data) ->
+    gen_server:call(Pid, {write, Offset, ClientMeta, Data}, ?TIMEOUT).
 
-% @doc Append data at offset
--spec append(Filename :: string(), Offset :: non_neg_integer(), Data :: binary()) -> ok|{error, term()}.
-append(Filename, Offset, Data) ->
-    append(Filename, Offset, [], 0, Data).
+% @doc Append data
+-spec append(Pid :: pid(), Data :: binary()) -> ok|{error, term()}.
+append(Pid, Data) ->
+    append(Pid, [], 0, Data).
 
-% @doc Append data at offset, supplying client metadata and (if desired) a reservation for
-% additional space.  ClientMeta is a proplist and expects the same keys as write/4.
--spec append(Filename :: string(), Offset :: non_neg_integer(), ClientMeta :: proplists:proplist(), 
+% @doc Append data to file, supplying client metadata and (if desired) a
+% reservation for additional space.  ClientMeta is a proplist and expects the
+% same keys as write/4.
+-spec append(Pid :: pid(), ClientMeta :: proplists:proplist(), 
              Extra :: non_neg_integer(), Data :: binary()) -> ok|{error, term()}.
-append(Filename, Offset, ClientMeta, Extra, Data) ->
-    gen_server:call(to_atom(Filename), {append, Offset, ClientMeta, Extra, Data}, ?TIMEOUT).
+append(Pid, ClientMeta, Extra, Data) ->
+    gen_server:call(Pid, {append, ClientMeta, Extra, Data}, ?TIMEOUT).
 
 %% TODO
 %% read_repair(Filename, Offset, Data) ???
@@ -135,9 +148,10 @@ append(Filename, Offset, ClientMeta, Extra, Data) ->
 init({Filename, DataDir}) ->
     CsumFile = machi_util:make_csum_filename(DataDir, Filename),
     {_, DPath} = machi_util:make_data_filename(DataDir, Filename),
-    LastWriteOffset = get_last_offset_from_csum_file(CsumFile),
-    %% The paranoid might do a file info request to validate that the 
-    %% calculated offset is the same as the on-disk file's length
+    LastWriteOffset = case parse_csum_file(CsumFile) of 
+        0 -> ?MINIMUM_OFFSET;
+        V -> V
+    end,
     {ok, FHd} = file:open(DPath, [read, write, binary, raw]),
     {ok, FHc} = file:open(CsumFile, [append, binary, raw]),
     Tref = schedule_tick(),
@@ -181,13 +195,11 @@ handle_call({sync, all}, _From, State = #state{filename = F,
 
 %%% READS
 
-handle_call({read, Offset, _Length}, _From, 
-                State = #state{last_write_offset = Last,
-                               reads = {T, Err}
-                              }) when Offset > Last ->
-    lager:error("Read request at offset ~p is past the last write offset of ~p", 
-                [Offset, Last]),
-    {reply, {error, not_written}, State#state{reads = {T + 1, Err + 1}}};
+handle_call({read, _Offset, _Length}, _From, 
+            State = #state{wedged = true,
+                           reads = {T, Err}
+                          }) ->
+    {reply, {error, wedged}, State#state{writes = {T + 1, Err + 1}}};
 
 handle_call({read, Offset, Length}, _From, 
                 State = #state{last_write_offset = Last,
@@ -202,39 +214,26 @@ handle_call({read, Offset, Length}, _From,
                            data_filehandle = FH,
                            reads = {T, Err}
                           }) ->
-    {Resp, NewErr} = case file:pread(FH, Offset, Length) of
-        {ok, Bytes} when byte_size(Bytes) == Length ->
-            lager:debug("successful read at ~p of ~p bytes", [Offset, Length]),
-            {{ok, Bytes}, Err};
-        {ok, Partial} ->
-            lager:error("read ~p bytes, wanted ~p at offset ~p in file ~p", 
-                [byte_size(Partial), Length, Offset, F]),
-            {{error, partial_read}, Err + 1};
+
+    Checksum = get({Offset, Length}), %% N.B. Maybe be 'undefined'!
+
+    {Resp, NewErr} = case do_read(FH, F, Checksum, Offset, Length) of
+        {ok, Bytes, Csum} ->
+            {{ok, Bytes, Csum}, Err};
         eof ->
-            lager:debug("Got eof on read operation", []),
             {{error, not_written}, Err + 1};
-        Other ->
-            lager:warning("Got ~p during file read operation on ~p", [Other, F]),
-            {{error, Other}, Err + 1}
+        Error ->
+            {Error, Err + 1}
     end,
     {reply, Resp, State#state{reads = {T+1, NewErr}}};
 
 %%% WRITES
 
 handle_call({write, _Offset, _ClientMeta, _Data}, _From, 
-            State = #state{sealed = true,
+            State = #state{wedged = true,
                            writes = {T, Err}
                           }) ->
-    {reply, {error, sealed}, State#state{writes = {T + 1, Err + 1}}};
-
-handle_call({write, Offset, _ClientMeta, _Data}, _From, 
-            State = #state{last_write_offset = Last,
-                           writes = {T, Err}
-                          }) when Offset =< Last ->
-    {reply, {error, written}, State#state{writes = {T + 1, Err + 1}}};
-
-%% XXX: What if the chunk is larger than the max file size??
-%% XXX: What if the chunk is larger than the physical disk we have??
+    {reply, {error, wedged}, State#state{writes = {T + 1, Err + 1}}};
 
 handle_call({write, Offset, ClientMeta, Data}, _From, 
             State = #state{last_write_offset = Last,
@@ -242,85 +241,83 @@ handle_call({write, Offset, ClientMeta, Data}, _From,
                            writes = {T, Err},
                            data_filehandle = FHd,
                            csum_filehandle = FHc
-                          }) when Offset > Last ->
+                          }) ->
 
-    ClientCsumTag = proplists:get_value(client_csum_tag, ClientMeta), %% gets 'undefined' if not found
-    ClientCsum = proplists:get_value(client_csum, ClientMeta), %% also potentially 'undefined'
-    Size = iolist_size(Data),
+    ClientCsumTag = proplists:get_value(client_csum_tag, ClientMeta, ?CSUM_TAG_NONE), 
+    ClientCsum = proplists:get_value(client_csum, ClientMeta, <<>>), 
 
     {Resp, NewErr, NewLast} = 
     case check_or_make_tagged_csum(ClientCsumTag, ClientCsum, Data) of
-        {error, Error} ->
-                {{error, Error}, Err + 1, Last};
+        {error, {bad_csum, Bad}} ->
+            lager:error("Bad checksum on write; client sent ~p, we computed ~p", 
+                        [ClientCsum, Bad]),
+            {{error, bad_csum}, Err + 1, Last};
         TaggedCsum ->
-                %% Is additional paranoia warranted here? Should we attempt a pread
-                %% at this position
-                case file:pwrite(FHd, Offset, Data) of
-                    ok ->
-                        EncodedCsum = encode_csum_file_entry(Offset, Size, TaggedCsum),
-                        ok = file:write(FHc, EncodedCsum),
-                        {ok, Err, Last + Size};
-                    Other ->
-                        lager:error("Got ~p during write on file ~p at offset ~p, length ~p",
-                            [Other, F, Offset, Size]),
-                        {Other, Err + 1, Last} %% How do we detect partial writes? Pretend they don't exist? :)
-                end
+            case handle_write(FHd, FHc, F, TaggedCsum, Offset, Data) of
+                ok ->
+                    {ok, Err, Last + Offset};
+                Error ->
+                    {Error, Err + 1, Last}
+            end
     end,
     {reply, Resp, State#state{writes = {T+1, NewErr}, last_write_offset = NewLast}};
 
 %% APPENDS
 
-handle_call({append, _Offset, _ClientMeta, _Extra, _Data}, _From, 
-            State = #state{sealed = true,
+handle_call({append, _ClientMeta, _Extra, _Data}, _From, 
+            State = #state{wedged = true,
                            appends = {T, Err}
                           }) ->
-    {reply, {error, sealed}, State#state{appends = {T+1, Err+1}}};
+    {reply, {error, wedged}, State#state{appends = {T+1, Err+1}}};
 
-handle_call({append, Offset, _ClientMeta, _Extra, _Data}, _From, 
-            State = #state{last_write_offset = Last,
-                           appends = {T, Err}
-                          }) when Offset =< Last ->
-    {reply, {error, written}, State#state{appends = {T+1, Err+1}}};
-
-handle_call({append, Offset, ClientMeta, Extra, Data}, _From, 
+handle_call({append, ClientMeta, Extra, Data}, _From, 
             State = #state{last_write_offset = Last,
                            filename = F,
                            appends = {T, Err},
                            data_filehandle = FHd,
                            csum_filehandle = FHc
-                          }) when Offset > Last ->
+                          }) ->
 
-    ClientCsumTag = proplists:get_value(client_csum_tag, ClientMeta), %% gets 'undefined' if not found
-    ClientCsum = proplists:get_value(client_csum, ClientMeta), %% also potentially 'undefined'
+    ClientCsumTag = proplists:get_value(client_csum_tag, ClientMeta, ?CSUM_TAG_NONE), 
+    ClientCsum = proplists:get_value(client_csum, ClientMeta, <<>>), 
     Size = iolist_size(Data),
 
     {Resp, NewErr, NewLast} = 
     case check_or_make_tagged_csum(ClientCsumTag, ClientCsum, Data) of
-        {error, Error} ->
-                {{error, Error}, Err + 1, Last};
+        {error, {bad_csum, Bad}} ->
+            lager:error("Bad checksum; client sent ~p, we computed ~p",
+                        [ClientCsum, Bad]),
+            {{error, bad_csum}, Err + 1, Last};
         TaggedCsum ->
-                %% Is additional paranoia warranted here? 
-                %% Should we attempt a pread at offset?
-                case file:pwrite(FHd, Offset, Data) of
-                    ok ->
-                        EncodedCsum = encode_csum_file_entry(Offset, Size, TaggedCsum),
-                        ok = file:write(FHc, EncodedCsum),
-                        {ok, Err, Last + Size + Extra};
-                    Other ->
-                        lager:error("Got ~p during append on file ~p at offset ~p, length ~p",
-                            [Other, F, Offset, Size]),
-                        {Other, Err + 1, Last} %% How do we detect partial writes? Pretend they don't exist? :)
-                end
+            case handle_write(FHd, FHc, F, TaggedCsum, Last, Data) of
+                ok ->
+                    {{ok, F, Last}, Err, Last + Size + Extra};
+                Error ->
+                    {Error, Err + 1, Last}
+            end
     end,
     {reply, Resp, State#state{appends = {T+1, NewErr}, last_write_offset = NewLast}};
 
 handle_call(Req, _From, State) ->
     lager:warning("Unknown call: ~p", [Req]),
-    {reply, whaaaaaaaaaa, State}.
+    {reply, whoaaaaaaaaaaaa, State}.
 
 handle_cast(Cast, State) ->
     lager:warning("Unknown cast: ~p", [Cast]),
     {noreply, State}.
+
+%% I dunno. This may not be a good idea, but it seems like if we're throwing lots of
+%% errors, we ought to shut down and give up our file descriptors.
+handle_info(tick, State = #state{
+                             ops = Ops,
+                             reads = {RT, RE},
+                             writes = {WT, WE},
+                             appends = {AT, AE}
+                            }) when Ops > 100 andalso 
+                               trunc(((RE+WE+AE) / RT+WT+AT) * 100) > ?TOO_MANY_ERRORS_RATIO ->
+    Errors = RE + WE + AE,
+    lager:notice("Got ~p errors. Shutting down.", [Errors]),
+    {stop, too_many_errors, State};
 
 handle_info(tick, State = #state{
                              ticks = Ticks,
@@ -351,6 +348,26 @@ handle_info(tick, State = #state{
     Tref = schedule_tick(),
     {noreply, State#state{tref = Tref, ops = Ops}};
 
+%handle_info({wedged, EpochId} State = #state{epoch = E}) when E /= EpochId ->
+%    lager:notice("Wedge epoch ~p but ignoring because our epoch id is ~p", [EpochId, E]),
+%    {noreply, State};
+
+%handle_info({wedged, EpochId}, State = #state{epoch = E}) when E == EpochId ->
+%    lager:notice("Wedge epoch ~p same as our epoch id ~p; we are wedged. Bummer.", [EpochId, E]),
+%    {noreply, State#state{wedged = true}};
+
+% flu1.erl:
+% ProxyPid = get_proxy_pid(Filename),
+% Are we wedged? if not
+% machi_file_proxy:read(Pid, Offset, Length)
+% otherwise -> error,wedged
+%
+% get_proxy_pid(Filename) ->
+%   Pid = lookup_pid(Filename)
+%   is_pid_alive(Pid)
+%   Pid
+%   if not alive then start one
+
 handle_info(Req, State) ->
     lager:warning("Unknown info message: ~p", [Req]),
     {noreply, State}.
@@ -377,22 +394,26 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% Private functions
 
+-spec schedule_tick() -> reference().
 schedule_tick() ->
     erlang:send_after(?TICK, self(), tick).
 
-check_or_make_tagged_csum(undefined, undefined, Data) ->
-    check_or_make_tagged_csum(?CSUM_TAG_NONE, undefined, Data);
+-spec check_or_make_tagged_csum(Type     :: binary(), 
+                                Checksum :: binary(),
+                                Data     :: binary() ) -> binary() |
+                                                          {error, {bad_csum, Bad :: binary()}}.
 check_or_make_tagged_csum(?CSUM_TAG_NONE, _Csum, Data) ->
     %% We are making a checksum here
     Csum = machi_util:checksum_chunk(Data),
     machi_util:make_tagged_csum(server_sha, Csum);
-check_or_make_tagged_csum(?CSUM_TAG_CLIENT_SHA, ClientCsum, Data) ->
+check_or_make_tagged_csum(Tag, InCsum, Data) when Tag == ?CSUM_TAG_CLIENT_SHA; 
+                                                  Tag == ?CSUM_TAG_SERVER_SHA ->
     Csum = machi_util:checksum_chunk(Data),
-    case Csum =:= ClientCsum of
+    case Csum =:= InCsum of
         true ->
             machi_util:make_tagged_csum(server_sha, Csum);
         false ->
-            {error, bad_csum}
+            {error, {bad_csum, Csum}}
     end;
 check_or_make_tagged_csum(OtherTag, _ClientCsum, _Data) ->
     lager:warning("Unknown checksum tag ~p", [OtherTag]),
@@ -403,17 +424,110 @@ encode_csum_file_entry(Offset, Size, TaggedCSum) ->
     [<<Len:8/unsigned-big, Offset:64/unsigned-big, Size:32/unsigned-big>>,
      TaggedCSum].
 
-get_last_offset_from_csum_file(Filename) ->
+map_offsets_to_csums(CsumList) ->
+    lists:foreach(fun insert_offsets/1, CsumList).
+
+insert_offsets({Offset, Length, Checksum}) ->
+    put({Offset, Length}, Checksum).
+
+parse_csum_file(Filename) ->
     {ok, CsumData} = file:read_file(Filename),
     {DecodedCsums, _Junk} = machi_flu1:split_checksum_list_blob_decode(CsumData),
     case DecodedCsums of
         [] -> 0;
         _ ->
+            map_offsets_to_csums(DecodedCsums),
             {Offset, Size, _Csum} = lists:last(DecodedCsums),
             Offset + Size
     end.
 
-to_atom(String) when is_list(String) ->
-    %% XXX FIXME: leaks atoms, yo.
-    list_to_atom(String).
+-spec do_read(FHd        :: file:filehandle(),
+              Filename   :: string(),
+              TaggedCsum :: undefined|binary(),
+              Offset     :: non_neg_integer(),
+              Size       :: non_neg_integer()) -> eof | 
+                                            {ok, Bytes :: binary(), Csum :: binary()} |
+                                            {error, bad_csum} |
+                                            {error, partial_read} |
+                                            {error, Other :: term() }.
+do_read(FHd, Filename, undefined, Offset, Size) ->
+    do_read(FHd, Filename, machi_util:make_tagged_csum(none), Offset, Size);
 
+do_read(FHd, Filename, TaggedCsum, Offset, Size) ->
+    case file:pread(FHd, Offset, Size) of
+        eof -> 
+            eof;
+
+        {ok, Bytes} when byte_size(Bytes) == Size ->
+            {Type, Ck} = machi_util:unmake_tagged_csum(TaggedCsum),
+            case check_or_make_tagged_csum(Type, Ck, Bytes) of
+                {error, Bad} ->
+                    lager:error("Bad checksum; got ~p, expected ~p",
+                                [Bad, Ck]),
+                    {error, bad_csum};
+                TaggedCsum ->
+                    {ok, Bytes, TaggedCsum}
+            end;
+
+        {ok, Partial} ->
+            lager:error("In file ~p, offset ~p, wanted to read ~p bytes, but got ~p", 
+                        [Filename, Offset, Size, byte_size(Partial)]),
+            {error, partial_read};
+                    
+        Other ->
+            lager:error("While reading file ~p, offset ~p, length ~p, got ~p", 
+                        [Filename, Offset, Size, Other]),
+            {error, Other}
+    end.
+
+-spec handle_write( FHd        :: file:filehandle(),
+                    FHc        :: file:filehandle(),
+                    Filename   :: string(),
+                    TaggedCsum :: binary(),
+                    Offset     :: non_neg_integer(),
+                    Data       :: binary() ) -> ok |
+                                                {error, written} |
+                                                {error, Reason :: term()}.
+handle_write(FHd, FHc, Filename, TaggedCsum, Offset, Data) ->
+    Size = iolist_size(Data),
+    case do_read(FHd, Filename, TaggedCsum, Offset, Size) of
+        eof ->
+            try
+                do_write(FHd, FHc, Filename, TaggedCsum, Offset, Size, Data)
+            catch
+                %%% XXX FIXME: be more specific on badmatch that might
+                %%% occur around line 520 when we write the checksum
+                %%% file entry for the data blob we just put on the disk
+                error:Reason ->
+                    {error, Reason}
+            end;
+        {ok, _, _} ->
+            % yep, we did that write! Honest.
+            ok;
+        {error, Error} ->
+            lager:error("During write to ~p, offset ~p, got error ~p; returning {error, written}",
+                        [Filename, Offset, Error]),
+            {error, written}
+    end.
+
+-spec do_write( FHd        :: file:descriptor(),
+                FHc        :: file:descriptor(),
+                Filename   :: string(),
+                TaggedCsum :: binary(),
+                Offset     :: non_neg_integer(),
+                Size       :: non_neg_integer(),
+                Data       :: binary() ) -> ok|term().
+do_write(FHd, FHc, Filename, TaggedCsum, Offset, Size, Data) ->
+    case file:pwrite(FHd, Offset, Data) of
+        ok ->
+            lager:debug("Successful write in file ~p at offset ~p, length ~p",
+                        [Filename, Offset, Size]),
+            EncodedCsum = encode_csum_file_entry(Offset, Size, TaggedCsum),
+            ok = file:write(FHc, EncodedCsum),
+            lager:debug("Successful write to checksum file for ~p.", [Filename]),
+            ok;
+        Other ->
+            lager:error("Got ~p during write to file ~p at offset ~p, length ~p",
+            [Other, Filename, Offset, Size]),
+            {error, Other}
+    end.
