@@ -972,7 +972,7 @@ do_react_to_env(S) ->
     catch
         throw:{zerf,_}=_Throw ->
             Proj = S#ch_mgr.proj,
-io:format(user, "\n\nzerf ~p throw ~p\n", [S#ch_mgr.name, _Throw]),
+%%io:format(user, "\n\nzerf ~p throw ~p\n", [S#ch_mgr.name, _Throw]),
             {{no_change, [], Proj#projection_v1.epoch_number}, S}
     end.
 
@@ -1425,7 +1425,7 @@ react_to_env_A50(P_latest, FinalProps, S) ->
     ?REACT({a50, ?LINE, [{latest_epoch, P_latest#projection_v1.epoch_number},
                          {final_props, FinalProps}]}),
 %% io:format(user, "A50: ~p: ~W\n", [S#ch_mgr.name, get(react), 60]),
-if S#ch_mgr.name == a -> io:format(user, "A50: ~p: ~P\n", [S#ch_mgr.name, get(react), 60]); true -> ok end,
+%%if S#ch_mgr.name == a -> io:format(user, "A50: ~p: ~P\n", [S#ch_mgr.name, get(react), 60]); true -> ok end,
     {{no_change, FinalProps, P_latest#projection_v1.epoch_number}, S}.
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
@@ -2593,7 +2593,6 @@ make_zerf(#projection_v1{epoch_number=OldEpochNum,
 
 make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list, MembersDict, S) ->
     try
-        put(epochs, []),
         Epochs = lists:reverse(
                    lists:usort(
                      lists:flatten(
@@ -2603,57 +2602,39 @@ make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list, M
                                           Proxy, private, ?TO*5),
                             [E || E <- Es]
                         end || FLU <- Up]))),
-        put(epochs, Epochs),
         Relation = [],
         zerf_find_last_common(Epochs, Relation, MajoritySize, Up, S)
     catch
         throw:{zerf,no_common} ->
-            case lists:usort(get(epochs)) of
-                [0] ->
-                    %% Epoch 0 special case: make the "all" projection.
-                    %% calc_projection2() will then filter out any FLUs that
-                    %% aren't currently up to create the first chain.  If not
-                    %% enough are up now, then it will fail to create a first
-                    %% chain.
-                    P = make_all_projection(MyName, AllMembers, OldWitness_list,
-                                            MembersDict),
-                    machi_projection:update_checksum(
-                      P#projection_v1{epoch_number=OldEpochNum});
-                _Es ->
-                    %% TODO: This corner case needs more thought.
-                    %%
-                    %% Easy case: epoch 1, All=[a,b,c], UPI=[a,b],
-                    %%            Private by a is ok, then *all* crash.
-                    %%            Upon restart, we see 'partial write' for
-                    %%            epoch 1 but not unanimous.  Nobody can
-                    %%            proceed because this case ends up getting
-                    %%            stuck here.
-                    %%
-                    %% Hard case: Is it always true that *all* possible
-                    %% private projections are not unanimous and therefore
-                    %% the chain has never had a single stable configuration
-                    %% and therefore we should act like the [epoch=0] case
-                    %% above??  I don't believe that this is correct, but I
-                    %% need to ponder more................
-                    throw({zerf, {undecidable, _Es, Up}})
-            end;
+            %% Epoch 0 special case: make the "all" projection.
+            %% calc_projection2() will then filter out any FLUs that
+            %% aren't currently up to create the first chain.  If not
+            %% enough are up now, then it will fail to create a first
+            %% chain.
+            %%
+            %% If epoch 0 isn't the only epoch that we've looked at,
+            %% but we still couldn't find a common projection, then
+            %% we still need to default to the "all" projection and let
+            %% subsequent chain calculations do their calculations....
+            P = make_all_projection(MyName, AllMembers, OldWitness_list,
+                                    MembersDict),
+            machi_projection:update_checksum(
+              P#projection_v1{epoch_number=OldEpochNum});
         _X:_Y ->
             throw({zerf, {damn_exception, Up, _X, _Y, erlang:get_stacktrace()}})
-    after
-        erase(epochs)
     end.
 
 zerf_find_last_common([], _Relation, _MajoritySize, _Up, _S) ->
     throw({zerf, no_common});
 zerf_find_last_common(UnsearchedEpochs, Relation, MajoritySize, Up, S) ->
     {NowEpochs, NextEpochs} = my_lists_split(5, UnsearchedEpochs),
-io:format(user, "zerf_find_last_common now_es ~p\n", [NowEpochs]),
+%%io:format(user, "zerf_find_last_common now_es ~p\n", [NowEpochs]),
     Rel2 = lists:foldl(
              fun({E, FLU}, Rel) ->
                      Proxy = proxy_pid(FLU, S),
                      case ?FLU_PC:read_projection(Proxy, private, E, ?TO) of
                          {ok, Proj} ->
-io:format(user, "fold ~p ~p ok\n", [E, FLU]),
+%%io:format(user, "fold ~p ~p ok\n", [E, FLU]),
                              %% Sort order: we want inner = bigger.
                              OorI = case inner_projection_exists(Proj) of
                                         true  -> z_inner;
@@ -2671,12 +2652,12 @@ io:format(user, "fold ~p ~p ok\n", [E, FLU]),
                                     end,
                              Rel2;
                          {error, not_written} ->
-io:format(user, "fold ~p ~p not_written\n", [E, FLU]),
+%%io:format(user, "fold ~p ~p not_written\n", [E, FLU]),
                              Rel
                      end
              end, Relation, [{E, FLU} || E <- NowEpochs, FLU <- Up]),
     SortedRel = lists:reverse(lists:sort(Rel2)),
-io:format(user, "zerf_find_last_common rel ~p\n", [SortedRel]),
+%%io:format(user, "zerf_find_last_common rel ~p\n", [SortedRel]),
     case [T || T={{E, OorI, Proj}, WrittenFLUs} <- SortedRel,
                lists:sort(Proj#projection_v1.upi) == lists:sort(WrittenFLUs)
                andalso
