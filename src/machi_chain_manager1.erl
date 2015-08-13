@@ -1559,53 +1559,26 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
 
     case {?FLU_PC:write_projection(MyNamePid, private, P_latest2,?TO*30),Goo} of
         {ok, Goo} ->
-            ok;
+            ?REACT({c120, [{write, ok}]}),
+            perhaps_verbose_c110(P_latest2, S),
+            %% We very intentionally do *not* pass P_latest2 forward: we must avoid
+            %% bloating the dbg2 list!
+            react_to_env_C120(P_latest, [], S);
+        {{error, bad_arg}, _Goo} ->
+            ?REACT({c120, [{write, bad_arg}]}),
+            %% seems to work: react_to_env_A50(P_latest, [], S); % stop for now...
+
+            %% React to new public write by restarting the iteration.
+            %% Hrmmm, going back to A20 triggers {error,written} problem??
+            react_to_env_A20(0, S);
         Else ->
             Summ = machi_projection:make_summary(P_latest),
-            io:format(user, "C11 error by ~w: ~w, ~w, ~w\n",
+            io:format(user, "C110 error by ~w: ~w, ~w\n~p\n",
                       [MyName, Else, Summ, get(react)]),
-            error_logger:error_msg("C11 error by ~w: ~w, ~w, ~w\n",
+            error_logger:error_msg("C110 error by ~w: ~w, ~w, ~w\n",
                                    [MyName, Else, Summ, get(react)]),
             exit({c110_failure, MyName, Else, Summ})
-    end,
-    case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
-        true ->
-            {_,_,C} = os:timestamp(),
-            MSec = trunc(C / 1000),
-            {HH,MM,SS} = time(),
-            P_latest2x = P_latest2#projection_v1{dbg2=[]}, % limit verbose len.
-            case inner_projection_exists(P_latest2) of
-                false ->
-                    Last2 = get(last_verbose),
-                    Summ2 = machi_projection:make_summary(P_latest2x),
-                    case proplists:get_value(private_write_verbose,
-                                             S#ch_mgr.opts) of
-                        true when Summ2 /= Last2 ->
-                            put(last_verbose, Summ2),
-                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses plain: ~w\n",
-                              [HH,MM,SS,MSec, S#ch_mgr.name, Summ2]);
-                        _ ->
-                            ok
-                    end;
-                true ->
-                    Last2 = get(last_verbose),
-                    P_inner = inner_projection_or_self(P_latest2),
-                    P_innerx = P_inner#projection_v1{dbg2=[]}, % limit verbose len.
-                    Summ2 = machi_projection:make_summary(P_innerx),
-                    case proplists:get_value(private_write_verbose,
-                                             S#ch_mgr.opts) of
-                        true when Summ2 /= Last2 ->
-                            put(last_verbose, Summ2),
-                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w\n",
-                              [HH,MM,SS,MSec, S#ch_mgr.name, Summ2]);
-                        _ ->
-                            ok
-                    end
-            end;
-        _ ->
-            ok
-    end,
-    react_to_env_C120(P_latest, [], S).
+    end.
 
 react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H,
                                                 sane_transitions=Xtns}=S) ->
@@ -2402,4 +2375,43 @@ all_hosed_history(#projection_v1{epoch_number=_Epoch, flap=Flap},
             {OldAllHosed, Acc};
        true ->
             {AllHosed, [AllHosed|Acc]}
+    end.
+
+perhaps_verbose_c110(P_latest2, S) ->
+    case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
+        true ->
+            {_,_,C} = os:timestamp(),
+            MSec = trunc(C / 1000),
+            {HH,MM,SS} = time(),
+            P_latest2x = P_latest2#projection_v1{dbg2=[]}, % limit verbose len.
+            case inner_projection_exists(P_latest2) of
+                false ->
+                    Last2 = get(last_verbose),
+                    Summ2 = machi_projection:make_summary(P_latest2x),
+                    case proplists:get_value(private_write_verbose,
+                                             S#ch_mgr.opts) of
+                        true when Summ2 /= Last2 ->
+                            put(last_verbose, Summ2),
+                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses plain: ~w\n",
+                              [HH,MM,SS,MSec, S#ch_mgr.name, Summ2]);
+                        _ ->
+                            ok
+                    end;
+                true ->
+                    Last2 = get(last_verbose),
+                    P_inner = inner_projection_or_self(P_latest2),
+                    P_innerx = P_inner#projection_v1{dbg2=[]}, % limit verbose len.
+                    Summ2 = machi_projection:make_summary(P_innerx),
+                    case proplists:get_value(private_write_verbose,
+                                             S#ch_mgr.opts) of
+                        true when Summ2 /= Last2 ->
+                            put(last_verbose, Summ2),
+                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w\n",
+                              [HH,MM,SS,MSec, S#ch_mgr.name, Summ2]);
+                        _ ->
+                            ok
+                    end
+            end;
+        _ ->
+            ok
     end.
