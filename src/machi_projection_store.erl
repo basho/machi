@@ -261,7 +261,17 @@ do_proj_read(ProjType, Epoch, S_or_Dir) ->
             {{error, Else}, S_or_Dir}
     end.
 
-do_proj_write(ProjType, #projection_v1{epoch_number=Epoch}=Proj, S) ->
+do_proj_write(public=ProjType, Proj, S) ->
+    do_proj_write2(ProjType, Proj, S);
+do_proj_write(private=ProjType, #projection_v1{epoch_number=Epoch}=Proj, S) ->
+    case S#state.max_public_epochid of
+        {PublicEpoch, _} when PublicEpoch =< Epoch ->
+            do_proj_write2(ProjType, Proj, S);
+        {PublicEpoch, _} ->
+            {{error, bad_arg}, S}
+    end.
+
+do_proj_write2(ProjType, #projection_v1{epoch_number=Epoch}=Proj, S) ->
     %% TODO: We probably ought to check the projection checksum for sanity, eh?
     Dir = pick_path(ProjType, S),
     Path = filename:join(Dir, epoch2name(Epoch)),
