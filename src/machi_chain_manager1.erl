@@ -754,6 +754,8 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                                  P_none1 = P_none0#projection_v1{
                                              epoch_number=OldEpochNum + 1,
                                              dbg=[{none_projection,true},
+                                                  {up, Up},
+                                                  {all_hosed, AllHosed},
                                                   {not_enough_witnesses,true}]},
                                  machi_projection:update_checksum(P_none1)
                          end
@@ -1744,7 +1746,11 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
 react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H,
                                                 sane_transitions=Xtns}=S) ->
     ?REACT(c120),
-    H2 = queue:in(P_latest, H),
+    H2 = if P_latest#projection_v1.epoch_number > 0 ->
+                 queue:in(P_latest, H);
+            true ->
+                 H
+         end,
     H3 = case queue:len(H2) of
              %% TODO: revisit this constant?  Is this too long as a base?
              %% My hunch is that it's fine and that the flap_limit needs to
@@ -1805,8 +1811,11 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
     HistoryPs = queue:to_list(H),
     Ps = HistoryPs ++ [P_newprop],
     UniqueProposalSummaries = lists:usort([{P#projection_v1.upi,
-                                            P#projection_v1.repairing,
-                                            P#projection_v1.down} || P <- Ps]),
+                                            P#projection_v1.repairing} ||
+                                              P <- Ps]),
+    %% UniqueProposalSummaries = lists:usort([{P#projection_v1.upi,
+    %%                                         P#projection_v1.repairing,
+    %%                                         P#projection_v1.down} || P <- Ps]),
 
     {_WhateverUnanimous, BestP, Props, _S} =
         cl_read_latest_projection(private, S),
@@ -1855,6 +1864,7 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
     %%    stopped flapping.
 
     ?REACT({calculate_flaps, queue:len(H), UniqueProposalSummaries}),
+    %% if MyName == c -> io:format(user, "calc unique=~w, ", [UniqueProposalSummaries]); true -> ok end,
     case {queue:len(H), UniqueProposalSummaries} of
         {N, [_]} when N >= length(P_newprop#projection_v1.all_members) ->
             NewFlaps = TempNewFlaps,
