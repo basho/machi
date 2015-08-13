@@ -1281,11 +1281,12 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
             react_to_env_A50(P_latest, FinalProps, S)
     end.
 
-react_to_env_A50(P_latest, FinalProps, S) ->
+react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
     ?REACT(a50),
-    ?REACT({a50, ?LINE, [{latest_epoch, P_latest#projection_v1.epoch_number},
+    ?REACT({a50, ?LINE, [{current_epoch, P_current#projection_v1.epoch_number},
+                         {latest_epoch, P_latest#projection_v1.epoch_number},
                          {final_props, FinalProps}]}),
-    {{no_change, FinalProps, P_latest#projection_v1.epoch_number}, S}.
+    {{no_change, FinalProps, P_current#projection_v1.epoch_number}, S}.
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                  Rank_newprop, Rank_latest,
@@ -1543,6 +1544,7 @@ react_to_env_C103(#projection_v1{epoch_number=Epoch_latest,
 
 react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     ?REACT(c110),
+    ?REACT({c110, [{latest_epoch, P_latest#projection_v1.epoch_number}]}),
     Extra_todo = [{react,get(react)}],
     P_latest2 = machi_projection:update_dbg2(P_latest, Extra_todo),
 
