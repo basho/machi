@@ -99,6 +99,9 @@
 
 -define(RETURN2(X), begin (catch put(why2, [?LINE|get(why2)])), X end).
 
+%% This rank is used if a majority quorum is not available.
+-define(RANK_CP_MINORITY_QUORUM, -99).
+
 %% API
 -export([start_link/2, start_link/3, stop/1, ping/1,
          set_chain_members/2, set_chain_members/3, set_active/2,
@@ -872,7 +875,7 @@ rank_projections(Projs, CurrentProj) ->
     [{rank_projection(Proj, MemberRank, N), Proj} || Proj <- Projs].
 
 rank_projection(#projection_v1{upi=[]}, _MemberRank, _N) ->
-    -100;
+    ?RANK_CP_MINORITY_QUORUM;
 rank_projection(#projection_v1{author_server=_Author,
                                witnesses=Witness_list,
                                upi=UPI_list,
@@ -882,7 +885,7 @@ rank_projection(#projection_v1{author_server=_Author,
     UPI_full = [X || X <- UPI_list, not lists:member(X, Witness_list)],
     case UPI_list -- Witness_list of
         [] ->
-            -100;
+            ?RANK_CP_MINORITY_QUORUM;
         _ ->
             AuthorRank +
                 (    N * length(Repairing_list)) +
@@ -967,8 +970,9 @@ do_react_to_env(S) ->
                 react_to_env_A10(S)
         end
     catch
-        throw:{zerf,_} ->
+        throw:{zerf,_}=_Throw ->
             Proj = S#ch_mgr.proj,
+io:format(user, "\n\nzerf ~p throw ~p\n", [S#ch_mgr.name, _Throw]),
             {{no_change, [], Proj#projection_v1.epoch_number}, S}
     end.
 
@@ -1301,7 +1305,7 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
 
     if
         %% Epoch == 0 is reserved for first-time, just booting conditions.
-        Rank_newprop > 0
+        (Rank_newprop > 0 orelse (Rank_newprop == ?RANK_CP_MINORITY_QUORUM))
         andalso
         ((P_current#projection_v1.epoch_number > 0
           andalso
@@ -1421,6 +1425,7 @@ react_to_env_A50(P_latest, FinalProps, S) ->
     ?REACT({a50, ?LINE, [{latest_epoch, P_latest#projection_v1.epoch_number},
                          {final_props, FinalProps}]}),
 %% io:format(user, "A50: ~p: ~W\n", [S#ch_mgr.name, get(react), 60]),
+if S#ch_mgr.name == a -> io:format(user, "A50: ~p: ~P\n", [S#ch_mgr.name, get(react), 60]); true -> ok end,
     {{no_change, FinalProps, P_latest#projection_v1.epoch_number}, S}.
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
@@ -1558,7 +1563,8 @@ react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
     ?REACT(c100),
 
     Sane = projection_transition_is_sane(P_current, P_latest, MyName),
-    if Sane == true -> ok;  true -> ?V("insane-~w-~w,", [MyName, P_newprop#projection_v1.epoch_number]) end, %%% DELME!!!
+    %% if Sane == true -> ok;  true -> ?V("insane-~w-~w,", [MyName, P_newprop#projection_v1.epoch_number]) end, %%% DELME!!!
+    if Sane == true -> ok;  true -> ?V("insane-~w-~w-~p,", [MyName, P_newprop#projection_v1.epoch_number, Sane]) end, %%% DELME!!!
     Flap_latest = if is_record(Flap_latest0, flap_i) ->
                           Flap_latest0;
                      true ->
@@ -2594,8 +2600,8 @@ make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list, M
                        [begin
                             Proxy = proxy_pid(FLU, S),
                             {ok, Es} = ?FLU_PC:list_all_projections(
-                                          Proxy, private, 5*1000),
-                            [E || E <- Es, E =< OldEpochNum]
+                                          Proxy, private, ?TO*5),
+                            [E || E <- Es]
                         end || FLU <- Up]))),
         put(epochs, Epochs),
         Relation = [],
@@ -2613,7 +2619,7 @@ make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list, M
                                             MembersDict),
                     machi_projection:update_checksum(
                       P#projection_v1{epoch_number=OldEpochNum});
-                _ ->
+                _Es ->
                     %% TODO: This corner case needs more thought.
                     %%
                     %% Easy case: epoch 1, All=[a,b,c], UPI=[a,b],
@@ -2629,7 +2635,7 @@ make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list, M
                     %% and therefore we should act like the [epoch=0] case
                     %% above??  I don't believe that this is correct, but I
                     %% need to ponder more................
-                    throw({zerf, undecidable})
+                    throw({zerf, {undecidable, _Es, Up}})
             end;
         _X:_Y ->
             throw({zerf, {damn_exception, Up, _X, _Y, erlang:get_stacktrace()}})
@@ -2641,12 +2647,13 @@ zerf_find_last_common([], _Relation, _MajoritySize, _Up, _S) ->
     throw({zerf, no_common});
 zerf_find_last_common(UnsearchedEpochs, Relation, MajoritySize, Up, S) ->
     {NowEpochs, NextEpochs} = my_lists_split(5, UnsearchedEpochs),
+io:format(user, "zerf_find_last_common now_es ~p\n", [NowEpochs]),
     Rel2 = lists:foldl(
              fun({E, FLU}, Rel) ->
                      Proxy = proxy_pid(FLU, S),
-                     case ?FLU_PC:read_projection(Proxy, private, E,
-                                                  5*1000) of
+                     case ?FLU_PC:read_projection(Proxy, private, E, ?TO) of
                          {ok, Proj} ->
+io:format(user, "fold ~p ~p ok\n", [E, FLU]),
                              %% Sort order: we want inner = bigger.
                              OorI = case inner_projection_exists(Proj) of
                                         true  -> z_inner;
@@ -2664,10 +2671,12 @@ zerf_find_last_common(UnsearchedEpochs, Relation, MajoritySize, Up, S) ->
                                     end,
                              Rel2;
                          {error, not_written} ->
+io:format(user, "fold ~p ~p not_written\n", [E, FLU]),
                              Rel
                      end
              end, Relation, [{E, FLU} || E <- NowEpochs, FLU <- Up]),
-    SortedRel = lists:sort(lists:reverse(Rel2)),
+    SortedRel = lists:reverse(lists:sort(Rel2)),
+io:format(user, "zerf_find_last_common rel ~p\n", [SortedRel]),
     case [T || T={{E, OorI, Proj}, WrittenFLUs} <- SortedRel,
                lists:sort(Proj#projection_v1.upi) == lists:sort(WrittenFLUs)
                andalso
