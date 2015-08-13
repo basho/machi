@@ -229,6 +229,8 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
 
       machi_partition_simulator:reset_thresholds(10, 50),
       io:format(user, "\nLet loose the dogs of war!\n", []),
+      %% machi_partition_simulator:always_these_partitions([]),
+      %% io:format(user, "\nPuppies for everyone!\n", []),
       [DoIt(30, 0, 0) || _ <- lists:seq(1,2)],
       AllPs = make_partition_list(All_list),
       PartitionCounts = lists:zip(AllPs, lists:seq(1, length(AllPs))),
@@ -247,7 +249,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                             private_projections_are_stable(Namez, DoIt)
                     end, false, lists:seq(0, MaxIters)),
            io:format(user, "\nSweet, private projections are stable\n", []),
-           io:format(user, "\t~p\n", [get(stable)]),
+           io:format(user, "\t~P\n", [get(stable), 10]),
            io:format(user, "Rolling sanity check ... ", []),
            MaxFiles = 1*1000,
            PrivProjs = [{Name, begin
@@ -360,8 +362,8 @@ make_partition_list(All_list) ->
     %% Concat = _X_Ys2,
     %% Concat = _X_Ys1 ++ _X_Ys2,
     %% %% Concat = _X_Ys3,
-    Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
-    random_sort(lists:usort([lists:sort(L) || L <- Concat])).
+    %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
+    %% random_sort(lists:usort([lists:sort(L) || L <- Concat])).
 
     %% [ [{a,b},{b,d},{c,b}],
     %%   [{a,b},{b,d},{c,b}, {a,b},{b,a},{a,c},{c,a},{a,d},{d,a}],
@@ -389,6 +391,16 @@ make_partition_list(All_list) ->
     %% ].
 
     %% [ [{a,b}, {b,a}] ].
+
+    [
+      [{a,b}, {a,c}], [],
+      [{b,a}, {b,c}], [],
+      [{c,b}, {c,a}], [],
+
+      [{b,a}, {c,a}], [],
+      [{a,b}, {c,b}], [],
+      [{b,c}, {a,c}]
+    ].
 
     %% [ [{a,b},{b,c},{c,a}],
     %%   [{a,b}, {b,a}, {a,c},{c,a}] ].
@@ -458,9 +470,9 @@ private_projections_are_stable(Namez, PollFunc) ->
     %% Old partitions: [{a,b},{b,c},{c,a}]
     %%                 result: all 3 had inner proj of [self]
     %% New partitions: [{b,a},{c,b}]
-    %%                 Priv1 [{342,[c,a],[],[b],false},
-    %%                       {326,[b],[],[a,c],true},
-    %%                       {342,[c,a],[],[b],false}]
+    %%                 Priv1 [{342,[c,a],[],[b],[],false},
+    %%                       {326,[b],[],[a,c],[],true},
+    %%                       {342,[c,a],[],[b],[],false}]
     %%                 ... and it stays completely stable with these epoch #s.
     %%
     %% So, instead, if inner/outer status isn't unanimous, then we
@@ -468,22 +480,38 @@ private_projections_are_stable(Namez, PollFunc) ->
     %%
     FLUs = [FLU || {FLU,_Pid} <- Namez],
     U_UPI_Rs = lists:usort([UPI++Rep ||
-                              {_Nm,{_Epoch,UPI,Rep,_Down,InnerP}} <- Private2]),
+                             {_Nm,{_Epoch,UPI,Rep,_Dn,_W,InnerP}} <- Private2]),
     FLU_uses = [{Name, Epoch} ||
-                   {Name,{Epoch,_UPI,Rep,_Down,InnerP}} <- Private2],
+                   {Name,{Epoch,_UPI,Rep,_Dn,_W,InnerP}} <- Private2],
+    Witnesses = hd([Ws ||
+                   {_Name,{_Epoch,_UPI,Rep,_Dn,Ws,InnerP}} <- Private2]),
+    HaveWitnesses_p = Witnesses /= [],
     Unanimous_with_all_peers_p =
         lists:all(fun({FLU, UsesEpoch}) ->
-                          length(
-                            lists:usort(
-                              [Epoch || {Name,{Epoch,UPI,Rep,_,_}} <- Private2,
-                                        lists:member(FLU, UPI) orelse
-                                        lists:member(FLU, Rep)])) == 1
-
+                   WhoInEpoch = [Name ||
+                                  {Name,{Epoch,_UPI,_Rep,_Dn,_W,I_}}<-Private2,
+                                  Epoch == UsesEpoch],
+                   UPI_versions = [UPI ||
+                               {_Name,{Epoch,UPI,_Rep,_Dn,_W,I_}}<-Private2,
+                               Epoch == UsesEpoch],
+                   UPI_versions == [ [] ] % This FLU in minority partition
+                   orelse
+                   (length(lists:usort(UPI_versions)) == 1
+                    andalso
+                    (lists:sort(hd(UPI_versions)) == lists:sort(WhoInEpoch)
+                     orelse
+                     (HaveWitnesses_p andalso
+                      lists:sort(hd(UPI_versions)) == lists:sort(WhoInEpoch--Witnesses))))
                   end, FLU_uses),
-    io:format(user, "\nPriv1 ~p agree ~p\n", [lists:sort(Private1), Unanimous_with_all_peers_p]),
+    %% io:format(user, "\nPriv1 ~P agree ~p\n", [lists:sort(Private1), 10, Unanimous_with_all_peers_p]),
+
+    %%io:format(user, "U_UPI_Rs ~p\n", [U_UPI_Rs]),
+    %%io:format(user, "FLUs ~p\n", [FLUs]),
+    %%io:format(user, "Unanimous_with_all_peers_p ~p\n", [Unanimous_with_all_peers_p]),
+    Flat_U_UPI_Rs = lists:flatten(U_UPI_Rs),
     Private1 == Private2 andalso
         %% If not disjoint, then a flu will appear twice in flattented U_UPIs.
-        lists:sort(lists:flatten(U_UPI_Rs)) == lists:sort(FLUs) andalso
+        lists:sort(Flat_U_UPI_Rs) == lists:usort(Flat_U_UPI_Rs) andalso
         %% Another property that we want is that for each participant
         %% X mentioned in a UPI or Repairing list of some epoch E that
         %% X is using the same epoch E.
@@ -497,10 +525,13 @@ private_projections_are_stable(Namez, PollFunc) ->
 
 get_latest_inner_proj_summ(FLU) ->
     {ok, Proj} = ?FLU_PC:read_latest_projection(FLU, private),
-    #projection_v1{epoch_number=E, upi=UPI, repairing=Repairing, down=Down} =
+    #projection_v1{epoch_number=E, epoch_csum=CSum,
+                   upi=UPI, repairing=Repairing,
+                   witnesses=Witnesses, down=Down} =
         machi_chain_manager1:inner_projection_or_self(Proj),
     Inner_p = machi_chain_manager1:inner_projection_exists(Proj),
-    {E, UPI, Repairing, Down, Inner_p}.
+    EpochID = {E, CSum},
+    {EpochID, UPI, Repairing, Down, Witnesses, Inner_p}.
 
 random_sort(L) ->
     random:seed(now()),
