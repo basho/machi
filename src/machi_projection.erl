@@ -147,6 +147,7 @@ get_epoch_id(#projection_v1{epoch_number=Epoch, epoch_csum=CSum}) ->
 
 make_summary(#projection_v1{epoch_number=EpochNum,
                             all_members=_All_list,
+                            mode=CMode,
                             witnesses=Witness_list,
                             down=Down_list,
                             author_server=Author,
@@ -161,7 +162,7 @@ make_summary(#projection_v1{epoch_number=EpochNum,
                         []
                 end,
     [{epoch,EpochNum},{author,Author},
-     {witnesses, Witness_list},
+     {mode,CMode},{witnesses, Witness_list},
      {upi,UPI_list},{repair,Repairing_list},{down,Down_list}] ++
         InnerInfo ++
         [{flap, Flap}] ++

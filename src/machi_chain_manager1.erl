@@ -291,9 +291,15 @@ handle_call({set_chain_members, MembersDict, Witness_list}, _From,
     NewUPI = OldUPI -- MissingInNew,
     NewDown = All_list -- NewUPI,
     NewEpoch = OldEpoch + 1111,
+    CMode = if Witness_list == [] ->
+                    ap_mode;
+               Witness_list /= [] ->
+                    cp_mode
+            end,
     NewProj = machi_projection:update_checksum(
                 OldProj#projection_v1{author_server=MyName,
                                       creation_time=now(),
+                                      mode=CMode,
                                       epoch_number=NewEpoch,
                                       all_members=All_list,
                                       witnesses=Witness_list,
@@ -389,7 +395,13 @@ make_none_projection(MyName, All_list, Witness_list, MembersDict) ->
     Down_list = All_list,
     UPI_list = [],
     P = machi_projection:new(MyName, MembersDict, Down_list, UPI_list, [], []),
-    machi_projection:update_checksum(P#projection_v1{witnesses=Witness_list}).
+    CMode = if Witness_list == [] ->
+                    ap_mode;
+               Witness_list /= [] ->
+                    cp_mode
+            end,
+    machi_projection:update_checksum(P#projection_v1{mode=CMode,
+                                                     witnesses=Witness_list}).
 
 make_all_projection(MyName, All_list, Witness_list, MembersDict) ->
     Down_list = [],
@@ -626,7 +638,7 @@ calc_projection(#ch_mgr{proj=LastProj, consistency_mode=CMode,
                     case make_zerf(LastProj, S) of
                         Zerf when is_record(Zerf, projection_v1) ->
                             calc_projection2(Zerf, RelativeToServer, AllHosed,
-                                             Dbg, S);
+                                             [{zerf_backstop, true}]++Dbg, S);
                         Zerf ->
                             {{{yo_todo_incomplete_fix_me_cp_mode, OldEpochNum, OldUPI_list, Zerf}}}
                     end
@@ -647,7 +659,8 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                    members_dict=MembersDict,
                    witnesses=OldWitness_list,
                    upi=OldUPI_list,
-                   repairing=OldRepairing_list
+                   repairing=OldRepairing_list,
+                   dbg=LastDbg
                   } = LastProj,
     LastUp = lists:usort(OldUPI_list ++ OldRepairing_list),
     AllMembers = (S#ch_mgr.proj)#projection_v1.all_members,
@@ -764,7 +777,7 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                  P
          end,
     P3 = machi_projection:update_checksum(
-           P2#projection_v1{witnesses=OldWitness_list}),
+           P2#projection_v1{mode=CMode, witnesses=OldWitness_list}),
     {P3, S#ch_mgr{runenv=RunEnv3}, Up}.
 
 check_latest_private_projections_same_epoch(FLUs, MyProj, Partitions, S) ->
@@ -1974,6 +1987,7 @@ projection_transition_is_sane(P1, P2, RelativeToServer) ->
 %% `term() /= true' for any unsafe/insane value.
 
 projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
+    put(myname, RelativeToServer),
     put(why2, []),
     case projection_transition_is_sane_with_si_epoch(
            P1, P2, RelativeToServer, RetrospectiveP) of
@@ -1999,7 +2013,8 @@ projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
                             Inner1, Inner2, RelativeToServer, RetrospectiveP)))
                     end;
                true ->
-                    ?RETURN2(true)
+                    projection_transition_is_sane_final_review(P1, P2,
+                                                               ?RETURN2(true))
             end;
         Else ->
             ?RETURN2(Else)
@@ -2028,6 +2043,30 @@ projection_transition_is_sane_final_review(_P1, P2,
             ?RETURN2(true);
        true ->
             ?RETURN2(Else)
+    end;
+projection_transition_is_sane_final_review(
+  #projection_v1{mode=CMode1}=_P1,
+  #projection_v1{mode=CMode2}=_P2,
+  _) when CMode1 /= CMode2 ->
+    {wtf, cmode1, CMode1, cmode2, CMode2};
+projection_transition_is_sane_final_review(
+  #projection_v1{mode=cp_mode, upi=UPI1}=_P1,
+  #projection_v1{mode=cp_mode, upi=UPI2, witnesses=Witness_list, dbg=Dbg2}=_P2,
+  true) ->
+    %% All earlier sanity checks has said that this transition is sane, but
+    %% we also need to make certain that any CP mode transition preserves at
+    %% least one non-witness server in the UPI list.  Earlier checks have
+    %% verified that the ordering of the FLUs within the UPI list is ok.
+    UPI1_s = ordsets:from_list(UPI1 -- Witness_list),
+    UPI2_s = ordsets:from_list(UPI2 -- Witness_list),
+    case proplists:get_value(zerf_backstop, Dbg2) of
+        true when UPI1 == [] ->
+            ?RETURN2(true);
+        _ when UPI2 == [] ->
+            %% We're down to the none projection to wedge ourself.  That's ok.
+            ?RETURN2(true);
+        _ ->
+            ?RETURN2(not ordsets:is_disjoint(UPI1_s, UPI2_s))
     end;
 projection_transition_is_sane_final_review(_P1, _P2, Else) ->
     ?RETURN2(Else).
@@ -2670,7 +2709,7 @@ zerf_find_last_common(UnsearchedEpochs, Relation, MajoritySize, Up, S) ->
                length(Proj#projection_v1.upi) >= MajoritySize] of
         [] ->
             zerf_find_last_common(NextEpochs, Rel2, MajoritySize, Up, S);
-        [{{E, OorI, Proj}, _WrittenFLUs}|_] ->
+        [{{_E, _OorI, Proj}, _WrittenFLUs}|_] ->
             Proj
     end.
 
