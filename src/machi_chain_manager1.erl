@@ -1420,13 +1420,12 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
             react_to_env_A50(P_latest, FinalProps, S)
     end.
 
-react_to_env_A50(P_latest, FinalProps, S) ->
+react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
     ?REACT(a50),
-    ?REACT({a50, ?LINE, [{latest_epoch, P_latest#projection_v1.epoch_number},
+    ?REACT({a50, ?LINE, [{current_epoch, P_current#projection_v1.epoch_number},
+                         {latest_epoch, P_latest#projection_v1.epoch_number},
                          {final_props, FinalProps}]}),
-%% io:format(user, "A50: ~p: ~W\n", [S#ch_mgr.name, get(react), 60]),
-%%if S#ch_mgr.name == a -> io:format(user, "A50: ~p: ~P\n", [S#ch_mgr.name, get(react), 60]); true -> ok end,
-    {{no_change, FinalProps, P_latest#projection_v1.epoch_number}, S}.
+    {{no_change, FinalProps, P_current#projection_v1.epoch_number}, S}.
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                  Rank_newprop, Rank_latest,
@@ -1684,6 +1683,7 @@ react_to_env_C103(#projection_v1{epoch_number=Epoch_latest,
 
 react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     ?REACT(c110),
+    ?REACT({c110, [{latest_epoch, P_latest#projection_v1.epoch_number}]}),
     Extra_todo = [{react,get(react)}],
     P_latest2 = machi_projection:update_dbg2(P_latest, Extra_todo),
 
@@ -1692,59 +1692,54 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     %% This is the local projection store.  Use a larger timeout, so
     %% that things locally are pretty horrible if we're killed by a
     %% timeout exception.
-    %% ok = ?FLU_PC:write_projection(MyNamePid, private, P_latest2, ?TO*30),
     Goo = P_latest2#projection_v1.epoch_number,
     %% ?V("HEE110 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(get(react))]),
 
     case {?FLU_PC:write_projection(MyNamePid, private, P_latest2,?TO*30),Goo} of
         {ok, Goo} ->
-            ok;
+            ?REACT({c120, [{write, ok}]}),
+            perhaps_verbose_c110(P_latest2, S),
+            %% We very intentionally do *not* pass P_latest2 forward:
+            %% we must avoid bloating the dbg2 list!
+            react_to_env_C120(P_latest, [], S);
+        {{error, bad_arg}, _Goo} ->
+            ?REACT({c120, [{write, bad_arg}]}),
+
+            %% This bad_arg error is the result of an implicit pre-condition
+            %% failure that is now built-in to the projection store: when
+            %% writing a private projection, return {error, bad_arg} if there
+            %% the store contains a *public* projection with a higher epoch
+            %% number.
+            %%
+            %% In the context of AP mode, this is harmless: we avoid a bit of
+            %% extra work by adopting P_latest now.
+            %%
+            %% In the context of CP mode, this pre-condition failure is very
+            %% important: it signals to us that the world is changing (or
+            %% trying to change), and it is vital that we avoid doing
+            %% something based on stale info.
+            %%
+            %% Worst case: our humming consensus round was executing very
+            %% quickly until the point immediately before writing our private
+            %% projection above: immediately before the private proj write,
+            %% we go to sleep for 10 days.  When we wake up after such a long
+            %% sleep, we would definitely notice the last projections made by
+            %% everyone, but we would miss the intermediate *history* of
+            %% chain changes over those 10 days.  In CP mode it's vital that
+            %% we don't miss any of that history while we're running (i.e.,
+            %% here in this func) or when we're restarting after a
+            %% shutdown/crash.
+            %%
+            %% React to newer public write by restarting the iteration.
+            react_to_env_A20(0, S);
         Else ->
             Summ = machi_projection:make_summary(P_latest),
-            io:format(user, "C11 error by ~w: ~w, ~w, ~w\n",
+            io:format(user, "C110 error by ~w: ~w, ~w\n~p\n",
                       [MyName, Else, Summ, get(react)]),
-            error_logger:error_msg("C11 error by ~w: ~w, ~w, ~w\n",
+            error_logger:error_msg("C110 error by ~w: ~w, ~w, ~w\n",
                                    [MyName, Else, Summ, get(react)]),
             exit({c110_failure, MyName, Else, Summ})
-    end,
-    case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
-        true ->
-            {_,_,C} = os:timestamp(),
-            MSec = trunc(C / 1000),
-            {HH,MM,SS} = time(),
-            P_latest2x = P_latest2#projection_v1{dbg2=[]}, % limit verbose len.
-            case inner_projection_exists(P_latest2) of
-                false ->
-                    Last2 = get(last_verbose),
-                    Summ2 = machi_projection:make_summary(P_latest2x),
-                    case proplists:get_value(private_write_verbose,
-                                             S#ch_mgr.opts) of
-                        true when Summ2 /= Last2 ->
-                            put(last_verbose, Summ2),
-                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses plain: ~w\n",
-                              [HH,MM,SS,MSec, S#ch_mgr.name, Summ2]);
-                        _ ->
-                            ok
-                    end;
-                true ->
-                    Last2 = get(last_verbose),
-                    P_inner = inner_projection_or_self(P_latest2),
-                    P_innerx = P_inner#projection_v1{dbg2=[]}, % limit verbose len.
-                    Summ2 = machi_projection:make_summary(P_innerx),
-                    case proplists:get_value(private_write_verbose,
-                                             S#ch_mgr.opts) of
-                        true when Summ2 /= Last2 ->
-                            put(last_verbose, Summ2),
-                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: (outer epoch ~w) ~w: ~w\n",
-                              [HH,MM,SS,MSec, S#ch_mgr.name, P_latest2#projection_v1.epoch_number, Summ2, get(react)]);
-                        _ ->
-                            ok
-                    end
-            end;
-        _ ->
-            ok
-    end,
-    react_to_env_C120(P_latest, [], S).
+    end.
 
 react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H,
                                                 sane_transitions=Xtns}=S) ->
@@ -2674,4 +2669,43 @@ my_lists_split(N, L) ->
     catch
         error:badarg ->
             {L, []}
+    end.
+
+perhaps_verbose_c110(P_latest2, S) ->
+    case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
+        true ->
+            {_,_,C} = os:timestamp(),
+            MSec = trunc(C / 1000),
+            {HH,MM,SS} = time(),
+            P_latest2x = P_latest2#projection_v1{dbg2=[]}, % limit verbose len.
+            case inner_projection_exists(P_latest2) of
+                false ->
+                    Last2 = get(last_verbose),
+                    Summ2 = machi_projection:make_summary(P_latest2x),
+                    case proplists:get_value(private_write_verbose,
+                                             S#ch_mgr.opts) of
+                        true when Summ2 /= Last2 ->
+                            put(last_verbose, Summ2),
+                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses plain: ~w\n",
+                              [HH,MM,SS,MSec, S#ch_mgr.name, Summ2]);
+                        _ ->
+                            ok
+                    end;
+                true ->
+                    Last2 = get(last_verbose),
+                    P_inner = inner_projection_or_self(P_latest2),
+                    P_innerx = P_inner#projection_v1{dbg2=[]}, % limit verbose len.
+                    Summ2 = machi_projection:make_summary(P_innerx),
+                    case proplists:get_value(private_write_verbose,
+                                             S#ch_mgr.opts) of
+                        true when Summ2 /= Last2 ->
+                            put(last_verbose, Summ2),
+                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w\n",
+                              [HH,MM,SS,MSec, S#ch_mgr.name, Summ2]);
+                        _ ->
+                            ok
+                    end
+            end;
+        _ ->
+            ok
     end.
