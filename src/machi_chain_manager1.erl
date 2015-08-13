@@ -1765,6 +1765,7 @@ react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H,
     %% HH = [if is_atom(X) -> X; is_tuple(X) -> {element(1,X), element(2,X)} end || X <- get(react), is_atom(X) orelse size(X) == 3],
     %% ?V("HEE120 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(HH)]),
 
+    diversion_c120_verbose_goop(P_latest, S),
     ?REACT({c120, [{latest, machi_projection:make_summary(P_latest)}]}),
     {{now_using, FinalProps, P_latest#projection_v1.epoch_number},
      S#ch_mgr{proj=P_latest, proj_history=H3, sane_transitions=Xtns + 1}}.
@@ -2679,6 +2680,41 @@ my_lists_split(N, L) ->
     catch
         error:badarg ->
             {L, []}
+    end.
+
+diversion_c120_verbose_goop(#projection_v1{upi=[], repairing=[]}, S) ->
+    ok;
+diversion_c120_verbose_goop(Proj, S) ->
+    case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
+        true ->
+            diversion_c120_verbose_goop2(Proj, S);
+        _ ->
+            ok
+    end.
+
+diversion_c120_verbose_goop2(#projection_v1{epoch_number=Epoch, epoch_csum=CSum,
+                                       upi=UPI, repairing=Repairing}=P_latest0,
+                        S) ->
+    P_latest = machi_projection:update_checksum(P_latest0#projection_v1{dbg2=[]}),
+    UPI_Rs = UPI ++ Repairing,
+    R = [try
+             true = (UPI_Rs /= []),
+             Proxy = proxy_pid(FLU, S),
+             {ok, P} = ?FLU_PC:read_projection(Proxy, private, Epoch),
+             case machi_projection:update_checksum(P#projection_v1{dbg2=[]}) of
+                 X when X == P_latest ->
+                     FLU;
+                 _ ->
+                     nope
+             end
+         catch _:_ ->
+                 definitely_not
+         end || FLU <- UPI_Rs],
+    if R == UPI_Rs ->
+            io:format(user, "\nCONFIRM by epoch ~p ~W at ~p ~p\n",
+                      [Epoch, CSum, 4, UPI, Repairing]);
+       true ->
+            ok
     end.
 
 perhaps_verbose_c110(P_latest2, S) ->
