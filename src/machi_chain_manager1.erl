@@ -676,7 +676,9 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
 
     NewUp = Up -- LastUp,
     Down = AllMembers -- Up,
-    ?REACT({calc,?LINE,[{last_up, LastUp}, {up0, Up0}, {all_hosed, AllHosed},
+    ?REACT({calc,?LINE,[{old_upi, OldUPI_list},
+                        {old_repairing,OldRepairing_list},
+                        {last_up, LastUp}, {up0, Up0}, {all_hosed, AllHosed},
                         {up, Up}, {new_up, NewUp}, {down, Down}]}),
 
     NewUPI_list =
@@ -790,6 +792,12 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                                                   {up0, Up0},
                                                   {up, Up},
                                                   {all_hosed, AllHosed},
+                                                  {oldupi, OldUPI_list},
+                                                  {newupi, NewUPI_list},
+                                                  {newupi3, NewUPI_list3},
+                                                  {tent_upi, TentativeUPI},
+                                                  {new_upi, NewUPI},
+                                                  {up_witnesses, UpWitnesses},
                                                   {not_enough_witnesses,true}]},
                                  machi_projection:update_checksum(P_none1)
                          end
@@ -800,7 +808,7 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
          end,
     P3 = machi_projection:update_checksum(
            P2#projection_v1{mode=CMode, witnesses=OldWitness_list}),
-    ?REACT({xxx,?LINE,[machi_projection:make_summary(P3)]}),
+    ?REACT({calc,?LINE,[machi_projection:make_summary(P3)]}),
     {P3, S#ch_mgr{runenv=RunEnv3}, Up}.
 
 check_latest_private_projections_same_epoch(FLUs, MyProj, Partitions, S) ->
@@ -1864,7 +1872,7 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
     HosedTransUnion = proplists:get_value(trans_all_hosed, Props),
     TransFlapCounts0 = proplists:get_value(trans_all_flap_counts, Props),
 
-    %% NOTE: bad_answer_flus are probably due to timeout or some other network
+    %% NOTE: bad_answer_flus are due to timeout or some other network
     %%       glitch, i.e., anything other than {ok, P::projection()}
     %%       response from machi_flu0:proj_read_latest().
     BadFLUs = proplists:get_value(bad_answer_flus, Props),
