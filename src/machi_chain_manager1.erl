@@ -1943,9 +1943,17 @@ calculate_flaps(P_newprop, _P_current, _FlapLimit,
             %% magically knows about both problem FLUs.  Weird/cool.
 
             AllFlapCounts = TempAllFlapCounts,
+            HosedTransUnionTs = [T || T <- HosedTransUnion, is_tuple(T)],
             AnnotatedBadFLUs = [{MyName, problem_with, FLU} || FLU <- BadFLUs],
-            AllHosed = lists:usort(DownUnion ++ HosedTransUnion ++ BadFLUs ++
-                                       AnnotatedBadFLUs);
+            HosedAnnotations = lists:usort(HosedTransUnionTs ++ AnnotatedBadFLUs),
+            Magic = lists:sort(
+                      digraph_magic(P_newprop#projection_v1.all_members,
+                                    HosedAnnotations)),
+            AllHosed = lists:usort(HosedAnnotations ++ Magic),
+            io:format(user, "ALLHOSED ~p: ~p ~p\n", [MyName, Magic, HosedAnnotations]),
+            AllHosed;
+            %% AllHosed = lists:usort(DownUnion ++ HosedTransUnion ++ BadFLUs ++
+            %%                            AnnotatedBadFLUs);
         {_N, _} ->
             NewFlaps = 0,
             NewFlapStart = ?NOT_FLAPPING_START,
@@ -2840,4 +2848,31 @@ perhaps_verbose_c110(P_latest2, S) ->
             end;
         _ ->
             ok
+    end.
+
+digraph_magic(All_list, HosedAnnotations) ->
+    G = digraph:new(),
+    [digraph:add_vertex(G, V) || V <- All_list],
+    [digraph:add_edge(G, V1, V2) || {V1, problem_with, V2} <- HosedAnnotations],
+    calc_magic_down(lists:sort(digraph:vertices(G)), G).
+
+calc_magic_down([], G) ->
+    digraph:delete(G),
+    [];
+calc_magic_down([H|T], G) ->
+    case digraph:in_degree(G, H) of
+        0 ->
+            calc_magic_down(T, G);
+        1 ->
+            Neighbors = digraph:in_neighbours(G, H),
+            case [V || V <- Neighbors, digraph:in_degree(G, V) == 1] of
+                [AlsoOne|_] ->
+                    %% TODO: be smarter here about the choice of which is down.
+                    [H|calc_magic_down(T -- [AlsoOne], G)];
+                [] ->
+                    %% H is "on the end", e.g. 1-2-1, so it's OK.
+                    calc_magic_down(T, G)
+            end;
+        N when N > 1 ->
+            [H|calc_magic_down(T, G)]
     end.
