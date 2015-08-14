@@ -697,7 +697,7 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
     Simulator_p = proplists:get_value(use_partition_simulator, RunEnv2, false),
     SimRepair_p = proplists:get_value(simulate_repair, RunEnv2, true),
     {NewUPI_list3, Repairing_list3, RunEnv3} =
-        case {NewUp, Repairing_list2} of
+        case {NewUp -- OldWitness_list, Repairing_list2} of
             {[], []} ->
                 D_foo=[d_foo1],
                 {NewUPI_list, [], RunEnv2};
@@ -726,7 +726,7 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                         D_foo=[d_foo2],
                         {NewUPI_list, OldRepairing_list, RunEnv2}
                 end;
-            {_, _} ->
+            {_ABC, _XYZ} ->
                 D_foo=[d_foo3, {new_upi_list, NewUPI_list}, {new_up, NewUp}, {repairing_list3, OldRepairing_list}],
                 {NewUPI_list, OldRepairing_list, RunEnv2}
         end,
