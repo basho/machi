@@ -102,6 +102,9 @@
 %% This rank is used if a majority quorum is not available.
 -define(RANK_CP_MINORITY_QUORUM, -99).
 
+%% Amount of epoch number skip-ahead for set_chain_members call
+-define(SET_CHAIN_MEMBERS_EPOCH_SKIP, 1111).
+
 %% API
 -export([start_link/2, start_link/3, stop/1, ping/1,
          set_chain_members/2, set_chain_members/3, set_active/2,
@@ -290,7 +293,7 @@ handle_call({set_chain_members, MembersDict, Witness_list}, _From,
     MissingInNew = OldAll_list -- All_list,
     NewUPI = OldUPI -- MissingInNew,
     NewDown = All_list -- NewUPI,
-    NewEpoch = OldEpoch + 1111,
+    NewEpoch = OldEpoch + ?SET_CHAIN_MEMBERS_EPOCH_SKIP,
     CMode = if Witness_list == [] ->
                     ap_mode;
                Witness_list /= [] ->
@@ -691,7 +694,7 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
     {NewUPI_list3, Repairing_list3, RunEnv3} =
         case {NewUp, Repairing_list2} of
             {[], []} ->
-                D_foo=[],
+                D_foo=[d_foo1],
                 {NewUPI_list, [], RunEnv2};
             {[], [H|T]} when RelativeToServer == LastInNewUPI ->
                 %% The author is tail of the UPI list.  Let's see if
@@ -706,6 +709,7 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                                 S#ch_mgr.proj, Partitions, S),
                 if Simulator_p andalso SimRepair_p andalso
                    SameEpoch_p andalso RelativeToServer == LastInCurrentUPI ->
+                        io:format(user, "CONFIRM ~p repair done during epoch ~p of ~p, obnoxious mostly-race-avoiding sleep now...\n", [MyName, OldEpochNum, H]), timer:sleep(543),
                         D_foo=[{repair_airquote_done, {we_agree, (S#ch_mgr.proj)#projection_v1.epoch_number}}],
                         {NewUPI_list ++ [H], T, RunEnv2};
                    not (Simulator_p andalso SimRepair_p)
@@ -714,13 +718,15 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                         D_foo=[{repair_done, {repair_final_status, ok, (S#ch_mgr.proj)#projection_v1.epoch_number}}],
                         {NewUPI_list ++ Repairing_list2, [], RunEnv2};
                    true ->
-                        D_foo=[],
+                        D_foo=[d_foo2],
                         {NewUPI_list, OldRepairing_list, RunEnv2}
                 end;
             {_, _} ->
-                D_foo=[],
+                D_foo=[d_foo3, {new_upi_list, NewUPI_list}, {new_up, NewUp}, {repairing_list3, OldRepairing_list}],
                 {NewUPI_list, OldRepairing_list, RunEnv2}
         end,
+    ?REACT({calc,?LINE,
+            [{newupi_list3, NewUPI_list3},{repairing_list3, Repairing_list3}]}),
     Repairing_list4 = case NewUp of
                           []    -> Repairing_list3;
                           NewUp -> Repairing_list3 ++ NewUp
@@ -729,9 +735,14 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
 
     TentativeUPI = NewUPI_list3,
     TentativeRepairing = Repairing_list5,
+    ?REACT({calc,?LINE,[{tent, TentativeUPI},{tent_rep, TentativeRepairing}]}),
 
     {NewUPI, NewRepairing} =
-        if TentativeUPI == [] andalso TentativeRepairing /= [] ->
+        if (CMode == ap_mode
+            orelse
+            (CMode == cp_mode andalso OldEpochNum == 0))
+           andalso
+           TentativeUPI == [] andalso TentativeRepairing /= [] ->
                 %% UPI is empty (not including witnesses), so grab
                 %% the first from the repairing list and make it the
                 %% only non-witness in the UPI.
@@ -740,6 +751,7 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
            true ->
                 {TentativeUPI, TentativeRepairing}
         end,
+    ?REACT({calc,?LINE,[{new_upi, NewUPI},{new_rep, NewRepairing}]}),
 
     P = machi_projection:new(OldEpochNum + 1,
                              MyName, MembersDict, Down, NewUPI, NewRepairing,
@@ -751,6 +763,7 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                  Majority = full_majority_size(AllMembers),
                  SoFar = length(NewUPI),
                  if SoFar >= Majority ->
+                         ?REACT({calc,?LINE,[]}),
                          P;
                     true ->
                          Need = Majority - SoFar,
@@ -758,15 +771,18 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                                              lists:member(W, OldWitness_list)],
                          if length(UpWitnesses) >= Need ->
                                  Ws = lists:sublist(UpWitnesses, Need),
+                                 ?REACT({calc,?LINE,[{ws, Ws}]}),
                                  machi_projection:update_checksum(
                                    P#projection_v1{upi=Ws++NewUPI});
                             true ->
+                                 ?REACT({calc,?LINE,[]}),
                                  P_none0 = make_none_projection(
                                             MyName, AllMembers, OldWitness_list,
                                             MembersDict),
                                  P_none1 = P_none0#projection_v1{
                                              epoch_number=OldEpochNum + 1,
                                              dbg=[{none_projection,true},
+                                                  {up0, Up0},
                                                   {up, Up},
                                                   {all_hosed, AllHosed},
                                                   {not_enough_witnesses,true}]},
@@ -774,10 +790,12 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                          end
                  end;
             CMode == ap_mode ->
+                 ?REACT({calc,?LINE,[]}),
                  P
          end,
     P3 = machi_projection:update_checksum(
            P2#projection_v1{mode=CMode, witnesses=OldWitness_list}),
+    ?REACT({xxx,?LINE,[machi_projection:make_summary(P3)]}),
     {P3, S#ch_mgr{runenv=RunEnv3}, Up}.
 
 check_latest_private_projections_same_epoch(FLUs, MyProj, Partitions, S) ->
@@ -2647,39 +2665,57 @@ make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list, M
                                           Proxy, private, ?TO*5),
                             [E || E <- Es]
                         end || FLU <- Up]))),
+        put(epochs, Epochs),
         Relation = [],
+        put(xxx_epoch, OldEpochNum),
         zerf_find_last_common(Epochs, Relation, MajoritySize, Up, S)
     catch
         throw:{zerf,no_common} ->
-            %% Epoch 0 special case: make the "all" projection.
-            %% calc_projection2() will then filter out any FLUs that
-            %% aren't currently up to create the first chain.  If not
-            %% enough are up now, then it will fail to create a first
-            %% chain.
-            %%
-            %% If epoch 0 isn't the only epoch that we've looked at,
-            %% but we still couldn't find a common projection, then
-            %% we still need to default to the "all" projection and let
-            %% subsequent chain calculations do their calculations....
-            P = make_all_projection(MyName, AllMembers, OldWitness_list,
-                                    MembersDict),
-            machi_projection:update_checksum(
-              P#projection_v1{epoch_number=OldEpochNum});
+            FirstEpoch_p = case get(epochs) of
+                               [0]                                -> true;
+                               [?SET_CHAIN_MEMBERS_EPOCH_SKIP, 0] -> true;
+                               _                                  -> false
+                           end,
+            if FirstEpoch_p ->
+                    %% Epoch 0 special case: make the "all" projection.
+                    %% calc_projection2() will then filter out any FLUs that
+                    %% aren't currently up to create the first chain.  If not
+                    %% enough are up now, then it will fail to create a first
+                    %% chain.
+                    %%
+                    %% If epoch 0 isn't the only epoch that we've looked at,
+                    %% but we still couldn't find a common projection, then
+                    %% we still need to default to the "all" projection and let
+                    %% subsequent chain calculations do their calculations....
+                    P = make_all_projection(MyName, AllMembers, OldWitness_list,
+                                            MembersDict),
+                    machi_projection:update_checksum(
+                      P#projection_v1{epoch_number=OldEpochNum});
+               true ->
+                    %% Make it appear like nobody is up now: we'll have to
+                    %% wait until the Up list changes so that
+                    %% zerf_find_last_common() can confirm a common stable
+                    %% last stable epoch.
+                    P = make_none_projection(MyName, AllMembers,OldWitness_list,
+                                             MembersDict),
+                    machi_projection:update_checksum(
+                      P#projection_v1{epoch_number=OldEpochNum})
+            end;
         _X:_Y ->
             throw({zerf, {damn_exception, Up, _X, _Y, erlang:get_stacktrace()}})
+    after
+        erase(epochs)
     end.
 
 zerf_find_last_common([], _Relation, _MajoritySize, _Up, _S) ->
     throw({zerf, no_common});
 zerf_find_last_common(UnsearchedEpochs, Relation, MajoritySize, Up, S) ->
     {NowEpochs, NextEpochs} = my_lists_split(5, UnsearchedEpochs),
-%%io:format(user, "zerf_find_last_common now_es ~p\n", [NowEpochs]),
     Rel2 = lists:foldl(
              fun({E, FLU}, Rel) ->
                      Proxy = proxy_pid(FLU, S),
                      case ?FLU_PC:read_projection(Proxy, private, E, ?TO) of
                          {ok, Proj} ->
-%%io:format(user, "fold ~p ~p ok\n", [E, FLU]),
                              %% Sort order: we want inner = bigger.
                              OorI = case inner_projection_exists(Proj) of
                                         true  -> z_inner;
@@ -2697,12 +2733,10 @@ zerf_find_last_common(UnsearchedEpochs, Relation, MajoritySize, Up, S) ->
                                     end,
                              Rel2;
                          {error, not_written} ->
-%%io:format(user, "fold ~p ~p not_written\n", [E, FLU]),
                              Rel
                      end
-             end, Relation, [{E, FLU} || E <- NowEpochs, FLU <- Up]),
+             end, Relation, lists:reverse([{E, FLU} || E <- NowEpochs, FLU <- Up])),
     SortedRel = lists:reverse(lists:sort(Rel2)),
-%%io:format(user, "zerf_find_last_common rel ~p\n", [SortedRel]),
     case [T || T={{E, OorI, Proj}, WrittenFLUs} <- SortedRel,
                lists:sort(Proj#projection_v1.upi) == lists:sort(WrittenFLUs)
                andalso
