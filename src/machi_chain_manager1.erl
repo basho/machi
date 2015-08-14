@@ -640,6 +640,9 @@ calc_projection(#ch_mgr{proj=LastProj, consistency_mode=CMode,
                 {_, false} ->
                     case make_zerf(LastProj, S) of
                         Zerf when is_record(Zerf, projection_v1) ->
+                            ?REACT({calc,?LINE,
+                                    [{zerf_backstop, true},
+                                     {zerf_in, machi_projection:make_summary(Zerf)}]}),
                             calc_projection2(Zerf, RelativeToServer, AllHosed,
                                              [{zerf_backstop, true}]++Dbg, S);
                         Zerf ->
@@ -673,6 +676,8 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
 
     NewUp = Up -- LastUp,
     Down = AllMembers -- Up,
+    ?REACT({calc,?LINE,[{last_up, LastUp}, {up0, Up0}, {all_hosed, AllHosed},
+                        {up, Up}, {new_up, NewUp}, {down, Down}]}),
 
     NewUPI_list =
         [X || X <- OldUPI_list, lists:member(X, Up) andalso
