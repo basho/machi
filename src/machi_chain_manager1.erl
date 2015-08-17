@@ -1475,15 +1475,16 @@ react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                  Rank_newprop, Rank_latest,
-                 #ch_mgr{name=MyName, flap_limit=FlapLimit}=S)->
+                 #ch_mgr{name=MyName, flap_limit=FlapLimit, proj=P_current}=S)->
     ?REACT(b10),
 
     {_P_newprop_flap_time, P_newprop_flap_count} = get_flap_count(P_newprop),
     UnanimousLatestInnerNotRelevant_p =
         case inner_projection_exists(P_latest) of
             true when P_latest#projection_v1.author_server /= MyName ->
-                #projection_v1{down=Down_inner} = inner_projection_or_self(
-                                                    P_latest),
+                #projection_v1{down=Down_inner,
+                        epoch_number=EpochLatest_i} = inner_projection_or_self(
+                                                         P_latest),
                 case lists:member(MyName, Down_inner) of
                     true ->
                         %% Some foreign author's inner projection thinks that
@@ -1491,8 +1492,12 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                         ?REACT({b10, ?LINE, [{down_inner, Down_inner}]}),
                         true;
                     false ->
-                        ?REACT({b10, ?LINE, [{down_inner, Down_inner}]}),
-                        false
+                        #projection_v1{epoch_number=Epoch_current} =
+                            inner_projection_or_self(P_current),
+                        Latest_GTE_Epoch_p = EpochLatest_i >= Epoch_current,
+                        ?REACT({b10, ?LINE, [{down_inner, Down_inner},
+                                      {latest_GTE_epoch, Latest_GTE_Epoch_p}]}),
+                        not Latest_GTE_Epoch_p
                 end;
             _Else_u ->
                 false
@@ -2693,9 +2698,9 @@ make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list, M
     catch
         throw:{zerf,no_common} ->
             FirstEpoch_p = case get(epochs) of
-                               [0]                                -> true;
-                               [?SET_CHAIN_MEMBERS_EPOCH_SKIP, 0] -> true;
-                               _                                  -> false
+                               [0]    -> true;
+                               [_, 0] -> true;
+                               _      -> false
                            end,
             if FirstEpoch_p ->
                     %% Epoch 0 special case: make the "all" projection.
@@ -2711,16 +2716,17 @@ make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list, M
                     P = make_all_projection(MyName, AllMembers, OldWitness_list,
                                             MembersDict),
                     machi_projection:update_checksum(
-                      P#projection_v1{epoch_number=OldEpochNum});
+                      P#projection_v1{epoch_number=OldEpochNum,dbg2=[zerf_all]});
                true ->
                     %% Make it appear like nobody is up now: we'll have to
                     %% wait until the Up list changes so that
                     %% zerf_find_last_common() can confirm a common stable
                     %% last stable epoch.
+
                     P = make_none_projection(MyName, AllMembers,OldWitness_list,
                                              MembersDict),
                     machi_projection:update_checksum(
-                      P#projection_v1{epoch_number=OldEpochNum})
+                      P#projection_v1{epoch_number=OldEpochNum,dbg2=[zerf_none]})
             end;
         _X:_Y ->
             throw({zerf, {damn_exception, Up, _X, _Y, erlang:get_stacktrace()}})
