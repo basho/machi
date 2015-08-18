@@ -1299,83 +1299,90 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                         down=P_i2#projection_v1.all_members
                         -- [MyName]}
               end,
-    FinalInnerEpoch =
-        case inner_projection_exists(P_current) of
-            false ->
-                FinalCreation = P_newprop3#projection_v1.creation_time,
-                AllFlapCounts_epk =
-                    [Epk || {{Epk,_FlTime}, _FlCount} <-
-                                get_all_flap_counts(P_newprop3)],
-                case AllFlapCounts_epk of
-                    [] ->
-                        P_newprop3#projection_v1.epoch_number;
-                    [_|_] ->
-                        lists:max(AllFlapCounts_epk)
-                end;
+    #projection_v1{epoch_number=Epoch_p_inner,
+                   upi=UPI_p_inner,
+                   repairing=Repairing_p_inner} = P_inner,
+    LatestHasCompatibleInner =
+        case inner_projection_exists(P_latest) of
             true ->
-                P_oldinner = inner_projection_or_self(P_current),
-                if P_oldinner#projection_v1.upi == 
-                   P_inner#projection_v1.upi
-                   andalso
-                   P_oldinner#projection_v1.repairing ==
-                   P_inner#projection_v1.repairing
-                   andalso
-                   P_oldinner#projection_v1.down ==
-                   P_inner#projection_v1.down ->
-                        FinalCreation = P_oldinner#projection_v1.creation_time,
-                        P_oldinner#projection_v1.epoch_number;
-                   true ->
-                        FinalCreation = P_newprop3#projection_v1.creation_time,
-                        P_oldinner#projection_v1.epoch_number + 1
-                end
+                P_latest_i = inner_projection_or_self(P_latest),
+                #projection_v1{epoch_number=Epoch_latest_i,
+                               upi=UPI_latest_i,
+                               repairing=Repairing_latest_i} = P_latest_i,
+                ?REACT({a30, ?LINE, [{epoch_latest_i, Epoch_latest_i},
+                                     {upi_latest_i, UPI_latest_i},
+                                     {repairing_latest_i}]}),
+                                                %io:format(user, "INNER: ~p line ~p ~p\n", [{epoch_latest_i, Epoch_latest_i}, {epoch_final_inner, FinalInnerEpoch}, {upi_latest_i, UPI_latest_i}, {repairing_latest_i}]),
+                if %% TODO yo delete? Epoch_latest_i > FinalInnerEpoch
+                    %% TODO yo delete? andalso
+                    UPI_p_inner == UPI_latest_i
+                    andalso
+                    Repairing_p_inner == Repairing_latest_i ->
+                        %% Use latest's inner projection instead!
+                        ?REACT({a30, ?LINE, []}),
+                                                %io:format(user, "INNER: ~p line ~p\n", [MyName, ?LINE]),
+                        machi_projection:update_checksum(
+                          P_inner#projection_v1{inner=P_latest_i});
+                    true ->
+                        ?REACT({a30, ?LINE, []}),
+                        false
+                end;
+            false ->
+                ?REACT({a30, ?LINE, []}),
+                false
         end,
-
-    %% TODO: When we implement the real chain repair function, we
-    %%       need to keep in mind that an inner projection with
-    %%       up nodes > 1, repair is required there!  In the
-    %%       current simulator, repair is not simulated and
-    %%       finished (and then growing the UPI list).  Fix.
-    P_inner2 = machi_projection:update_checksum(
-                 P_inner#projection_v1{epoch_number=FinalInnerEpoch,
-                                       creation_time=FinalCreation}),
-    ?REACT({a30, ?LINE, [{inner_summary,
-                          machi_projection:make_summary(P_inner2)}]}),
-    %% Put it all together.
-    P_newprop4 = machi_projection:update_checksum(
-                   P_newprop3#projection_v1{inner=P_inner2}),
-    #projection_v1{epoch_number=Epoch_i4,
-                   upi=UPI_i4,
-                   repairing=Repairing_i4} = P_newprop4,
-    case inner_projection_exists(P_latest) of
-        true ->
-            P_latest_i = inner_projection_or_self(P_latest),
-            #projection_v1{epoch_number=Epoch_latest_i,
-                           upi=UPI_latest_i,
-                           repairing=Repairing_latest_i} = P_latest_i,
-            ?REACT({a30, ?LINE, [{epoch_latest_i, Epoch_latest_i},
-                                 {epoch_final_inner, FinalInnerEpoch},
-                                 {upi_latest_i, UPI_latest_i},
-                                 {repairing_latest_i}]}),
-%io:format(user, "INNER: ~p line ~p ~p\n", [{epoch_latest_i, Epoch_latest_i}, {epoch_final_inner, FinalInnerEpoch}, {upi_latest_i, UPI_latest_i}, {repairing_latest_i}]),
-            if Epoch_latest_i > FinalInnerEpoch
-               andalso
-               UPI_i4 == UPI_latest_i
-               andalso
-               Repairing_i4 == Repairing_latest_i ->
-                    %% Use latest's inner projection instead!
-                    ?REACT({a30, ?LINE, []}),
-%io:format(user, "INNER: ~p line ~p\n", [MyName, ?LINE]),
-                    P_newprop5 = machi_projection:update_checksum(
-                                   P_newprop4#projection_v1{inner=P_latest_i}),
-                    {P_newprop5, S_i};
-               true ->
-                    ?REACT({a30, ?LINE, []}),
-%io:format(user, "INNER: ~p line ~p\n", [MyName, ?LINE]),
-                    {P_newprop4, S_i}
-            end;
-        false ->
-            ?REACT({a30, ?LINE, []}),
-%io:format(user, "INNER: ~p line ~p\n", [MyName, ?LINE]),
+    if LatestHasCompatibleInner /= false ->
+            {LatestHasCompatibleInner, S_i};
+       true ->
+            FinalInnerEpoch =
+                case inner_projection_exists(P_current) of
+                    false ->
+                        ?REACT({a30xyzxyz, ?LINE, [P_newprop3#projection_v1.epoch_number]}),
+                        FinalCreation = P_newprop3#projection_v1.creation_time,
+                        P_newprop3#projection_v1.epoch_number;
+                    %% AllFlapCounts_epk =
+                    %%     [Epk || {{Epk,_FlTime}, _FlCount} <-
+                    %%                 get_all_flap_counts(P_newprop3)],
+                    %% case AllFlapCounts_epk of
+                    %%     [] ->
+                    %%         ?REACT({a30xyzxyz, ?LINE, [P_newprop3#projection_v1.epoch_number]}),
+                    %%         P_newprop3#projection_v1.epoch_number;
+                    %%     [_|_] ->
+                    %%         ?REACT({a30xyzxyz, ?LINE, [AllFlapCounts_epk]}),
+                    %%         lists:max(AllFlapCounts_epk)
+                    %% end;
+                    true ->
+                        P_oldinner = inner_projection_or_self(P_current),
+                        if P_oldinner#projection_v1.upi ==
+                           P_inner#projection_v1.upi
+                           andalso
+                           P_oldinner#projection_v1.repairing ==
+                           P_inner#projection_v1.repairing
+                           andalso
+                           P_oldinner#projection_v1.down ==
+                           P_inner#projection_v1.down ->
+                                ?REACT({a30xyzxyz, ?LINE, [P_oldinner#projection_v1.epoch_number]}),
+                                FinalCreation = P_oldinner#projection_v1.creation_time,
+                                P_oldinner#projection_v1.epoch_number;
+                           true ->
+                                ?REACT({a30xyzxyz, ?LINE, [P_oldinner#projection_v1.epoch_number + 1]}),
+                                FinalCreation = P_newprop3#projection_v1.creation_time,
+                                P_oldinner#projection_v1.epoch_number + 1
+                        end
+                end,
+            %% TODO: When we implement the real chain repair function, we
+            %%       need to keep in mind that an inner projection with
+            %%       up nodes > 1, repair is required there!  In the
+            %%       current simulator, repair is not simulated and
+            %%       finished (and then growing the UPI list).  Fix.
+            P_inner2 = machi_projection:update_checksum(
+                         P_inner#projection_v1{epoch_number=FinalInnerEpoch,
+                                               creation_time=FinalCreation}),
+            ?REACT({a30, ?LINE, [{inner_summary,
+                                  machi_projection:make_summary(P_inner2)}]}),
+            %% Put it all together.
+            P_newprop4 = machi_projection:update_checksum(
+                           P_newprop3#projection_v1{inner=P_inner2}),
             {P_newprop4, S_i}
     end.
 
@@ -1527,6 +1534,7 @@ react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
     ?REACT({a50, ?LINE, [{current_epoch, P_current#projection_v1.epoch_number},
                          {latest_epoch, P_latest#projection_v1.epoch_number},
                          {final_props, FinalProps}]}),
+    %% if S#ch_mgr.name == b; S#ch_mgr.name == c -> io:format(user, "A50: ~p: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
     {{no_change, FinalProps, P_current#projection_v1.epoch_number}, S}.
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
