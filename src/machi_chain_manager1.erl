@@ -1119,7 +1119,6 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                  #ch_mgr{name=MyName, proj=P_current,
                          consistency_mode=CMode, flap_limit=FlapLimit} = S) ->
     ?REACT(a30),
-case length(get(react)) of XX when XX > 500 -> io:format(user, "A30! ~w: ~P\n", [MyName, get(react), 140]), timer:sleep(500); _ -> ok end,
     {P_newprop1, S2, Up} = calc_projection(S, MyName),
     ?REACT({a30, ?LINE, [{current, machi_projection:make_summary(S#ch_mgr.proj)}]}),
     ?REACT({a30, ?LINE, [{newprop1, machi_projection:make_summary(P_newprop1)}]}),
@@ -1955,10 +1954,6 @@ react_to_env_C310(P_newprop, S) ->
 %% 2. I observe a latest public projection E by author X such that author
 %%    X is marked as not flapping *and* I believe that X is flapping at
 %%    some earlier epoch E-delta.
-%%
-%% 3. I observe a latest public projection E by author X such that
-%%    author X is marked as flapping at some epk=K2 *and* I believe
-%%    that X was last flapping at some other epk=K1 where K1 /= K2.
 
 calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                 #ch_mgr{name=MyName, proj_history=H, flap_start=FlapStart,
@@ -2064,20 +2059,6 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                         %% latest proj flapping & flapping last time
                         ?REACT({calculate_flaps,?LINE,[]}),
                         false;
-                    {Curtime, _Count} when Curtime > P_latest_LastStartTime,
-                                           P_latest_LastStartTime /= undefined,
-                                           P_latest_LastStartTime /= ?NOT_FLAPPING_START ->
-                        %% latest proj flapping & older flapping last time:
-                        %% we didn't see this author flip out of its older
-                        %% flapping state.  So we will leave flapping and then,
-                        %% if necessary, re-flap sometime later.
-                        ?REACT({calculate_flaps,?LINE,
-                                [{manifesto_clause,3},
-                                 {p_latest, machi_projection:make_summary(P_latest)},
-                                 {curtime, Curtime},
-                                 {flap_counts_last, FlapCountsLast},
-                                 {laststart_time, P_latest_LastStartTime}]}),
-                        true;
                     {0=Curtime, 0} when P_latest_LastStartTime /= undefined,
                                         P_latest_LastStartTime /= ?NOT_FLAPPING_START ->
 
