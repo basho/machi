@@ -679,7 +679,6 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
     {Up0, Partitions, RunEnv2} = calc_up_nodes(MyName,
                                                AllMembers, RunEnv1),
     Up = Up0 -- AllHosed,
-%% io:format(user, "CALC_PROJ: ~w: up ~w\n", [MyName, Up]),
 
     NewUp = Up -- LastUp,
     Down = AllMembers -- Up,
@@ -1320,14 +1319,15 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                                repairing=Repairing_latest_i} = P_latest_i,
                 ?REACT({a30, ?LINE, [{epoch_latest_i, Epoch_latest_i},
                                      {upi_latest_i, UPI_latest_i},
-                                     {repairing_latest_i}]}),
+                                     {repairing_latest_i,Repairing_latest_i}]}),
                 SameEnough_p = 
-                    UPI_latest_i == P_current_ios#projection_v1.upi
+                    CMode == ap_mode
                     andalso
-                    Repairing_latest_i == P_current_ios#projection_v1.repairing
+                    lists:usort(UPI_latest_i ++ Repairing_latest_i) ==
+                    lists:usort(UPI_current_x ++ Repairing_current_x)
                     andalso
                     Epoch_latest_i >= P_current_ios#projection_v1.epoch_number,
-                CurrentInner_and_Disjoint_p = 
+                CurrentHasInner_and_LatestIsDisjoint_p =
                     P_current_has_inner_p
                     andalso
                     ordsets:is_disjoint(
@@ -1336,7 +1336,7 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                 if SameEnough_p ->
                         ?REACT({a30, ?LINE, []}),
                         P_latest_i;
-                   CurrentInner_and_Disjoint_p ->
+                   CurrentHasInner_and_LatestIsDisjoint_p ->
                         ?REACT({a30, ?LINE, []}),
                         P_current_ios;
                     true ->
@@ -1357,8 +1357,11 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                 end
         end,
     if HasCompatibleInner /= false ->
+            ?REACT({a30, ?LINE,
+                    [{inner_summary,
+                      machi_projection:make_summary(HasCompatibleInner)}]}),
             P_newprop4 = machi_projection:update_checksum(
-                      P_newprop3#projection_v1{inner=HasCompatibleInner}),
+                           P_newprop3#projection_v1{inner=HasCompatibleInner}),
             {P_newprop4, S_i};
        true ->
             FinalInnerEpoch =
@@ -1962,7 +1965,6 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                         flap_count=FlapCount, flap_last_up=FlapLastUp,
                         flap_counts_last=FlapCountsLast,
                         runenv=RunEnv1}=S) ->
-%% io:format(user, "CALC_FLAP: ~w: last_up ~w up ~w\n", [MyName, FlapLastUp, CurrentUp]),
     HistoryPs = queue:to_list(H),
     Ps = HistoryPs ++ [P_newprop],
     UniqueProposalSummaries = lists:usort([{P#projection_v1.upi,
@@ -2096,7 +2098,7 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                 ?REACT({calculate_flaps,?LINE,[]}),
                 false
         end,
-if LeaveFlapping_p -> io:format(user, "CALC_FLAP: ~w: flapping_now ~w start ~w leave ~w: ~p\n", [MyName, AmFlappingNow_p, StartFlapping_p, LeaveFlapping_p, [X || X={calculate_flaps,_,_} <- lists:sublist(get(react), 3)]]); true -> ok end,
+if LeaveFlapping_p -> io:format(user, "CALC_FLAP: ~w: flapping_now ~w start ~w leave ~w: ~w\n", [MyName, AmFlappingNow_p, StartFlapping_p, LeaveFlapping_p, [X || X={calculate_flaps,_,_} <- lists:sublist(get(react), 3)]]); true -> ok end,
     AmFlapping_p = if LeaveFlapping_p -> false;
                       true            -> AmFlappingNow_p orelse StartFlapping_p
                    end,
