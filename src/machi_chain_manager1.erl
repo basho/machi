@@ -1113,12 +1113,23 @@ react_to_env_A20(Retries, #ch_mgr{name=MyName}=S) ->
            true ->
                 exit({badbad, UnanimousTag})
         end,
-    react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra, S2).
+    react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra, S2).
+
+react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra, S) ->
+    XX = length(get(react)),
+    if XX > 3000 ->
+            io:format(user, "CONFIRM by mgr ~p max len XX ~p, break\n",
+                      [S#ch_mgr.name, XX]),
+            react_to_env_A50(P_latest, [], S);
+       true ->
+            react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra, S)
+    end.
 
 react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                  #ch_mgr{name=MyName, proj=P_current,
                          consistency_mode=CMode, flap_limit=FlapLimit} = S) ->
     ?REACT(a30),
+    %% case length(get(react)) of XX when XX > 500 -> io:format(user, "A30 ~w! ~w: ~P\n", [MyName, XX, get(react), 300]), timer:sleep(500); _ -> ok end,
     {P_newprop1, S2, Up} = calc_projection(S, MyName),
     ?REACT({a30, ?LINE, [{current, machi_projection:make_summary(S#ch_mgr.proj)}]}),
     ?REACT({a30, ?LINE, [{newprop1, machi_projection:make_summary(P_newprop1)}]}),
