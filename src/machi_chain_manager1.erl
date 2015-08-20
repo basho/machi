@@ -65,7 +65,7 @@
           timer           :: 'undefined' | timer:tref(),
           ignore_timer    :: boolean(),
           proj_history    :: queue:queue(),
-          flap_count=0         :: integer(),
+          flap_count=0    :: non_neg_integer(), % I am flapping if > 0.
           flap_start=?NOT_FLAPPING_START
                           :: {{'epk', integer()}, erlang:timestamp()},
           flap_last_up=[] :: list(),
@@ -1120,6 +1120,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                  #ch_mgr{name=MyName, proj=P_current,
                          consistency_mode=CMode, flap_limit=FlapLimit} = S) ->
     ?REACT(a30),
+case length(get(react)) of XX when XX > 500 -> io:format(user, "A30! ~w: ~P\n", [MyName, get(react), 140]), timer:sleep(500); _ -> ok end,
     {P_newprop1, S2, Up} = calc_projection(S, MyName),
     ?REACT({a30, ?LINE, [{current, machi_projection:make_summary(S#ch_mgr.proj)}]}),
     ?REACT({a30, ?LINE, [{newprop1, machi_projection:make_summary(P_newprop1)}]}),
@@ -1160,6 +1161,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                                     {flap_limit, FlapLimit}]}),
                 {P_newprop3, S3}
         end,
+    ?REACT({a30, ?LINE, [{newprop10, machi_projection:make_summary(P_newprop10)}]}),
 
     %% Here's a more common reason for moving from inner projection to
     %% a normal projection: the old proj has an inner but the newprop
@@ -1267,72 +1269,97 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
 a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                           #ch_mgr{name=MyName, consistency_mode=CMode} = S) ->
     AllHosed = get_all_hosed(P_newprop3),
-    P_current_inner = inner_projection_or_self(P_current),
-    {P_i, S_i, _Up} = calc_projection2(P_current_inner,
-                                       MyName, AllHosed, [], S),
+    P_current_has_inner_p = inner_projection_exists(P_current),
+    P_current_ios = inner_projection_or_self(P_current),
+    NewEpochOuter = erlang:max(P_latest#projection_v1.epoch_number + 1,
+                               P_newprop3#projection_v1.epoch_number),
+    {P_i1, S_i, _Up} = calc_projection2(P_current_ios,
+                                        MyName, AllHosed, [], S),
     ?REACT({a30, ?LINE, [{raw_all_hosed,get_all_hosed(P_newprop3)},
                          {up, Up},
                          {all_hosed, AllHosed},
-                         {p_c_i, machi_projection:make_summary(P_current_inner)},
-                         {p_i,machi_projection:make_summary(P_i)}]}),
+                         {p_c_i, machi_projection:make_summary(P_current_ios)},
+                         {p_i1, machi_projection:make_summary(P_i1)}]}),
     %% The inner projection will have a fake author, which
     %% everyone will agree is the largest UPI member's
     %% name.
     BiggestUPIMember =
-        if P_i#projection_v1.upi == [] ->
+        if P_i1#projection_v1.upi == [] ->
                 %% Oops, ok, fall back to author
-                P_i#projection_v1.author_server;
+                P_i1#projection_v1.author_server;
            true ->
-                lists:last(lists:sort(P_i#projection_v1.upi))
+                lists:last(lists:sort(P_i1#projection_v1.upi))
         end,
-    P_i2 = P_i#projection_v1{author_server=BiggestUPIMember},
-    P_inner = case lists:member(MyName, AllHosed)
-                   andalso
-                   CMode == ap_mode
-              of
-                  false ->
-                      P_i2;
-                  true ->
-                      P_i2#projection_v1{
-                        upi=[MyName],
-                        repairing=[],
-                        down=P_i2#projection_v1.all_members
-                        -- [MyName]}
-              end,
+    P_i2 = P_i1#projection_v1{author_server=BiggestUPIMember},
+    P_i3 = case lists:member(MyName, AllHosed)
+               andalso
+               CMode == ap_mode
+           of
+               false ->
+                   P_i2;
+               true ->
+                   %% Fall back to a safe AP mode chain: just me.
+                   P_i2#projection_v1{
+                     upi=[MyName],
+                     repairing=[],
+                     down=P_i2#projection_v1.all_members
+                     -- [MyName]}
+           end,
     #projection_v1{epoch_number=Epoch_p_inner,
                    upi=UPI_p_inner,
-                   repairing=Repairing_p_inner} = P_inner,
-    LatestHasCompatibleInner =
+                   repairing=Repairing_p_inner} = P_i3,
+    HasCompatibleInner =
         case inner_projection_exists(P_latest) of
             true ->
                 P_latest_i = inner_projection_or_self(P_latest),
+                #projection_v1{epoch_number=___Epoch_current_x,
+                               upi=UPI_current_x,
+                               repairing=Repairing_current_x} = P_current_ios,
                 #projection_v1{epoch_number=Epoch_latest_i,
                                upi=UPI_latest_i,
                                repairing=Repairing_latest_i} = P_latest_i,
                 ?REACT({a30, ?LINE, [{epoch_latest_i, Epoch_latest_i},
                                      {upi_latest_i, UPI_latest_i},
                                      {repairing_latest_i}]}),
-                                                %io:format(user, "INNER: ~p line ~p ~p\n", [{epoch_latest_i, Epoch_latest_i}, {epoch_final_inner, FinalInnerEpoch}, {upi_latest_i, UPI_latest_i}, {repairing_latest_i}]),
-                if %% TODO yo delete? Epoch_latest_i > FinalInnerEpoch
-                    %% TODO yo delete? andalso
-                    UPI_p_inner == UPI_latest_i
+                SameEnough_p = 
+                    UPI_latest_i == P_current_ios#projection_v1.upi
                     andalso
-                    Repairing_p_inner == Repairing_latest_i ->
-                        %% Use latest's inner projection instead!
+                    Repairing_latest_i == P_current_ios#projection_v1.repairing
+                    andalso
+                    Epoch_latest_i >= P_current_ios#projection_v1.epoch_number,
+                CurrentInner_and_Disjoint_p = 
+                    P_current_has_inner_p
+                    andalso
+                    ordsets:is_disjoint(
+                      ordsets:from_list(UPI_current_x ++ Repairing_current_x),
+                      ordsets:from_list(UPI_latest_i ++ Repairing_latest_i)),
+                if SameEnough_p ->
                         ?REACT({a30, ?LINE, []}),
-                                                %io:format(user, "INNER: ~p line ~p\n", [MyName, ?LINE]),
-                        machi_projection:update_checksum(
-                          P_inner#projection_v1{inner=P_latest_i});
+                        P_latest_i;
+                   CurrentInner_and_Disjoint_p ->
+                        ?REACT({a30, ?LINE, []}),
+                        P_current_ios;
                     true ->
                         ?REACT({a30, ?LINE, []}),
                         false
                 end;
             false ->
-                ?REACT({a30, ?LINE, []}),
-                false
+                #projection_v1{upi=UPI_i3,
+                               repairing=Repairing_i3} = P_i3,
+                if P_current_has_inner_p,
+                   UPI_i3 == P_current_ios#projection_v1.upi,
+                   Repairing_i3 == P_current_ios#projection_v1.repairing ->
+                        ?REACT({a30, ?LINE, []}),
+                        P_current_ios;
+                    true ->
+                        ?REACT({a30, ?LINE, []}),
+                        false
+                end
         end,
-    if LatestHasCompatibleInner /= false ->
-            {LatestHasCompatibleInner, S_i};
+    if HasCompatibleInner /= false ->
+            P_newprop4 = machi_projection:update_checksum(
+                      P_newprop3#projection_v1{inner=HasCompatibleInner}),
+            {P_newprop4, S_i};
        true ->
             FinalInnerEpoch =
                 case inner_projection_exists(P_current) of
@@ -1340,49 +1367,25 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                         ?REACT({a30xyzxyz, ?LINE, [P_newprop3#projection_v1.epoch_number]}),
                         FinalCreation = P_newprop3#projection_v1.creation_time,
                         P_newprop3#projection_v1.epoch_number;
-                    %% AllFlapCounts_epk =
-                    %%     [Epk || {{Epk,_FlTime}, _FlCount} <-
-                    %%                 get_all_flap_counts(P_newprop3)],
-                    %% case AllFlapCounts_epk of
-                    %%     [] ->
-                    %%         ?REACT({a30xyzxyz, ?LINE, [P_newprop3#projection_v1.epoch_number]}),
-                    %%         P_newprop3#projection_v1.epoch_number;
-                    %%     [_|_] ->
-                    %%         ?REACT({a30xyzxyz, ?LINE, [AllFlapCounts_epk]}),
-                    %%         lists:max(AllFlapCounts_epk)
-                    %% end;
                     true ->
                         P_oldinner = inner_projection_or_self(P_current),
-                        if P_oldinner#projection_v1.upi ==
-                           P_inner#projection_v1.upi
-                           andalso
-                           P_oldinner#projection_v1.repairing ==
-                           P_inner#projection_v1.repairing
-                           andalso
-                           P_oldinner#projection_v1.down ==
-                           P_inner#projection_v1.down ->
-                                ?REACT({a30xyzxyz, ?LINE, [P_oldinner#projection_v1.epoch_number]}),
-                                FinalCreation = P_oldinner#projection_v1.creation_time,
-                                P_oldinner#projection_v1.epoch_number;
-                           true ->
-                                ?REACT({a30xyzxyz, ?LINE, [P_oldinner#projection_v1.epoch_number + 1]}),
-                                FinalCreation = P_newprop3#projection_v1.creation_time,
-                                P_oldinner#projection_v1.epoch_number + 1
-                        end
+                        ?REACT({a30xyzxyz, ?LINE, [P_oldinner#projection_v1.epoch_number + 1]}),
+                        FinalCreation = P_newprop3#projection_v1.creation_time,
+                        P_oldinner#projection_v1.epoch_number + 1
                 end,
             %% TODO: When we implement the real chain repair function, we
             %%       need to keep in mind that an inner projection with
             %%       up nodes > 1, repair is required there!  In the
             %%       current simulator, repair is not simulated and
             %%       finished (and then growing the UPI list).  Fix.
-            P_inner2 = machi_projection:update_checksum(
-                         P_inner#projection_v1{epoch_number=FinalInnerEpoch,
-                                               creation_time=FinalCreation}),
+            P_i4 = machi_projection:update_checksum(
+                     P_i3#projection_v1{epoch_number=FinalInnerEpoch,
+                                        creation_time=FinalCreation}),
             ?REACT({a30, ?LINE, [{inner_summary,
-                                  machi_projection:make_summary(P_inner2)}]}),
+                                  machi_projection:make_summary(P_i4)}]}),
             %% Put it all together.
             P_newprop4 = machi_projection:update_checksum(
-                           P_newprop3#projection_v1{inner=P_inner2}),
+                           P_newprop3#projection_v1{inner=P_i4}),
             {P_newprop4, S_i}
     end.
 
@@ -1410,7 +1413,9 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                         P_latest#projection_v1.author_server /= MyName,
     ?REACT({a40, ?LINE,
             [{latest_author, P_latest#projection_v1.author_server},
-             {author_is_down_p, LatestAuthorDownP}]}),
+             {author_is_down_p, LatestAuthorDownP},
+             {latest_flap, P_latest#projection_v1.flap},
+             {newprop_flap, P_newprop#projection_v1.flap}]}),
 
     if
         %% Epoch == 0 is reserved for first-time, just booting conditions.
@@ -1542,7 +1547,10 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                  #ch_mgr{name=MyName, flap_limit=FlapLimit, proj=P_current}=S)->
     ?REACT(b10),
 
-    {_P_newprop_flap_time, P_newprop_flap_count} = get_flap_count(P_newprop),
+    {P_newprop_flap_time, P_newprop_flap_count} = get_flap_count(P_newprop),
+    ?REACT({b10, ?LINE, [{newprop_epoch, P_newprop#projection_v1.epoch_number},
+                         {newprop_flap_time, P_newprop_flap_time},
+                         {newprop_flap_count, P_newprop_flap_count}]}),
     UnanimousLatestInnerNotRelevant_p =
         case inner_projection_exists(P_latest) of
             true when P_latest#projection_v1.author_server /= MyName ->
@@ -2011,16 +2019,16 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
     ?REACT({calculate_flaps, ?LINE, [{queue_len, queue:len(H)},
                                      {uniques, UniqueProposalSummaries}]}),
     P_latest_Flap = get_raw_flapping_i(P_latest),
-    AmFlapping_or_StartingFlapping_p =
+    AmFlappingNow_p = not (FlapStart == ?NOT_FLAPPING_START orelse
+                           FlapStart == undefined),
+    StartFlapping_p =
         case {queue:len(H), UniqueProposalSummaries} of
-            _ when not (FlapStart == ?NOT_FLAPPING_START orelse
-                        FlapStart == undefined) ->
-                %% ?REACT({calculate_flaps,?LINE,[{am_flapping,stay_flapping}]}),
+            _ when AmFlappingNow_p ->
                 ?REACT({calculate_flaps,?LINE,[{flap_start,FlapStart}]}),
-                true;
+                %% I'm already flapping, therefore don't start again.
+                false;
             {N, _} when N >= 3,
-                       P_latest_Flap#flap_i.flap_count /= ?NOT_FLAPPING_START ->
-%%io:format(user, "CALC_FLAP: ~w: ~w\n", [MyName, machi_projection:make_summary(P_latest)]),
+                        P_latest_Flap#flap_i.flap_count /= ?NOT_FLAPPING_START->
                 ?REACT({calculate_flaps,?LINE,[{manifesto_clause,2}]}),
                 true;
             {N, [_]} when N >= 3 ->
@@ -2031,42 +2039,66 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                 false
         end,
     LeaveFlapping_p =
-        if FlapLastUp /= [], CurrentUp /= FlapLastUp ->
+        if 
+            StartFlapping_p ->
+                %% If we're starting flapping on this iteration, don't ignore
+                %% that intent.
+                false;
+            AmFlappingNow_p andalso
+            FlapLastUp /= [] andalso CurrentUp /= FlapLastUp ->
                 ?REACT({calculate_flaps,?LINE,[{manifesto_clause,1}]}),
                 true;
-           true ->
+            AmFlappingNow_p ->
                 P_latest_LastStartTime =
-                    search_flap_counts(P_latest#projection_v1.author_server,
-                                       FlapCountsLast),
+                    search_last_flap_counts(
+                      P_latest#projection_v1.author_server, FlapCountsLast),
                 case get_flap_count(P_latest) of
                     {?NOT_FLAPPING_START, _Count}
                       when P_latest_LastStartTime == undefined ->
+                        %% latest proj not flapping & not flapping last time
                         ?REACT({calculate_flaps,?LINE,[]}),
                         false;
-                    {Time, _Count} when Time == P_latest_LastStartTime ->
+                    {Curtime, _Count} when Curtime == P_latest_LastStartTime ->
+                        %% latest proj flapping & flapping last time
                         ?REACT({calculate_flaps,?LINE,[]}),
                         false;
-                    {Time, _Count} when Time > P_latest_LastStartTime,
-                                        P_latest_LastStartTime /= undefined ->
+                    {Curtime, _Count} when Curtime > P_latest_LastStartTime,
+                                           P_latest_LastStartTime /= undefined,
+                                           P_latest_LastStartTime /= ?NOT_FLAPPING_START ->
+                        %% latest proj flapping & older flapping last time:
+                        %% we didn't see this author flip out of its older
+                        %% flapping state.  So we will leave flapping and then,
+                        %% if necessary, re-flap sometime later.
                         ?REACT({calculate_flaps,?LINE,
                                 [{manifesto_clause,3},
                                  {p_latest, machi_projection:make_summary(P_latest)},
-                                 {time, Time},
+                                 {curtime, Curtime},
                                  {flap_counts_last, FlapCountsLast},
                                  {laststart_time, P_latest_LastStartTime}]}),
                         true;
-                    {0, 0} when P_latest_LastStartTime /= undefined ->
-                        ?REACT({calculate_flaps,?LINE,[{manifesto_clause,2}]}),
+                    {0=Curtime, 0} when P_latest_LastStartTime /= undefined,
+                                        P_latest_LastStartTime /= ?NOT_FLAPPING_START ->
+
+                        ?REACT({calculate_flaps,?LINE,
+                                [{manifesto_clause,2},
+                                 {p_latest, machi_projection:make_summary(P_latest)},
+                                 {curtime, Curtime},
+                                 {flap_counts_last, FlapCountsLast},
+                                 {laststart_time, P_latest_LastStartTime}]}),
+                        %% latest proj not flapping & flapping last time:
+                        %% this author
                         true;
                     _ ->
+                        ?REACT({calculate_flaps,?LINE,[]}),
                         false
-                end
+                end;
+            true ->
+                ?REACT({calculate_flaps,?LINE,[]}),
+                false
         end,
-%%io:format(user, "CALC_FLAP: ~w: am_or_start ~w leave ~w: ~p\n", [MyName, AmFlapping_or_StartingFlapping_p, LeaveFlapping_p, [X || X={calculate_flaps,_,_} <- get(react)]]),
-%%io:format(user, "CALC_FLAP: ~w: am_or_start ~w leave ~w\n", [MyName, AmFlapping_or_StartingFlapping_p, LeaveFlapping_p]),
-if LeaveFlapping_p -> io:format(user, "CALC_FLAP: ~w: am_or_start ~w leave ~w: ~p\n", [MyName, AmFlapping_or_StartingFlapping_p, LeaveFlapping_p, [X || X={calculate_flaps,_,_} <- lists:sublist(get(react), 3)]]); true -> ok end,
+if LeaveFlapping_p -> io:format(user, "CALC_FLAP: ~w: flapping_now ~w start ~w leave ~w: ~p\n", [MyName, AmFlappingNow_p, StartFlapping_p, LeaveFlapping_p, [X || X={calculate_flaps,_,_} <- lists:sublist(get(react), 3)]]); true -> ok end,
     AmFlapping_p = if LeaveFlapping_p -> false;
-                      true                -> AmFlapping_or_StartingFlapping_p
+                      true            -> AmFlappingNow_p orelse StartFlapping_p
                    end,
 
     if AmFlapping_p ->
@@ -2094,8 +2126,10 @@ if LeaveFlapping_p -> io:format(user, "CALC_FLAP: ~w: am_or_start ~w leave ~w: ~
             AllHosed = []
     end,
 
+    AllFlapCounts_with_my_new =
+        [{MyName, NewFlapStart}|lists:keydelete(MyName, 1, AllFlapCounts)],
     FlappingI = make_flapping_i(NewFlapStart, NewFlapCount, AllHosed,
-                                AllFlapCounts, BadFLUs),
+                                AllFlapCounts_with_my_new, BadFLUs),
     %% NOTE: Just because we increment flaps here, there's no correlation
     %%       to successful public proj store writes!  For example,
     %%       if we loop through states C2xx a few times, we would incr
@@ -3022,10 +3056,5 @@ calc_magic_down([H|T], G) ->
             [H|calc_magic_down(T, G)]
     end.
 
-search_flap_counts(_FLU, []) ->
-    undefined;
-search_flap_counts(FLU, [{FLU, {EpkTime, _Count}}|_]) ->
-    EpkTime;
-search_flap_counts(FLU, [_|Tail]) ->
-    search_flap_counts(FLU, Tail).
-
+search_last_flap_counts(FLU, FlapCountsLast) ->
+    proplists:get_value(FLU, FlapCountsLast, undefined).
