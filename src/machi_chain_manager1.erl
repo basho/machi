@@ -690,15 +690,18 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
     NewUPI_list =
         [X || X <- OldUPI_list, lists:member(X, Up) andalso
                                 not lists:member(X, OldWitness_list)],
-    #projection_v1{upi=CurrentUPI_list} = CurrentProj,
-    LastInCurrentUPI = case CurrentUPI_list of
-                           []    -> does_not_exist_because_upi_is_empty;
-                           [_|_] -> lists:last(CurrentUPI_list)
-                       end,
-    LastInNewUPI = case NewUPI_list of
-                       []    -> does_not_exist_because_upi_is_empty;
-                       [_|_] -> lists:last(NewUPI_list)
+    %% If we are not flapping (AllHosed /= [], which is a good enough proxy),
+    %% then we do our repair checks based on the inner projection only.  There
+    %% is no value in doing repairs during flapping.
+    RepChk_Proj =  if AllHosed == [] ->
+                           CurrentProj;
+                      true ->
+                           inner_projection_or_self(CurrentProj)
                    end,
+    RepChk_LastInUPI = case RepChk_Proj#projection_v1.upi of
+                           []    -> does_not_exist_because_upi_is_empty;
+                           [_|_] -> lists:last(RepChk_Proj#projection_v1.upi)
+                       end,
     Repairing_list2 = [X || X <- OldRepairing_list,
                             lists:member(X, Up),
                             not lists:member(X, OldWitness_list)],
@@ -709,7 +712,7 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
             {[], []} ->
                 D_foo=[d_foo1],
                 {NewUPI_list, [], RunEnv2};
-            {[], [H|T]} when RelativeToServer == LastInNewUPI ->
+            {[], [H|T]} when RelativeToServer == RepChk_LastInUPI ->
                 %% The author is tail of the UPI list.  Let's see if
                 %% *everyone* in the UPI+repairing lists are using our
                 %% projection.  This is to simulate a requirement that repair
@@ -719,9 +722,9 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                 %% TODO create a real API call for fetching this info?
                 SameEpoch_p = check_latest_private_projections_same_epoch(
                                 NewUPI_list ++ Repairing_list2,
-                                S#ch_mgr.proj, Partitions, S),
+                                RepChk_Proj, Partitions, S),
                 if Simulator_p andalso SimRepair_p andalso
-                   SameEpoch_p andalso RelativeToServer == LastInCurrentUPI ->
+                   SameEpoch_p andalso RelativeToServer == RepChk_LastInUPI ->
                         D_foo=[{repair_airquote_done, {we_agree, (S#ch_mgr.proj)#projection_v1.epoch_number}}],
                         {NewUPI_list ++ [H], T, RunEnv2};
                    not (Simulator_p andalso SimRepair_p)
@@ -817,6 +820,7 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
     {P3, S#ch_mgr{runenv=RunEnv3}, Up}.
 
 check_latest_private_projections_same_epoch(FLUs, MyProj, Partitions, S) ->
+    #projection_v1{epoch_number=MyEpoch, epoch_csum=MyCSum} = MyProj,
     %% NOTE: The caller must provide us with the FLUs list for all
     %%       FLUs that must be up & available right now.  So any
     %%       failure of perhaps_call_t() means that we must return
@@ -828,17 +832,17 @@ check_latest_private_projections_same_epoch(FLUs, MyProj, Partitions, S) ->
                                   ?FLU_PC:read_latest_projection(Pid, private, ?TO)
                           end,
                       case perhaps_call_t(S, Partitions, FLU, F) of
-                          {ok, RemotePrivateProj} ->
-                              if MyProj#projection_v1.epoch_number ==
-                                 RemotePrivateProj#projection_v1.epoch_number
-                                 andalso
-                                 MyProj#projection_v1.epoch_csum ==
-                                 RemotePrivateProj#projection_v1.epoch_csum ->
+                          {ok, RPJ} ->
+                              #projection_v1{epoch_number=RemoteEpoch,
+                                             epoch_csum=RemoteCSum} =
+                                  inner_projection_or_self(RPJ),
+                              if MyEpoch == RemoteEpoch,
+                                 MyCSum  == RemoteCSum ->
                                       true;
                                  true ->
                                       false
                               end;
-                          _ ->
+                          _Else ->
                               false
                       end
               end,
@@ -1344,7 +1348,19 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                       ordsets:from_list(UPI_latest_i ++ Repairing_latest_i)),
                 if SameEnough_p ->
                         ?REACT({a30, ?LINE, []}),
-                        P_latest_i;
+                        case P_current_has_inner_p andalso
+                            (UPI_current_x /= P_i3#projection_v1.upi orelse
+                            Repairing_current_x /= P_i3#projection_v1.repairing)
+                        of
+                            true ->
+                                %% Current proj is inner *and* our new
+                                %% proposed inner proj differs substantially
+                                %% from the current.  Don't use latest or
+                                %% current.
+                                false;
+                            false ->
+                                P_latest_i
+                            end;
                    CurrentHasInner_and_LatestIsDisjoint_p ->
                         ?REACT({a30, ?LINE, []}),
                         P_current_ios;
@@ -1541,9 +1557,40 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
 
         true ->
             ?REACT({a40, ?LINE, [true]}),
-
-            FinalProps = [{throttle_seconds, 0}],
-            react_to_env_A50(P_latest, FinalProps, S)
+            GoTo50_p =
+                case inner_projection_exists(P_current) andalso
+                     inner_projection_exists(P_newprop) andalso
+                     inner_projection_exists(P_latest) of
+                    true ->
+                        %% All three projections are flapping ... do we have a
+                        %% new projection (probably due to repair) that is
+                        %% worth suggesting via C300?
+                        #projection_v1{epoch_number=Epoch_currenti} =
+                            inner_projection_or_self(P_current),
+                        #projection_v1{epoch_number=Epoch_newpropi} =
+                            inner_projection_or_self(P_newprop),
+                        ?REACT({a30, ?LINE, [{epoch_currenti,Epoch_currenti},
+                                             {epoch_newpropi,Epoch_newpropi}]}),
+                        if Epoch_currenti > Epoch_newpropi ->
+                                %% Inner has a newer epoch, don't go to A50.
+                                ?REACT({a30, ?LINE, []}),
+                                false;
+                           true ->
+                                ?REACT({a30, ?LINE, []}),
+                                true
+                        end;
+                    false ->
+                        ?REACT({a30, ?LINE, []}),
+                        true
+                end,
+            if GoTo50_p ->
+                    ?REACT({a30, ?LINE, []}),
+                    FinalProps = [{throttle_seconds, 0}],
+                    react_to_env_A50(P_latest, FinalProps, S);
+               true ->
+                    ?REACT({a30, ?LINE, []}),
+                    react_to_env_C300(P_newprop, P_latest, S)
+            end
     end.
 
 react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
@@ -1781,7 +1828,7 @@ react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
     S2 = S#ch_mgr{not_sanes=NotSanesDict, sane_transitions=0},
     case orddict:fetch(Author_latest, NotSanesDict) of
         N when N > ?TOO_FREQUENT_BREAKER ->
-            ?V("\n\nYOYO ~w breaking the cycle of ~p\n", [MyName, machi_projection:make_summary(P_latest)]),
+            ?V("\n\nYOYO ~w breaking the cycle of:\n  current: ~w\n  new    : ~w\n", [MyName, machi_projection:make_summary(S#ch_mgr.proj), machi_projection:make_summary(P_latest)]),
             ?REACT({c100, ?LINE, [{not_sanes_author_count, N}]}),
             react_to_env_C103(P_latest, S2);
         N ->
@@ -1811,6 +1858,7 @@ react_to_env_C103(#projection_v1{epoch_number=Epoch_latest,
     ?REACT({c103, ?LINE,
             [{current_epoch, P_current#projection_v1.epoch_number},
              {none_projection_epoch, Epoch_latest}]}),
+    timer:sleep(5000),                          % Let someone else clean up
     %% Reset the not_sanes count dictionary here, or else an already
     %% ?TOO_FREQUENT_BREAKER count for an author might prevent a
     %% transition from C100_inner()->C300, which can lead to infinite
@@ -2154,7 +2202,7 @@ if LeaveFlapping_p -> io:format(user, "CALC_FLAP: ~w: flapping_now ~w start ~w l
      if AmFlapping_p ->
              S2;
         true ->
-             clear_flapping_state(S2)
+             clear_most_flapping_state(S2)
      end}.
 
 make_flapping_i() ->
@@ -2234,7 +2282,7 @@ projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
             ?RETURN2(Else)
     end.
 
-projection_transition_is_sane_final_review(_P1, P2,
+projection_transition_is_sane_final_review(P1, P2,
                                            {expected_author2,UPI1_tail}=Else) ->
     %% Reminder: P1 & P2 are outer projections
     %%
@@ -2252,11 +2300,24 @@ projection_transition_is_sane_final_review(_P1, P2,
     %%
     %% So, there's a special return value that tells us to try to check for
     %% the correct authorship here.
-
-    if UPI1_tail == P2#projection_v1.author_server ->
+    P1HasInner_p = inner_projection_exists(P1),
+    P2HasInner_p = inner_projection_exists(P2),
+    P1_LastInnerUPI = case (inner_projection_or_self(P1))#projection_v1.upi of
+                          P1InnerUPI=[_|_] when P1HasInner_p ->
+                              lists:last(P1InnerUPI);
+                          _ ->
+                              no_such_author
+                      end,
+    if P1HasInner_p, P2HasInner_p ->
+            if UPI1_tail == P1_LastInnerUPI ->
+                    ?RETURN2(true);
+               true ->
+                    ?RETURN2(Else)
+               end;
+       UPI1_tail == P2#projection_v1.author_server ->
             ?RETURN2(true);
        true ->
-            ?RETURN2(Else)
+            ?RETURN2({gazzuknkgazzuknk, Else, gazzuknk})
     end;
 projection_transition_is_sane_final_review(
   #projection_v1{mode=CMode1}=_P1,
@@ -2819,11 +2880,14 @@ all_hosed_history(#projection_v1{epoch_number=_Epoch, flap=Flap},
     end.
 
 clear_flapping_state(S) ->
+    S2 = clear_most_flapping_state(S),
+    S#ch_mgr{not_sanes=orddict:new()}.
+
+clear_most_flapping_state(S) ->
     S#ch_mgr{flap_count=0,
              flap_start=?NOT_FLAPPING_START,
              %% Do not clear flap_last_up.
-             flap_counts_last=[],
-             not_sanes=orddict:new()}.
+             flap_counts_last=[]}.
 
 full_majority_size(N) when is_integer(N) ->
     (N div 2) + 1;
