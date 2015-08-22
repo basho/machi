@@ -3069,8 +3069,8 @@ perhaps_verbose_c110(P_latest2, S) ->
                                              S#ch_mgr.opts) of
                         true when Summ2 /= Last2 ->
                             put(last_verbose, Summ2),
-                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses plain: ~w  (my flap ~w ~w ~w)\n",
-                              [HH,MM,SS,MSec, S#ch_mgr.name, Summ2, S#ch_mgr.flap_start, S#ch_mgr.flap_count, S#ch_mgr.flap_counts_last]);
+                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses plain: ~w \n",
+                              [HH,MM,SS,MSec, S#ch_mgr.name, Summ2]);
                         _ ->
                             ok
                     end;
@@ -3083,8 +3083,8 @@ perhaps_verbose_c110(P_latest2, S) ->
                                              S#ch_mgr.opts) of
                         true when Summ2 /= Last2 ->
                             put(last_verbose, Summ2),
-                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w (outer flap epoch ~w: ~w) (my flap ~w ~w ~w)\n",
-                              [HH,MM,SS,MSec, S#ch_mgr.name, Summ2, P_latest2#projection_v1.epoch_number, P_latest2#projection_v1.flap, S#ch_mgr.flap_start, S#ch_mgr.flap_count, S#ch_mgr.flap_counts_last]);
+                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w\n",
+                              [HH,MM,SS,MSec, S#ch_mgr.name, Summ2]);
                         _ ->
                             ok
                     end
