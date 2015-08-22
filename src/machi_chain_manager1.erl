@@ -1830,7 +1830,7 @@ react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
         N when N > ?TOO_FREQUENT_BREAKER ->
             ?V("\n\nYOYO ~w breaking the cycle of:\n  current: ~w\n  new    : ~w\n", [MyName, machi_projection:make_summary(S#ch_mgr.proj), machi_projection:make_summary(P_latest)]),
             ?REACT({c100, ?LINE, [{not_sanes_author_count, N}]}),
-            react_to_env_C103(P_latest, S2);
+            react_to_env_C103(P_newprop, P_latest, S2);
         N ->
            ?V("YOYO,~w,~w,~w,",[MyName, P_latest#projection_v1.epoch_number,N]),
             ?REACT({c100, ?LINE, [{not_sanes_author_count, N}]}),
@@ -1840,17 +1840,16 @@ react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
             react_to_env_C300(P_newprop, P_latest, S2)
     end.
 
-react_to_env_C103(#projection_v1{epoch_number=Epoch_latest,
+react_to_env_C103(#projection_v1{epoch_number=Epoch_newprop} = P_newprop,
+                  #projection_v1{epoch_number=Epoch_latest,
                                  all_members=All_list,
+                                 flap=Flap,
                                  members_dict=MembersDict} = P_latest,
                   #ch_mgr{name=MyName, proj=P_current}=S) ->
-    #projection_v1{epoch_number=Epoch_latest,
-                   flap=Flap,
-                   all_members=All_list,
-                   members_dict=MembersDict} = P_latest,
     #projection_v1{witnesses=Witness_list} = P_current,
     P_none0 = make_none_projection(MyName, All_list, Witness_list, MembersDict),
-    P_none1 = P_none0#projection_v1{epoch_number=Epoch_latest,
+    P_none1 = P_none0#projection_v1{epoch_number=erlang:max(Epoch_newprop,
+                                                            Epoch_latest),
                                     flap=Flap,
                                     dbg=[{none_projection,true}]},
     P_none = machi_projection:update_checksum(P_none1),
@@ -1858,7 +1857,6 @@ react_to_env_C103(#projection_v1{epoch_number=Epoch_latest,
     ?REACT({c103, ?LINE,
             [{current_epoch, P_current#projection_v1.epoch_number},
              {none_projection_epoch, Epoch_latest}]}),
-    timer:sleep(5000),                          % Let someone else clean up
     %% Reset the not_sanes count dictionary here, or else an already
     %% ?TOO_FREQUENT_BREAKER count for an author might prevent a
     %% transition from C100_inner()->C300, which can lead to infinite
