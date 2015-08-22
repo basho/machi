@@ -157,11 +157,17 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
 
     TcpPort = 62877,
     ok = filelib:ensure_dir("/tmp/c/not-used"),
-    FluInfo = [{a,TcpPort+0,"/tmp/c/data.a"}, {b,TcpPort+1,"/tmp/c/data.b"},
+    FluInfo = [
+               {a,TcpPort+0,"/tmp/c/data.a"}, {b,TcpPort+1,"/tmp/c/data.b"},
                {c,TcpPort+2,"/tmp/c/data.c"}, {d,TcpPort+3,"/tmp/c/data.d"},
                {e,TcpPort+4,"/tmp/c/data.e"}, {f,TcpPort+5,"/tmp/c/data.f"},
                {g,TcpPort+6,"/tmp/c/data.g"}, {h,TcpPort+7,"/tmp/c/data.h"},
-               {i,TcpPort+8,"/tmp/c/data.i"}, {j,TcpPort+9,"/tmp/c/data.j"}],
+               {i,TcpPort+8,"/tmp/c/data.i"}, {j,TcpPort+9,"/tmp/c/data.j"},
+               {k,TcpPort+10,"/tmp/c/data.k"}, {l,TcpPort+11,"/tmp/c/data.l"},
+               {m,TcpPort+12,"/tmp/c/data.m"}, {n,TcpPort+13,"/tmp/c/data.n"},
+               {o,TcpPort+14,"/tmp/c/data.o"}, {p,TcpPort+15,"/tmp/c/data.p"},
+               {q,TcpPort+16,"/tmp/c/data.q"}, {r,TcpPort+17,"/tmp/c/data.r"}
+              ],
     FLU_biglist = [X || {X,_,_} <- FluInfo],
     All_list = lists:sublist(FLU_biglist, NumFLUs),
     io:format(user, "\nSET # of FLUs = ~w members ~w).\n",
