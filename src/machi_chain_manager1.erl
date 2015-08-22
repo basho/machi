@@ -722,7 +722,6 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                                 S#ch_mgr.proj, Partitions, S),
                 if Simulator_p andalso SimRepair_p andalso
                    SameEpoch_p andalso RelativeToServer == LastInCurrentUPI ->
-                        io:format(user, "CONFIRM ~p repair done during epoch ~p of ~p, obnoxious mostly-race-avoiding sleep now...\n", [MyName, OldEpochNum, H]), timer:sleep(543),
                         D_foo=[{repair_airquote_done, {we_agree, (S#ch_mgr.proj)#projection_v1.epoch_number}}],
                         {NewUPI_list ++ [H], T, RunEnv2};
                    not (Simulator_p andalso SimRepair_p)
@@ -1117,7 +1116,7 @@ react_to_env_A20(Retries, #ch_mgr{name=MyName}=S) ->
 
 react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra, S) ->
     XX = length(get(react)),
-    if XX > 3000 ->
+    if XX > 10*1000 ->
             io:format(user, "CONFIRM by mgr ~p max len XX ~p, break\n",
                       [S#ch_mgr.name, XX]),
             react_to_env_A50(P_latest, [], S);
@@ -2029,6 +2028,12 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
     P_latest_Flap = get_raw_flapping_i(P_latest),
     AmFlappingNow_p = not (FlapStart == ?NOT_FLAPPING_START orelse
                            FlapStart == undefined),
+    P_latest_flap_start = case P_latest_Flap of
+                              undefined ->
+                                  ?NOT_FLAPPING_START;
+                              _ ->
+                                  element(1, P_latest_Flap#flap_i.flap_count)
+                          end,
     StartFlapping_p =
         case {queue:len(H), UniqueProposalSummaries} of
             _ when AmFlappingNow_p ->
@@ -2036,8 +2041,11 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                 %% I'm already flapping, therefore don't start again.
                 false;
             {N, _} when N >= 3,
-                        P_latest_Flap#flap_i.flap_count /= ?NOT_FLAPPING_START->
-                ?REACT({calculate_flaps,?LINE,[{manifesto_clause,2}]}),
+                        P_latest_flap_start /= ?NOT_FLAPPING_START ->
+                ?REACT({calculate_flaps,?LINE,
+                        [{manifesto_clause,2},
+                         {latest_epoch, P_latest#projection_v1.epoch_number},
+                         {latest_flap_count,P_latest_Flap#flap_i.flap_count}]}),
                 true;
             {N, [_]} when N >= 3 ->
                 ?REACT({calculate_flaps,?LINE,[{manifesto_clause,1}]}),
@@ -2090,12 +2098,12 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                 ?REACT({calculate_flaps,?LINE,[]}),
                 false
         end,
-if LeaveFlapping_p -> io:format(user, "CALC_FLAP: ~w: flapping_now ~w start ~w leave ~w: ~w\n", [MyName, AmFlappingNow_p, StartFlapping_p, LeaveFlapping_p, [X || X={calculate_flaps,_,_} <- lists:sublist(get(react), 3)]]); true -> ok end,
+if LeaveFlapping_p -> io:format(user, "CALC_FLAP: ~w: flapping_now ~w start ~w leave ~w latest-epoch ~w: ~w\n", [MyName, AmFlappingNow_p, StartFlapping_p, LeaveFlapping_p, P_latest#projection_v1.epoch_number, [X || X={calculate_flaps,_,_} <- lists:sublist(get(react), 3)]]); true -> ok end,
     AmFlapping_p = if LeaveFlapping_p -> false;
                       true            -> AmFlappingNow_p orelse StartFlapping_p
                    end,
 
-    if AmFlapping_p ->
+    if AmFlapping_p andalso not LeaveFlapping_p ->
             NewFlapCount = TempNewFlapCount,
             if element(2,FlapStart) == ?NOT_FLAPPING ->
                     NewFlapStart = {{epk,P_newprop#projection_v1.epoch_number},now()};
