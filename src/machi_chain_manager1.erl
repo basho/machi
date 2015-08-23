@@ -1569,26 +1569,26 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                             inner_projection_or_self(P_current),
                         #projection_v1{epoch_number=Epoch_newpropi} =
                             inner_projection_or_self(P_newprop),
-                        ?REACT({a30, ?LINE, [{epoch_currenti,Epoch_currenti},
+                        ?REACT({a40, ?LINE, [{epoch_currenti,Epoch_currenti},
                                              {epoch_newpropi,Epoch_newpropi}]}),
                         if Epoch_currenti > Epoch_newpropi ->
                                 %% Inner has a newer epoch, don't go to A50.
-                                ?REACT({a30, ?LINE, []}),
+                                ?REACT({a40, ?LINE, []}),
                                 false;
                            true ->
-                                ?REACT({a30, ?LINE, []}),
+                                ?REACT({a40, ?LINE, []}),
                                 true
                         end;
                     false ->
-                        ?REACT({a30, ?LINE, []}),
+                        ?REACT({a40, ?LINE, []}),
                         true
                 end,
             if GoTo50_p ->
-                    ?REACT({a30, ?LINE, []}),
+                    ?REACT({a40, ?LINE, []}),
                     FinalProps = [{throttle_seconds, 0}],
                     react_to_env_A50(P_latest, FinalProps, S);
                true ->
-                    ?REACT({a30, ?LINE, []}),
+                    ?REACT({a40, ?LINE, []}),
                     react_to_env_C300(P_newprop, P_latest, S)
             end
     end.
