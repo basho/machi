@@ -65,6 +65,7 @@
           timer           :: 'undefined' | timer:tref(),
           ignore_timer    :: boolean(),
           proj_history    :: queue:queue(),
+          proj_i_history  :: queue:queue(),
           flap_count=0    :: non_neg_integer(), % I am flapping if > 0.
           flap_start=?NOT_FLAPPING_START
                           :: {{'epk', integer()}, erlang:timestamp()},
@@ -270,6 +271,7 @@ init({MyName, InitMembersDict, MgrOpts}) ->
                 flap_limit=length(All_list) + 3,
                 timer='undefined',
                 proj_history=queue:new(),
+                proj_i_history=queue:new(),
                 not_sanes=orddict:new(),
                 consistency_mode=CMode,
                 runenv=RunEnv,
@@ -318,7 +320,8 @@ handle_call({set_chain_members, MembersDict, Witness_list}, _From,
     %% Reset all flapping state.
     NewProj2 = NewProj#projection_v1{flap=make_flapping_i()},
     S3 = clear_flapping_state(S2#ch_mgr{proj=NewProj2,
-                                        proj_history=queue:new()}),
+                                        proj_history=queue:new(),
+                                        proj_i_history=queue:new()}),
     {_QQ, S4} = do_react_to_env(S3),
     {reply, Reply, S4};
 handle_call({set_active, Boolean}, _From, #ch_mgr{timer=TRef}=S) ->
@@ -1922,28 +1925,36 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     end.
 
 react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H,
+                                                proj_i_history=H_i,
                                                 sane_transitions=Xtns}=S) ->
     ?REACT(c120),
-    H2 = if P_latest#projection_v1.epoch_number > 0 ->
-                 queue:in(P_latest, H);
-            true ->
-                 H
-         end,
-    H3 = case queue:len(H2) of
-             %% TODO: revisit this constant?
-             X when X > length(P_latest#projection_v1.all_members) ->
-                 {_V, Hxx} = queue:out(H2),
-                 Hxx;
-             _ ->
-                 H2
-         end,
+    %% TODO: revisit this constant?
+    MaxLength = length(P_latest#projection_v1.all_members),
+    H2   = add_and_trunc_history(P_latest, H, MaxLength),
+    H_i2 = add_and_trunc_history(inner_projection_or_self(P_latest),
+                                 H_i, MaxLength),
     %% HH = [if is_atom(X) -> X; is_tuple(X) -> {element(1,X), element(2,X)} end || X <- get(react), is_atom(X) orelse size(X) == 3],
     %% ?V("HEE120 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(HH)]),
 
     diversion_c120_verbose_goop(P_latest, S),
     ?REACT({c120, [{latest, machi_projection:make_summary(P_latest)}]}),
     {{now_using, FinalProps, P_latest#projection_v1.epoch_number},
-     S#ch_mgr{proj=P_latest, proj_history=H3, sane_transitions=Xtns + 1}}.
+     S#ch_mgr{proj=P_latest, proj_history=H2, proj_i_history=H_i2,
+              sane_transitions=Xtns + 1}}.
+
+add_and_trunc_history(P_latest, H, MaxLength) ->
+    H2 = if P_latest#projection_v1.epoch_number > 0 ->
+                 queue:in(P_latest, H);
+            true ->
+                 H
+         end,
+    case queue:len(H2) of
+        X when X > MaxLength ->
+            {_V, Hxx} = queue:out(H2),
+            Hxx;
+        _ ->
+            H2
+    end.
 
 react_to_env_C200(Retries, P_latest, S) ->
     ?REACT(c200),
@@ -2010,15 +2021,14 @@ react_to_env_C310(P_newprop, S) ->
 %%    some earlier epoch E-delta.
 
 calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
-                #ch_mgr{name=MyName, proj_history=H, flap_start=FlapStart,
+                #ch_mgr{name=MyName, proj_history=H, proj_i_history=H_i,
+                        flap_start=FlapStart,
                         flap_count=FlapCount, flap_last_up=FlapLastUp,
                         flap_counts_last=FlapCountsLast,
                         runenv=RunEnv1}=S) ->
-    HistoryPs = queue:to_list(H),
-    Ps = HistoryPs ++ [P_newprop],
-    UniqueProposalSummaries = lists:usort([{P#projection_v1.upi,
-                                            P#projection_v1.repairing} ||
-                                              P <- Ps]),
+    UniqueProposalSummaries = make_unique_proposal_summaries(H, P_newprop),
+    UniqueProposalSummaries_i = make_unique_proposal_summaries(
+                                  H_i, inner_projection_or_self(P_newprop)),
 
     {_WhateverUnanimous, BestP, Props, _S} =
         cl_read_latest_projection(private, S),
@@ -2175,7 +2185,7 @@ if LeaveFlapping_p -> io:format(user, "CALC_FLAP: ~w: flapping_now ~w start ~w l
     AllFlapCounts_with_my_new =
         [{MyName, NewFlapStart}|lists:keydelete(MyName, 1, AllFlapCounts)],
     FlappingI = make_flapping_i(NewFlapStart, NewFlapCount, AllHosed,
-                                AllFlapCounts_with_my_new, BadFLUs),
+                                AllFlapCounts_with_my_new),
     %% NOTE: Just because we increment flaps here, there's no correlation
     %%       to successful public proj store writes!  For example,
     %%       if we loop through states C2xx a few times, we would incr
@@ -2201,10 +2211,17 @@ if LeaveFlapping_p -> io:format(user, "CALC_FLAP: ~w: flapping_now ~w start ~w l
              clear_most_flapping_state(S2)
      end}.
 
-make_flapping_i() ->
-    make_flapping_i(?NOT_FLAPPING_START, 0, [], [], []).
+make_unique_proposal_summaries(H, P_newprop) ->
+    HistoryPs = queue:to_list(H),
+    Ps = HistoryPs ++ [P_newprop],
+    lists:usort([{P#projection_v1.upi,
+                  P#projection_v1.repairing} ||
+                    P <- Ps]).
 
-make_flapping_i(NewFlapStart, NewFlapCount, AllHosed, AllFlapCounts, BadFLUs) ->
+make_flapping_i() ->
+    make_flapping_i(?NOT_FLAPPING_START, 0, [], []).
+
+make_flapping_i(NewFlapStart, NewFlapCount, AllHosed, AllFlapCounts) ->
     #flap_i{flap_count={NewFlapStart, NewFlapCount},
             all_hosed=AllHosed,
             all_flap_counts=lists:sort(AllFlapCounts)}.
@@ -3081,8 +3098,8 @@ perhaps_verbose_c110(P_latest2, S) ->
                                              S#ch_mgr.opts) of
                         true when Summ2 /= Last2 ->
                             put(last_verbose, Summ2),
-                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w (outer ~w)\n",
-                              [HH,MM,SS,MSec, S#ch_mgr.name, Summ2, P_latest2#projection_v1.epoch_number]);
+                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w (outer ~w auth ~w)\n",
+                              [HH,MM,SS,MSec, S#ch_mgr.name, Summ2, P_latest2#projection_v1.epoch_number, P_latest2#projection_v1.author_server]);
                         _ ->
                             ok
                     end
