@@ -1333,11 +1333,9 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                 ?REACT({a30, ?LINE, [{epoch_latest_i, Epoch_latest_i},
                                      {upi_latest_i, UPI_latest_i},
                                      {repairing_latest_i,Repairing_latest_i}]}),
-                SameEnough_p = 
-                    CMode == ap_mode
-                    andalso
-                    lists:usort(UPI_latest_i ++ Repairing_latest_i) ==
-                    lists:usort(UPI_current_x ++ Repairing_current_x)
+                LatestSameEnough_p =
+                    (UPI_latest_i ++ Repairing_latest_i) ==
+                        (UPI_current_x ++ Repairing_current_x)
                     andalso
                     Epoch_latest_i >= P_current_ios#projection_v1.epoch_number,
                 CurrentHasInner_and_LatestIsDisjoint_p =
@@ -1346,7 +1344,7 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                     ordsets:is_disjoint(
                       ordsets:from_list(UPI_current_x ++ Repairing_current_x),
                       ordsets:from_list(UPI_latest_i ++ Repairing_latest_i)),
-                if SameEnough_p ->
+                if LatestSameEnough_p ->
                         ?REACT({a30, ?LINE, []}),
                         case P_current_has_inner_p andalso
                             (UPI_current_x /= P_i3#projection_v1.upi orelse
@@ -3083,8 +3081,8 @@ perhaps_verbose_c110(P_latest2, S) ->
                                              S#ch_mgr.opts) of
                         true when Summ2 /= Last2 ->
                             put(last_verbose, Summ2),
-                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w\n",
-                              [HH,MM,SS,MSec, S#ch_mgr.name, Summ2]);
+                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w (outer ~w)\n",
+                              [HH,MM,SS,MSec, S#ch_mgr.name, Summ2, P_latest2#projection_v1.epoch_number]);
                         _ ->
                             ok
                     end
