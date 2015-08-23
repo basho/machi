@@ -1460,9 +1460,6 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                      {current_epoch, P_current#projection_v1.epoch_number},
                      {latest_unanimous_p, LatestUnanimousP}]}),
 
-            %% 1st clause: someone else has written a newer projection
-            %% 2nd clause: a network partition has healed, revealing a
-            %%             differing opinion.
             react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                              Rank_newprop, Rank_latest, S);
 
@@ -1634,8 +1631,29 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
             _Else_u ->
                 false
         end,
+    #flap_i{all_hosed=P_newprop_AllHosed,
+            my_unique_prop_count=MyUniquePropCount} =
+        case P_newprop#projection_v1.flap of undefined -> make_flapping_i();
+                                             Flap      -> Flap
+        end,
+    AllAreFlapping_and_IamBad_p =
+        inner_projection_exists(P_current) andalso
+        inner_projection_exists(P_latest) andalso
+        inner_projection_exists(P_newprop) andalso
+        MyUniquePropCount == 1 andalso
+        lists:member(MyName, P_newprop_AllHosed),
 
     if
+        AllAreFlapping_and_IamBad_p ->
+            ?REACT({b10, ?LINE, []}),
+
+            %% There's outer flapping happening *and* we ourselves are
+            %% definitely flapping (flapping manifesto, starting clause 1)
+            %% ... and also we are a member of the all_hosed club.  So, we
+            %% should shut up and let someone else do the proposing.
+            react_to_env_A50(P_latest, [{muting_myself, true},
+                                        {all_hosed, P_newprop_AllHosed}], S);
+
         LatestUnanimousP
         andalso
         UnanimousLatestInnerNotRelevant_p ->
@@ -1931,8 +1949,10 @@ react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H,
     %% TODO: revisit this constant?
     MaxLength = length(P_latest#projection_v1.all_members),
     H2   = add_and_trunc_history(P_latest, H, MaxLength),
+    %% TODO: revisit this constant?
+    MaxLength_i = trunc(MaxLength * 1.5),
     H_i2 = add_and_trunc_history(inner_projection_or_self(P_latest),
-                                 H_i, MaxLength),
+                                 H_i, MaxLength_i),
     %% HH = [if is_atom(X) -> X; is_tuple(X) -> {element(1,X), element(2,X)} end || X <- get(react), is_atom(X) orelse size(X) == 3],
     %% ?V("HEE120 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(HH)]),
 
@@ -2027,8 +2047,7 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                         flap_counts_last=FlapCountsLast,
                         runenv=RunEnv1}=S) ->
     UniqueProposalSummaries = make_unique_proposal_summaries(H, P_newprop),
-    UniqueProposalSummaries_i = make_unique_proposal_summaries(
-                                  H_i, inner_projection_or_self(P_newprop)),
+    MyUniquePropCount = length(UniqueProposalSummaries),
 
     {_WhateverUnanimous, BestP, Props, _S} =
         cl_read_latest_projection(private, S),
@@ -2185,7 +2204,7 @@ if LeaveFlapping_p -> io:format(user, "CALC_FLAP: ~w: flapping_now ~w start ~w l
     AllFlapCounts_with_my_new =
         [{MyName, NewFlapStart}|lists:keydelete(MyName, 1, AllFlapCounts)],
     FlappingI = make_flapping_i(NewFlapStart, NewFlapCount, AllHosed,
-                                AllFlapCounts_with_my_new),
+                                AllFlapCounts_with_my_new, MyUniquePropCount),
     %% NOTE: Just because we increment flaps here, there's no correlation
     %%       to successful public proj store writes!  For example,
     %%       if we loop through states C2xx a few times, we would incr
@@ -2219,12 +2238,14 @@ make_unique_proposal_summaries(H, P_newprop) ->
                     P <- Ps]).
 
 make_flapping_i() ->
-    make_flapping_i(?NOT_FLAPPING_START, 0, [], []).
+    make_flapping_i(?NOT_FLAPPING_START, 0, [], [], 0).
 
-make_flapping_i(NewFlapStart, NewFlapCount, AllHosed, AllFlapCounts) ->
+make_flapping_i(NewFlapStart, NewFlapCount, AllHosed, AllFlapCounts,
+                MyUniquePropCount) ->
     #flap_i{flap_count={NewFlapStart, NewFlapCount},
             all_hosed=AllHosed,
-            all_flap_counts=lists:sort(AllFlapCounts)}.
+            all_flap_counts=lists:sort(AllFlapCounts),
+            my_unique_prop_count=MyUniquePropCount}.
 
 projection_transitions_are_sane(Ps, RelativeToServer) ->
     projection_transitions_are_sane(Ps, RelativeToServer, false).
