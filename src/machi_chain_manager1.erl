@@ -65,7 +65,6 @@
           timer           :: 'undefined' | timer:tref(),
           ignore_timer    :: boolean(),
           proj_history    :: queue:queue(),
-          proj_i_history  :: queue:queue(),
           flap_count=0    :: non_neg_integer(), % I am flapping if > 0.
           flap_start=?NOT_FLAPPING_START
                           :: {{'epk', integer()}, erlang:timestamp()},
@@ -271,7 +270,6 @@ init({MyName, InitMembersDict, MgrOpts}) ->
                 flap_limit=length(All_list) + 3,
                 timer='undefined',
                 proj_history=queue:new(),
-                proj_i_history=queue:new(),
                 not_sanes=orddict:new(),
                 consistency_mode=CMode,
                 runenv=RunEnv,
@@ -320,8 +318,7 @@ handle_call({set_chain_members, MembersDict, Witness_list}, _From,
     %% Reset all flapping state.
     NewProj2 = NewProj#projection_v1{flap=make_flapping_i()},
     S3 = clear_flapping_state(S2#ch_mgr{proj=NewProj2,
-                                        proj_history=queue:new(),
-                                        proj_i_history=queue:new()}),
+                                        proj_history=queue:new()}),
     {_QQ, S4} = do_react_to_env(S3),
     {reply, Reply, S4};
 handle_call({set_active, Boolean}, _From, #ch_mgr{timer=TRef}=S) ->
@@ -1636,21 +1633,25 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         case P_newprop#projection_v1.flap of undefined -> make_flapping_i();
                                              Flap      -> Flap
         end,
-    AllAreFlapping_and_IamBad_p =
+    P_newprop_AllHosedPlus =
+        lists:flatten([[X,Y] || {X,problem_with,Y} <- P_newprop_AllHosed]),
+    AllAreFlapping_and_IamBad_and_NotRelevant_p =
         inner_projection_exists(P_current) andalso
         inner_projection_exists(P_latest) andalso
         inner_projection_exists(P_newprop) andalso
         MyUniquePropCount == 1 andalso
-        lists:member(MyName, P_newprop_AllHosed),
+        lists:member(MyName, P_newprop_AllHosedPlus) andalso
+        UnanimousLatestInnerNotRelevant_p,
 
     if
-        AllAreFlapping_and_IamBad_p ->
+        AllAreFlapping_and_IamBad_and_NotRelevant_p ->
             ?REACT({b10, ?LINE, []}),
 
             %% There's outer flapping happening *and* we ourselves are
             %% definitely flapping (flapping manifesto, starting clause 1)
             %% ... and also we are a member of the all_hosed club.  So, we
             %% should shut up and let someone else do the proposing.
+%% io:format(user, "B10: ~w shut up, latest e=~w/Inner=~w, ", [MyName, P_latest#projection_v1.epoch_number, (inner_projection_or_self(P_latest))#projection_v1.epoch_number]),
             react_to_env_A50(P_latest, [{muting_myself, true},
                                         {all_hosed, P_newprop_AllHosed}], S);
 
@@ -1943,23 +1944,20 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     end.
 
 react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H,
-                                                proj_i_history=H_i,
                                                 sane_transitions=Xtns}=S) ->
     ?REACT(c120),
     %% TODO: revisit this constant?
-    MaxLength = length(P_latest#projection_v1.all_members),
+    MaxLength = length(P_latest#projection_v1.all_members) * 1.5,
     H2   = add_and_trunc_history(P_latest, H, MaxLength),
     %% TODO: revisit this constant?
     MaxLength_i = trunc(MaxLength * 1.5),
-    H_i2 = add_and_trunc_history(inner_projection_or_self(P_latest),
-                                 H_i, MaxLength_i),
     %% HH = [if is_atom(X) -> X; is_tuple(X) -> {element(1,X), element(2,X)} end || X <- get(react), is_atom(X) orelse size(X) == 3],
     %% ?V("HEE120 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(HH)]),
 
     diversion_c120_verbose_goop(P_latest, S),
     ?REACT({c120, [{latest, machi_projection:make_summary(P_latest)}]}),
     {{now_using, FinalProps, P_latest#projection_v1.epoch_number},
-     S#ch_mgr{proj=P_latest, proj_history=H2, proj_i_history=H_i2,
+     S#ch_mgr{proj=P_latest, proj_history=H2,
               sane_transitions=Xtns + 1}}.
 
 add_and_trunc_history(P_latest, H, MaxLength) ->
@@ -2041,7 +2039,7 @@ react_to_env_C310(P_newprop, S) ->
 %%    some earlier epoch E-delta.
 
 calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
-                #ch_mgr{name=MyName, proj_history=H, proj_i_history=H_i,
+                #ch_mgr{name=MyName, proj_history=H,
                         flap_start=FlapStart,
                         flap_count=FlapCount, flap_last_up=FlapLastUp,
                         flap_counts_last=FlapCountsLast,
