@@ -257,7 +257,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
            io:format(user, "\nSweet, private projections are stable\n", []),
            io:format(user, "\t~P\n", [get(stable), 14]),
            io:format(user, "Rolling sanity check ... ", []),
-           MaxFiles = 1*1000,
+           MaxFiles = 800,
            PrivProjs = [{Name, begin
                                    {ok, Ps8} = ?FLU_PC:get_all_projections(
                                                   FLU, private, infinity),
@@ -290,8 +290,10 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                 Pubs = filelib:wildcard(Dir ++ "/projection/public/*"),
                 FilesToDel2 = lists:sublist(Pubs,
                                             max(0, length(Pubs)-MaxFiles)),
-                [_ = file:delete(File) || File <- FilesToDel2]
+                [_ = file:delete(File) || File <- FilesToDel2],
+                io:format(user, "Yay, now prune: ~w ~w, ", [length(FilesToDel1), length(FilesToDel2)])
             end || Dir <- filelib:wildcard("/tmp/c/data*")],
+           io:format(user, "\n", []),
 
            timer:sleep(1250),
            ok
@@ -301,7 +303,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
       io:format(user, "\nSET partitions = []\n", []),
       io:format(user, "We should see convergence to 1 correct chain.\n", []),
       machi_partition_simulator:no_partitions(),
-      [DoIt(50, 10, 50) || _ <- [1]],
+      [DoIt(50, 10, 50) || _ <- [1,2,3]],
       true = private_projections_are_stable(Namez, DoIt),
       io:format(user, "~s\n", [os:cmd("date")]),
 
@@ -499,6 +501,9 @@ private_projections_are_stable(Namez, PollFunc) ->
     Witnesses = hd([Ws ||
                    {_Name,{_Epoch,_UPI,Rep,_Dn,Ws,InnerP}} <- Private2]),
     HaveWitnesses_p = Witnesses /= [],
+    CMode = if HaveWitnesses_p -> cp_mode;
+               true            -> ap_mode
+            end,
     Unanimous_with_all_peers_p =
         lists:all(fun({FLU, UsesEpoch}) ->
                    WhoInEpoch = [Name ||
@@ -513,17 +518,21 @@ private_projections_are_stable(Namez, PollFunc) ->
                    orelse
                    (length(lists:usort(UPI_R_versions)) == 1
                     andalso
-                    ordsets:is_subset(UPI_R_vers_s, WhoInEpoch_s))
+                    (ordsets:is_subset(UPI_R_vers_s, WhoInEpoch_s) orelse
+                     (CMode == cp_mode andalso
+                     ordsets:is_disjoint(UPI_R_vers_s, WhoInEpoch_s))))
                   end, FLU_uses),
-    %% io:format(user, "\nPriv1 ~P agree ~p\n", [lists:sort(Private1), 14, Unanimous_with_all_peers_p]),
+    Pubs = [begin
+                {ok, P} = ?FLU_PC:read_latest_projection(FLU, public),
+                {Name, P#projection_v1.epoch_number}
+            end || {Name, FLU} <- Namez],
 
-    %%io:format(user, "U_UPI_Rs ~p\n", [U_UPI_Rs]),
-    %%io:format(user, "FLUs ~p\n", [FLUs]),
-    %%io:format(user, "Unanimous_with_all_peers_p ~p\n", [Unanimous_with_all_peers_p]),
     Flat_U_UPI_Rs = lists:flatten(U_UPI_Rs),
     Private1 == Private2 andalso
-        %% If not disjoint, then a flu will appear twice in flattented U_UPIs.
-        lists:sort(Flat_U_UPI_Rs) == lists:usort(Flat_U_UPI_Rs) andalso
+        (CMode == cp_mode orelse % CP mode = skip this criterion
+         %% In AP mode,
+         %% if not disjoint, then a flu will appear twice in flattented U_UPIs.
+         lists:sort(Flat_U_UPI_Rs) == lists:usort(Flat_U_UPI_Rs)) andalso
         %% Another property that we want is that for each participant
         %% X mentioned in a UPI or Repairing list of some epoch E that
         %% X is using the same epoch E.
