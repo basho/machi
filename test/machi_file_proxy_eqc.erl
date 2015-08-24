@@ -63,10 +63,12 @@ csum(Type, Binary) ->
     end.
 
 offset() ->
-    ?SUCHTHAT(X, oneof([largeint(), int()]), X >= 0).
+%    ?SUCHTHAT(X, oneof([largeint(), int()]), X >= 0).
+    ?SUCHTHAT(X, int(), X >= 0).
 
 len() ->
-    ?SUCHTHAT(X, oneof([largeint(), int()]), X >= 1).
+%    ?SUCHTHAT(X, oneof([largeint(), int()]), X >= 1).
+    ?SUCHTHAT(X, int(), X >= 1).
 
 data_with_csum() ->
     ?LET({B,T},{eqc_gen:largebinary(), csum_type()}, {B,T, csum(T, B)}).
@@ -74,12 +76,13 @@ data_with_csum() ->
 small_data() ->
     ?LET(D, ?SUCHTHAT(S, int(), S >= 1 andalso S < 500), binary(D)).
 
+%% INITIALIZATION
+
 -record(state, {pid, file = 0, written=[]}).
 
-initial_state() -> #state{}.
+initial_state() -> #state{written=[{0,1023}]}.
 
-precondition_common(S, Cmd) ->
-    S#state.pid /= undefined orelse Cmd == start.
+%% HELPERS
 
 %% check if an operation is permitted based on whether a write has
 %% occurred
@@ -93,6 +96,15 @@ check_writes([{Pos, Sz}|_T], Off, _L) when Off > ( Pos + Sz ) ->
     false;
 check_writes([_H|T], Off, L) ->
     check_writes(T, Off, L).
+
+is_error({error, _}) -> true;
+is_error({error, _, _}) -> true;
+is_error(Other) -> {expected_ERROR, Other}.
+
+is_ok({ok, _, _}) -> true;
+is_ok(ok) -> true;
+is_ok(Other) -> {expected_OK, Other}.
+
 
 -define(TESTDIR, "./eqc").
 
@@ -111,29 +123,36 @@ start_pre(S) ->
     S#state.pid == undefined.
 
 start_command(S) ->
-    File = "eqc_data." ++ integer_to_list(S#state.file),
+    {call, ?MODULE, start, [S]}.
+
+start(S) ->
+    File = test_server:temp_name("eqc_data") ++ "." ++ integer_to_list(S#state.file),
     {ok, Pid} = machi_file_proxy:start_link(File, ?TESTDIR),
     unlink(Pid),
-    {ok, Pid}.
+    Pid.
 
-start_next(S, {ok, Pid}, _Args) ->
+start_next(S, Pid, _Args) ->
     S#state{pid = Pid, file = S#state.file + 1}.
 
 %% read
 
+read_pre(S) ->
+    S#state.pid /= undefined.
+
 read_args(S) ->
     [S#state.pid, offset(), len()].
 
-read_ok(S, [_Pid, Off, L]) ->
+read_ok(S, Off, L) ->
     case S#state.written of
         [] -> false;
+        [{0, 1023}] -> false;
         W -> check_writes(W, Off, L)
     end.
 
 read_post(S, [_Pid, Off, L], Res) ->
-    case read_ok(S, [Off, L]) of
-        true -> eq(Res, {ok, '_', '_'});
-        false -> eq(Res, {error, '_'})
+    case read_ok(S, Off, L) of
+        true -> is_ok(Res);
+        false -> is_error(Res)
     end.
 
 read_next(S, _Res, _Args) -> S.
@@ -143,24 +162,28 @@ read(Pid, Offset, Length) ->
 
 %% write
 
+write_pre(S) ->
+    S#state.pid /= undefined.
+
 write_args(S) ->
     [S#state.pid, offset(), data_with_csum()].
 
+write_ok(_S, [_Pid, Off, _Data]) when Off < 1024 -> false;
 write_ok(S, [_Pid, Off, {Bin, _Tag, _Csum}]) ->
     Size = iolist_size(Bin),
-    case S#state.written of
-        [] -> false;
-         W -> check_writes(W, Off, Size)
-    end.
+    %% Check writes checks if a byte range is *written*
+    %% So writes are ok IFF they are NOT written, so
+    %% we want not check_writes/3 to be true.
+    not check_writes(S#state.written, Off, Size).
 
 write_post(S, Args, Res) ->
     case write_ok(S, Args) of
         true -> eq(Res, ok);
-        false -> eq(Res, {error, '_'})
+        false -> is_error(Res)
     end.
 
 write_next(S, ok, [_Pid, Offset, {Bin, _Tag, _Csum}]) ->
-    S#state{written = lists:sort(S#state.written ++ {Offset, iolist_size(Bin)})};
+    S#state{written = lists:sort(S#state.written ++ [{Offset, iolist_size(Bin)}])};
 write_next(S, _Res, _Args) -> S.
 
 write(Pid, Offset, {Bin, Tag, Csum}) ->
@@ -171,20 +194,25 @@ write(Pid, Offset, {Bin, Tag, Csum}) ->
 %% append
 %% TODO - ensure offset is expected offset
 
+append_pre(S) ->
+    S#state.pid /= undefined.
+
 append_args(S) ->
     [S#state.pid, default(0, len()), data_with_csum()].
 
 append(Pid, Extra, {Bin, Tag, Csum}) ->
     Meta = [{client_csum_tag, Tag},
             {client_csum, Csum}],
-    machi_file_proxy:write(Pid, Extra, Meta, Bin).
+    machi_file_proxy:append(Pid, Meta, Extra, Bin).
 
 append_next(S, {ok, _File, Offset}, [_Pid, _Extra, {Bin, _Tag, _Csum}]) ->
-    S#state{written = lists:sort(S#state.written ++ {Offset, iolist_size(Bin)})};
+    S#state{written = lists:sort(S#state.written ++ [{Offset, iolist_size(Bin)}])};
 append_next(S, _Res, _Args) -> S.
 
+%% appends should always succeed unless the disk is full 
+%% or there's a hardware failure.
 append_post(_S, _Args, Res) ->
-    eq(Res, {ok, '_', '_'}).
+    is_ok(Res).
 
 %% Property
 
@@ -192,6 +220,7 @@ prop_ok() ->
   ?FORALL(Cmds, commands(?MODULE),
   begin
     cleanup(),
+    %io:format(user, "Commands: ~p~n", [Cmds]),
     {H, S, Res} = run_commands(?MODULE, Cmds),
     pretty_commands(?MODULE, Cmds, {H, S, Res},
       aggregate(command_names(Cmds), Res == ok))
