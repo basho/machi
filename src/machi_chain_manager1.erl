@@ -649,7 +649,7 @@ calc_projection(#ch_mgr{proj=LastProj, consistency_mode=CMode,
                             ?REACT({calc,?LINE,
                                     [{zerf_backstop, true},
                                      {zerf_in, machi_projection:make_summary(Zerf)}]}),
-                            io:format(user, "zerf_in: ~p: ~w\n", [S#ch_mgr.name,  machi_projection:make_summary(Zerf)]),
+                            %% io:format(user, "zerf_in: ~p: ~w\n", [S#ch_mgr.name,  machi_projection:make_summary(Zerf)]),
                             calc_projection2(Zerf, RelativeToServer, AllHosed,
                                              [{zerf_backstop, true}]++Dbg, S);
                         Zerf ->
@@ -1118,12 +1118,27 @@ react_to_env_A20(Retries, #ch_mgr{name=MyName}=S) ->
         end,
     react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra, S2).
 
-react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra, S) ->
-    XX = length(get(react)),
-    if XX > 10*1000 ->
-            io:format(user, "CONFIRM by mgr ~p max len XX ~p, break\n",
-                      [S#ch_mgr.name, XX]),
-            react_to_env_A50(P_latest, [], S);
+react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra,
+                 #ch_mgr{name=MyName, consistency_mode=CMode,
+                         proj=P_current} = S) ->
+    #projection_v1{epoch_number=Epoch_latest,
+                   author_server=Author_latest} = P_latest,
+    if CMode == cp_mode,
+       Epoch_latest > P_current#projection_v1.epoch_number,
+       Author_latest /= MyName ->
+            case make_zerf(P_current, S) of
+                Zerf when is_record(Zerf, projection_v1) ->
+                    ?REACT({a29, ?LINE,
+                            [{zerf_filler, true},
+                             {zerf_in, machi_projection:make_summary(Zerf)}]}),
+                    %% io:format(user, "zerf_in @ A29: ~p: ~w\n", [MyName,  machi_projection:make_summary(Zerf)]),
+                    P_current2 = Zerf#projection_v1{
+                                             flap=P_current#projection_v1.flap},
+                    react_to_env_A30(Retries, P_latest, LatestUnanimousP,
+                                     ReadExtra, S#ch_mgr{proj=P_current2});
+                Zerf ->
+                    {{{yo_todo_incomplete_fix_me_cp_mode, line, ?LINE, Zerf}}}
+            end;
        true ->
             react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra, S)
     end.
@@ -1893,6 +1908,8 @@ react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
            ?V("YOYO-cp-mode,~w,~w,~w,",[MyName, P_latest#projection_v1.epoch_number,N]),
             ?REACT({c100, ?LINE, [{cmode,CMode},
                                   {not_sanes_author_count, N}]}),
+            case get({zzz_quiet, P_latest#projection_v1.epoch_number}) of undefined -> ?V("YOYO-cp-mode,~w,current=~w,",[MyName, machi_projection:make_summary((S#ch_mgr.proj))]); _ -> ok end,
+            put({zzz_quiet, P_latest#projection_v1.epoch_number}, true),
             react_to_env_A49(P_latest, [], S2);
         N when N > ?TOO_FREQUENT_BREAKER ->
             ?V("\n\nYOYO ~w breaking the cycle of:\n  current: ~w\n  new    : ~w\n", [MyName, machi_projection:make_summary(S#ch_mgr.proj), machi_projection:make_summary(P_latest)]),
@@ -3029,7 +3046,6 @@ make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list, M
                         end || FLU <- Up]))),
         put(epochs, Epochs),
         Relation = [],
-        put(xxx_epoch, OldEpochNum),
         Proj = zerf_find_last_common(Epochs, Relation, MajoritySize, Up, S),
         Proj#projection_v1{flap=make_flapping_i()}
     catch
@@ -3053,7 +3069,9 @@ make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list, M
                     P = make_all_projection(MyName, AllMembers, OldWitness_list,
                                             MembersDict),
                     machi_projection:update_checksum(
-                      P#projection_v1{epoch_number=OldEpochNum,dbg2=[zerf_all]});
+                      P#projection_v1{epoch_number=OldEpochNum,
+                                      mode=cp_mode,
+                                      dbg2=[zerf_all]});
                true ->
                     %% Make it appear like nobody is up now: we'll have to
                     %% wait until the Up list changes so that
@@ -3063,7 +3081,9 @@ make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list, M
                     P = make_none_projection(MyName, AllMembers,OldWitness_list,
                                              MembersDict),
                     machi_projection:update_checksum(
-                      P#projection_v1{epoch_number=OldEpochNum,dbg2=[zerf_none, {es, get(epochs)},{up,Up},{maj,MajoritySize}]})
+                      P#projection_v1{epoch_number=OldEpochNum,
+                                      mode=cp_mode,
+                                      dbg2=[zerf_none, {es, get(epochs)},{up,Up},{maj,MajoritySize}]})
             end;
         _X:_Y ->
             throw({zerf, {damn_exception, Up, _X, _Y, erlang:get_stacktrace()}})

@@ -631,7 +631,7 @@ private_projections_are_stable(Namez, PollFunc) ->
                 true
         end,
 
-    io:format(user, "\nPriv1 ~P agree ~p\n", [lists:sort(Private1), 20, Unanimous_with_all_peers_p]),
+    io:format(user, "\nPriv1 ~P u_all_peers ~w cp_mode_agree ~w\n", [lists:sort(Private1), 20, Unanimous_with_all_peers_p, CP_mode_agree_test_p]),
     Private1 == Private2 andalso
         AP_mode_disjoint_test_p andalso
         (
