@@ -69,6 +69,7 @@
           flap_start=?NOT_FLAPPING_START
                           :: {{'epk', integer()}, erlang:timestamp()},
           flap_last_up=[] :: list(),
+          flap_last_up_change=now() :: erlang:now(),
           flap_counts_last=[] :: list(),
           not_sanes       :: orddict:orddict(),
           sane_transitions = 0 :: non_neg_integer(),
@@ -1614,7 +1615,8 @@ react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                  Rank_newprop, Rank_latest,
-                 #ch_mgr{name=MyName, flap_limit=FlapLimit, proj=P_current}=S)->
+                 #ch_mgr{name=MyName, consistency_mode=CMode,
+                         flap_limit=FlapLimit, proj=P_current}=S)->
     ?REACT(b10),
 
     {P_newprop_flap_time, P_newprop_flap_count} = get_flap_count(P_newprop),
@@ -1668,7 +1670,6 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         andalso
         %% My down lists are the same, i.e., no state change to announce
         P_current#projection_v1.down == P_newprop#projection_v1.down,
-if EnoughAreFlapping_and_IamBad_p -> io:format(user, "B10 ~w ~w current_down ~w newprop_down ~w, ", [MyName, EnoughAreFlapping_and_IamBad_p, P_current#projection_v1.down, P_newprop#projection_v1.down]); true -> ok end,
     ?REACT({b10, ?LINE, [{0,EnoughAreFlapping_and_IamBad_p},
                          {1,inner_projection_exists(P_current)},
                          {2,inner_projection_exists(P_latest)},
@@ -1679,14 +1680,24 @@ if EnoughAreFlapping_and_IamBad_p -> io:format(user, "B10 ~w ~w current_down ~w 
     if
         EnoughAreFlapping_and_IamBad_p ->
             ?REACT({b10, ?LINE, []}),
-
             %% There's outer flapping happening *and* we ourselves are
             %% definitely flapping (flapping manifesto, starting clause 1)
             %% ... and also we are a member of the all_hosed club.  So, we
             %% should shut up and let someone else do the proposing.
+            FinalProps = [{muting_myself, true},
+                          {all_hosed, P_newprop_AllHosed}],
 %% io:format(user, "B10: ~w shut up, latest e=~w/Inner=~w, ", [MyName, P_latest#projection_v1.epoch_number, (inner_projection_or_self(P_latest))#projection_v1.epoch_number]),
-            react_to_env_A50(P_latest, [{muting_myself, true},
-                                        {all_hosed, P_newprop_AllHosed}], S);
+            if CMode == ap_mode ->
+                    react_to_env_A50(P_latest, FinalProps, S);
+               CMode == cp_mode ->
+                    %% Be more harsh, stop iterating by A49 so that when we
+                    %% resume we will have a much small opinion about the
+                    %% world.
+                    %% WHOOPS, doesn't allow convergence in simple cases,
+                    %% needs more work!!!!!!!!!!!!!!!! Monday evening!!!!
+                    %% react_to_env_A49(P_latest, FinalProps, S)
+                    react_to_env_A50(P_latest, FinalProps, S)
+            end;
 
         LatestUnanimousP
         andalso
@@ -2079,10 +2090,17 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                 #ch_mgr{name=MyName, proj_history=H,
                         flap_start=FlapStart,
                         flap_count=FlapCount, flap_last_up=FlapLastUp,
+                        flap_last_up_change=LastUpChange0,
                         flap_counts_last=FlapCountsLast,
                         runenv=RunEnv1}=S) ->
     UniqueProposalSummaries = make_unique_proposal_summaries(H, P_newprop),
     MyUniquePropCount = length(UniqueProposalSummaries),
+    LastUpChange = if CurrentUp /= FlapLastUp ->
+                           now();
+                      true ->
+                           LastUpChange0
+                   end,
+    LastUpChange_diff = timer:now_diff(now(), LastUpChange) / 1000000,
 
     {_WhateverUnanimous, BestP, Props, _S} =
         cl_read_latest_projection(private, S),
@@ -2167,12 +2185,17 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
         end,
     LeaveFlapping_p =
         if 
+            LastUpChange_diff < 3.0 ->
+                %% If the last time we saw a hard change in up/down status
+                %% was less than this time ago, then we do not flap.  Give
+                %% the status change some time to propagate.
+                true;
             StartFlapping_p ->
                 %% If we're starting flapping on this iteration, don't ignore
                 %% that intent.
                 false;
             AmFlappingNow_p andalso
-            FlapLastUp /= [] andalso CurrentUp /= FlapLastUp ->
+            CurrentUp /= FlapLastUp ->
                 ?REACT({calculate_flaps,?LINE,[{manifesto_clause,1}]}),
                 true;
             AmFlappingNow_p ->
@@ -2209,7 +2232,7 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                 ?REACT({calculate_flaps,?LINE,[]}),
                 false
         end,
-if LeaveFlapping_p -> io:format(user, "CALC_FLAP: ~w: flapping_now ~w start ~w leave ~w latest-epoch ~w: ~w\n", [MyName, AmFlappingNow_p, StartFlapping_p, LeaveFlapping_p, P_latest#projection_v1.epoch_number, [X || X={calculate_flaps,_,_} <- lists:sublist(get(react), 3)]]); true -> ok end,
+%% if LeaveFlapping_p andalso (AmFlappingNow_p orelse StartFlapping_p) -> io:format(user, "CALC_FLAP: ~w: flapping_now ~w start ~w leave ~w latest-epoch ~w: ~w\n", [MyName, AmFlappingNow_p, StartFlapping_p, LeaveFlapping_p, P_latest#projection_v1.epoch_number, [X || X={calculate_flaps,_,_} <- lists:sublist(get(react), 3)]]); true -> ok end,
     AmFlapping_p = if LeaveFlapping_p -> false;
                       true            -> AmFlappingNow_p orelse StartFlapping_p
                    end,
@@ -2258,7 +2281,8 @@ if LeaveFlapping_p -> io:format(user, "CALC_FLAP: ~w: flapping_now ~w start ~w l
     %% the 'runenv' variable that's threaded through all this code.
     %% It isn't doing what I'd originally intended.  Fix it.
     S2 = S#ch_mgr{flap_count=NewFlapCount, flap_start=NewFlapStart,
-                  flap_last_up=CurrentUp, flap_counts_last=AllFlapCounts,
+                  flap_last_up=CurrentUp, flap_last_up_change=LastUpChange,
+                  flap_counts_last=AllFlapCounts,
                   runenv=RunEnv1},
     {machi_projection:update_checksum(P_newprop#projection_v1{
                                                          flap=FlappingI}),
