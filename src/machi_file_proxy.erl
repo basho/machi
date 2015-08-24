@@ -46,6 +46,7 @@
 %% public API
 -export([
     start_link/2,
+    stop/1,
     sync/1,
     sync/2,
     read/3,
@@ -65,7 +66,7 @@
     code_change/3
 ]).
 
--define(TICK, 5*1000).
+-define(TICK, 30*1000). %% XXX FIXME Should be something like 5 seconds
 -define(TICK_THRESHOLD, 5). %% After this + 1 more quiescent ticks, shutdown
 -define(TIMEOUT, 10*1000).
 -define(TOO_MANY_ERRORS_RATIO, 50).
@@ -104,28 +105,48 @@
 start_link(Filename, DataDir) ->
     gen_server:start_link(?MODULE, {Filename, DataDir}, []).
 
+% @doc Request to stop an instance of the file proxy service.
+-spec stop(Pid :: pid()) -> ok.
+stop(Pid) when is_pid(Pid) ->
+    gen_server:call(Pid, {stop}, ?TIMEOUT).
+
 % @doc Force a sync of all filehandles
 -spec sync(Pid :: pid()) -> ok|{error, term()}.
-sync(Pid) ->
-    sync(Pid, all).
+sync(Pid) when is_pid(Pid) ->
+    sync(Pid, all);
+sync(_Pid) ->
+    lager:warning("Bad pid to sync"),
+    {error, bad_arg}.
 
 % @doc Force a sync of a specific filehandle type. Valid types are `all', `csum' and `data'.
 -spec sync(Pid :: pid(), Type :: all|data|csum) -> ok|{error, term()}.
-sync(Pid, Type) ->
-    gen_server:call(Pid, {sync, Type}, ?TIMEOUT).
+sync(Pid, Type) when is_pid(Pid) andalso 
+                     ( Type =:= all orelse Type =:= csum orelse Type =:= data ) ->
+    gen_server:call(Pid, {sync, Type}, ?TIMEOUT);
+sync(_Pid, Type) ->
+    lager:warning("Bad arg to sync: Type ~p", [Type]),
+    {error, bad_arg}.
 
 % @doc Read file at offset for length
 -spec read(Pid :: pid(),
            Offset :: non_neg_integer(),
            Length :: non_neg_integer()) -> {ok, Data :: binary(), Checksum :: binary()} |
                                            {error, Reason :: term()}.
-read(Pid, Offset, Length) ->
-    gen_server:call(Pid, {read, Offset, Length}, ?TIMEOUT).
+read(Pid, Offset, Length) when is_pid(Pid) andalso is_integer(Offset) andalso Offset >= 0 
+                               andalso is_integer(Length) andalso Length > 0 ->
+    gen_server:call(Pid, {read, Offset, Length}, ?TIMEOUT);
+read(_Pid, Offset, Length) ->
+    lager:warning("Bad args to read: Offset ~p, Length ~p", [Offset, Length]),
+    {error, bad_arg}.
 
 % @doc Write data at offset
 -spec write(Pid :: pid(), Offset :: non_neg_integer(), Data :: binary()) -> ok|{error, term()}.
-write(Pid, Offset, Data) ->
-    write(Pid, Offset, [], Data).
+write(Pid, Offset, Data) when is_pid(Pid) andalso is_integer(Offset) andalso Offset >= 0
+                              andalso is_binary(Data) ->
+    write(Pid, Offset, [], Data);
+write(_Pid, Offset, _Data) ->
+    lager:warning("Bad arg to write: Offset ~p", [Offset]),
+    {error, bad_arg}.
 
 % @doc Write data at offset, including the client metadata. ClientMeta is a proplist
 % that expects the following keys and values:
@@ -135,34 +156,50 @@ write(Pid, Offset, Data) ->
 % </ul>
 -spec write(Pid :: pid(), Offset :: non_neg_integer(), ClientMeta :: proplists:proplist(),
             Data :: binary()) -> ok|{error, term()}.
-write(Pid, Offset, ClientMeta, Data) ->
-    gen_server:call(Pid, {write, Offset, ClientMeta, Data}, ?TIMEOUT).
+write(Pid, Offset, ClientMeta, Data) when is_pid(Pid) andalso is_integer(Offset) andalso Offset >= 0
+                                          andalso is_list(ClientMeta) andalso is_binary(Data) ->
+    gen_server:call(Pid, {write, Offset, ClientMeta, Data}, ?TIMEOUT);
+write(_Pid, Offset, ClientMeta, _Data) ->
+    lager:warning("Bad arg to write: Offset ~p, ClientMeta: ~p", [Offset, ClientMeta]),
+    {error, bad_arg}.
 
 % @doc Append data
--spec append(Pid :: pid(), Data :: binary()) -> ok|{error, term()}.
-append(Pid, Data) ->
-    append(Pid, [], 0, Data).
+-spec append(Pid :: pid(), Data :: binary()) -> {ok, File :: string(), Offset :: non_neg_integer()}
+                                                |{error, term()}.
+append(Pid, Data) when is_pid(Pid) andalso is_binary(Data) ->
+    append(Pid, [], 0, Data);
+append(_Pid, _Data) ->
+    lager:warning("Bad arguments to append/2"),
+    {error, bad_arg}.
 
 % @doc Append data to file, supplying client metadata and (if desired) a
 % reservation for additional space.  ClientMeta is a proplist and expects the
 % same keys as write/4.
 -spec append(Pid :: pid(), ClientMeta :: proplists:proplist(),
-             Extra :: non_neg_integer(), Data :: binary()) -> ok|{error, term()}.
-append(Pid, ClientMeta, Extra, Data) ->
-    gen_server:call(Pid, {append, ClientMeta, Extra, Data}, ?TIMEOUT).
+             Extra :: non_neg_integer(), Data :: binary()) -> {ok, File :: string(), Offset :: non_neg_integer()}
+                                                              |{error, term()}.
+append(Pid, ClientMeta, Extra, Data) when is_pid(Pid) andalso is_list(ClientMeta) 
+                                          andalso is_integer(Extra) andalso Extra >= 0 
+                                          andalso is_binary(Data) ->
+    gen_server:call(Pid, {append, ClientMeta, Extra, Data}, ?TIMEOUT);
+append(_Pid, ClientMeta, Extra, _Data) ->
+    lager:warning("Bad arg to append: ClientMeta ~p, Extra ~p", [ClientMeta, Extra]),
+    {error, bad_arg}.
 
 %% gen_server callbacks
 
 % @private
 init({Filename, DataDir}) ->
-    CsumFile = machi_util:make_csum_filename(DataDir, Filename),
+    CsumFile = machi_util:make_checksum_filename(DataDir, Filename),
     {_, DPath} = machi_util:make_data_filename(DataDir, Filename),
+    ok = filelib:ensure_dir(CsumFile),
+    ok = filelib:ensure_dir(DPath),
     UnwrittenBytes = parse_csum_file(CsumFile),
     {Eof, infinity} = lists:last(UnwrittenBytes),
     {ok, FHd} = file:open(DPath, [read, write, binary, raw]),
     {ok, FHc} = file:open(CsumFile, [append, binary, raw]),
     Tref = schedule_tick(),
-    {ok, #state{
+    St = #state{
         filename        = Filename,
         data_dir        = DataDir,
         data_path       = DPath,
@@ -171,9 +208,16 @@ init({Filename, DataDir}) ->
         csum_filehandle = FHc,
         tref            = Tref,
         unwritten_bytes = UnwrittenBytes,
-        eof_position    = Eof}}.
+        eof_position    = Eof},
+    lager:debug("Starting file proxy ~p for filename ~p, state = ~p",
+                [self(), Filename, St]),
+    {ok, St}.
 
 % @private
+handle_call({stop}, _From, State) ->
+    lager:debug("Requested to stop."),
+    {stop, normal, State};
+
 handle_call({sync, data}, _From, State = #state{ data_filehandle = FHd }) ->
     R = file:sync(FHd),
     {reply, R, State};
@@ -216,7 +260,7 @@ handle_call({read, Offset, Length}, _From,
                               }) when Offset + Length > Eof ->
     lager:error("Read request at offset ~p for ~p bytes is past the last write offset of ~p",
                 [Offset, Length, Eof]),
-    {reply, {error, not_written}, State = #state{reads = {T + 1, Err + 1}}};
+    {reply, {error, not_written}, State#state{reads = {T + 1, Err + 1}}};
 
 handle_call({read, Offset, Length}, _From,
             State = #state{filename = F,
@@ -463,17 +507,22 @@ insert_offsets({Offset, Length, Checksum}) ->
 -spec parse_csum_file( Filename :: string() ) -> [byte_sequence()].
 parse_csum_file(Filename) ->
     %% using file:read_file works as long as the files are "small"
-    {ok, CsumData} = file:read_file(Filename),
-    {DecodedCsums, _Junk} = machi_flu1:split_checksum_list_blob_decode(CsumData),
-    Sort = lists:sort(DecodedCsums),
-    case Sort of
+    try
+        {ok, CsumData} = file:read_file(Filename),
+        {DecodedCsums, _Junk} = machi_flu1:split_checksum_list_blob_decode(CsumData),
+        Sort = lists:sort(DecodedCsums),
+        case Sort of
         [] -> [{?MINIMUM_OFFSET, infinity}];
         _ ->
             map_offsets_to_csums(DecodedCsums),
             {First, _, _} = hd(Sort),
             build_unwritten_bytes_list(Sort, First, [])
+        end
+    catch
+        _:{badmatch, {error, enoent}} ->
+            [{?MINIMUM_OFFSET, infinity}]
     end.
-
+   
 -spec handle_read(FHd        :: file:filehandle(),
                   Filename   :: string(),
                   TaggedCsum :: undefined|binary(),
@@ -511,20 +560,23 @@ handle_read(FHd, Filename, TaggedCsum, Offset, Size, U) ->
             do_read(FHd, Filename, TaggedCsum, Offset, Size)
     end.
 
-% @private Implements the disk read
 do_read(FHd, Filename, TaggedCsum, Offset, Size) ->
     case file:pread(FHd, Offset, Size) of
         eof -> 
             eof;
         {ok, Bytes} when byte_size(Bytes) == Size ->
-            {Type, Ck} = machi_util:unmake_tagged_csum(TaggedCsum),
-            case check_or_make_tagged_csum(Type, Ck, Bytes) of
+            {Tag, Ck} = machi_util:unmake_tagged_csum(TaggedCsum),
+            case check_or_make_tagged_csum(Tag, Ck, Bytes) of
                 {error, Bad} ->
                     lager:error("Bad checksum; got ~p, expected ~p",
                                 [Bad, Ck]),
                     {error, bad_csum};
                 TaggedCsum ->
-                    {ok, Bytes, TaggedCsum}
+                    {ok, Bytes, TaggedCsum};
+                %% XXX FIXME: Should we return something other than
+                %% {ok, ....} in this case?
+                OtherCsum when Tag =:= ?CSUM_TAG_NONE ->
+                    {ok, Bytes, OtherCsum}
             end;
         {ok, Partial} ->
             lager:error("In file ~p, offset ~p, wanted to read ~p bytes, but got ~p", 
@@ -664,6 +716,8 @@ lookup_unwritten(Offset, Size, [H={Pos, Space}|_Rest])
 lookup_unwritten(Offset, Size, [_H|Rest]) ->
     %% These are not the droids you're looking for.
     lookup_unwritten(Offset, Size, Rest).
+
+%%% if the pos is greater than offset + size then we're done. End early.
 
 -spec update_unwritten( Offset    :: non_neg_integer(),
                         Size      :: pos_integer(),
