@@ -39,7 +39,8 @@
 -record(flap_i, {
           flap_count :: {term(), term()},
           all_hosed :: list(),
-          all_flap_counts :: list()
+          all_flap_counts :: list(),
+          my_unique_prop_count :: non_neg_integer()
          }).
 
 -type p_srvr() :: #p_srvr{}.

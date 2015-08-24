@@ -773,7 +773,6 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                              D_foo ++
                                  Dbg ++ [{ps, Partitions},{nodes_up, Up}]),
     P2 = if CMode == cp_mode ->
-                 %% TODO incompete logic!
                  UpWitnesses = [W || W <- Up, lists:member(W, OldWitness_list)],
                  Majority = full_majority_size(AllMembers),
                  SoFar = length(NewUPI),
@@ -1231,7 +1230,14 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                                    Latest_authors_flap_count_latest}},
                   {move_from_inner, MoveFromInnerToNorm_p}],
     ?REACT({a30, ?LINE, ClauseInfo}),
-    if MoveFromInnerToNorm_p orelse Kicker_p ->
+    MoveToNorm_p = MoveFromInnerToNorm_p orelse Kicker_p,
+    if MoveToNorm_p, CMode == cp_mode ->
+            %% Too much weird stuff may have hapened while we were suffering
+            %% the flapping/asymmetric partition.  Fall back to the none
+            %% projection as if we're restarting.
+            ?REACT({a30, ?LINE, [{move_to_norm, MoveToNorm_p}]}),
+            react_to_env_A49(P_latest, [], S10);
+       MoveToNorm_p, CMode == ap_mode ->
             %% Move from inner projection to outer.
             P_inner2A = inner_projection_or_self(P_current),
             ResetEpoch = P_newprop10#projection_v1.epoch_number,
@@ -1588,6 +1594,16 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
             end
     end.
 
+react_to_env_A49(P_latest, FinalProps, #ch_mgr{name=MyName,
+                                               proj=P_current} = S) ->
+    ?REACT(a49),
+    #projection_v1{all_members=All_list,
+                   witnesses=Witness_list,
+                   members_dict=MembersDict} = P_current,
+    P_none = make_none_projection(MyName, All_list, Witness_list,
+                                  MembersDict),
+    react_to_env_A50(P_none, FinalProps, S#ch_mgr{proj=P_none}).
+
 react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
     ?REACT(a50),
     ?REACT({a50, ?LINE, [{current_epoch, P_current#projection_v1.epoch_number},
@@ -1635,16 +1651,33 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         end,
     P_newprop_AllHosedPlus =
         lists:flatten([[X,Y] || {X,problem_with,Y} <- P_newprop_AllHosed]),
-    AllAreFlapping_and_IamBad_and_NotRelevant_p =
-        inner_projection_exists(P_current) andalso
-        inner_projection_exists(P_latest) andalso
-        inner_projection_exists(P_newprop) andalso
-        MyUniquePropCount == 1 andalso
+    %% Commit 66cafe06 added UnanimousLatestInnerNotRelevant_p to the
+    %% compound predicate below.  I'm yanking it out now. TODO re-study?
+    #projection_v1{upi=P_newprop_upi_ooi, repairing=P_newprop_repairing_ooi} =
+        inner_projection_or_self(P_newprop),
+    EnoughAreFlapping_and_IamBad_p =
+        %% Ignore inner_projection_exists(P_current): We might need to
+        %% shut up quickly (adopting a new P_current can take a long
+        %% time).
+        (inner_projection_exists(P_latest) orelse
+         inner_projection_exists(P_newprop)) andalso
+        %% I'm suspected of being bad
         lists:member(MyName, P_newprop_AllHosedPlus) andalso
-        UnanimousLatestInnerNotRelevant_p,
-
+        %% I'm not in the critical UPI or repairing lists
+        (not lists:member(MyName, P_newprop_upi_ooi++P_newprop_repairing_ooi))
+        andalso
+        %% My down lists are the same, i.e., no state change to announce
+        P_current#projection_v1.down == P_newprop#projection_v1.down,
+if EnoughAreFlapping_and_IamBad_p -> io:format(user, "B10 ~w ~w current_down ~w newprop_down ~w, ", [MyName, EnoughAreFlapping_and_IamBad_p, P_current#projection_v1.down, P_newprop#projection_v1.down]); true -> ok end,
+    ?REACT({b10, ?LINE, [{0,EnoughAreFlapping_and_IamBad_p},
+                         {1,inner_projection_exists(P_current)},
+                         {2,inner_projection_exists(P_latest)},
+                         {3,inner_projection_exists(P_newprop)},
+                         {4,MyUniquePropCount},
+                         {5,{MyName, P_newprop_AllHosedPlus}},
+                         {6,UnanimousLatestInnerNotRelevant_p}]}),
     if
-        AllAreFlapping_and_IamBad_and_NotRelevant_p ->
+        EnoughAreFlapping_and_IamBad_p ->
             ?REACT({b10, ?LINE, []}),
 
             %% There's outer flapping happening *and* we ourselves are
@@ -1764,8 +1797,7 @@ react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
     ?REACT(c100),
 
     Sane = projection_transition_is_sane(P_current, P_latest, MyName),
-    %% if Sane == true -> ok;  true -> ?V("insane-~w-~w,", [MyName, P_newprop#projection_v1.epoch_number]) end, %%% DELME!!!
-    if Sane == true -> ok;  true -> ?V("insane-~w-~w-~p,", [MyName, P_newprop#projection_v1.epoch_number, Sane]) end, %%% DELME!!!
+    if Sane == true -> ok;  true -> ?V("~w-insane-~w-auth=~w:~w:~w:~w:~w:~w:~w-~p,", [?LINE, MyName, P_newprop#projection_v1.author_server, P_newprop#projection_v1.epoch_number, P_newprop#projection_v1.upi, P_newprop#projection_v1.repairing, (inner_projection_or_self(P_newprop))#projection_v1.epoch_number, (inner_projection_or_self(P_newprop))#projection_v1.upi, (inner_projection_or_self(P_newprop))#projection_v1.repairing, Sane]) end, %%% DELME!!!
     Flap_latest = if is_record(Flap_latest0, flap_i) ->
                           Flap_latest0;
                      true ->
@@ -1782,14 +1814,12 @@ react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
         _ when P_current#projection_v1.epoch_number == 0 ->
             %% Epoch == 0 is reserved for first-time, just booting conditions.
             ?REACT({c100, ?LINE, [first_write]}),
-            if Sane == true -> ok;  true -> ?V("insane-~w-~w@~w,", [MyName, P_newprop#projection_v1.epoch_number, ?LINE]) end, %%% DELME!!!
+            if Sane == true -> ok;  true -> ?V("~w-insane-~w-~w:~w:~w,", [?LINE, MyName, P_newprop#projection_v1.epoch_number, P_newprop#projection_v1.upi, P_newprop#projection_v1.repairing]) end, %%% DELME!!!
             react_to_env_C110(P_latest, S);
         true ->
             ?REACT({c100, ?LINE, [sane]}),
-            if Sane == true -> ok;  true -> ?V("insane-~w-~w@~w,", [MyName, P_newprop#projection_v1.epoch_number, ?LINE]) end, %%% DELME!!!
+            if Sane == true -> ok;  true -> ?V("~w-insane-~w-~w:~w:~w@~w,", [?LINE, MyName, P_newprop#projection_v1.epoch_number, P_newprop#projection_v1.upi, P_newprop#projection_v1.repairing, ?LINE]) end, %%% DELME!!!
             react_to_env_C110(P_latest, S);
-        %% 20150715: I've seen this loop happen with {expected_author2,X}
-        %% where nobody agrees, weird.
         DoctorSays ->
             ?REACT({c100, ?LINE, [{not_sane, DoctorSays}]}),
             %% This is a fun case.  We had just enough asymmetric partition
@@ -1843,10 +1873,16 @@ react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
     end.
 
 react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
-                        P_newprop, P_latest, S) ->
+                        P_newprop, P_latest,
+                        #ch_mgr{consistency_mode=CMode} = S) ->
     NotSanesDict = orddict:update_counter(Author_latest, 1, NotSanesDict0),
     S2 = S#ch_mgr{not_sanes=NotSanesDict, sane_transitions=0},
     case orddict:fetch(Author_latest, NotSanesDict) of
+        N when CMode == cp_mode ->
+           ?V("YOYO-cp-mode,~w,~w,~w,",[MyName, P_latest#projection_v1.epoch_number,N]),
+            ?REACT({c100, ?LINE, [{cmode,CMode},
+                                  {not_sanes_author_count, N}]}),
+            react_to_env_A49(P_latest, [], S2);
         N when N > ?TOO_FREQUENT_BREAKER ->
             ?V("\n\nYOYO ~w breaking the cycle of:\n  current: ~w\n  new    : ~w\n", [MyName, machi_projection:make_summary(S#ch_mgr.proj), machi_projection:make_summary(P_latest)]),
             ?REACT({c100, ?LINE, [{not_sanes_author_count, N}]}),
@@ -1863,20 +1899,21 @@ react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
 react_to_env_C103(#projection_v1{epoch_number=Epoch_newprop} = P_newprop,
                   #projection_v1{epoch_number=Epoch_latest,
                                  all_members=All_list,
-                                 flap=Flap,
-                                 members_dict=MembersDict} = P_latest,
+                                 flap=Flap} = P_latest,
                   #ch_mgr{name=MyName, proj=P_current}=S) ->
-    #projection_v1{witnesses=Witness_list} = P_current,
+    #projection_v1{witnesses=Witness_list,
+                   members_dict=MembersDict} = P_current,
     P_none0 = make_none_projection(MyName, All_list, Witness_list, MembersDict),
-    P_none1 = P_none0#projection_v1{epoch_number=erlang:max(Epoch_newprop,
-                                                            Epoch_latest),
+    %% P_none1 = P_none0#projection_v1{epoch_number=erlang:max(Epoch_newprop,
+    %%                                                         Epoch_latest),
+    P_none1 = P_none0#projection_v1{epoch_number=Epoch_latest,
                                     flap=Flap,
                                     dbg=[{none_projection,true}]},
     P_none = machi_projection:update_checksum(P_none1),
     %% Use it, darn it, because it's 100% safe.  And exit flapping state.
     ?REACT({c103, ?LINE,
             [{current_epoch, P_current#projection_v1.epoch_number},
-             {none_projection_epoch, Epoch_latest}]}),
+             {none_projection_epoch, P_none#projection_v1.epoch_number}]}),
     %% Reset the not_sanes count dictionary here, or else an already
     %% ?TOO_FREQUENT_BREAKER count for an author might prevent a
     %% transition from C100_inner()->C300, which can lead to infinite
@@ -1885,7 +1922,7 @@ react_to_env_C103(#projection_v1{epoch_number=Epoch_newprop} = P_newprop,
 
 react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     ?REACT(c110),
-    ?REACT({c110, [{latest_epoch, P_latest#projection_v1.epoch_number}]}),
+    ?REACT({c110, ?LINE, [{latest_epoch,P_latest#projection_v1.epoch_number}]}),
     Extra_todo = [{react,get(react)}],
     P_latest2 = machi_projection:update_dbg2(P_latest, Extra_todo),
 
@@ -2098,27 +2135,30 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                                      {uniques, UniqueProposalSummaries}]}),
     P_latest_Flap = get_raw_flapping_i(P_latest),
     AmFlappingNow_p = not (FlapStart == ?NOT_FLAPPING_START orelse
-                           FlapStart == undefined),
+                           FlapStart == undefined)
+                      andalso
+                      length(UniqueProposalSummaries) == 1,
     P_latest_flap_start = case P_latest_Flap of
                               undefined ->
                                   ?NOT_FLAPPING_START;
                               _ ->
                                   element(1, P_latest_Flap#flap_i.flap_count)
                           end,
+    MinQueueLen = 7,
     StartFlapping_p =
         case {queue:len(H), UniqueProposalSummaries} of
             _ when AmFlappingNow_p ->
                 ?REACT({calculate_flaps,?LINE,[{flap_start,FlapStart}]}),
                 %% I'm already flapping, therefore don't start again.
                 false;
-            {N, _} when N >= 3,
+            {N, _} when N >= MinQueueLen,
                         P_latest_flap_start /= ?NOT_FLAPPING_START ->
                 ?REACT({calculate_flaps,?LINE,
                         [{manifesto_clause,2},
                          {latest_epoch, P_latest#projection_v1.epoch_number},
                          {latest_flap_count,P_latest_Flap#flap_i.flap_count}]}),
                 true;
-            {N, [_]} when N >= 3 ->
+            {N, [_]} when N >= MinQueueLen ->
                 ?REACT({calculate_flaps,?LINE,[{manifesto_clause,1}]}),
                 true;
             {_N, _} ->
@@ -2314,8 +2354,8 @@ projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
             ?RETURN2(Else)
     end.
 
-projection_transition_is_sane_final_review(P1, P2,
-                                           {expected_author2,UPI1_tail}=Else) ->
+projection_transition_is_sane_final_review(
+  P1, P2, {expected_author2,UPI1_tail,_}=Else) ->
     %% Reminder: P1 & P2 are outer projections
     %%
     %% We have a small problem for state transition sanity checking in the
@@ -2815,7 +2855,11 @@ simple_chain_state_transition_is_sane(_Author1, UPI1, Repair1, Author2, UPI2) ->
                         UPI1_tail when UPI1_tail == Author2 ->
                             ?RETURN2(true);
                         UPI1_tail ->
-                            ?RETURN2({expected_author2,UPI1_tail})
+                            ?RETURN2({expected_author2,UPI1_tail,
+                                     [{upi1,UPI1},
+                                      {repair1,Repair1},
+                                      {author2,Author2},
+                                      {upi2,UPI2}]})
                     end
             end
     end.
@@ -2962,7 +3006,8 @@ make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list, M
         put(epochs, Epochs),
         Relation = [],
         put(xxx_epoch, OldEpochNum),
-        zerf_find_last_common(Epochs, Relation, MajoritySize, Up, S)
+        Proj = zerf_find_last_common(Epochs, Relation, MajoritySize, Up, S),
+        Proj#projection_v1{flap=make_flapping_i()}
     catch
         throw:{zerf,no_common} ->
             FirstEpoch_p = case get(epochs) of
@@ -2994,7 +3039,7 @@ make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list, M
                     P = make_none_projection(MyName, AllMembers,OldWitness_list,
                                              MembersDict),
                     machi_projection:update_checksum(
-                      P#projection_v1{epoch_number=OldEpochNum,dbg2=[zerf_none]})
+                      P#projection_v1{epoch_number=OldEpochNum,dbg2=[zerf_none, {es, get(epochs)},{up,Up},{maj,MajoritySize}]})
             end;
         _X:_Y ->
             throw({zerf, {damn_exception, Up, _X, _Y, erlang:get_stacktrace()}})
@@ -3012,11 +3057,12 @@ zerf_find_last_common(UnsearchedEpochs, Relation, MajoritySize, Up, S) ->
                      case ?FLU_PC:read_projection(Proxy, private, E, ?TO) of
                          {ok, Proj} ->
                              %% Sort order: we want inner = bigger.
+                             CSum = Proj#projection_v1.epoch_csum,
                              OorI = case inner_projection_exists(Proj) of
                                         true  -> z_inner;
                                         false -> a_outer
                                     end,
-                             K = {E, OorI, Proj#projection_v1{dbg2=[]}},
+                             K = {E, CSum, OorI, Proj#projection_v1{dbg2=[]}},
                              Rel2 = case lists:keyfind(K, 1, Rel) of
                                         false ->
                                             [{K, [FLU]}|Rel];
@@ -3032,13 +3078,14 @@ zerf_find_last_common(UnsearchedEpochs, Relation, MajoritySize, Up, S) ->
                      end
              end, Relation, lists:reverse([{E, FLU} || E <- NowEpochs, FLU <- Up])),
     SortedRel = lists:reverse(lists:sort(Rel2)),
-    case [T || T={{E, OorI, Proj}, WrittenFLUs} <- SortedRel,
-               lists:sort(Proj#projection_v1.upi) == lists:sort(WrittenFLUs)
+    case [T || T={{E, _CSum, _OorI, Proj}, WrittenFLUs} <- SortedRel,
+               ordsets:is_subset(ordsets:from_list(Proj#projection_v1.upi),
+                                 ordsets:from_list(WrittenFLUs))
                andalso
                length(Proj#projection_v1.upi) >= MajoritySize] of
         [] ->
             zerf_find_last_common(NextEpochs, Rel2, MajoritySize, Up, S);
-        [{{_E, _OorI, Proj}, _WrittenFLUs}|_] ->
+        [{{_E, _CSum, _OorI, Proj}, _WrittenFLUs}|_] ->
             Proj
     end.
 
