@@ -128,7 +128,8 @@ flu_restart_test() ->
                                           infinity),
             P_a = #p_srvr{name=a, address="localhost", port=6622},
             P1   = machi_projection:new(1, a, [P_a], [], [a], [], []),
-            P1xx = P1#projection_v1{dbg2=["not exactly the same as P1!!!"]},
+            P1xx = P1#projection_v1{dbg2=["dbg2 changes are ok"]},
+            P1yy = P1#projection_v1{dbg=["not exactly the same as P1!!!"]},
             EpochID = {P1#projection_v1.epoch_number,
                        P1#projection_v1.epoch_csum},
             ok = ?MUT:write_projection(Prox1, public, P1),
@@ -202,11 +203,18 @@ flu_restart_test() ->
                     (line) -> io:format("line ~p, ", [?LINE]);
                     (stop) -> ?MUT:write_projection(Prox1, public, P1xx)
                  end,
-                 fun(run) -> {error, written} =
+
+                 fun(run) -> ok = %% P1xx is difference only in dbg2
                                  ?MUT:write_projection(Prox1, private, P1xx),
                              ok;
                     (line) -> io:format("line ~p, ", [?LINE]);
                     (stop) -> ?MUT:write_projection(Prox1, private, P1xx)
+                 end,
+                 fun(run) -> {error, bad_arg} = % P1yy has got bad checksum
+                                 ?MUT:write_projection(Prox1, private, P1yy),
+                             ok;
+                    (line) -> io:format("line ~p, ", [?LINE]);
+                    (stop) -> ?MUT:write_projection(Prox1, private, P1yy)
                  end,
 
                  fun(run) -> {ok, [_]} =
