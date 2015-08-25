@@ -88,11 +88,6 @@
           props = []      :: list()  % proplist
          }).
 
--record(http_goop, {
-          len,                                  % content-length
-          x_csum                                % x-checksum
-         }).
-
 start_link([{FluName, TcpPort, DataDir}|Rest])
   when is_atom(FluName), is_integer(TcpPort), is_list(DataDir) ->
     {ok, spawn_link(fun() -> main2(FluName, TcpPort, DataDir, Rest) end)}.
@@ -305,12 +300,12 @@ net_server_loop(Sock, S) ->
             Msg = io_lib:format("Socket error ~w", [SockError]),
             R = #mpb_ll_response{req_id= <<>>,
                                  generic=#mpb_errorresp{code=1, msg=Msg}},
-            Resp = machi_pb:encode_mpb_ll_response(R),
+            _Resp = machi_pb:encode_mpb_ll_response(R),
             %% TODO: Weird that sometimes neither catch nor try/catch
             %%       can prevent OTP's SASL from logging an error here.
             %%       Error in process <0.545.0> with exit value: {badarg,[{erlang,port_command,.......
             %% TODO: is this what causes the intermittent PULSE deadlock errors?
-            %% _ = (catch gen_tcp:send(Sock, Resp)), timer:sleep(1000),
+            %% _ = (catch gen_tcp:send(Sock, _Resp)), timer:sleep(1000),
             (catch gen_tcp:close(Sock)),
             exit(normal)
     end.
@@ -843,99 +838,6 @@ make_listener_regname(BaseName) ->
 
 make_projection_server_regname(BaseName) ->
     list_to_atom(atom_to_list(BaseName) ++ "_pstore2").
-
-http_hack_server(FluName, Line1, Sock, S) ->
-    {ok, {http_request, HttpOp, URI0, _HttpV}, _x} =
-        erlang:decode_packet(http_bin, Line1, [{line_length,4095}]),
-    MyURI = case URI0 of
-              {abs_path, Path} -> <<"/", Rest/binary>> = Path,
-                                  Rest;
-              _                -> URI0
-          end,
-    Hdrs = http_hack_harvest_headers(Sock),
-    G = http_hack_digest_header_goop(Hdrs, #http_goop{}),
-    case HttpOp of
-        'PUT' ->
-            http_hack_server_put(Sock, G, FluName, MyURI);
-        'GET' ->
-            http_hack_server_get(Sock, G, FluName, MyURI, S)
-    end,
-    ok = gen_tcp:close(Sock),
-    exit(normal).
-
-http_hack_server_put(Sock, G, FluName, MyURI) ->
-    ok = inet:setopts(Sock, [{packet, raw}]),
-    {ok, Chunk} = gen_tcp:recv(Sock, G#http_goop.len, 60*1000),
-    CSum0 = machi_util:checksum_chunk(Chunk),
-    try
-        CSum = case G#http_goop.x_csum of
-                   undefined ->
-                       machi_util:make_tagged_csum(server_sha, CSum0);
-                   XX when is_binary(XX) ->
-                       if XX == CSum0 ->
-                               machi_util:make_tagged_csum(client_sha,  CSum0);
-                          true ->
-                               throw({bad_csum, XX})
-                       end
-               end,
-        FluName ! {seq_append, self(), MyURI, Chunk, CSum, 0, todo_epoch_id_bitrot}
-    catch
-        throw:{bad_csum, _CS} ->
-            Out = "HTTP/1.0 412 Precondition failed\r\n"
-                "X-Reason: bad checksum\r\n\r\n",
-            ok = gen_tcp:send(Sock, Out),
-            ok = gen_tcp:close(Sock),
-            exit(normal);
-        error:badarg ->
-            error_logger:error_msg("Message send to ~p gave badarg, make certain server is running with correct registered name\n", [?MODULE])
-    end,
-    receive
-        {assignment, Offset, File} ->
-            Msg = io_lib:format("HTTP/1.0 201 Created\r\nLocation: ~s\r\n"
-                                "X-Offset: ~w\r\nX-Size: ~w\r\n\r\n",
-                                [File, Offset, byte_size(Chunk)]),
-            ok = gen_tcp:send(Sock, Msg);
-        wedged ->
-            ok = gen_tcp:send(Sock, <<"HTTP/1.0 499 WEDGED\r\n\r\n">>)
-    after 10*1000 ->
-            ok = gen_tcp:send(Sock, <<"HTTP/1.0 499 TIMEOUT\r\n\r\n">>)
-    end.
-
-http_hack_server_get(Sock, _G, _FluName, _MyURI, _S) ->
-    ok = gen_tcp:send(Sock, <<"TODO BROKEN FEATURE see old commits\r\n">>).
-
-http_hack_harvest_headers(Sock) ->
-    ok = inet:setopts(Sock, [{packet, httph}]),
-    http_hack_harvest_headers(gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT),
-                              Sock, []).
-
-http_hack_harvest_headers({ok, http_eoh}, _Sock, Acc) ->
-    Acc;
-http_hack_harvest_headers({error, _}, _Sock, _Acc) ->
-    [];
-http_hack_harvest_headers({ok, Hdr}, Sock, Acc) ->
-    http_hack_harvest_headers(gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT),
-                              Sock, [Hdr|Acc]).
-
-http_hack_digest_header_goop([], G) ->
-    G;
-http_hack_digest_header_goop([{http_header, _, 'Content-Length', _, Str}|T], G) ->
-    http_hack_digest_header_goop(T, G#http_goop{len=list_to_integer(Str)});
-http_hack_digest_header_goop([{http_header, _, "X-Checksum", _, Str}|T], G) ->
-    SHA = machi_util:hexstr_to_bin(Str),
-    CSum = machi_util:make_tagged_csum(client_sha, SHA),
-    http_hack_digest_header_goop(T, G#http_goop{x_csum=CSum});
-http_hack_digest_header_goop([_H|T], G) ->
-    http_hack_digest_header_goop(T, G).
-
-http_hack_split_uri_options(OpsBin) ->
-    L = binary:split(OpsBin, <<"&">>),
-    [case binary:split(X, <<"=">>) of
-         [<<"offset">>, Bin] ->
-             {offset, binary_to_integer(Bin)};
-         [<<"size">>, Bin] ->
-             {size, binary_to_integer(Bin)}
-     end || X <- L].
 
 %% @doc Encode `Offset + Size + TaggedCSum' into an `iolist()' type for
 %% internal storage by the FLU.

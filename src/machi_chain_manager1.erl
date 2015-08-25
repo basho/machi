@@ -126,6 +126,10 @@
 %% Exports so that EDoc docs generated for these internal funcs.
 -export([mk/3]).
 
+%% Exports for developer/debugging
+-export([scan_dir/4, strip_dbg2/1,
+         get_ps/2, has_not_sane/2, all_hosed_history/2]).
+
 -ifdef(TEST).
 
 -export([test_calc_projection/2,
@@ -618,21 +622,17 @@ do_read_repair(FLUsRs, _Extra, #ch_mgr{proj=CurrentProj} = S) ->
 calc_projection(S, RelativeToServer) ->
     calc_projection(S, RelativeToServer, []).
 
-calc_projection(#ch_mgr{proj=LastProj, consistency_mode=CMode,
-                        runenv=RunEnv} = S,
+calc_projection(#ch_mgr{proj=LastProj, consistency_mode=CMode} = S,
                 RelativeToServer, AllHosed) ->
     Dbg = [],
-    OldThreshold = proplists:get_value(old_threshold, RunEnv),
-    NoPartitionThreshold = proplists:get_value(no_partition_threshold, RunEnv),
+    %% OldThreshold = proplists:get_value(old_threshold, RunEnv),
+    %% NoPartitionThreshold = proplists:get_value(no_partition_threshold, RunEnv),
     if CMode == ap_mode ->
             calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg, S);
        CMode == cp_mode ->
             #projection_v1{epoch_number=OldEpochNum,
-                           members_dict=MembersDict,
                            all_members=AllMembers,
-                           witnesses=OldWitness_list,
-                           upi=OldUPI_list,
-                           repairing=OldRepairing_list
+                           upi=OldUPI_list
                           } = LastProj,
             UPI_length_ok_p =
                 length(OldUPI_list) >= full_majority_size(AllMembers),
@@ -672,8 +672,7 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                    members_dict=MembersDict,
                    witnesses=OldWitness_list,
                    upi=OldUPI_list,
-                   repairing=OldRepairing_list,
-                   dbg=LastDbg
+                   repairing=OldRepairing_list
                   } = LastProj,
     LastUp = lists:usort(OldUPI_list ++ OldRepairing_list),
     AllMembers = (S#ch_mgr.proj)#projection_v1.all_members,
@@ -1308,8 +1307,6 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
     AllHosed = get_all_hosed(P_newprop3),
     P_current_has_inner_p = inner_projection_exists(P_current),
     P_current_ios = inner_projection_or_self(P_current),
-    NewEpochOuter = erlang:max(P_latest#projection_v1.epoch_number + 1,
-                               P_newprop3#projection_v1.epoch_number),
     {P_i1, S_i, _Up} = calc_projection2(P_current_ios,
                                         MyName, AllHosed, [], S),
     ?REACT({a30, ?LINE, [{raw_all_hosed,get_all_hosed(P_newprop3)},
@@ -1342,9 +1339,6 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                      down=P_i2#projection_v1.all_members
                      -- [MyName]}
            end,
-    #projection_v1{epoch_number=Epoch_p_inner,
-                   upi=UPI_p_inner,
-                   repairing=Repairing_p_inner} = P_i3,
     HasCompatibleInner =
         case inner_projection_exists(P_latest) of
             true ->
@@ -1454,8 +1448,7 @@ a40_latest_author_down(#projection_v1{author_server=LatestAuthor}=_P_latest,
     lists:member(LatestAuthor, NewPropDown).
 
 react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
-                 #ch_mgr{name=MyName, consistency_mode=CMode,
-                         proj=P_current}=S) ->
+                 #ch_mgr{name=MyName, proj=P_current}=S) ->
     ?REACT(a40),
     [{Rank_newprop, _}] = rank_projections([P_newprop], P_current),
     [{Rank_latest, _}] = rank_projections([P_latest], P_current),
@@ -1613,8 +1606,8 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
             end
     end.
 
-react_to_env_A49(P_latest, FinalProps, #ch_mgr{name=MyName,
-                                               proj=P_current} = S) ->
+react_to_env_A49(_P_latest, FinalProps, #ch_mgr{name=MyName,
+                                                proj=P_current} = S) ->
     ?REACT(a49),
     #projection_v1{all_members=All_list,
                    witnesses=Witness_list,
@@ -1929,10 +1922,10 @@ react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
             react_to_env_C300(P_newprop, P_latest, S2)
     end.
 
-react_to_env_C103(#projection_v1{epoch_number=Epoch_newprop} = P_newprop,
+react_to_env_C103(#projection_v1{epoch_number=_Epoch_newprop} = _P_newprop,
                   #projection_v1{epoch_number=Epoch_latest,
                                  all_members=All_list,
-                                 flap=Flap} = P_latest,
+                                 flap=Flap} = _P_latest,
                   #ch_mgr{name=MyName, proj=P_current}=S) ->
     #projection_v1{witnesses=Witness_list,
                    members_dict=MembersDict} = P_current,
@@ -2019,10 +2012,6 @@ react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H,
     %% TODO: revisit this constant?
     MaxLength = length(P_latest#projection_v1.all_members) * 1.5,
     H2   = add_and_trunc_history(P_latest, H, MaxLength),
-    %% TODO: revisit this constant?
-    MaxLength_i = trunc(MaxLength * 1.5),
-    %% HH = [if is_atom(X) -> X; is_tuple(X) -> {element(1,X), element(2,X)} end || X <- get(react), is_atom(X) orelse size(X) == 3],
-    %% ?V("HEE120 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(HH)]),
 
     diversion_c120_verbose_goop(P_latest, S),
     ?REACT({c120, [{latest, machi_projection:make_summary(P_latest)}]}),
@@ -2124,13 +2113,11 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                    end,
     LastUpChange_diff = timer:now_diff(now(), LastUpChange) / 1000000,
 
-    {_WhateverUnanimous, BestP, Props, _S} =
+    %% TODO: Do we want to try to use BestP below to short-circuit
+    %% calculation if we notice that the best private epoch # from
+    %% somewhere has advanced?
+    {_WhateverUnanimous, _BestP, Props, _S} =
         cl_read_latest_projection(private, S),
-    NotBestPs = proplists:get_value(not_unanimous_answers, Props, []),
-    DownUnion = lists:usort(
-                  lists:flatten(
-                    [P#projection_v1.down ||
-                        P <- [BestP|NotBestPs]])),
     HosedTransUnion = proplists:get_value(trans_all_hosed, Props),
     TransFlapCounts0 = proplists:get_value(trans_all_flap_counts, Props),
 
@@ -2174,8 +2161,7 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
     ?REACT({calculate_flaps, ?LINE, [{queue_len, queue:len(H)},
                                      {uniques, UniqueProposalSummaries}]}),
     P_latest_Flap = get_raw_flapping_i(P_latest),
-    AmFlappingNow_p = not (FlapStart == ?NOT_FLAPPING_START orelse
-                           FlapStart == undefined)
+    AmFlappingNow_p = not (FlapStart == ?NOT_FLAPPING_START)
                       andalso
                       length(UniqueProposalSummaries) == 1,
     P_latest_flap_start = case P_latest_Flap of
@@ -3007,7 +2993,7 @@ all_hosed_history(#projection_v1{epoch_number=_Epoch, flap=Flap},
 
 clear_flapping_state(S) ->
     S2 = clear_most_flapping_state(S),
-    S#ch_mgr{not_sanes=orddict:new()}.
+    S2#ch_mgr{not_sanes=orddict:new()}.
 
 clear_most_flapping_state(S) ->
     S#ch_mgr{flap_count=0,
@@ -3023,12 +3009,9 @@ full_majority_size(L) when is_list(L) ->
 make_zerf(#projection_v1{epoch_number=OldEpochNum,
                          all_members=AllMembers,
                          members_dict=MembersDict,
-                         witnesses=OldWitness_list,
-                         upi=OldUPI_list,
-                         repairing=OldRepairing_list
+                         witnesses=OldWitness_list
                         } = _LastProj,
           #ch_mgr{name=MyName,
-                  proj=CurrentProj,
                   consistency_mode=cp_mode,
                   runenv=RunEnv1} = S) ->
     {Up, _Partitions, _RunEnv2} = calc_up_nodes(MyName,
@@ -3132,7 +3115,7 @@ zerf_find_last_common(UnsearchedEpochs, Relation, MajoritySize, Up, S) ->
                      end
              end, Relation, lists:reverse([{E, FLU} || E <- NowEpochs, FLU <- Up])),
     SortedRel = lists:reverse(lists:sort(Rel2)),
-    case [T || T={{E, _CSum, _OorI, Proj}, WrittenFLUs} <- SortedRel,
+    case [T || T={{_E, _CSum, _OorI, Proj}, WrittenFLUs} <- SortedRel,
                ordsets:is_subset(ordsets:from_list(Proj#projection_v1.upi),
                                  ordsets:from_list(WrittenFLUs))
                andalso
@@ -3151,7 +3134,7 @@ my_lists_split(N, L) ->
             {L, []}
     end.
 
-diversion_c120_verbose_goop(#projection_v1{upi=[], repairing=[]}, S) ->
+diversion_c120_verbose_goop(#projection_v1{upi=[], repairing=[]}, _S) ->
     ok;
 diversion_c120_verbose_goop(Proj, S) ->
     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
