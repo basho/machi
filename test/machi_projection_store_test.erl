@@ -41,6 +41,9 @@ smoke_test() ->
         ok = ?PS:write(a_pstore, public, P1),
         {error, written} = ?PS:write(a_pstore, public, P1),
 
+        Pbad = P1#projection_v1{epoch_number=99238}, % break checksum
+        {error, bad_arg} = ?PS:write(a_pstore, public, Pbad),
+
         ok = ?PS:write(a_pstore, private, P1),
         {error, written} = ?PS:write(a_pstore, private, P1),
         P1b = P1#projection_v1{dbg2=[version_b]},
