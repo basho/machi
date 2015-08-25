@@ -10,3 +10,9 @@ edoc
 
 # PB artifacts for Erlang
 include/machi_pb.hrl
+
+# Misc Scott cruft
+*.patch
+current_counterexample.eqc
+foo*
+typescript*
