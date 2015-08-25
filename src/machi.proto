@@ -304,16 +304,17 @@ message Mpb_ProjectionV1 {
     required bytes epoch_csum = 2;
     required string author_server = 3;
     repeated string all_members = 4;
-    required Mpb_Now creation_time = 5;
-    required Mpb_Mode mode = 6;
-    repeated string upi = 7;
-    repeated string repairing = 8;
-    repeated string down = 9;
-    optional bytes opaque_flap = 10;
-    optional bytes opaque_inner = 11;
-    required bytes opaque_dbg = 12;
-    required bytes opaque_dbg2 = 13;
-    repeated Mpb_MembersDictEntry members_dict = 14;
+    repeated string witnesses = 5;
+    required Mpb_Now creation_time = 6;
+    required Mpb_Mode mode = 7;
+    repeated string upi = 8;
+    repeated string repairing = 9;
+    repeated string down = 10;
+    optional bytes opaque_flap = 11;
+    optional bytes opaque_inner = 12;
+    required bytes opaque_dbg = 13;
+    required bytes opaque_dbg2 = 14;
+    repeated Mpb_MembersDictEntry members_dict = 15;
 }
 
 //////////////////////////////////////////

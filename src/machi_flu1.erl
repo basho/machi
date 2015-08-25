@@ -30,21 +30,8 @@
 %%
 %% === Protocol origins ===
 %%
-%% The protocol implemented here is an artisanal, hand-crafted, silly
-%% thing that was very quick to put together for a "demo day" proof of
-%% concept.  It will almost certainly be replaced with something else,
-%% both in terms of wire format and better code separation of
-%% serialization/deserialization vs. network transport management,
-%% etc.
-%%
-%% For the moment, this module implements a rudimentary TCP-based
-%% protocol as the sole supported access method to the server,
-%% sequencer, and projection store.  Conceptually, those three
-%% services are independent and ought to have their own protocols.  As
-%% a practical matter, there is no need for wire protocol
-%% compatibility.  Furthermore, from the perspective of failure
-%% detection, it is very convenient that all three FLU-related
-%% services are accessed using the same single TCP port.
+%% Today's FLU fully supports a protocol that is based on Protocol
+%% Buffers.  Please see the `src/machi.proto' file for details.
 %%
 %% === TODO items ===
 %%
@@ -89,6 +76,7 @@
 -record(state, {
           flu_name        :: atom(),
           proj_store      :: pid(),
+          witness = false :: boolean(),
           append_pid      :: pid(),
           tcp_port        :: non_neg_integer(),
           data_dir        :: string(),
@@ -97,13 +85,7 @@
           epoch_id        :: 'undefined' | machi_dt:epoch_id(),
           pb_mode = undefined  :: 'undefined' | 'high' | 'low',
           high_clnt       :: 'undefined' | pid(),
-          dbg_props = []  :: list(), % proplist
           props = []      :: list()  % proplist
-         }).
-
--record(http_goop, {
-          len,                                  % content-length
-          x_csum                                % x-checksum
          }).
 
 start_link([{FluName, TcpPort, DataDir}|Rest])
@@ -131,18 +113,10 @@ wedge_myself(PidSpec, EpochId)
 
 ets_table_name(FluName) when is_atom(FluName) ->
     list_to_atom(atom_to_list(FluName) ++ "_epoch").
-%% ets_table_name(FluName) when is_binary(FluName) ->
-%%     list_to_atom(binary_to_list(FluName) ++ "_epoch").
 
-main2(FluName, TcpPort, DataDir, Rest) ->
-    {Props, DbgProps} =  case proplists:get_value(dbg, Rest) of
-                             undefined ->
-                                 {Rest, []};
-                             DPs ->
-                                 {lists:keydelete(dbg, 1, Rest), DPs}
-                         end,
+main2(FluName, TcpPort, DataDir, Props) ->
     {SendAppendPidToProj_p, ProjectionPid} =
-        case proplists:get_value(projection_store_registered_name, Rest) of
+        case proplists:get_value(projection_store_registered_name, Props) of
             undefined ->
                 RN = make_projection_server_regname(FluName),
                 {ok, PP} =
@@ -151,7 +125,7 @@ main2(FluName, TcpPort, DataDir, Rest) ->
             RN ->
                 {false, whereis(RN)}
         end,
-    InitialWedged_p = proplists:get_value(initial_wedged, DbgProps),
+    InitialWedged_p = proplists:get_value(initial_wedged, Props),
     ProjRes = machi_projection_store:read_latest_projection(ProjectionPid,
                                                             private),
     {Wedged_p, EpochId} =
@@ -165,14 +139,15 @@ main2(FluName, TcpPort, DataDir, Rest) ->
            true ->
                 {true, undefined}
         end,
+    Witness_p = proplists:get_value(witness_mode, Props, false),
     S0 = #state{flu_name=FluName,
                 proj_store=ProjectionPid,
                 tcp_port=TcpPort,
                 data_dir=DataDir,
                 wedged=Wedged_p,
+                witness=Witness_p,
                 etstab=ets_table_name(FluName),
                 epoch_id=EpochId,
-                dbg_props=DbgProps,
                 props=Props},
     AppendPid = start_append_server(S0, self()),
     receive
@@ -195,11 +170,11 @@ main2(FluName, TcpPort, DataDir, Rest) ->
     ok = filelib:ensure_dir(Projection_e),
 
     put(flu_flu_name, FluName),
-    put(flu_append_pid, AppendPid),
+    put(flu_append_pid, S1#state.append_pid),
     put(flu_projection_pid, ProjectionPid),
     put(flu_listen_pid, ListenPid),
     receive killme -> ok end,
-    (catch exit(AppendPid, kill)),
+    (catch exit(S1#state.append_pid, kill)),
     (catch exit(ProjectionPid, kill)),
     (catch exit(ListenPid, kill)),
     ok.
@@ -231,8 +206,6 @@ run_append_server(FluPid, AckPid, #state{flu_name=Name,
     register(Name, self()),
     TID = ets:new(ets_table_name(Name),
                   [set, protected, named_table, {read_concurrency, true}]),
-    %% InitialWedged = proplists:get_value(initial_wedged, DbgProps, true),
-    %% ets:insert(TID, {epoch, {InitialWedged, {-65, <<"bogus epoch, yo">>}}}),
     ets:insert(TID, {epoch, {Wedged_p, EpochId}}),
     AckPid ! append_server_ack,
     append_server_loop(FluPid, S#state{etstab=TID}).
@@ -243,9 +216,17 @@ listen_server_loop(LSock, S) ->
     listen_server_loop(LSock, S).
 
 append_server_loop(FluPid, #state{data_dir=DataDir, wedged=Wedged_p,
+                                  witness=Witness_p,
                                   epoch_id=OldEpochId, flu_name=FluName}=S) ->
     AppendServerPid = self(),
     receive
+        {seq_append, From, _Prefix, _Chunk, _CSum, _Extra, _EpochID}
+          when Witness_p ->
+            %% The FLU's net_server_loop() process ought to filter all
+            %% witness states, but we'll keep this clause for extra
+            %% paranoia.
+            From ! witness,
+            append_server_loop(FluPid, S);
         {seq_append, From, _Prefix, _Chunk, _CSum, _Extra, _EpochID}
           when Wedged_p ->
             From ! wedged,
@@ -305,21 +286,26 @@ net_server_loop(Sock, S) ->
                         {machi_pb:encode_mpb_response(R), mode(high, NewS)}
                 end,
             if RespBin == async_no_response ->
-                    ok;
+                    net_server_loop(Sock, S2);
                true ->
-                    ok = gen_tcp:send(Sock, RespBin)
-            end,
-            net_server_loop(Sock, S2);
+                    case gen_tcp:send(Sock, RespBin) of
+                        ok ->
+                            net_server_loop(Sock, S2);
+                        {error, _} ->
+                            (catch gen_tcp:close(Sock)),
+                            exit(normal)
+                    end
+            end;
         {error, SockError} ->
             Msg = io_lib:format("Socket error ~w", [SockError]),
             R = #mpb_ll_response{req_id= <<>>,
                                  generic=#mpb_errorresp{code=1, msg=Msg}},
-            Resp = machi_pb:encode_mpb_ll_response(R),
+            _Resp = machi_pb:encode_mpb_ll_response(R),
             %% TODO: Weird that sometimes neither catch nor try/catch
             %%       can prevent OTP's SASL from logging an error here.
             %%       Error in process <0.545.0> with exit value: {badarg,[{erlang,port_command,.......
             %% TODO: is this what causes the intermittent PULSE deadlock errors?
-            %% _ = (catch gen_tcp:send(Sock, Resp)), timer:sleep(1000),
+            %% _ = (catch gen_tcp:send(Sock, _Resp)), timer:sleep(1000),
             (catch gen_tcp:close(Sock)),
             exit(normal)
     end.
@@ -387,31 +373,43 @@ do_pb_ll_request2(EpochID, CMD, S) ->
             do_pb_ll_request3(CMD, S#state{epoch_id=CurrentEpochID})
     end.
 
+%% Witness status does not matter below.
 do_pb_ll_request3({low_echo, _BogusEpochID, Msg}, S) ->
     {Msg, S};
 do_pb_ll_request3({low_auth, _BogusEpochID, _User, _Pass}, S) ->
     {-6, S};
+do_pb_ll_request3({low_wedge_status, _EpochID}, S) ->
+    {do_server_wedge_status(S), S};
+do_pb_ll_request3({low_proj, PCMD}, S) ->
+    {do_server_proj_request(PCMD, S), S};
+%% Witness status *matters* below
 do_pb_ll_request3({low_append_chunk, _EpochID, PKey, Prefix, Chunk, CSum_tag,
-                CSum, ChunkExtra}, S) ->
+                CSum, ChunkExtra},
+                  #state{witness=false}=S) ->
     {do_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
                             ChunkExtra, S), S};
 do_pb_ll_request3({low_write_chunk, _EpochID, File, Offset, Chunk, CSum_tag,
-                   CSum}, S) ->
+                   CSum},
+                  #state{witness=false}=S) ->
     {do_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum, S), S};
-do_pb_ll_request3({low_read_chunk, _EpochID, File, Offset, Size, Opts}, S) ->
+do_pb_ll_request3({low_read_chunk, _EpochID, File, Offset, Size, Opts},
+                  #state{witness=false}=S) ->
     {do_server_read_chunk(File, Offset, Size, Opts, S), S};
-do_pb_ll_request3({low_checksum_list, _EpochID, File}, S) ->
+do_pb_ll_request3({low_checksum_list, _EpochID, File},
+                  #state{witness=false}=S) ->
     {do_server_checksum_listing(File, S), S};
-do_pb_ll_request3({low_list_files, _EpochID}, S) ->
+do_pb_ll_request3({low_list_files, _EpochID},
+                  #state{witness=false}=S) ->
     {do_server_list_files(S), S};
-do_pb_ll_request3({low_wedge_status, _EpochID}, S) ->
-    {do_server_wedge_status(S), S};
-do_pb_ll_request3({low_delete_migration, _EpochID, File}, S) ->
-    {do_server_delete_migration(File, S), S};
-do_pb_ll_request3({low_trunc_hack, _EpochID, File}, S) ->
+do_pb_ll_request3({low_delete_migration, _EpochID, File},
+                  #state{witness=false}=S) ->
+    {do_server_delete_migration(File, S),
+     #state{witness=false}=S};
+do_pb_ll_request3({low_trunc_hack, _EpochID, File},
+                  #state{witness=false}=S) ->
     {do_server_trunc_hack(File, S), S};
-do_pb_ll_request3({low_proj, PCMD}, S) ->
-    {do_server_proj_request(PCMD, S), S}.
+do_pb_ll_request3(_, #state{witness=true}=S) ->
+    {{error, bad_arg}, S}.                       % TODO: new status code??
 
 do_pb_hl_request(#mpb_request{req_id=ReqID}, #state{pb_mode=low}=S) ->
     Result = {low_error, 41, "High protocol request while in low mode"},
@@ -458,7 +456,7 @@ do_server_proj_request({read_projection, ProjType, Epoch},
     machi_projection_store:read(ProjStore, ProjType, Epoch);
 do_server_proj_request({write_projection, ProjType, Proj},
                        #state{proj_store=ProjStore}) ->
-    machi_projection_store:write(ProjStore, ProjType, Proj);
+    catch machi_projection_store:write(ProjStore, ProjType, Proj);
 do_server_proj_request({get_all_projections, ProjType},
                        #state{proj_store=ProjStore}) ->
     machi_projection_store:get_all_projections(ProjStore, ProjType);
@@ -497,6 +495,8 @@ do_server_append_chunk2(_PKey, Prefix, Chunk, CSum_tag, Client_CSum,
             {assignment, Offset, File} ->
                 Size = iolist_size(Chunk),
                 {ok, {Offset, Size, File}};
+            witness ->
+                {error, bad_arg};
             wedged ->
                 {error, wedged}
         after 10*1000 ->
@@ -838,99 +838,6 @@ make_listener_regname(BaseName) ->
 
 make_projection_server_regname(BaseName) ->
     list_to_atom(atom_to_list(BaseName) ++ "_pstore2").
-
-http_hack_server(FluName, Line1, Sock, S) ->
-    {ok, {http_request, HttpOp, URI0, _HttpV}, _x} =
-        erlang:decode_packet(http_bin, Line1, [{line_length,4095}]),
-    MyURI = case URI0 of
-              {abs_path, Path} -> <<"/", Rest/binary>> = Path,
-                                  Rest;
-              _                -> URI0
-          end,
-    Hdrs = http_hack_harvest_headers(Sock),
-    G = http_hack_digest_header_goop(Hdrs, #http_goop{}),
-    case HttpOp of
-        'PUT' ->
-            http_hack_server_put(Sock, G, FluName, MyURI);
-        'GET' ->
-            http_hack_server_get(Sock, G, FluName, MyURI, S)
-    end,
-    ok = gen_tcp:close(Sock),
-    exit(normal).
-
-http_hack_server_put(Sock, G, FluName, MyURI) ->
-    ok = inet:setopts(Sock, [{packet, raw}]),
-    {ok, Chunk} = gen_tcp:recv(Sock, G#http_goop.len, 60*1000),
-    CSum0 = machi_util:checksum_chunk(Chunk),
-    try
-        CSum = case G#http_goop.x_csum of
-                   undefined ->
-                       machi_util:make_tagged_csum(server_sha, CSum0);
-                   XX when is_binary(XX) ->
-                       if XX == CSum0 ->
-                               machi_util:make_tagged_csum(client_sha,  CSum0);
-                          true ->
-                               throw({bad_csum, XX})
-                       end
-               end,
-        FluName ! {seq_append, self(), MyURI, Chunk, CSum, 0, todo_epoch_id_bitrot}
-    catch
-        throw:{bad_csum, _CS} ->
-            Out = "HTTP/1.0 412 Precondition failed\r\n"
-                "X-Reason: bad checksum\r\n\r\n",
-            ok = gen_tcp:send(Sock, Out),
-            ok = gen_tcp:close(Sock),
-            exit(normal);
-        error:badarg ->
-            error_logger:error_msg("Message send to ~p gave badarg, make certain server is running with correct registered name\n", [?MODULE])
-    end,
-    receive
-        {assignment, Offset, File} ->
-            Msg = io_lib:format("HTTP/1.0 201 Created\r\nLocation: ~s\r\n"
-                                "X-Offset: ~w\r\nX-Size: ~w\r\n\r\n",
-                                [File, Offset, byte_size(Chunk)]),
-            ok = gen_tcp:send(Sock, Msg);
-        wedged ->
-            ok = gen_tcp:send(Sock, <<"HTTP/1.0 499 WEDGED\r\n\r\n">>)
-    after 10*1000 ->
-            ok = gen_tcp:send(Sock, <<"HTTP/1.0 499 TIMEOUT\r\n\r\n">>)
-    end.
-
-http_hack_server_get(Sock, _G, _FluName, _MyURI, _S) ->
-    ok = gen_tcp:send(Sock, <<"TODO BROKEN FEATURE see old commits\r\n">>).
-
-http_hack_harvest_headers(Sock) ->
-    ok = inet:setopts(Sock, [{packet, httph}]),
-    http_hack_harvest_headers(gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT),
-                              Sock, []).
-
-http_hack_harvest_headers({ok, http_eoh}, _Sock, Acc) ->
-    Acc;
-http_hack_harvest_headers({error, _}, _Sock, _Acc) ->
-    [];
-http_hack_harvest_headers({ok, Hdr}, Sock, Acc) ->
-    http_hack_harvest_headers(gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT),
-                              Sock, [Hdr|Acc]).
-
-http_hack_digest_header_goop([], G) ->
-    G;
-http_hack_digest_header_goop([{http_header, _, 'Content-Length', _, Str}|T], G) ->
-    http_hack_digest_header_goop(T, G#http_goop{len=list_to_integer(Str)});
-http_hack_digest_header_goop([{http_header, _, "X-Checksum", _, Str}|T], G) ->
-    SHA = machi_util:hexstr_to_bin(Str),
-    CSum = machi_util:make_tagged_csum(client_sha, SHA),
-    http_hack_digest_header_goop(T, G#http_goop{x_csum=CSum});
-http_hack_digest_header_goop([_H|T], G) ->
-    http_hack_digest_header_goop(T, G).
-
-http_hack_split_uri_options(OpsBin) ->
-    L = binary:split(OpsBin, <<"&">>),
-    [case binary:split(X, <<"=">>) of
-         [<<"offset">>, Bin] ->
-             {offset, binary_to_integer(Bin)};
-         [<<"size">>, Bin] ->
-             {size, binary_to_integer(Bin)}
-     end || X <- L].
 
 %% @doc Encode `Offset + Size + TaggedCSum' into an `iolist()' type for
 %% internal storage by the FLU.

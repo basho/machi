@@ -76,7 +76,6 @@ new(EpochNum, MyName, [_|_] = MembersDict0, Down_list, UPI_list, Repairing_list,
     RepairingSet = ordsets:from_list(Repairing_list),
 
     true = ordsets:is_element(MyName, AllSet),
-    true = (AllSet == ordsets:union([DownSet, UPISet, RepairingSet])),
     true = ordsets:is_disjoint(DownSet, UPISet),
     true = ordsets:is_disjoint(DownSet, RepairingSet),
     true = ordsets:is_disjoint(UPISet, RepairingSet),
@@ -147,8 +146,9 @@ get_epoch_id(#projection_v1{epoch_number=Epoch, epoch_csum=CSum}) ->
 %% @doc Create a proplist-style summary of a projection record.
 
 make_summary(#projection_v1{epoch_number=EpochNum,
-                            epoch_csum= <<_CSum4:4/binary, _/binary>>=_CSum,
                             all_members=_All_list,
+                            mode=CMode,
+                            witnesses=Witness_list,
                             down=Down_list,
                             author_server=Author,
                             upi=UPI_list,
@@ -162,6 +162,7 @@ make_summary(#projection_v1{epoch_number=EpochNum,
                         []
                 end,
     [{epoch,EpochNum},{author,Author},
+     {mode,CMode},{witnesses, Witness_list},
      {upi,UPI_list},{repair,Repairing_list},{down,Down_list}] ++
         InnerInfo ++
         [{flap, Flap}] ++

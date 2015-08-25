@@ -38,10 +38,9 @@
 
 -record(flap_i, {
           flap_count :: {term(), term()},
-          flapping_me = false :: boolean(),
           all_hosed :: list(),
           all_flap_counts :: list(),
-          bad :: list()
+          my_unique_prop_count :: non_neg_integer()
          }).
 
 -type p_srvr() :: #p_srvr{}.
@@ -54,6 +53,7 @@
           epoch_csum      :: pv1_csum(),
           author_server   :: pv1_server(),
           all_members     :: [pv1_server()],
+          witnesses = []  :: [pv1_server()],
           creation_time   :: pv1_timestamp(),
           mode = ap_mode  :: pv1_consistency_mode(),
           upi             :: [pv1_server()],
