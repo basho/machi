@@ -276,7 +276,6 @@ do_proj_write2(ProjType, #projection_v1{epoch_csum=CSum}=Proj, S) ->
         CSum2 when CSum2 == CSum ->
             do_proj_write3(ProjType, Proj, S);
         _Else ->
-            io:format(user, "Oops ~s epoch ~w csum ~W expected ~W\n", [S#state.public_dir, Proj#projection_v1.epoch_number, _Else, 6, CSum, 6]),
             {{error, bad_arg}, S}
     end.
 
@@ -291,7 +290,16 @@ do_proj_write3(ProjType, #projection_v1{epoch_number=Epoch,
         {ok, Bin} when ProjType == private ->
             #projection_v1{epoch_number=CurEpoch,
                            epoch_csum=CurCSum} = _CurProj = binary_to_term(Bin),
-            {{error, written}, S};
+            %% We've already checked that CSum is correct matches the
+            %% contents of this new projection version.  If the epoch_csum
+            %% values match, and if we trust the value on disk (TODO paranoid
+            %% check that, also), then the only difference must be the dbg2
+            %% list, which is ok.
+            if CurCSum == CSum ->
+                    do_proj_write4(ProjType, Proj, Path, Epoch, S);
+               true ->
+                    {{error, written}, S}
+            end;
         {error, enoent} ->
             do_proj_write4(ProjType, Proj, Path, Epoch, S);
         {error, Else} ->

@@ -45,12 +45,14 @@ smoke_test() ->
         {error, bad_arg} = ?PS:write(a_pstore, public, Pbad),
 
         ok = ?PS:write(a_pstore, private, P1),
-        {error, written} = ?PS:write(a_pstore, private, P1),
+        P1a = machi_projection:update_checksum(P1#projection_v1{dbg=[diff_yo]}),
+        {error, written} = ?PS:write(a_pstore, private, P1a),
+
         P1b = P1#projection_v1{dbg2=[version_b]},
         ok = ?PS:write(a_pstore, private, P1b),
         P1c = P1#projection_v1{dbg2=[version_c]},
         ok = ?PS:write(a_pstore, private, P1c),
-        {error, written} = ?PS:write(a_pstore, private, P1c),
+        {error, written} = ?PS:write(a_pstore, private, P1a),
 
         ok
     after
