@@ -727,6 +727,7 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                 if Simulator_p andalso SimRepair_p andalso
                    SameEpoch_p andalso RelativeToServer == RepChk_LastInUPI ->
                         D_foo=[{repair_airquote_done, {we_agree, (S#ch_mgr.proj)#projection_v1.epoch_number}}],
+                        if CMode == cp_mode -> timer:sleep(567); true -> ok end,
                         {NewUPI_list ++ [H], T, RunEnv2};
                    not (Simulator_p andalso SimRepair_p)
                    andalso
@@ -800,6 +801,7 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                                                   {up0, Up0},
                                                   {up, Up},
                                                   {all_hosed, AllHosed},
+                                                  {oldepoch, OldEpochNum},
                                                   {oldupi, OldUPI_list},
                                                   {newupi, NewUPI_list},
                                                   {newupi3, NewUPI_list3},
@@ -1134,6 +1136,7 @@ react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra,
                     %% io:format(user, "zerf_in @ A29: ~p: ~w\n", [MyName,  machi_projection:make_summary(Zerf)]),
                     P_current2 = Zerf#projection_v1{
                                              flap=P_current#projection_v1.flap},
+                    %% io:format(user, "A29 ~w cur_flap ~W, ", [S#ch_mgr.name, P_current#projection_v1.flap, 8]),
                     react_to_env_A30(Retries, P_latest, LatestUnanimousP,
                                      ReadExtra, S#ch_mgr{proj=P_current2});
                 Zerf ->
@@ -1678,6 +1681,8 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         %% time).
         (inner_projection_exists(P_latest) orelse
          inner_projection_exists(P_newprop)) andalso
+        %% I have been flapping for a while
+        S#ch_mgr.flap_count > 100 andalso
         %% I'm suspected of being bad
         lists:member(MyName, P_newprop_AllHosedPlus) andalso
         %% I'm not in the critical UPI or repairing lists
@@ -2179,11 +2184,12 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                               _ ->
                                   element(1, P_latest_Flap#flap_i.flap_count)
                           end,
-    MinQueueLen = 7,
+    MinQueueLen = 3,
     StartFlapping_p =
         case {queue:len(H), UniqueProposalSummaries} of
             _ when AmFlappingNow_p ->
-                ?REACT({calculate_flaps,?LINE,[{flap_start,FlapStart}]}),
+                ?REACT({calculate_flaps,?LINE,[{flap_count,FlapCount},
+                                               {flap_start,FlapStart}]}),
                 %% I'm already flapping, therefore don't start again.
                 false;
             {N, _} when N >= MinQueueLen,
@@ -2206,10 +2212,12 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                 %% If the last time we saw a hard change in up/down status
                 %% was less than this time ago, then we do not flap.  Give
                 %% the status change some time to propagate.
+                ?REACT({calculate_flaps,?LINE,[{time_diff,LastUpChange_diff}]}),
                 true;
             StartFlapping_p ->
                 %% If we're starting flapping on this iteration, don't ignore
                 %% that intent.
+                ?REACT({calculate_flaps,?LINE,[]}),
                 false;
             AmFlappingNow_p andalso
             CurrentUp /= FlapLastUp ->
@@ -2249,6 +2257,7 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                 ?REACT({calculate_flaps,?LINE,[]}),
                 false
         end,
+%% if true -> io:format(user, "CALC_FLAP: ~w: flapping_now ~w start ~w leave ~w latest-epoch ~w: ~w\n", [MyName, AmFlappingNow_p, StartFlapping_p, LeaveFlapping_p, P_latest#projection_v1.epoch_number, [X || X={calculate_flaps,_,_} <- lists:sublist(get(react), 3)]]); true -> ok end,
 %% if LeaveFlapping_p andalso (AmFlappingNow_p orelse StartFlapping_p) -> io:format(user, "CALC_FLAP: ~w: flapping_now ~w start ~w leave ~w latest-epoch ~w: ~w\n", [MyName, AmFlappingNow_p, StartFlapping_p, LeaveFlapping_p, P_latest#projection_v1.epoch_number, [X || X={calculate_flaps,_,_} <- lists:sublist(get(react), 3)]]); true -> ok end,
     AmFlapping_p = if LeaveFlapping_p -> false;
                       true            -> AmFlappingNow_p orelse StartFlapping_p
@@ -3098,7 +3107,8 @@ zerf_find_last_common(UnsearchedEpochs, Relation, MajoritySize, Up, S) ->
     Rel2 = lists:foldl(
              fun({E, FLU}, Rel) ->
                      Proxy = proxy_pid(FLU, S),
-                     case ?FLU_PC:read_projection(Proxy, private, E, ?TO) of
+                     case (catch ?FLU_PC:read_projection(Proxy, private,
+                                                         E, ?TO)) of
                          {ok, Proj} ->
                              %% Sort order: we want inner = bigger.
                              CSum = Proj#projection_v1.epoch_csum,
@@ -3117,7 +3127,7 @@ zerf_find_last_common(UnsearchedEpochs, Relation, MajoritySize, Up, S) ->
                                                              NewT)
                                     end,
                              Rel2;
-                         {error, not_written} ->
+                         _ ->
                              Rel
                      end
              end, Relation, lists:reverse([{E, FLU} || E <- NowEpochs, FLU <- Up])),
@@ -3208,8 +3218,8 @@ perhaps_verbose_c110(P_latest2, S) ->
                                              S#ch_mgr.opts) of
                         true when Summ2 /= Last2 ->
                             put(last_verbose, Summ2),
-                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w (outer ~w auth ~w)\n",
-                              [HH,MM,SS,MSec, S#ch_mgr.name, Summ2, P_latest2#projection_v1.epoch_number, P_latest2#projection_v1.author_server]);
+                            ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w (outer ~w auth ~w flap ~w)\n",
+                              [HH,MM,SS,MSec, S#ch_mgr.name, Summ2, P_latest2#projection_v1.epoch_number, P_latest2#projection_v1.author_server, P_latest2#projection_v1.flap]);
                         _ ->
                             ok
                     end

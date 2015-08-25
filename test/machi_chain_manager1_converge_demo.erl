@@ -241,7 +241,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
       %% io:format(user, "\nLet loose the dogs of war!\n", []),
       machi_partition_simulator:always_these_partitions([]),
       io:format(user, "\nPuppies for everyone!\n", []),
-      [DoIt(30, 0, 0) || _ <- lists:seq(1,5)],
+      [DoIt(20, 0, 0) || _ <- lists:seq(1,9)],
 
       AllPs = make_partition_list(All_list),
       PartitionCounts = lists:zip(AllPs, lists:seq(1, length(AllPs))),
@@ -631,7 +631,7 @@ private_projections_are_stable(Namez, PollFunc) ->
                 true
         end,
 
-    io:format(user, "\nPriv1 ~P u_all_peers ~w cp_mode_agree ~w\n", [lists:sort(Private1), 20, Unanimous_with_all_peers_p, CP_mode_agree_test_p]),
+    io:format(user, "\nPriv1 ~P\n1==2 ~w ap_disjoint ~w u_all_peers ~w cp_mode_agree ~w\n", [lists:sort(Private1), 20, Private1 == Private2, AP_mode_disjoint_test_p, Unanimous_with_all_peers_p, CP_mode_agree_test_p]),
     Private1 == Private2 andalso
         AP_mode_disjoint_test_p andalso
         (
