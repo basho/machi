@@ -59,7 +59,8 @@
          get_all_projections/2, get_all_projections/3,
          list_all_projections/2, list_all_projections/3
         ]).
--export([set_wedge_notify_pid/2, set_consistency_mode/2]).
+-export([set_wedge_notify_pid/2, get_wedge_notify_pid/1,
+         set_consistency_mode/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -163,6 +164,10 @@ set_wedge_notify_pid(PidSpec, NotifyWedgeStateChanges) ->
     gen_server:call(PidSpec, {set_wedge_notify_pid, NotifyWedgeStateChanges},
                     infinity).
 
+get_wedge_notify_pid(PidSpec) ->
+    gen_server:call(PidSpec, {get_wedge_notify_pid},
+                    infinity).
+
 set_consistency_mode(PidSpec, CMode)
   when CMode == ap_mode; CMode == cp_mode ->
     gen_server:call(PidSpec, {set_consistency_mode, CMode}, infinity).
@@ -230,6 +235,8 @@ handle_call({{list_all_projections, ProjType}, LC1}, _From, S) ->
     {reply, {{ok, find_all(Dir)}, LC2}, S};
 handle_call({set_wedge_notify_pid, NotifyWedgeStateChanges}, _From, S) ->
     {reply, ok, S#state{wedge_notify_pid=NotifyWedgeStateChanges}};
+handle_call({get_wedge_notify_pid}, _From, S) ->
+    {reply, {ok, S#state.wedge_notify_pid}, S};
 handle_call({set_consistency_mode, CMode}, _From, S) ->
     {reply, ok, S#state{consistency_mode=CMode}};
 handle_call(_Request, _From, S) ->

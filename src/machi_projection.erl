@@ -31,7 +31,8 @@
          compare/2,
          get_epoch_id/1,
          make_summary/1,
-         make_members_dict/1
+         make_members_dict/1,
+         make_epoch_id/1
         ]).
 
 %% @doc Create a new projection record.
@@ -201,3 +202,6 @@ make_members_dict(Ps) ->
                     exit({badarg, {make_members_dict, lists:filter(F_neither, Ps)}})
             end
     end.
+
+make_epoch_id(#projection_v1{epoch_number=Epoch, epoch_csum=CSum}) ->
+    {Epoch, CSum}.

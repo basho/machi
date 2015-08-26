@@ -205,7 +205,7 @@ witness_smoke_test2() ->
 
         %% Whew ... ok, now start some damn tests.
         {ok, C1} = machi_cr_client:start_link([P || {_,P}<-orddict:to_list(D)]),
-        machi_cr_client:append_chunk(C1, Prefix, Chunk1),
+        {ok, _} = machi_cr_client:append_chunk(C1, Prefix, Chunk1),
         {ok, {Off1,Size1,File1}} =
             machi_cr_client:append_chunk(C1, Prefix, Chunk1),
         Chunk1_badcs = {<<?CSUM_TAG_CLIENT_SHA:8, 0:(8*20)>>, Chunk1},
@@ -215,7 +215,8 @@ witness_smoke_test2() ->
 
         %% Stop 'b' and let the chain reset.
         ok = machi_flu_psup:stop_flu_package(b),
-        run_ticks([a_chmgr,c_chmgr]),
+        %% Run ticks enough times to force auto-unwedge of both a & c.
+        [run_ticks([a_chmgr,c_chmgr]) || _ <- [1,2,3,4] ],
 
         %% The chain should now be [a,c].
         %% Let's wedge OurWitness and see what happens: timeout/partition.
