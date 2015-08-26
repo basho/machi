@@ -135,11 +135,12 @@ partial_stop_restart2() ->
         {FluName_a, _} = hd(Ps),
         ok = machi_flu_psup:stop_flu_package(FluName_a),
         {ok, _} = Start(hd(Ps)),
+        timer:sleep(123),      % TODO fix server socket available race condition in better way
         %% Remember: 'a' is not in active mode.
         {ok, Proj_m3} = machi_projection_store:read_latest_projection(
                           hd(PStores), private),
         true = (machi_projection:update_dbg2(Proj_m, []) ==
-                    machi_projection:update_dbg2(Proj_m, [])),
+                    machi_projection:update_dbg2(Proj_m3, [])),
         %% Confirm that 'a' is wedged
         {error, wedged} = Append(hd(Ps), EpochID1),
         {_, #p_srvr{address=Addr_a, port=TcpPort_a}} = hd(Ps),
