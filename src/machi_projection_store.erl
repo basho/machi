@@ -303,7 +303,7 @@ do_proj_write3(ProjType, #projection_v1{epoch_number=Epoch,
             %% values match, and if we trust the value on disk (TODO paranoid
             %% check that, also), then the only difference must be the dbg2
             %% list, which is ok.
-            if CurCSum == CSum ->
+            if CurEpoch == Epoch, CurCSum == CSum ->
                     do_proj_write4(ProjType, Proj, Path, Epoch, S);
                true ->
                     {{error, written}, S}
@@ -340,14 +340,17 @@ do_proj_write4(ProjType, Proj, Path, Epoch, #state{consistency_mode=CMode}=S) ->
                    end,
                    S#state{max_public_epochid=EpochId};
               ProjType == private,
-              CMode == ap_mode,
               Epoch > element(1, S#state.max_private_epochid) ->
-                   update_wedge_state(
-                     S#state.wedge_notify_pid, false,
-                     EffectiveEpochId),
+                   if CMode == ap_mode ->
+                           update_wedge_state(
+                             S#state.wedge_notify_pid, false,
+                             EffectiveEpochId);
+                      true ->
+                           %% If ProjType == private and CMode == cp_mode, then
+                           %% the unwedge action is not performed here!
+                           ok
+                   end,
                    S#state{max_private_epochid=EpochId};
-              %% If ProjType == private and CMode == cp_mode, then
-              %% the unwedge action is not performed here!
               true ->
                    S
            end,
