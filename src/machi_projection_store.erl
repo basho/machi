@@ -314,7 +314,7 @@ do_proj_write3(ProjType, #projection_v1{epoch_number=Epoch,
             {{error, Else}, S}
     end.
 
-do_proj_write4(ProjType, Proj, Path, Epoch, S) ->
+do_proj_write4(ProjType, Proj, Path, Epoch, #state{consistency_mode=CMode}=S) ->
     {ok, FH} = file:open(Path, [write, raw, binary]),
     ok = file:write(FH, term_to_binary(Proj)),
     ok = file:sync(FH),
@@ -340,11 +340,14 @@ do_proj_write4(ProjType, Proj, Path, Epoch, S) ->
                    end,
                    S#state{max_public_epochid=EpochId};
               ProjType == private,
+              CMode == ap_mode,
               Epoch > element(1, S#state.max_private_epochid) ->
                    update_wedge_state(
                      S#state.wedge_notify_pid, false,
                      EffectiveEpochId),
                    S#state{max_private_epochid=EpochId};
+              %% If ProjType == private and CMode == cp_mode, then
+              %% the unwedge action is not performed here!
               true ->
                    S
            end,
