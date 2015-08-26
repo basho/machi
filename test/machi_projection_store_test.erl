@@ -54,6 +54,9 @@ smoke_test() ->
         ok = ?PS:write(a_pstore, private, P1c),
         {error, written} = ?PS:write(a_pstore, private, P1a),
 
+        ok = ?PS:set_consistency_mode(a_pstore, ap_mode),
+        ok = ?PS:set_consistency_mode(a_pstore, cp_mode),
+
         ok
     after
         machi_flu_psup:stop_flu_package(a),

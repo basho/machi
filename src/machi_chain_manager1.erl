@@ -232,12 +232,18 @@ init({MyName, InitMembersDict, MgrOpts}) ->
     random:seed(now()),
     init_remember_partition_hack(),
     Opt = fun(Key, Default) -> proplists:get_value(Key, MgrOpts, Default) end,
-    CMode = Opt(consistency_mode, ap_mode),
     InitWitness_list = Opt(witnesses, []),
     ZeroAll_list = [P#p_srvr.name || {_,P} <- orddict:to_list(InitMembersDict)],
     ZeroProj = make_none_projection(MyName, ZeroAll_list,
                                     InitWitness_list, InitMembersDict),
     ok = store_zeroth_projection_maybe(ZeroProj, MgrOpts),
+    CMode = Opt(consistency_mode, ap_mode),
+    case get_projection_store_regname(MgrOpts) of
+        undefined ->
+            ok;
+        PS ->
+            ok = set_consistency_mode(PS, CMode)
+    end,
 
     %% Using whatever is the largest epoch number in our local private
     %% store, this manager starts out using the "none" projection.  If
@@ -309,6 +315,7 @@ handle_call({set_chain_members, MembersDict, Witness_list}, _From,
                Witness_list /= [] ->
                     cp_mode
             end,
+    ok = set_consistency_mode(machi_flu_psup:make_proj_supname(MyName), CMode),
     NewProj = machi_projection:update_checksum(
                 OldProj#projection_v1{author_server=MyName,
                                       creation_time=now(),
@@ -442,7 +449,7 @@ get_my_proj_boot_info(MgrOpts, DefaultDict, DefaultProj, ProjType) ->
 %% 0th epoch is already written, there's no problem.
 
 store_zeroth_projection_maybe(ZeroProj, MgrOpts) ->
-    case proplists:get_value(projection_store_registered_name, MgrOpts) of
+    case get_projection_store_regname(MgrOpts) of
         undefined ->
             ok;
         Store ->
@@ -450,6 +457,14 @@ store_zeroth_projection_maybe(ZeroProj, MgrOpts) ->
             _ = machi_projection_store:write(Store, private, ZeroProj),
             ok
     end.
+
+get_projection_store_regname(MgrOpts) ->
+    proplists:get_value(projection_store_registered_name, MgrOpts).
+
+set_consistency_mode(undefined, CMode) ->
+    ok;
+set_consistency_mode(ProjStore, CMode) ->
+    machi_projection_store:set_consistency_mode(ProjStore, CMode).
 
 set_active_timer(#ch_mgr{name=MyName, members_dict=MembersDict}=S) ->
     FLU_list = [P#p_srvr.name || {_,P} <- orddict:to_list(MembersDict)],

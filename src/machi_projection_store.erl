@@ -59,7 +59,7 @@
          get_all_projections/2, get_all_projections/3,
          list_all_projections/2, list_all_projections/3
         ]).
--export([set_wedge_notify_pid/2]).
+-export([set_wedge_notify_pid/2, set_consistency_mode/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -72,7 +72,8 @@
           private_dir = ""       :: string(),
           wedge_notify_pid       :: pid() | atom(),
           max_public_epochid =  ?NO_EPOCH :: {-1 | non_neg_integer(), binary()},
-          max_private_epochid = ?NO_EPOCH :: {-1 | non_neg_integer(), binary()}
+          max_private_epochid = ?NO_EPOCH :: {-1 | non_neg_integer(), binary()},
+          consistency_mode=ap_mode :: 'ap_mode' | 'cp_mode'
          }).
 
 %% @doc Start a new projection store server.
@@ -159,7 +160,12 @@ list_all_projections(PidSpec, ProjType, Timeout)
     g_call(PidSpec, {list_all_projections, ProjType}, Timeout).
 
 set_wedge_notify_pid(PidSpec, NotifyWedgeStateChanges) ->
-    gen_server:call(PidSpec, {set_wedge_notify_pid, NotifyWedgeStateChanges}).
+    gen_server:call(PidSpec, {set_wedge_notify_pid, NotifyWedgeStateChanges},
+                    infinity).
+
+set_consistency_mode(PidSpec, CMode)
+  when CMode == ap_mode; CMode == cp_mode ->
+    gen_server:call(PidSpec, {set_consistency_mode, CMode}, infinity).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -224,6 +230,8 @@ handle_call({{list_all_projections, ProjType}, LC1}, _From, S) ->
     {reply, {{ok, find_all(Dir)}, LC2}, S};
 handle_call({set_wedge_notify_pid, NotifyWedgeStateChanges}, _From, S) ->
     {reply, ok, S#state{wedge_notify_pid=NotifyWedgeStateChanges}};
+handle_call({set_consistency_mode, CMode}, _From, S) ->
+    {reply, ok, S#state{consistency_mode=CMode}};
 handle_call(_Request, _From, S) ->
     Reply = {whaaaaaaaaaaaaazz, _Request},
     {reply, Reply, S}.
