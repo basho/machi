@@ -3083,7 +3083,8 @@ full_majority_size(L) when is_list(L) ->
 make_zerf(#projection_v1{epoch_number=OldEpochNum,
                          all_members=AllMembers,
                          members_dict=MembersDict,
-                         witnesses=OldWitness_list
+                         witnesses=OldWitness_list,
+                         flap=OldFlap
                         } = _LastProj,
           #ch_mgr{name=MyName,
                   consistency_mode=cp_mode,
@@ -3096,108 +3097,88 @@ make_zerf(#projection_v1{epoch_number=OldEpochNum,
             throw({zerf, {not_enough_up, Up, AllMembers}});
         true ->
             make_zerf2(OldEpochNum, Up, MajoritySize, MyName,
-                       AllMembers, OldWitness_list, MembersDict, S)
+                       AllMembers, OldWitness_list, MembersDict, OldFlap, S)
     end.
 
-make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list, MembersDict, S) ->
+make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list,
+           MembersDict, OldFlap, S) ->
     try
-        Epochs = lists:reverse(
-                   lists:usort(
-                     lists:flatten(
-                       [begin
-                            Proxy = proxy_pid(FLU, S),
-                            {ok, Es} = ?FLU_PC:list_all_projections(
-                                          Proxy, private, ?TO*5),
-                            [E || E <- Es]
-                        end || FLU <- Up]))),
-        put(epochs, Epochs),
-        Relation = [],
-        Proj = zerf_find_last_common(Epochs, Relation, MajoritySize, Up, S),
-        Proj#projection_v1{flap=make_flapping_i()}
+        Proj = zerf_find_last_common(MajoritySize, Up, S),
+        Proj2 =
+            Proj#projection_v1{flap=OldFlap}
+            ,        io:format(user, "ZERF ~w\n", [machi_projection:make_summary(Proj2)]),
+        Proj2
     catch
         throw:{zerf,no_common} ->
-            FirstEpoch_p = case get(epochs) of
-                               [0]    -> true;
-                               [_, 0] -> true;
-                               _      -> false
-                           end,
-            if FirstEpoch_p ->
-                    %% Epoch 0 special case: make the "all" projection.
-                    %% calc_projection2() will then filter out any FLUs that
-                    %% aren't currently up to create the first chain.  If not
-                    %% enough are up now, then it will fail to create a first
-                    %% chain.
-                    %%
-                    %% If epoch 0 isn't the only epoch that we've looked at,
-                    %% but we still couldn't find a common projection, then
-                    %% we still need to default to the "all" projection and let
-                    %% subsequent chain calculations do their calculations....
-                    P = make_all_projection(MyName, AllMembers, OldWitness_list,
-                                            MembersDict),
-                    machi_projection:update_checksum(
-                      P#projection_v1{epoch_number=OldEpochNum,
-                                      mode=cp_mode,
-                                      dbg2=[zerf_all]});
-               true ->
-                    %% Make it appear like nobody is up now: we'll have to
-                    %% wait until the Up list changes so that
-                    %% zerf_find_last_common() can confirm a common stable
-                    %% last stable epoch.
-
-                    P = make_none_projection(MyName, AllMembers,OldWitness_list,
-                                             MembersDict),
-                    machi_projection:update_checksum(
-                      P#projection_v1{epoch_number=OldEpochNum,
-                                      mode=cp_mode,
-                                      dbg2=[zerf_none, {es, get(epochs)},{up,Up},{maj,MajoritySize}]})
-            end;
+            %% Epoch 0 special case: make the "all" projection.
+            %% calc_projection2() will then filter out any FLUs that
+            %% aren't currently up to create the first chain.  If not
+            %% enough are up now, then it will fail to create a first
+            %% chain.
+            %%
+            %% If epoch 0 isn't the only epoch that we've looked at,
+            %% but we still couldn't find a common projection, then
+            %% we still need to default to the "all" projection and let
+            %% subsequent chain calculations do their calculations....
+            P = make_all_projection(MyName, AllMembers, OldWitness_list,
+                                    MembersDict),
+            P2 =
+            machi_projection:update_checksum(
+              P#projection_v1{epoch_number=OldEpochNum,
+                              mode=cp_mode,
+                              dbg2=[zerf_all]}),
+            io:format(user, "ZERF ~w\n", [machi_projection:make_summary(P2)]),
+            P2;
         _X:_Y ->
             throw({zerf, {damn_exception, Up, _X, _Y, erlang:get_stacktrace()}})
-    after
-        erase(epochs)
     end.
 
-zerf_find_last_common([], _Relation, _MajoritySize, _Up, _S) ->
-    throw({zerf, no_common});
-zerf_find_last_common(UnsearchedEpochs, Relation, MajoritySize, Up, S) ->
-    {NowEpochs, NextEpochs} = my_lists_split(5, UnsearchedEpochs),
-    Rel2 = lists:foldl(
-             fun({E, FLU}, Rel) ->
-                     Proxy = proxy_pid(FLU, S),
-                     case (catch ?FLU_PC:read_projection(Proxy, private,
-                                                         E, ?TO)) of
-                         {ok, Proj} ->
-                             %% Sort order: we want inner = bigger.
-                             CSum = Proj#projection_v1.epoch_csum,
-                             OorI = case inner_projection_exists(Proj) of
-                                        true  -> z_inner;
-                                        false -> a_outer
-                                    end,
-                             K = {E, CSum, OorI, Proj#projection_v1{dbg2=[]}},
-                             Rel2 = case lists:keyfind(K, 1, Rel) of
-                                        false ->
-                                            [{K, [FLU]}|Rel];
-                                        {K, OldV} ->
-                                            NewV = lists:usort([FLU|OldV]),
-                                            NewT = {K, NewV},
-                                            lists:keyreplace(K, 1, Rel,
-                                                             NewT)
-                                    end,
-                             Rel2;
-                         _ ->
-                             Rel
-                     end
-             end, Relation, lists:reverse([{E, FLU} || E <- NowEpochs, FLU <- Up])),
-    SortedRel = lists:reverse(lists:sort(Rel2)),
-    case [T || T={{_E, _CSum, _OorI, Proj}, WrittenFLUs} <- SortedRel,
-               ordsets:is_subset(ordsets:from_list(Proj#projection_v1.upi),
-                                 ordsets:from_list(WrittenFLUs))
-               andalso
-               length(Proj#projection_v1.upi) >= MajoritySize] of
+zerf_find_last_common(MajoritySize, Up, S) ->
+    case lists:reverse(
+           lists:sort(
+             lists:flatten(
+               [zerf_find_last_annotated(FLU,MajoritySize,S) || FLU <- Up]))) of
         [] ->
-            zerf_find_last_common(NextEpochs, Rel2, MajoritySize, Up, S);
-        [{{_E, _CSum, _OorI, Proj}, _WrittenFLUs}|_] ->
-            Proj
+            throw({zerf,no_common});
+        [P|_] ->
+            %% TODO is this simple sort really good enough?
+            P
+    end.
+
+zerf_find_last_annotated(FLU, MajoritySize, S) ->
+    Proxy = proxy_pid(FLU, S),
+    {ok, Epochs} = ?FLU_PC:list_all_projections(Proxy, private, 60*1000),
+    P = lists:foldl(
+          fun(Epoch, #projection_v1{}=Proj) ->
+                  Proj;
+             (Epoch, Acc) ->
+                  {ok, Proj} = ?FLU_PC:read_projection(Proxy, private,
+                                                       Epoch, ?TO*10),
+                  case proplists:get_value(private_proj_is_upi_unanimous,
+                                           Proj#projection_v1.dbg2) of
+                      undefined ->
+                          Acc;
+                      {{ConfEpoch, ConfCSum}, _ConfTime} ->
+                          Px = if ConfEpoch == Epoch ->
+                                       Proj;
+                                  true ->
+                                       Proj2 = inner_projection_or_self(Proj),
+                                       %% Sanity checking
+                                       ConfEpoch = Proj2#projection_v1.epoch_number,
+                                       ConfCSum  = Proj2#projection_v1.epoch_csum,
+                                       Proj2
+                               end,
+                          if length(Px#projection_v1.upi) >= MajoritySize ->
+                                  Px;
+                             true ->
+                                  Acc
+                          end
+                  end
+          end, first_accumulator, Epochs),
+    if is_record(P, projection_v1) ->
+            P;
+       true ->
+            []                                  % lists:flatten() will destroy
     end.
 
 my_lists_split(N, L) ->
