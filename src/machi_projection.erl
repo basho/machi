@@ -174,7 +174,7 @@ make_summary(#projection_v1{epoch_number=EpochNum,
                    true ->
                         []
                 end,
-    [{epoch,EpochNum}, %% {csum,CSum4},
+    [{epoch,EpochNum}, {csum,_CSum4},
      {author,Author}, {mode,CMode},{witnesses, Witness_list},
      {upi,UPI_list},{repair,Repairing_list},{down,Down_list}] ++
         InnerInfo ++

@@ -1857,7 +1857,9 @@ react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
     ?REACT(c100),
 
     Sane = projection_transition_is_sane(P_current, P_latest, MyName),
-    if Sane == true -> ok;  true -> ?V("~w-insane-~w-auth=~w:~w:~w:~w:~w:~w:~w-~p,", [?LINE, MyName, P_newprop#projection_v1.author_server, P_newprop#projection_v1.epoch_number, P_newprop#projection_v1.upi, P_newprop#projection_v1.repairing, (inner_projection_or_self(P_newprop))#projection_v1.epoch_number, (inner_projection_or_self(P_newprop))#projection_v1.upi, (inner_projection_or_self(P_newprop))#projection_v1.repairing, Sane]) end, %%% DELME!!!
+    QQ_current = lists:flatten(io_lib:format("~w:~w,~w/~w:~w,~w", [P_current#projection_v1.epoch_number, P_current#projection_v1.upi, P_current#projection_v1.repairing, (inner_projection_or_self(P_current))#projection_v1.epoch_number, (inner_projection_or_self(P_current))#projection_v1.upi, (inner_projection_or_self(P_current))#projection_v1.repairing])),
+    QQ_latest = lists:flatten(io_lib:format("~w:~w,~w/~w:~w,~w", [P_latest#projection_v1.epoch_number, P_latest#projection_v1.upi, P_latest#projection_v1.repairing, (inner_projection_or_self(P_latest))#projection_v1.epoch_number, (inner_projection_or_self(P_latest))#projection_v1.upi, (inner_projection_or_self(P_latest))#projection_v1.repairing])),
+    if Sane == true -> ok;  true -> ?V("\n~w-insane-~w-auth=~w ~s -> ~s ~w\n", [?LINE, MyName, P_newprop#projection_v1.author_server, QQ_current, QQ_latest, Sane]) end,
     Flap_latest = if is_record(Flap_latest0, flap_i) ->
                           Flap_latest0;
                      true ->
@@ -2687,7 +2689,12 @@ poll_private_proj_is_upi_unanimous3(#ch_mgr{name=MyName, proj=P_current,
                             PStr ->
                                 PStr
                         end,
-            io:format(user, "\nCONFIRM epoch ~w ~W upi ~w rep ~w by ~w\n", [NewProj#projection_v1.epoch_number, NewProj#projection_v1.epoch_csum, 6, NewProj#projection_v1.upi, NewProj#projection_v1.repairing, MyName]),
+            #projection_v1{epoch_number=_EpochRep,
+                           epoch_csum= <<_CSumRep:4/binary, _/binary>>,
+                           upi=_UPIRep,
+                           repairing=_RepairingRep} =
+                inner_projection_or_self(NewProj),
+            io:format(user, "\nCONFIRM epoch ~w ~w upi ~w rep ~w by ~w ~w\n", [_EpochRep, _CSumRep, _UPIRep, _RepairingRep, MyName, if P_current#projection_v1.inner == undefined -> outer; true -> {inner,{outer,P_current#projection_v1.epoch_number}} end]),
             ok = machi_projection_store:write(ProjStore, private, NewProj),
             %% Unwedge our FLU.
             {ok, NotifyPid} = machi_projection_store:get_wedge_notify_pid(ProjStore),
