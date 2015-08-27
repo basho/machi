@@ -371,13 +371,14 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
 
 make_partition_list(All_list) ->
     [
-     [{b,c}],
-     [],
-     [{c,d}],
-     [],
-     [{d,e}],
-     [],
-     [{c,e}]
+     [{b,c}]
+     %% [{b,c}],
+     %% [],
+     %% [{c,d}],
+     %% [],
+     %% [{d,e}],
+     %% [],
+     %% [{c,e}]
     ].
 
     %% _X_Ys1 = [[{X,Y}] || X <- All_list, Y <- All_list, X /= Y],

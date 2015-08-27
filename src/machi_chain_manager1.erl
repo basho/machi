@@ -2672,7 +2672,7 @@ poll_private_proj_is_upi_unanimous3(#ch_mgr{name=MyName, proj=P_current,
     EpochID = machi_projection:make_epoch_id(Proj_ios),
     {Rs, S2} = read_latest_projection_call_only2(private, UPI, S),
     Rs2 = [if is_record(P, projection_v1) ->
-                   machi_projection:make_epoch_id(P);
+                   machi_projection:make_epoch_id(inner_projection_or_self(P));
               true ->
                    P
            end || #projection_v1{}=P <- Rs],
@@ -2688,9 +2688,7 @@ poll_private_proj_is_upi_unanimous3(#ch_mgr{name=MyName, proj=P_current,
                             PStr ->
                                 PStr
                         end,
-            [io:format(user, "whereis(~w) ~w, ", [X, whereis(X)]) ||
-                X <- [a_pstore, a_pstore2]],
-io:format(user, "POLL: ~w updates ~w ~W\n", [S#ch_mgr.name, NewProj#projection_v1.epoch_number, NewProj#projection_v1.epoch_csum, 6]),
+io:format(user, "POLL: ~w: ~w updates ~w ~W ~w\n", [S#ch_mgr.name, P_current#projection_v1.epoch_csum == (machi_projection:update_checksum(P_current))#projection_v1.epoch_csum, NewProj#projection_v1.epoch_number, NewProj#projection_v1.epoch_csum, 6, NewProj#projection_v1.epoch_csum == (machi_projection:update_checksum(NewProj))#projection_v1.epoch_csum]),
             ok = machi_projection_store:write(ProjStore, private, NewProj),
             %% Unwedge our FLU.
             io:format(user, "\nUnwedge ~w @ ~W\n", [MyName, EpochID, 7]),

@@ -276,22 +276,15 @@ do_proj_read(ProjType, Epoch, S_or_Dir) ->
             {{error, Else}, S_or_Dir}
     end.
 
-do_proj_write(public=ProjType, Proj, S) ->
-    do_proj_write2(ProjType, Proj, S);
-do_proj_write(private=ProjType, #projection_v1{epoch_number=Epoch}=Proj, S) ->
-    case S#state.max_public_epochid of
-        {PublicEpoch, _} when PublicEpoch =< Epoch ->
-            do_proj_write2(ProjType, Proj, S);
-        {_PublicEpoch, _} ->
-            {{error, bad_arg}, S}
-    end.
+do_proj_write(ProjType, Proj, S) ->
+    do_proj_write2(ProjType, Proj, S).
 
 do_proj_write2(ProjType, #projection_v1{epoch_csum=CSum}=Proj, S) ->
     case (machi_projection:update_checksum(Proj))#projection_v1.epoch_csum of
         CSum2 when CSum2 == CSum ->
             do_proj_write3(ProjType, Proj, S);
         _Else ->
-            {{error, bad_arg}, S}
+            {{error, bad_arg_badddddddddddddddddddddddddd_csum, CSum, _Else}, S}
     end.
 
 do_proj_write3(ProjType, #projection_v1{epoch_number=Epoch,
