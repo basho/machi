@@ -111,8 +111,19 @@ new(EpochNum, MyName, [] = _MembersDict0, _Down_list, _UPI_list,_Repairing_list,
 %% @doc Update the checksum element of a projection record.
 
 update_checksum(P) ->
+    %% Fields that we ignore when calculating checksum:
+    %% * epoch_csum
+    %% * dbg2: humming consensus participants may modify this at will without
+    %%         voiding the identity of the projection as a whole.
+    %% * flap: In some cases in CP mode, coode upstream of C120 may have
+    %%         updated the flapping information.  That's OK enough: we aren't
+    %%         going to violate chain replication safety rules (or
+    %%         accidentally encourage someone else sometime later) by
+    %%         replacing flapping information with our own local view at
+    %%         this instant in time.
     CSum = crypto:hash(sha,
                        term_to_binary(P#projection_v1{epoch_csum= <<>>,
+                                                      flap=undefined,
                                                       dbg2=[]})),
     P#projection_v1{epoch_csum=CSum}.
 
