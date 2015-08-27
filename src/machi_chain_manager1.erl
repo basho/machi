@@ -1162,17 +1162,18 @@ react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra,
     if CMode == cp_mode,
        Epoch_latest > P_current#projection_v1.epoch_number,
        Author_latest /= MyName ->
+            put(yyy_hack, []),
             case make_zerf(P_current, S) of
                 Zerf when is_record(Zerf, projection_v1) ->
                     ?REACT({a29, ?LINE,
                             [{zerf_filler, true},
                              {zerf_in, machi_projection:make_summary(Zerf)}]}),
-                    %% io:format(user, "zerf_in @ A29: ~p: ~w\n", [MyName,  machi_projection:make_summary(Zerf)]),
+                    io:format(user, "zerf_in: A29: ~p: ~w\n\t~p\n", [MyName,  machi_projection:make_summary(Zerf), get(yyy_hack)]),
                     P_current2 = Zerf#projection_v1{
                                              flap=P_current#projection_v1.flap},
-                    %% Do not use the usual set_proj() wrapper here.
+                    S2 = set_proj(S, P_current2),
                     react_to_env_A30(Retries, P_latest, LatestUnanimousP,
-                                     ReadExtra, S#ch_mgr{proj=P_current2});
+                                     ReadExtra, S2);
                 Zerf ->
                     {{{yo_todo_incomplete_fix_me_cp_mode, line, ?LINE, Zerf}}}
             end;
@@ -1649,8 +1650,8 @@ react_to_env_A49(_P_latest, FinalProps, #ch_mgr{name=MyName,
                    members_dict=MembersDict} = P_current,
     P_none = make_none_projection(MyName, All_list, Witness_list,
                                   MembersDict),
-    %% Do not use the usual set_proj() wrapper here.
-    react_to_env_A50(P_none, FinalProps, S#ch_mgr{proj=P_none}).
+io:format(user, "Debug A49: ~w forced to none\n", [MyName]),
+    react_to_env_A50(P_none, FinalProps, set_proj(S, P_none)).
 
 react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
     ?REACT(a50),
@@ -2018,10 +2019,12 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName, proj=P_current,
     case {?FLU_PC:write_projection(MyNamePid, private, P_latest2,?TO*30),Goo} of
         {ok, Goo} ->
             ?REACT({c120, [{write, ok}]}),
-            perhaps_verbose_c110(P_latest2, S),
             %% We very intentionally do *not* pass P_latest2 forward:
             %% we must avoid bloating the dbg2 list!
-            react_to_env_C120(P_latest, [], S);
+            P_latest_perhaps_annotated =
+                machi_projection:update_dbg2(P_latest, Extra1),
+            perhaps_verbose_c110(P_latest_perhaps_annotated, S),
+            react_to_env_C120(P_latest_perhaps_annotated, [], S);
         {{error, bad_arg}, _Goo} ->
             ?REACT({c120, [{write, bad_arg}]}),
 
@@ -2053,7 +2056,7 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName, proj=P_current,
             %% React to newer public write by restarting the iteration.
             react_to_env_A20(0, S);
         Else ->
-            Summ = machi_projection:make_summary(P_latest),
+            Summ = machi_projection:make_summary(P_latest2),
             io:format(user, "C110 error by ~w: ~w, ~w\n~p\n",
                       [MyName, Else, Summ, get(react)]),
             error_logger:error_msg("C110 error by ~w: ~w, ~w, ~w\n",
@@ -2070,9 +2073,16 @@ react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H,
 
     %% diversion_c120_verbose_goop(P_latest, S),
     ?REACT({c120, [{latest, machi_projection:make_summary(P_latest)}]}),
-    {{now_using, FinalProps, P_latest#projection_v1.epoch_number},
-     set_proj(S#ch_mgr{proj_history=H2,
-                       sane_transitions=Xtns + 1}, P_latest)}.
+    S2 = set_proj(S#ch_mgr{proj_history=H2,
+                           sane_transitions=Xtns + 1}, P_latest),
+    S3 = case is_annotated(P_latest) of
+             false ->
+                 S2;
+             {{_ConfEpoch, _ConfCSum}, ConfTime} ->
+io:format(user, "\nCONFIRM debug C120 ~w was annotated ~W outer ~w\n", [S#ch_mgr.name, (inner_projection_or_self(P_latest))#projection_v1.epoch_number, 5, P_latest#projection_v1.epoch_number]),
+                 S2#ch_mgr{proj_unanimous=ConfTime}
+         end,
+    {{now_using, FinalProps, P_latest#projection_v1.epoch_number}, S3}.
 
 add_and_trunc_history(P_latest, H, MaxLength) ->
     H2 = if P_latest#projection_v1.epoch_number > 0 ->
@@ -3150,6 +3160,7 @@ make_zerf(#projection_v1{epoch_number=OldEpochNum,
                   runenv=RunEnv1} = S) ->
     {Up, _Partitions, _RunEnv2} = calc_up_nodes(MyName,
                                                 AllMembers, RunEnv1),
+    (catch put(yyy_hack, [{up,Up}|get(yyy_hack)])),
     MajoritySize = full_majority_size(AllMembers),
     case length(Up) >= MajoritySize of
         false ->
@@ -3212,23 +3223,29 @@ zerf_find_last_annotated(FLU, MajoritySize, S) ->
              (Epoch, Acc) ->
                   {ok, Proj} = ?FLU_PC:read_projection(Proxy, private,
                                                        Epoch, ?TO*10),
-                  case proplists:get_value(private_proj_is_upi_unanimous,
-                                           Proj#projection_v1.dbg2) of
-                      undefined ->
+                  case is_annotated(Proj) of
+                      false ->
+                          (catch put(yyy_hack, [{FLU, Epoch, not_annotated}|get(yyy_hack)])),
                           Acc;
                       {{ConfEpoch, ConfCSum}, _ConfTime} ->
                           Px = if ConfEpoch == Epoch ->
+                          (catch put(yyy_hack, [{FLU, Epoch, outer_ok}|get(yyy_hack)])),
                                        Proj;
                                   true ->
+                                       %% We only use Proj2 for sanity checking
+                                       %% here, do not return an inner!
                                        Proj2 = inner_projection_or_self(Proj),
                                        %% Sanity checking
                                        ConfEpoch = Proj2#projection_v1.epoch_number,
                                        ConfCSum  = Proj2#projection_v1.epoch_csum,
-                                       Proj2
+                          (catch put(yyy_hack, [{FLU, Epoch, inner_ok_return_original_outerplusinner}|get(yyy_hack)])),
+                                       Proj
                                end,
                           if length(Px#projection_v1.upi) >= MajoritySize ->
+                          (catch put(yyy_hack, [{FLU, Epoch, yay}|get(yyy_hack)])),
                                   Px;
                              true ->
+                          (catch put(yyy_hack, [{FLU, Epoch, skip}|get(yyy_hack)])),
                                   Acc
                           end
                   end
@@ -3364,3 +3381,6 @@ set_proj(S, Proj) ->
 
 make_annotation(EpochID, Time) ->
     {private_proj_is_upi_unanimous, {EpochID, Time}}.
+
+is_annotated(#projection_v1{dbg2=Dbg2}) ->
+    proplists:get_value(private_proj_is_upi_unanimous, Dbg2, false).
