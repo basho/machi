@@ -2066,9 +2066,8 @@ react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H,
     MaxLength = length(P_latest#projection_v1.all_members) * 1.5,
     H2   = add_and_trunc_history(P_latest, H, MaxLength),
 
-    diversion_c120_verbose_goop(P_latest, S),
+    %% diversion_c120_verbose_goop(P_latest, S),
     ?REACT({c120, [{latest, machi_projection:make_summary(P_latest)}]}),
-io:format(user, "C120: ~w wrote ~w ~W\n", [S#ch_mgr.name, P_latest#projection_v1.epoch_number, P_latest#projection_v1.epoch_csum, 6]),
     {{now_using, FinalProps, P_latest#projection_v1.epoch_number},
      set_proj(S#ch_mgr{proj_history=H2,
                        sane_transitions=Xtns + 1}, P_latest)}.
@@ -2688,15 +2687,15 @@ poll_private_proj_is_upi_unanimous3(#ch_mgr{name=MyName, proj=P_current,
                             PStr ->
                                 PStr
                         end,
-io:format(user, "POLL: ~w: ~w updates ~w ~W ~w\n", [S#ch_mgr.name, P_current#projection_v1.epoch_csum == (machi_projection:update_checksum(P_current))#projection_v1.epoch_csum, NewProj#projection_v1.epoch_number, NewProj#projection_v1.epoch_csum, 6, NewProj#projection_v1.epoch_csum == (machi_projection:update_checksum(NewProj))#projection_v1.epoch_csum]),
+            io:format(user, "\nCONFIRM epoch ~w ~W upi ~w rep ~w by ~w\n", [NewProj#projection_v1.epoch_number, NewProj#projection_v1.epoch_csum, 6, NewProj#projection_v1.upi, NewProj#projection_v1.repairing, MyName]),
             ok = machi_projection_store:write(ProjStore, private, NewProj),
             %% Unwedge our FLU.
-            io:format(user, "\nUnwedge ~w @ ~W\n", [MyName, EpochID, 7]),
             {ok, NotifyPid} = machi_projection_store:get_wedge_notify_pid(ProjStore),
             _ = machi_flu1:update_wedge_state(NotifyPid, false, EpochID),
             S2#ch_mgr{proj_unanimous=Now};
         _Else ->
-io:format(user, "poll by ~w: want ~W got ~W\n", [MyName, EpochID, 6, _Else, 8]),
+            %% io:format(user, "poll by ~w: want ~W got ~W\n",
+            %%           [MyName, EpochID, 6, _Else, 8]),
             S2
     end.
 
@@ -3157,8 +3156,8 @@ make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list,
            MembersDict, OldFlap, S) ->
     try
         Proj = zerf_find_last_common(MajoritySize, Up, S),
-        Proj2 = Proj#projection_v1{flap=OldFlap, dbg2=[]}
-            ,        io:format(user, "ZERF ~w\n", [machi_projection:make_summary(Proj2)]),
+        Proj2 = Proj#projection_v1{flap=OldFlap, dbg2=[]},
+        %% io:format(user, "ZERF ~w\n",[machi_projection:make_summary(Proj2)]),
         Proj2
     catch
         throw:{zerf,no_common} ->
@@ -3179,7 +3178,7 @@ make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list,
               P#projection_v1{epoch_number=OldEpochNum,
                               mode=cp_mode,
                               dbg2=[zerf_all]}),
-            io:format(user, "ZERF ~w\n", [machi_projection:make_summary(P2)]),
+            %% io:format(user, "ZERF ~w\n",[machi_projection:make_summary(P2)]),
             P2;
         _X:_Y ->
             throw({zerf, {damn_exception, Up, _X, _Y, erlang:get_stacktrace()}})
@@ -3193,7 +3192,6 @@ zerf_find_last_common(MajoritySize, Up, S) ->
         [] ->
             throw({zerf,no_common});
         [P|_]=_TheList ->
-            io:format(user, "Zerf results: ~P\n", [ [machi_projection:make_summary(X) || X <- _TheList], 20]),
             %% TODO is this simple sort really good enough?
             P
     end.

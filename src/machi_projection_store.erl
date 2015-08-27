@@ -284,7 +284,7 @@ do_proj_write2(ProjType, #projection_v1{epoch_csum=CSum}=Proj, S) ->
         CSum2 when CSum2 == CSum ->
             do_proj_write3(ProjType, Proj, S);
         _Else ->
-            {{error, bad_arg_badddddddddddddddddddddddddd_csum, CSum, _Else}, S}
+            {{error, bad_arg}, S}
     end.
 
 do_proj_write3(ProjType, #projection_v1{epoch_number=Epoch,
