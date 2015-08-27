@@ -2422,11 +2422,11 @@ projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
             if HasInner1 orelse HasInner2 ->
                     Inner1 = inner_projection_or_self(P1),
                     Inner2 = inner_projection_or_self(P2),
-                    if HasInner1 andalso HasInner2 ->
-                       %% In case of inner->inner transition, we must allow
-                       %% the epoch number to remain constant.  Thus, we
-                       %% call the function that does not check for a
-                       %% strictly-increasing epoch.
+                    if HasInner1 orelse HasInner2 ->
+                       %% In case of transition with inner projections, we
+                       %% must allow the epoch number to remain constant.
+                       %% Thus, we call the function that does not check for
+                       %% a strictly-increasing epoch.
                        ?RETURN2(
                          projection_transition_is_sane_final_review(P1, P2,
                            projection_transition_is_sane_except_si_epoch(
