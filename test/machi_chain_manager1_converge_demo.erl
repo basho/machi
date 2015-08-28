@@ -240,13 +240,13 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
       %% machi_partition_simulator:reset_thresholds(10, 50),
       %% io:format(user, "\nLet loose the dogs of war!\n", []),
       %% [DoIt(20, 0, 0) || _ <- lists:seq(1,9)],
-      io:format(user, "\nVariations of puppies and dogs of war!\n", []),
-      [begin
-           machi_partition_simulator:reset_thresholds(90, 90),
-           DoIt(7, 0, 0),
-           machi_partition_simulator:always_these_partitions([]),
-           DoIt(7, 0, 0)
-       end || _ <- lists:seq(1, 3)],
+      %% %% io:format(user, "\nVariations of puppies and dogs of war!\n", []),
+      %% %% [begin
+      %% %%      machi_partition_simulator:reset_thresholds(90, 90),
+      %% %%      DoIt(7, 0, 0),
+      %% %%      machi_partition_simulator:always_these_partitions([]),
+      %% %%      DoIt(7, 0, 0)
+      %% %%  end || _ <- lists:seq(1, 3)],
       machi_partition_simulator:always_these_partitions([]),
       io:format(user, "\nPuppies for everyone!\n", []),
       [DoIt(20, 0, 0) || _ <- lists:seq(1,9)],
@@ -256,6 +256,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
       MaxIters = NumFLUs * (NumFLUs + 1) * 6,
       [begin
            machi_partition_simulator:always_these_partitions(Partition),
+if Partition==[{a,c},{b,c}] -> io:format(user, "\nSET SET SET debug, yo!\n", []), file:write_file("/tmp/moomoo", []); true -> ok end,
            io:format(user, "\nSET partitions = ~w (~w of ~w) at ~w\n",
                      [Partition, Count, length(AllPs), time()]),
            true = lists:foldl(
@@ -641,7 +642,7 @@ private_projections_are_stable(Namez, PollFunc) ->
                 true
         end,
 
-    io:format(user, "\nPriv1 ~P\n1==2 ~w ap_disjoint ~w u_all_peers ~w cp_mode_agree ~w\n", [lists:sort(Private1), 20, Private1 == Private2, AP_mode_disjoint_test_p, Unanimous_with_all_peers_p, CP_mode_agree_test_p]),
+    io:format(user, "\nPriv1 ~p\nPriv2 ~p\n1==2 ~w ap_disjoint ~w u_all_peers ~w cp_mode_agree ~w\n", [lists:sort(Private1), lists:sort(Private2), Private1 == Private2, AP_mode_disjoint_test_p, Unanimous_with_all_peers_p, CP_mode_agree_test_p]),
     Private1 == Private2 andalso
         AP_mode_disjoint_test_p andalso
         (
@@ -661,12 +662,12 @@ private_projections_are_stable(Namez, PollFunc) ->
 
 get_latest_inner_proj_summ(FLU) ->
     {ok, Proj} = ?FLU_PC:read_latest_projection(FLU, private),
-    #projection_v1{epoch_number=E, epoch_csum=CSum,
+    #projection_v1{epoch_number=E, epoch_csum= <<CSum4:4/binary, _/binary>>,
                    upi=UPI, repairing=Repairing,
                    witnesses=Witnesses, down=Down} =
         machi_chain_manager1:inner_projection_or_self(Proj),
     Inner_p = machi_chain_manager1:inner_projection_exists(Proj),
-    EpochID = {E, CSum},
+    EpochID = {E, CSum4},
     {EpochID, UPI, Repairing, Down, Witnesses, Inner_p}.
 
 random_sort(L) ->

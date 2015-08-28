@@ -821,9 +821,9 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                                             MyName, AllMembers, OldWitness_list,
                                             MembersDict),
                                  Why = if NewUPI == [] ->
-                                               no_real_servers;
+                                               "No real servers in old upi are available now";
                                           true ->
-                                               not_enough_witnesses
+                                               "Not enough witnesses are available now"
                                        end,
                                  P_none1 = P_none0#projection_v1{
                                              epoch_number=OldEpochNum + 1,
@@ -1285,7 +1285,16 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                   {move_from_inner, MoveFromInnerToNorm_p}],
     ?REACT({a30, ?LINE, ClauseInfo}),
     MoveToNorm_p = MoveFromInnerToNorm_p orelse Kicker_p,
-    if MoveToNorm_p, CMode == cp_mode ->
+    if MoveToNorm_p,
+       P_newprop10#projection_v1.upi == [],
+       CMode == cp_mode ->
+            %% Too much weird stuff may have hapened while we were suffering
+            %% the flapping/asymmetric partition ... but we are now proposing
+            %% the none projection.  We're going to use it so that we can
+            %% unwedge ourselve into the glorious none projection.
+            ?REACT({a30, ?LINE, []}),
+            react_to_env_C100(P_newprop10, P_latest, S);
+       MoveToNorm_p, CMode == cp_mode ->
             %% Too much weird stuff may have hapened while we were suffering
             %% the flapping/asymmetric partition.  Fall back to the none
             %% projection as if we're restarting.
@@ -1652,7 +1661,6 @@ react_to_env_A49(_P_latest, FinalProps, #ch_mgr{name=MyName,
                    members_dict=MembersDict} = P_current,
     P_none = make_none_projection(MyName, All_list, Witness_list,
                                   MembersDict),
-io:format(user, "Debug A49: ~w forced to none\n\n    ~P", [MyName, get(react), 120]),
     react_to_env_A50(P_none, FinalProps, set_proj(S, P_none)).
 
 react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
@@ -1660,7 +1668,8 @@ react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
     ?REACT({a50, ?LINE, [{current_epoch, P_current#projection_v1.epoch_number},
                          {latest_epoch, P_latest#projection_v1.epoch_number},
                          {final_props, FinalProps}]}),
-    %% if S#ch_mgr.name == b; S#ch_mgr.name == c -> io:format(user, "A50: ~p: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
+    V = case file:read_file("/tmp/moomoo") of {ok, _} -> true; _ -> false end,
+    if V andalso (S#ch_mgr.name == b orelse S#ch_mgr.name == c) -> io:format(user, "A50: ~p: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
 %% io:format(user, "Debug A50: ~w P_current outer ~w ~w ~w\n", [S#ch_mgr.name, P_current#projection_v1.epoch_number,P_current#projection_v1.upi,P_current#projection_v1.repairing]),
     {{no_change, FinalProps, P_current#projection_v1.epoch_number}, S}.
 
@@ -2282,7 +2291,10 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
             {_N, _} ->
                 ?REACT({calculate_flaps,?LINE,[]}),
                 false
-        end,
+        end
+        andalso
+        %% If P_newprop is the none projection, do not start flapping.
+        P_newprop#projection_v1.upi /= [],
     LeaveFlapping_p =
         if 
             LastUpChange_diff < 3.0 ->
@@ -2296,6 +2308,10 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                 %% that intent.
                 ?REACT({calculate_flaps,?LINE,[]}),
                 false;
+            AmFlappingNow_p andalso
+            P_newprop#projection_v1.upi == [] ->
+                %% P_newprop is the none projection, stop flapping.
+                true;
             AmFlappingNow_p andalso
             CurrentUp /= FlapLastUp ->
                 ?REACT({calculate_flaps,?LINE,[{manifesto_clause,{leave,1}}]}),
@@ -3249,6 +3265,18 @@ make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list,
                               dbg2=[zerf_all]}),
             %% io:format(user, "ZERF ~w\n",[machi_projection:make_summary(P2)]),
             P2;
+        throw:{zerf,{not_enough_up,Up2,_All2}} ->
+            %% Make it appear like nobody is up now: we'll have to
+            %% wait until the Up list changes so that
+            %% zerf_find_last_common() can confirm a common stable
+            %% last stable epoch.
+
+            P = make_none_projection(MyName, AllMembers, OldWitness_list,
+                                     MembersDict),
+            machi_projection:update_checksum(
+              P#projection_v1{epoch_number=OldEpochNum,
+                              mode=cp_mode,
+                              dbg2=[zerf_none, {up,Up2},{maj,MajoritySize}]});
         _X:_Y ->
             throw({zerf, {damn_exception, Up, _X, _Y, erlang:get_stacktrace()}})
     end.
