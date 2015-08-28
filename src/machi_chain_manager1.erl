@@ -1491,6 +1491,8 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
     LatestAuthorDownP = a40_latest_author_down(P_latest, P_newprop, S)
                         andalso
                         P_latest#projection_v1.author_server /= MyName,
+    P_latestStable = make_comparison_stable(P_latest),
+    P_currentStable = make_comparison_stable(P_current),
     ?REACT({a40, ?LINE,
             [{latest_author, P_latest#projection_v1.author_server},
              {author_is_down_p, LatestAuthorDownP},
@@ -1518,7 +1520,7 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
         andalso
         (P_latest#projection_v1.epoch_number < P_current#projection_v1.epoch_number
          orelse
-         P_latest /= P_current) ->
+         P_latestStable /= P_currentStable) ->
             ?REACT({a40, ?LINE,
                     [{latest_epoch, P_latest#projection_v1.epoch_number},
                      {current_epoch, P_current#projection_v1.epoch_number},
@@ -1706,6 +1708,9 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
     %% compound predicate below.  I'm yanking it out now. TODO re-study?
     #projection_v1{upi=P_newprop_upi_ooi, repairing=P_newprop_repairing_ooi} =
         inner_projection_or_self(P_newprop),
+    CurrentZerfInStatus = proplists:get_value(make_zerf,
+                                              P_current#projection_v1.dbg2),
+    CurrentEpoch = P_current#projection_v1.epoch_number,
     EnoughAreFlapping_and_IamBad_p =
         %% Ignore inner_projection_exists(P_current): We might need to
         %% shut up quickly (adopting a new P_current can take a long
@@ -1720,14 +1725,21 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         (not lists:member(MyName, P_newprop_upi_ooi++P_newprop_repairing_ooi))
         andalso
         %% My down lists are the same, i.e., no state change to announce
-        P_current#projection_v1.down == P_newprop#projection_v1.down,
+        %% Or if P_current is a CP mode result of zerf_in & valid (epoch #),
+        %% then this down list comparison should be skipped.
+        ((P_current#projection_v1.down == P_newprop#projection_v1.down)
+         orelse
+         (CurrentZerfInStatus == CurrentEpoch)),
     ?REACT({b10, ?LINE, [{0,EnoughAreFlapping_and_IamBad_p},
                          {1,inner_projection_exists(P_current)},
                          {2,inner_projection_exists(P_latest)},
                          {3,inner_projection_exists(P_newprop)},
                          {4,MyUniquePropCount},
                          {5,{MyName, P_newprop_AllHosedPlus}},
-                         {6,UnanimousLatestInnerNotRelevant_p}]}),
+                         %% {6,UnanimousLatestInnerNotRelevant_p},
+                         {7,P_current#projection_v1.down},
+                         {8,P_newprop#projection_v1.down},
+                         {9,{CurrentZerfInStatus,CurrentEpoch}}]}),
     if
         EnoughAreFlapping_and_IamBad_p ->
             ?REACT({b10, ?LINE, []}),
@@ -3211,8 +3223,9 @@ make_zerf(#projection_v1{epoch_number=OldEpochNum,
 make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list,
            MembersDict, OldFlap, S) ->
     try
-        Proj = zerf_find_last_common(MajoritySize, Up, S),
-        Proj2 = Proj#projection_v1{flap=OldFlap, dbg2=[]},
+        #projection_v1{epoch_number=Epoch} = Proj =
+            zerf_find_last_common(MajoritySize, Up, S),
+        Proj2 = Proj#projection_v1{flap=OldFlap, dbg2=[{make_zerf,Epoch}]},
         %% io:format(user, "ZERF ~w\n",[machi_projection:make_summary(Proj2)]),
         Proj2
     catch
@@ -3427,3 +3440,6 @@ make_annotation(EpochID, Time) ->
 
 is_annotated(#projection_v1{dbg2=Dbg2}) ->
     proplists:get_value(private_proj_is_upi_unanimous, Dbg2, false).
+
+make_comparison_stable(P) ->
+    P#projection_v1{flap=undefined, dbg2=[]}.
