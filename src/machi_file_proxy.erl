@@ -35,8 +35,6 @@
 %% 1. Some way to transition the proxy into/out of a wedged state that 
 %% doesn't rely on message delivery.
 %%
-%% 2. We might need a read repair command which does an unconditional write
-%% on the data block?
 
 -module(machi_file_proxy).
 -behaviour(gen_server).
