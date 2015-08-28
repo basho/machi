@@ -1293,7 +1293,9 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
             %% the none projection.  We're going to use it so that we can
             %% unwedge ourselve into the glorious none projection.
             ?REACT({a30, ?LINE, []}),
-            react_to_env_C100(P_newprop10, P_latest, S);
+            %% TODO: It seems a bit crazy, but this duplicates part/much
+            %%       of what state C103 does?  Go to C103 instead?
+            react_to_env_C100(P_newprop10, P_newprop10, S);
        MoveToNorm_p, CMode == cp_mode ->
             %% Too much weird stuff may have hapened while we were suffering
             %% the flapping/asymmetric partition.  Fall back to the none
