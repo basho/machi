@@ -309,6 +309,7 @@ do_proj_write3(ProjType, #projection_v1{epoch_number=Epoch,
                     io:format(user, "OUCH: on disk: ~w\n", [machi_projection:make_summary(binary_to_term(Bin))]),
                     io:format(user, "OUCH: clobber: ~w\n", [machi_projection:make_summary(Proj)]),
                     io:format(user, "OUCH: clobber: ~p\n", [Proj#projection_v1.dbg2]),
+                    %% {{error, written}, S}
                     {{error, written, CurEpoch, Epoch, CurCSum, CSum}, S}
             end;
         {error, enoent} ->

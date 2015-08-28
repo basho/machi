@@ -239,6 +239,14 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
 
       %% machi_partition_simulator:reset_thresholds(10, 50),
       %% io:format(user, "\nLet loose the dogs of war!\n", []),
+      %% [DoIt(20, 0, 0) || _ <- lists:seq(1,9)],
+      io:format(user, "\nVariations of puppies and dogs of war!\n", []),
+      [begin
+           machi_partition_simulator:reset_thresholds(90, 90),
+           DoIt(7, 0, 0),
+           machi_partition_simulator:always_these_partitions([]),
+           DoIt(7, 0, 0)
+       end || _ <- lists:seq(1, 3)],
       machi_partition_simulator:always_these_partitions([]),
       io:format(user, "\nPuppies for everyone!\n", []),
       [DoIt(20, 0, 0) || _ <- lists:seq(1,9)],
@@ -371,7 +379,8 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
 
 make_partition_list(All_list) ->
     [
-     [{b,c}]
+     [{b,c}],
+     [{a,c},{b,c}]
      %% [{b,c}],
      %% [],
      %% [{c,d}],

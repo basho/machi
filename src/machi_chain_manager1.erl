@@ -1650,7 +1650,7 @@ react_to_env_A49(_P_latest, FinalProps, #ch_mgr{name=MyName,
                    members_dict=MembersDict} = P_current,
     P_none = make_none_projection(MyName, All_list, Witness_list,
                                   MembersDict),
-io:format(user, "Debug A49: ~w forced to none\n", [MyName]),
+io:format(user, "Debug A49: ~w forced to none\n\n    ~P", [MyName, get(react), 120]),
     react_to_env_A50(P_none, FinalProps, set_proj(S, P_none)).
 
 react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
@@ -1659,6 +1659,7 @@ react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
                          {latest_epoch, P_latest#projection_v1.epoch_number},
                          {final_props, FinalProps}]}),
     %% if S#ch_mgr.name == b; S#ch_mgr.name == c -> io:format(user, "A50: ~p: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
+%% io:format(user, "Debug A50: ~w P_current outer ~w ~w ~w\n", [S#ch_mgr.name, P_current#projection_v1.epoch_number,P_current#projection_v1.upi,P_current#projection_v1.repairing]),
     {{no_change, FinalProps, P_current#projection_v1.epoch_number}, S}.
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
@@ -1860,7 +1861,7 @@ react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
     Sane = projection_transition_is_sane(P_current, P_latest, MyName),
     QQ_current = lists:flatten(io_lib:format("~w:~w,~w/~w:~w,~w", [P_current#projection_v1.epoch_number, P_current#projection_v1.upi, P_current#projection_v1.repairing, (inner_projection_or_self(P_current))#projection_v1.epoch_number, (inner_projection_or_self(P_current))#projection_v1.upi, (inner_projection_or_self(P_current))#projection_v1.repairing])),
     QQ_latest = lists:flatten(io_lib:format("~w:~w,~w/~w:~w,~w", [P_latest#projection_v1.epoch_number, P_latest#projection_v1.upi, P_latest#projection_v1.repairing, (inner_projection_or_self(P_latest))#projection_v1.epoch_number, (inner_projection_or_self(P_latest))#projection_v1.upi, (inner_projection_or_self(P_latest))#projection_v1.repairing])),
-    if Sane == true -> ok;  true -> ?V("\n~w-insane-~w-auth=~w ~s -> ~s ~w\n", [?LINE, MyName, P_newprop#projection_v1.author_server, QQ_current, QQ_latest, Sane]) end,
+    if Sane == true -> ok;  true -> ?V("\n~w-insane-~w-auth=~w ~s -> ~s ~w\n    ~p\n", [?LINE, MyName, P_newprop#projection_v1.author_server, QQ_current, QQ_latest, Sane, get(react)]) end,
     Flap_latest = if is_record(Flap_latest0, flap_i) ->
                           Flap_latest0;
                      true ->
@@ -1875,7 +1876,9 @@ react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
     %%       construction errors, checksum error, etc.
     case Sane of
         _ when P_current#projection_v1.epoch_number == 0 ->
-            %% Epoch == 0 is reserved for first-time, just booting conditions.
+            %% Epoch == 0 is reserved for first-time, just booting conditions
+            %% or for when we got stuck in an insane projection transition
+            %% and were forced to the none projection to recover.
             ?REACT({c100, ?LINE, [first_write]}),
             if Sane == true -> ok;  true -> ?V("~w-insane-~w-~w:~w:~w,", [?LINE, MyName, P_newprop#projection_v1.epoch_number, P_newprop#projection_v1.upi, P_newprop#projection_v1.repairing]) end, %%% DELME!!!
             react_to_env_C110(P_latest, S);
@@ -2001,7 +2004,8 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName, proj=P_current,
                                  inner_projection_or_self(P_latest)),
                      UnanimousTime = ProjUnanimous,
                      A = make_annotation(EpochID, UnanimousTime),
-                     [A];
+                     io:format(user, "\nCONFIRM debug C110 ~w annotates ~W outer ~w\n", [MyName, EpochID, 5, P_latest#projection_v1.epoch_number]),
+                     [A, {annotated_by,c110}];
                  false ->
                      []
              end,
@@ -2021,10 +2025,10 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName, proj=P_current,
             ?REACT({c120, [{write, ok}]}),
             %% We very intentionally do *not* pass P_latest2 forward:
             %% we must avoid bloating the dbg2 list!
-            P_latest_perhaps_annotated =
+            P_latest2_perhaps_annotated =
                 machi_projection:update_dbg2(P_latest, Extra1),
-            perhaps_verbose_c110(P_latest_perhaps_annotated, S),
-            react_to_env_C120(P_latest_perhaps_annotated, [], S);
+            perhaps_verbose_c110(P_latest2_perhaps_annotated, S),
+            react_to_env_C120(P_latest2_perhaps_annotated, [], S);
         {{error, bad_arg}, _Goo} ->
             ?REACT({c120, [{write, bad_arg}]}),
 
@@ -2177,6 +2181,14 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                            LastUpChange0
                    end,
     LastUpChange_diff = timer:now_diff(now(), LastUpChange) / 1000000,
+    ?REACT({calculate_flaps,?LINE,[{flap_start,FlapStart},
+                                   {flap_count,FlapCount},
+                                   {flap_last_up,FlapLastUp},
+                                   {flap_counts_last,FlapCountsLast},
+                                   {my_unique_prop_count,MyUniquePropCount},
+                                   {current_up,CurrentUp},
+                                   {last_up_change,LastUpChange},
+                                   {last_up_change_diff,LastUpChange_diff}]}),
 
     %% TODO: Do we want to try to use BestP below to short-circuit
     %% calculation if we notice that the best private epoch # from
@@ -2246,12 +2258,12 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
             {N, _} when N >= MinQueueLen,
                         P_latest_flap_start /= ?NOT_FLAPPING_START ->
                 ?REACT({calculate_flaps,?LINE,
-                        [{manifesto_clause,2},
+                        [{manifesto_clause,{start,2}},
                          {latest_epoch, P_latest#projection_v1.epoch_number},
                          {latest_flap_count,P_latest_Flap#flap_i.flap_count}]}),
                 true;
             {N, [_]} when N >= MinQueueLen ->
-                ?REACT({calculate_flaps,?LINE,[{manifesto_clause,1}]}),
+                ?REACT({calculate_flaps,?LINE,[{manifesto_clause,{start,1}}]}),
                 true;
             {_N, _} ->
                 ?REACT({calculate_flaps,?LINE,[]}),
@@ -2272,7 +2284,7 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                 false;
             AmFlappingNow_p andalso
             CurrentUp /= FlapLastUp ->
-                ?REACT({calculate_flaps,?LINE,[{manifesto_clause,1}]}),
+                ?REACT({calculate_flaps,?LINE,[{manifesto_clause,{leave,1}}]}),
                 true;
             AmFlappingNow_p ->
                 P_latest_LastStartTime =
@@ -2292,7 +2304,7 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                                         P_latest_LastStartTime /= ?NOT_FLAPPING_START ->
 
                         ?REACT({calculate_flaps,?LINE,
-                                [{manifesto_clause,2},
+                                [{manifesto_clause,{leave,2}},
                                  {p_latest, machi_projection:make_summary(P_latest)},
                                  {curtime, Curtime},
                                  {flap_counts_last, FlapCountsLast},
@@ -2653,6 +2665,9 @@ poll_private_proj_is_upi_unanimous(#ch_mgr{consistency_mode=ap_mode} = S) ->
     S;
 poll_private_proj_is_upi_unanimous(#ch_mgr{consistency_mode=cp_mode,
                                            proj_unanimous={_,_,_}} = S) ->
+    %% #ch_mgr{name=MyName, proj=Proj} = S,
+    %% io:format(user, "\nCONFIRM debug ~w skip poll for inner ~w outer ~w\n",
+    %%           [MyName, (inner_projection_or_self(Proj))#projection_v1.epoch_number, Proj#projection_v1.epoch_number]),
     S;
 poll_private_proj_is_upi_unanimous(#ch_mgr{consistency_mode=cp_mode,
                                            proj_unanimous=false,
@@ -2682,34 +2697,55 @@ poll_private_proj_is_upi_unanimous3(#ch_mgr{name=MyName, proj=P_current,
     UPI = Proj_ios#projection_v1.upi,
     EpochID = machi_projection:make_epoch_id(Proj_ios),
     {Rs, S2} = read_latest_projection_call_only2(private, UPI, S),
-    Rs2 = [if is_record(P, projection_v1) ->
-                   machi_projection:make_epoch_id(inner_projection_or_self(P));
+    Rs2 = [if is_record(R, projection_v1) ->
+                   machi_projection:make_epoch_id(inner_projection_or_self(R));
               true ->
-                   P
-           end || #projection_v1{}=P <- Rs],
+                   R                            % probably {error, unwritten}
+           end || R <- Rs],
     case lists:usort(Rs2) of
         [EID] when EID == EpochID ->
-            Now = os:timestamp(),
-            Annotation = make_annotation(EpochID, Now),
-            NewDbg2 = [Annotation|P_current#projection_v1.dbg2],
-            NewProj = P_current#projection_v1{dbg2=NewDbg2},
-            ProjStore = case get_projection_store_regname(MgrOpts) of
-                            undefined ->
-                                machi_flu_psup:make_proj_supname(MyName);
-                            PStr ->
-                                PStr
-                        end,
-            #projection_v1{epoch_number=_EpochRep,
-                           epoch_csum= <<_CSumRep:4/binary, _/binary>>,
-                           upi=_UPIRep,
-                           repairing=_RepairingRep} =
-                inner_projection_or_self(NewProj),
-            io:format(user, "\nCONFIRM epoch ~w ~w upi ~w rep ~w by ~w ~w\n", [_EpochRep, _CSumRep, _UPIRep, _RepairingRep, MyName, if P_current#projection_v1.inner == undefined -> outer; true -> {inner,{outer,P_current#projection_v1.epoch_number}} end]),
-            ok = machi_projection_store:write(ProjStore, private, NewProj),
-            %% Unwedge our FLU.
-            {ok, NotifyPid} = machi_projection_store:get_wedge_notify_pid(ProjStore),
-            _ = machi_flu1:update_wedge_state(NotifyPid, false, EpochID),
-            S2#ch_mgr{proj_unanimous=Now};
+            %% We have a debugging problem, alas.  It would be really great
+            %% if we could preserve the dbg2 info that's in the current
+            %% projection that's on disk.  However, the full dbg2 list
+            %% with 'react' trace data isn't in the #ch_mgr.proj copy of
+            %% the projection.  So, go read it from the store.
+            %%
+            %% But of course there's another small problem.  P_current could
+            %% be the result of make_zerf(), which helps us "fast forward" to
+            %% a newer CP mode projection.  And so what we just read in the
+            %% 'Rs' at the top of this function may be for a new epoch that
+            %% we've never seen before and therefore doesn't exist in our
+            %% local private projection store.  But if it came from
+            %% make_zerf(), by definition it must be annotated, so don't try
+            %% to proceed any further.
+            ProxyPid = proxy_pid(MyName, S),
+            OuterEpoch = P_current#projection_v1.epoch_number,
+            case ?FLU_PC:read_projection(ProxyPid, private, OuterEpoch) of
+                {ok, P_currentFull} ->
+                    Now = os:timestamp(),
+                    Annotation = make_annotation(EpochID, Now),
+                    NewDbg2 = [Annotation|P_currentFull#projection_v1.dbg2],
+                    NewProj = P_currentFull#projection_v1{dbg2=NewDbg2},
+                    ProjStore = case get_projection_store_regname(MgrOpts) of
+                                   undefined ->
+                                       machi_flu_psup:make_proj_supname(MyName);
+                                   PStr ->
+                                       PStr
+                                end,
+                    #projection_v1{epoch_number=_EpochRep,
+                                   epoch_csum= <<_CSumRep:4/binary,_/binary>>,
+                                   upi=_UPIRep,
+                                   repairing=_RepairingRep} =
+                        inner_projection_or_self(NewProj),
+                    io:format(user, "\nCONFIRM epoch ~w ~w upi ~w rep ~w by ~w ~w\n", [_EpochRep, _CSumRep, _UPIRep, _RepairingRep, MyName, if P_current#projection_v1.inner == undefined -> outer; true -> {inner,{outer,P_current#projection_v1.epoch_number}} end]),
+                    ok = machi_projection_store:write(ProjStore, private, NewProj),
+                    %% Unwedge our FLU.
+                    {ok, NotifyPid} = machi_projection_store:get_wedge_notify_pid(ProjStore),
+                    _ = machi_flu1:update_wedge_state(NotifyPid, false, EpochID),
+                    S2#ch_mgr{proj_unanimous=Now};
+                _ ->
+                    S2
+            end;
         _Else ->
             %% io:format(user, "poll by ~w: want ~W got ~W\n",
             %%           [MyName, EpochID, 6, _Else, 8]),
@@ -3308,14 +3344,18 @@ perhaps_verbose_c110(P_latest2, S) ->
             {_,_,C} = os:timestamp(),
             MSec = trunc(C / 1000),
             {HH,MM,SS} = time(),
-            P_latest2x = P_latest2#projection_v1{dbg2=[]}, % limit verbose len.
+            Dbg2X = lists:keydelete(react, 1,
+                                    P_latest2#projection_v1.dbg2) ++
+                [{is_annotated,is_annotated(P_latest2)}],
+            P_latest2x = P_latest2#projection_v1{dbg2=Dbg2X}, % limit verbose len.
             case inner_projection_exists(P_latest2) of
                 false ->
                     Last2 = get(last_verbose),
                     Summ2 = machi_projection:make_summary(P_latest2x),
                     case proplists:get_value(private_write_verbose,
                                              S#ch_mgr.opts) of
-                        true when Summ2 /= Last2 ->
+                        true ->
+                        %% true when Summ2 /= Last2 ->
                             put(last_verbose, Summ2),
                             ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses plain: ~w \n",
                               [HH,MM,SS,MSec, S#ch_mgr.name, Summ2]);
@@ -3325,11 +3365,12 @@ perhaps_verbose_c110(P_latest2, S) ->
                 true ->
                     Last2 = get(last_verbose),
                     P_inner = inner_projection_or_self(P_latest2),
-                    P_innerx = P_inner#projection_v1{dbg2=[]}, % limit verbose len.
+                    P_innerx = P_inner#projection_v1{dbg2=Dbg2X}, % limit verbose len.
                     Summ2 = machi_projection:make_summary(P_innerx),
                     case proplists:get_value(private_write_verbose,
                                              S#ch_mgr.opts) of
-                        true when Summ2 /= Last2 ->
+                        true ->
+                        %% true when Summ2 /= Last2 ->
                             put(last_verbose, Summ2),
                             ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w (outer ~w auth ~w flap ~w)\n",
                               [HH,MM,SS,MSec, S#ch_mgr.name, Summ2, P_latest2#projection_v1.epoch_number, P_latest2#projection_v1.author_server, P_latest2#projection_v1.flap]);
