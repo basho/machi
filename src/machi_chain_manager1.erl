@@ -2238,9 +2238,11 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
     ?REACT({calculate_flaps, ?LINE, [{queue_len, queue:len(H)},
                                      {uniques, UniqueProposalSummaries}]}),
     P_latest_Flap = get_raw_flapping_i(P_latest),
-    AmFlappingNow_p = not (FlapStart == ?NOT_FLAPPING_START)
-                      andalso
-                      length(UniqueProposalSummaries) == 1,
+    AmFlappingNow_p = not (FlapStart == ?NOT_FLAPPING_START),
+                      %% TODO: revisit why I added this extra length()
+                      %%       condition back on commit 3dfe5c2.
+                      %% andalso
+                      %% length(UniqueProposalSummaries) == 1,
     P_latest_flap_start = case P_latest_Flap of
                               undefined ->
                                   ?NOT_FLAPPING_START;
