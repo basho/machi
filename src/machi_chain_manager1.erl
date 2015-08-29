@@ -2266,8 +2266,7 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
         [X || {_FLU, {{_FlEpk,FlTime}, _FlapCount}}=X <- RemoteTransFlapCounts1,
               FlTime /= ?NOT_FLAPPING],
     TempNewFlapCount = FlapCount + 1,
-    TempAllFlapCounts = lists:sort([{MyName, {FlapStart, TempNewFlapCount}}|
-                                    RemoteTransFlapCounts]),
+    TempAllFlapCounts = lists:sort([{MyName, FlapStart}|RemoteTransFlapCounts]),
     %% Sanity check.
     true = lists:all(fun({_FLU,{_EpkTime,_Count}}) -> true;
                         (_)                        -> false
