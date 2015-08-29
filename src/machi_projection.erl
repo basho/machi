@@ -121,8 +121,15 @@ update_checksum(P) ->
     %%         accidentally encourage someone else sometime later) by
     %%         replacing flapping information with our own local view at
     %%         this instant in time.
+    %% * creation_time: With CP mode & inner projections, it's damn annoying
+    %%                  to have to copy this around 100% correctly.  {sigh}
+    %%                  That's a negative state of the code.  However, there
+    %%                  isn't a safety violation if the creation_time is
+    %%                  altered for any reason: it's there only for human
+    %%                  benefit for debugging.
     CSum = crypto:hash(sha,
                        term_to_binary(P#projection_v1{epoch_csum= <<>>,
+                                                      creation_time=undefined,
                                                       flap=undefined,
                                                       dbg2=[]})),
     P#projection_v1{epoch_csum=CSum}.

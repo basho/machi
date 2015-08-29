@@ -1171,7 +1171,7 @@ react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra,
                     ?REACT({a29, ?LINE,
                             [{zerf_filler, true},
                              {zerf_in, machi_projection:make_summary(Zerf)}]}),
-                    io:format(user, "zerf_in: A29: ~p: ~w\n\t~p\n", [MyName,  machi_projection:make_summary(Zerf), get(yyy_hack)]),
+                    %% io:format(user, "zerf_in: A29: ~p: ~w\n\t~p\n", [MyName,  machi_projection:make_summary(Zerf), get(yyy_hack)]),
                     P_current2 = Zerf#projection_v1{
                                              flap=P_current#projection_v1.flap},
                     S2 = set_proj(S, P_current2),
@@ -1422,9 +1422,18 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                                      {upi_latest_i, UPI_latest_i},
                                      {repairing_latest_i,Repairing_latest_i}]}),
                 LatestSameEnough_p =
-                    (UPI_latest_i ++ Repairing_latest_i) ==
-                        (UPI_current_x ++ Repairing_current_x)
-                    andalso
+                    %% Experiment: With chain length=5, this check is a pain,
+                    %%             e.g. when make_zerf() verifies last
+                    %%             history of [c,d,e] *and no inner*, and now
+                    %%             others have proposed *with an inner* with
+                    %%             [a/witness,d,e] and bigger epoch.  So, the
+                    %%             experiment is that if we choose something
+                    %%             insane here, other steps will figure that
+                    %%             out and do something safe instead.
+                    %%
+                    %% ({UPI_latest_i, Repairing_latest_i} ==
+                    %%      {UPI_current_x, Repairing_current_x})
+                    %% andalso
                     Epoch_latest_i >= P_current_ios#projection_v1.epoch_number,
                 CurrentHasInner_and_LatestIsDisjoint_p =
                     P_current_has_inner_p
@@ -1777,8 +1786,8 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                          {2,inner_projection_exists(P_latest)},
                          {3,inner_projection_exists(P_newprop)},
                          {4,MyUniquePropCount},
-                         {5,{MyName, P_newprop_AllHosedPlus}},
-                         %% {6,UnanimousLatestInnerNotRelevant_p},
+                         {5,S#ch_mgr.flap_count},
+                         {6,{MyName, P_newprop_AllHosedPlus}},
                          {7,P_current#projection_v1.down},
                          {8,P_newprop#projection_v1.down},
                          {9,{CurrentZerfInStatus_p,CurrentEpoch}}]}),
