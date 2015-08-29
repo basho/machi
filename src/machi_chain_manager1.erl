@@ -1289,6 +1289,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                   {move_from_inner, MoveFromInnerToNorm_p}],
     ?REACT({a30, ?LINE, ClauseInfo}),
     MoveToNorm_p = MoveFromInnerToNorm_p orelse Kicker_p,
+    CurrentHasZerf_p = has_make_zerf_annotation(P_current),
     if MoveToNorm_p,
        P_newprop11#projection_v1.upi == [],
        CMode == cp_mode ->
@@ -1302,11 +1303,11 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
             P_newprop12 = machi_projection:update_checksum(
                             P_newprop11#projection_v1{epoch_number=NewEpoch}),
             react_to_env_C100(P_newprop12, P_newprop11, S);
-       MoveToNorm_p, CMode == cp_mode ->
+       MoveToNorm_p,
+       CMode == cp_mode,
+       not CurrentHasZerf_p ->
             %% Too much weird stuff may have hapened while we were suffering
             %% the flapping/asymmetric partition.
-            %% The MoveToNorm_p calculation doesn't take all CP mode
-            %% behavior into account, so finish the job here.
             %%
             %% The make_zerf() function will annotate the dbg2 list with
             %% {make_zerf,Epoch} where Epoch should equal the epoch_number.
@@ -1314,17 +1315,11 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
             %% clause in a prior iteration, and therefore we should go to A40
             %% now.  If not annotated, go to A49 so that we *will* trigger a
             %% make_zerf() on our next iteration.
-            case has_make_zerf_annotation(P_current) of
-                true ->
-                    ?REACT({a30, ?LINE, []}),
-                    react_to_env_A40(Retries, P_newprop11, P_latest,
-                                     LatestUnanimousP, S10);
-                false ->
-                    ?REACT({a30, ?LINE, []}),
-                    %% Fall back to the none projection as if we're restarting.
-                    react_to_env_A49(P_latest, [], S10)
-            end;
-       MoveToNorm_p, CMode == ap_mode ->
+
+            ?REACT({a30, ?LINE, []}),
+            %% Fall back to the none projection as if we're restarting.
+            react_to_env_A49(P_latest, [], S10);
+       MoveToNorm_p ->
             %% Move from inner projection to outer.
             P_inner2A = inner_projection_or_self(P_current),
             ResetEpoch = P_newprop11#projection_v1.epoch_number,
