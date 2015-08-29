@@ -254,10 +254,8 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
       AllPs = make_partition_list(All_list),
       PartitionCounts = lists:zip(AllPs, lists:seq(1, length(AllPs))),
       MaxIters = NumFLUs * (NumFLUs + 1) * 6,
-os:cmd("rm -f /tmp/moomoo"),
       [begin
            machi_partition_simulator:always_these_partitions(Partition),
-%% if Partition==[] -> os:cmd("touch /tmp/moomoo"); true -> ok end,
            io:format(user, "\nSET partitions = ~w (~w of ~w) at ~w\n",
                      [Partition, Count, length(AllPs), time()]),
            true = lists:foldl(
@@ -318,7 +316,6 @@ os:cmd("rm -f /tmp/moomoo"),
        end || {Partition, Count} <- PartitionCounts
       ],
 
-os:cmd("touch /tmp/moomoo"),
       io:format(user, "\nSET partitions = []\n", []),
       io:format(user, "We should see convergence to 1 correct chain.\n", []),
       machi_partition_simulator:no_partitions(),

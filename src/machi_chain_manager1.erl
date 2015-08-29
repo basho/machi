@@ -1641,6 +1641,7 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
 
         true ->
             ?REACT({a40, ?LINE, [true]}),
+            CurrentZerfInStatus_p = has_make_zerf_annotation(P_current),
             GoTo50_p =
                 case inner_projection_exists(P_current) andalso
                      inner_projection_exists(P_newprop) andalso
@@ -1664,8 +1665,20 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                                 true
                         end;
                     false ->
-                        ?REACT({a40, ?LINE, []}),
-                        true
+                        ?REACT({a40, ?LINE, [{currentzerfinstatus_p,CurrentZerfInStatus_p}]}),
+                        if CurrentZerfInStatus_p andalso
+                           P_newprop#projection_v1.upi /= [] ->
+                                %% One scenario here: we are waking up after
+                                %% a slumber with the none proj and need to
+                                %% send P_newprop (which has non/empty UPI)
+                                %% through the process to continue chain
+                                %% recovery.
+                                ?REACT({a40, ?LINE, []}),
+                                false;
+                           true ->
+                                ?REACT({a40, ?LINE, []}),
+                                true
+                        end
                 end,
             if GoTo50_p ->
                     ?REACT({a40, ?LINE, []}),
@@ -1692,10 +1705,6 @@ react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
     ?REACT({a50, ?LINE, [{current_epoch, P_current#projection_v1.epoch_number},
                          {latest_epoch, P_latest#projection_v1.epoch_number},
                          {final_props, FinalProps}]}),
-    V = case file:read_file("/tmp/moomoo") of {ok, _} -> true; _ -> false end,
-    if V,S#ch_mgr.name == b -> io:format(user, "A50: ~p: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
-    %% if V andalso (S#ch_mgr.name == b orelse S#ch_mgr.name == c) -> io:format(user, "A50: ~p: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
-%% io:format(user, "Debug A50: ~w P_current outer ~w ~w ~w\n", [S#ch_mgr.name, P_current#projection_v1.epoch_number,P_current#projection_v1.upi,P_current#projection_v1.repairing]),
     {{no_change, FinalProps, P_current#projection_v1.epoch_number}, S}.
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
