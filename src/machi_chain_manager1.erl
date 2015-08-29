@@ -830,7 +830,6 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                                              %% Stable creation time!
                                              creation_time={1,2,3},
                                              dbg=[{none_projection,true},
-                                                 {creation_time,os:timestamp()},
                                                   {up0, Up0},
                                                   {up, Up},
                                                   {all_hosed, AllHosed},
@@ -840,7 +839,9 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                                                   {tent_upi, TentativeUPI},
                                                   {new_upi, NewUPI},
                                                   {up_witnesses, UpWitnesses},
-                                                  {why_none, Why}]},
+                                                  {why_none, Why}],
+                                             dbg2=[
+                                               {creation_time,os:timestamp()}]},
                                  machi_projection:update_checksum(P_none1)
                          end
                  end;
@@ -1313,13 +1314,13 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
             %% clause in a prior iteration, and therefore we should go to A40
             %% now.  If not annotated, go to A49 so that we *will* trigger a
             %% make_zerf() on our next iteration.
-            case proplists:get_value(make_zerf, P_current#projection_v1.dbg2) of
-                Z_epoch when Z_epoch == P_current#projection_v1.epoch_number ->
+            case has_make_zerf_annotation(P_current) of
+                true ->
                     ?REACT({a30, ?LINE, []}),
                     react_to_env_A40(Retries, P_newprop11, P_latest,
                                      LatestUnanimousP, S10);
-                Z_epoch ->
-                    ?REACT({a30, ?LINE, [{z_epoch,Z_epoch}]}),
+                false ->
+                    ?REACT({a30, ?LINE, []}),
                     %% Fall back to the none projection as if we're restarting.
                     react_to_env_A49(P_latest, [], S10)
             end;
@@ -1691,6 +1692,10 @@ react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
     ?REACT({a50, ?LINE, [{current_epoch, P_current#projection_v1.epoch_number},
                          {latest_epoch, P_latest#projection_v1.epoch_number},
                          {final_props, FinalProps}]}),
+    V = case file:read_file("/tmp/moomoo") of {ok, _} -> true; _ -> false end,
+    if V,S#ch_mgr.name == b -> io:format(user, "A50: ~p: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
+    %% if V andalso (S#ch_mgr.name == b orelse S#ch_mgr.name == c) -> io:format(user, "A50: ~p: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
+%% io:format(user, "Debug A50: ~w P_current outer ~w ~w ~w\n", [S#ch_mgr.name, P_current#projection_v1.epoch_number,P_current#projection_v1.upi,P_current#projection_v1.repairing]),
     {{no_change, FinalProps, P_current#projection_v1.epoch_number}, S}.
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
@@ -1737,8 +1742,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
     %% compound predicate below.  I'm yanking it out now. TODO re-study?
     #projection_v1{upi=P_newprop_upi_ooi, repairing=P_newprop_repairing_ooi} =
         inner_projection_or_self(P_newprop),
-    CurrentZerfInStatus = proplists:get_value(make_zerf,
-                                              P_current#projection_v1.dbg2),
+    CurrentZerfInStatus_p = has_make_zerf_annotation(P_current),
     CurrentEpoch = P_current#projection_v1.epoch_number,
     EnoughAreFlapping_and_IamBad_p =
         %% Ignore inner_projection_exists(P_current): We might need to
@@ -1758,7 +1762,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         %% then this down list comparison should be skipped.
         ((P_current#projection_v1.down == P_newprop#projection_v1.down)
          orelse
-         (CurrentZerfInStatus == CurrentEpoch)),
+         CurrentZerfInStatus_p),
     ?REACT({b10, ?LINE, [{0,EnoughAreFlapping_and_IamBad_p},
                          {1,inner_projection_exists(P_current)},
                          {2,inner_projection_exists(P_latest)},
@@ -1768,7 +1772,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                          %% {6,UnanimousLatestInnerNotRelevant_p},
                          {7,P_current#projection_v1.down},
                          {8,P_newprop#projection_v1.down},
-                         {9,{CurrentZerfInStatus,CurrentEpoch}}]}),
+                         {9,{CurrentZerfInStatus_p,CurrentEpoch}}]}),
     if
         EnoughAreFlapping_and_IamBad_p ->
             ?REACT({b10, ?LINE, []}),
@@ -3509,3 +3513,11 @@ is_annotated(#projection_v1{dbg2=Dbg2}) ->
 
 make_comparison_stable(P) ->
     P#projection_v1{flap=undefined, dbg2=[]}.
+
+has_make_zerf_annotation(P) ->
+    case proplists:get_value(make_zerf, P#projection_v1.dbg2) of
+        Z_epoch when Z_epoch == P#projection_v1.epoch_number ->
+            true;
+        _ ->
+            false
+    end.
