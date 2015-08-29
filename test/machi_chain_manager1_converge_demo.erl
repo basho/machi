@@ -642,7 +642,7 @@ private_projections_are_stable(Namez, PollFunc) ->
                     Else ->
                         %% This is bad: we have a count that's less than
                         %% FullMajority but greater than 1.
-                        throw({minority_error,Else,EpochIDs,private2,Private2})
+                        false
                 end;
            CMode == ap_mode ->
                 true
