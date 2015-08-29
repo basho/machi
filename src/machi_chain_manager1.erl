@@ -2368,7 +2368,9 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                         %% latest proj flapping & flapping last time
                         ?REACT({calculate_flaps,?LINE,[]}),
                         false;
-                    {0=Curtime, 0} when P_latest_LastStartTime /= undefined,
+                    {0=Curtime, 0} when P_latest#projection_v1.author_server
+                                        /= MyName,
+                                        P_latest_LastStartTime /= undefined,
                                         P_latest_LastStartTime /= ?NOT_FLAPPING_START ->
 
                         ?REACT({calculate_flaps,?LINE,
