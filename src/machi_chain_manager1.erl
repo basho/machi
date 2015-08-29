@@ -2294,10 +2294,9 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
             {_N, _} ->
                 ?REACT({calculate_flaps,?LINE,[]}),
                 false
-        end
-        andalso
-        %% If P_newprop is the none projection, do not start flapping.
-        P_newprop#projection_v1.upi /= [],
+        end,
+        %% TODO: 2015-08-29: Grr, we really need CP cases of none projection
+        %% flapping to propagate problem_with information.
     LeaveFlapping_p =
         if 
             LastUpChange_diff < 3.0 ->
@@ -2311,10 +2310,13 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                 %% that intent.
                 ?REACT({calculate_flaps,?LINE,[]}),
                 false;
-            AmFlappingNow_p andalso
-            P_newprop#projection_v1.upi == [] ->
-                %% P_newprop is the none projection, stop flapping.
-                true;
+            %% TODO: 2015-08-29: Grr, we really need CP cases of none projection
+            %% flapping to propagate problem_with information.
+            %% AmFlappingNow_p andalso
+            %% P_newprop#projection_v1.upi == [] ->
+            %%     %% P_newprop is the none projection, stop flapping.
+            %%     ?REACT({calculate_flaps,?LINE,[]}),
+            %%     true;
             AmFlappingNow_p andalso
             CurrentUp /= FlapLastUp ->
                 ?REACT({calculate_flaps,?LINE,[{manifesto_clause,{leave,1}}]}),
