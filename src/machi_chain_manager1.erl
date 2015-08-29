@@ -1226,20 +1226,21 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                                     {flap_limit, FlapLimit}]}),
                 {P_newprop3, S3}
         end,
-    ?REACT({a30, ?LINE, [{newprop10, machi_projection:make_summary(P_newprop10)}]}),
+    P_newprop11 = machi_projection:update_checksum(P_newprop10),
+    ?REACT({a30, ?LINE, [{newprop11, machi_projection:make_summary(P_newprop11)}]}),
 
     %% Here's a more common reason for moving from inner projection to
     %% a normal projection: the old proj has an inner but the newprop
     %% does not.
     MoveFromInnerToNorm_p =
         case {inner_projection_exists(P_current),
-              inner_projection_exists(P_newprop10)} of
+              inner_projection_exists(P_newprop11)} of
             {true, false} -> true;
             {_, _}        -> false
         end,
 
     %% If P_current says that we believe that we're currently flapping,
-    %% and if P_newprop10 says that we're no longer flapping, then we
+    %% and if P_newprop11 says that we're no longer flapping, then we
     %% really ought to stop flapping, right.
     %%
     %% Not quite so simple....
@@ -1286,7 +1287,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
     ?REACT({a30, ?LINE, ClauseInfo}),
     MoveToNorm_p = MoveFromInnerToNorm_p orelse Kicker_p,
     if MoveToNorm_p,
-       P_newprop10#projection_v1.upi == [],
+       P_newprop11#projection_v1.upi == [],
        CMode == cp_mode ->
             %% Too much weird stuff may have hapened while we were suffering
             %% the flapping/asymmetric partition ... but we are now proposing
@@ -1295,7 +1296,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
             ?REACT({a30, ?LINE, []}),
             %% TODO: It seems a bit crazy, but this duplicates part/much
             %%       of what state C103 does?  Go to C103 instead?
-            react_to_env_C100(P_newprop10, P_newprop10, S);
+            react_to_env_C100(P_newprop11, P_newprop11, S);
        MoveToNorm_p, CMode == cp_mode ->
             %% Too much weird stuff may have hapened while we were suffering
             %% the flapping/asymmetric partition.  Fall back to the none
@@ -1305,7 +1306,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
        MoveToNorm_p, CMode == ap_mode ->
             %% Move from inner projection to outer.
             P_inner2A = inner_projection_or_self(P_current),
-            ResetEpoch = P_newprop10#projection_v1.epoch_number,
+            ResetEpoch = P_newprop11#projection_v1.epoch_number,
             ResetAuthor = case P_current#projection_v1.upi of
                               [] ->
                                   %% Drat, fall back to current's author.
@@ -1345,7 +1346,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
             react_to_env_A40(Retries, P_o, P_latest, LatestUnanimousP, S_o);
        true ->
             ?REACT({a30, ?LINE, []}),
-            react_to_env_A40(Retries, P_newprop10, P_latest,
+            react_to_env_A40(Retries, P_newprop11, P_latest,
                              LatestUnanimousP, S10)
     end.
 
