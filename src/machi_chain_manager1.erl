@@ -827,11 +827,12 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                                        end,
                                  P_none1 = P_none0#projection_v1{
                                              epoch_number=OldEpochNum + 1,
+                                             %% Stable creation time!
+                                             creation_time={1,2,3},
                                              dbg=[{none_projection,true},
                                                   {up0, Up0},
                                                   {up, Up},
                                                   {all_hosed, AllHosed},
-                                                  {oldepoch, OldEpochNum},
                                                   {oldupi, OldUPI_list},
                                                   {newupi, NewUPI_list},
                                                   {newupi3, NewUPI_list3},
