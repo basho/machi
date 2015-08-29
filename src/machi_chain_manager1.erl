@@ -2378,11 +2378,16 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                                     HosedAnnotations)),
             AllHosed = lists:usort(HosedAnnotations ++ Magic),
             %%io:format(user, "ALLHOSED ~p: ~p ~w\n", [MyName, Magic, HosedAnnotations]),
+            ?REACT({calculate_flaps,?LINE,[{new_flap_count,NewFlapCount},
+                                           {hosed_annotations,HosedAnnotations},
+                                           {magic,Magic},
+                                           {all_hosed,AllHosed}]}),
             AllHosed;
        not AmFlapping_p ->
             NewFlapCount = 0,
             NewFlapStart = ?NOT_FLAPPING_START,
             AllFlapCounts = [],
+            ?REACT({calculate_flaps,?LINE,[]}),
             AllHosed = []
     end,
 
@@ -2404,6 +2409,14 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
     %% TODO: 2015-03-04: I'm growing increasingly suspicious of
     %% the 'runenv' variable that's threaded through all this code.
     %% It isn't doing what I'd originally intended.  Fix it.
+    ?REACT({calculate_flaps,?LINE,[{flapping_i,FlappingI},
+                                   {am_flapping_p,AmFlapping_p},
+                                   {ch_mgr_updates,follow},
+                                   {flap_count,NewFlapCount},
+                                   {flap_start,NewFlapStart},
+                                   {flap_last_up,CurrentUp},
+                                   {flap_last_up_change,LastUpChange},
+                                   {flap_counts_last,AllFlapCounts}]}),
     S2 = S#ch_mgr{flap_count=NewFlapCount, flap_start=NewFlapStart,
                   flap_last_up=CurrentUp, flap_last_up_change=LastUpChange,
                   flap_counts_last=AllFlapCounts,
