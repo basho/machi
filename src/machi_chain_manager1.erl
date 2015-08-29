@@ -1429,6 +1429,8 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                     %% ({UPI_latest_i, Repairing_latest_i} ==
                     %%      {UPI_current_x, Repairing_current_x})
                     %% andalso
+                    UPI_latest_i /= []          % avoid hasty none proj jump
+                    andalso
                     Epoch_latest_i >= P_current_ios#projection_v1.epoch_number,
                 CurrentHasInner_and_LatestIsDisjoint_p =
                     P_current_has_inner_p
