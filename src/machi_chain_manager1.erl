@@ -2745,8 +2745,14 @@ poll_private_proj_is_upi_unanimous(#ch_mgr{consistency_mode=cp_mode,
 
 poll_private_proj_is_upi_unanimous_sleep(Count, S) when Count > 2 ->
     S;
-poll_private_proj_is_upi_unanimous_sleep(Count, S) ->
-    timer:sleep((Count * Count) * 50),
+poll_private_proj_is_upi_unanimous_sleep(Count, #ch_mgr{runenv=RunEnv}=S) ->
+    Denom = case proplists:get_value(use_partition_simulator, RunEnv, false) of
+                true ->
+                    20;
+                _ ->
+                    1
+            end,
+    timer:sleep(((Count * Count) * 50) div Denom),
     case poll_private_proj_is_upi_unanimous3(S) of
         #ch_mgr{proj_unanimous=false} = S2 ->
             poll_private_proj_is_upi_unanimous_sleep(Count + 1, S2);
