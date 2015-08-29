@@ -1369,13 +1369,17 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
 a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                           #ch_mgr{name=MyName, consistency_mode=CMode} = S) ->
     AllHosed = get_all_hosed(P_newprop3),
+    NewPropDown = P_newprop3#projection_v1.down,
     P_current_has_inner_p = inner_projection_exists(P_current),
     P_current_ios = inner_projection_or_self(P_current),
+    AllHosed_and_Down = lists:usort(AllHosed ++ NewPropDown),
     {P_i1, S_i, _Up} = calc_projection2(P_current_ios,
-                                        MyName, AllHosed, [], S),
+                                        MyName, AllHosed_and_Down, [], S),
     ?REACT({a30, ?LINE, [{raw_all_hosed,get_all_hosed(P_newprop3)},
                          {up, Up},
                          {all_hosed, AllHosed},
+                         {new_prop_down, NewPropDown},
+                         {all_hosed_and_down, AllHosed_and_Down},
                          {p_c_i, machi_projection:make_summary(P_current_ios)},
                          {p_i1, machi_projection:make_summary(P_i1)}]}),
     %% The inner projection will have a fake author, which
@@ -1489,7 +1493,7 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                         P_newprop3#projection_v1.epoch_number;
                     true ->
                         P_oldinner = inner_projection_or_self(P_current),
-                        ?REACT({a30xyzxyz, ?LINE, [P_oldinner#projection_v1.epoch_number + 1]}),
+                        ?REACT({a30xyzxyz, ?LINE, [{incrementing_based_on,P_oldinner#projection_v1.epoch_number + 1}]}),
                         FinalCreation = P_newprop3#projection_v1.creation_time,
                         P_oldinner#projection_v1.epoch_number + 1
                 end,
@@ -1766,7 +1770,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         (inner_projection_exists(P_latest) orelse
          inner_projection_exists(P_newprop)) andalso
         %% I have been flapping for a while
-        S#ch_mgr.flap_count > 100 andalso
+        S#ch_mgr.flap_count > 200 andalso
         %% I'm suspected of being bad
         lists:member(MyName, P_newprop_AllHosedPlus) andalso
         %% I'm not in the critical UPI or repairing lists
@@ -2226,6 +2230,7 @@ react_to_env_C310(P_newprop, S) ->
 
 calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                 #ch_mgr{name=MyName, proj_history=H,
+                        consistency_mode=CMode,
                         flap_start=FlapStart,
                         flap_count=FlapCount, flap_last_up=FlapLastUp,
                         flap_last_up_change=LastUpChange0,
@@ -2414,6 +2419,8 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
             AllHosed = lists:usort(HosedAnnotations ++ Magic),
             %%io:format(user, "ALLHOSED ~p: ~p ~w\n", [MyName, Magic, HosedAnnotations]),
             ?REACT({calculate_flaps,?LINE,[{new_flap_count,NewFlapCount},
+                                           {bad_flus,BadFLUs},
+                                           {hosed_t_u_ts,HosedTransUnionTs},
                                            {hosed_annotations,HosedAnnotations},
                                            {magic,Magic},
                                            {all_hosed,AllHosed}]}),
@@ -2456,8 +2463,22 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                   flap_last_up=CurrentUp, flap_last_up_change=LastUpChange,
                   flap_counts_last=AllFlapCounts,
                   runenv=RunEnv1},
-    {machi_projection:update_checksum(P_newprop#projection_v1{
-                                                         flap=FlappingI}),
+
+    P_newprop2 = case proplists:get_value(MyName, AllHosed) of
+                     true when CMode == cp_mode ->
+                         %% Experiment: try none proj but keep the epoch #.
+                         ?REACT({calculate_flaps,?LINE,[]}),
+                         P_newprop#projection_v1{
+                           upi=[], repairing=[],
+                           down=P_newprop#projection_v1.all_members};
+                     _ ->
+                         ?REACT({calculate_flaps,?LINE,[]}),
+                         P_newprop
+                 end,
+    ?REACT({calculate_flaps,?LINE,[{zzz_1,P_newprop2#projection_v1.upi},
+                                  {zzz_2,P_newprop2#projection_v1.repairing},
+                                  {zzz_3,catch (P_newprop2#projection_v1.flap)#flap_i.all_hosed}]}),
+    {machi_projection:update_checksum(P_newprop2#projection_v1{flap=FlappingI}),
      if AmFlapping_p ->
              S2;
         true ->
