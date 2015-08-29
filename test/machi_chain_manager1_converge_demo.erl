@@ -256,7 +256,6 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
       MaxIters = NumFLUs * (NumFLUs + 1) * 6,
       [begin
            machi_partition_simulator:always_these_partitions(Partition),
-if Partition==[{a,c},{b,c}] -> io:format(user, "\nSET SET SET debug, yo!\n", []), file:write_file("/tmp/moomoo", []); true -> ok end,
            io:format(user, "\nSET partitions = ~w (~w of ~w) at ~w\n",
                      [Partition, Count, length(AllPs), time()]),
            true = lists:foldl(

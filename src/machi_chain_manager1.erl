@@ -830,6 +830,7 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                                              %% Stable creation time!
                                              creation_time={1,2,3},
                                              dbg=[{none_projection,true},
+                                                 {creation_time,os:timestamp()},
                                                   {up0, Up0},
                                                   {up, Up},
                                                   {all_hosed, AllHosed},
@@ -1297,13 +1298,31 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
             ?REACT({a30, ?LINE, []}),
             %% TODO: It seems a bit crazy, but this duplicates part/much
             %%       of what state C103 does?  Go to C103 instead?
-            react_to_env_C100(P_newprop11, P_newprop11, S);
+            P_newprop12 = machi_projection:update_checksum(
+                            P_newprop11#projection_v1{epoch_number=NewEpoch}),
+            react_to_env_C100(P_newprop12, P_newprop11, S);
        MoveToNorm_p, CMode == cp_mode ->
             %% Too much weird stuff may have hapened while we were suffering
-            %% the flapping/asymmetric partition.  Fall back to the none
-            %% projection as if we're restarting.
-            ?REACT({a30, ?LINE, [{move_to_norm, MoveToNorm_p}]}),
-            react_to_env_A49(P_latest, [], S10);
+            %% the flapping/asymmetric partition.
+            %% The MoveToNorm_p calculation doesn't take all CP mode
+            %% behavior into account, so finish the job here.
+            %%
+            %% The make_zerf() function will annotate the dbg2 list with
+            %% {make_zerf,Epoch} where Epoch should equal the epoch_number.
+            %% If annotated, then we have already passed through this if
+            %% clause in a prior iteration, and therefore we should go to A40
+            %% now.  If not annotated, go to A49 so that we *will* trigger a
+            %% make_zerf() on our next iteration.
+            case proplists:get_value(make_zerf, P_current#projection_v1.dbg2) of
+                Z_epoch when Z_epoch == P_current#projection_v1.epoch_number ->
+                    ?REACT({a30, ?LINE, []}),
+                    react_to_env_A40(Retries, P_newprop11, P_latest,
+                                     LatestUnanimousP, S10);
+                Z_epoch ->
+                    ?REACT({a30, ?LINE, [{z_epoch,Z_epoch}]}),
+                    %% Fall back to the none projection as if we're restarting.
+                    react_to_env_A49(P_latest, [], S10)
+            end;
        MoveToNorm_p, CMode == ap_mode ->
             %% Move from inner projection to outer.
             P_inner2A = inner_projection_or_self(P_current),
@@ -1672,9 +1691,6 @@ react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
     ?REACT({a50, ?LINE, [{current_epoch, P_current#projection_v1.epoch_number},
                          {latest_epoch, P_latest#projection_v1.epoch_number},
                          {final_props, FinalProps}]}),
-    V = case file:read_file("/tmp/moomoo") of {ok, _} -> true; _ -> false end,
-    if V andalso (S#ch_mgr.name == b orelse S#ch_mgr.name == c) -> io:format(user, "A50: ~p: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
-%% io:format(user, "Debug A50: ~w P_current outer ~w ~w ~w\n", [S#ch_mgr.name, P_current#projection_v1.epoch_number,P_current#projection_v1.upi,P_current#projection_v1.repairing]),
     {{no_change, FinalProps, P_current#projection_v1.epoch_number}, S}.
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
@@ -1997,8 +2013,6 @@ react_to_env_C103(#projection_v1{epoch_number=_Epoch_newprop} = _P_newprop,
     #projection_v1{witnesses=Witness_list,
                    members_dict=MembersDict} = P_current,
     P_none0 = make_none_projection(MyName, All_list, Witness_list, MembersDict),
-    %% P_none1 = P_none0#projection_v1{epoch_number=erlang:max(Epoch_newprop,
-    %%                                                         Epoch_latest),
     P_none1 = P_none0#projection_v1{epoch_number=Epoch_latest,
                                     flap=Flap,
                                     dbg=[{none_projection,true}]},
@@ -3249,7 +3263,18 @@ make_zerf(#projection_v1{epoch_number=OldEpochNum,
     MajoritySize = full_majority_size(AllMembers),
     case length(Up) >= MajoritySize of
         false ->
-            throw({zerf, {not_enough_up, Up, AllMembers}});
+            %% Make it appear like nobody is up now: we'll have to
+            %% wait until the Up list changes so that
+            %% zerf_find_last_common() can confirm a common stable
+            %% last stable epoch.
+
+            P = make_none_projection(MyName, AllMembers, OldWitness_list,
+                                     MembersDict),
+            machi_projection:update_checksum(
+              P#projection_v1{epoch_number=OldEpochNum,
+                              mode=cp_mode,
+                              flap=OldFlap,
+                              dbg2=[zerf_none,{up,Up},{maj,MajoritySize}]});
         true ->
             make_zerf2(OldEpochNum, Up, MajoritySize, MyName,
                        AllMembers, OldWitness_list, MembersDict, OldFlap, S)
@@ -3284,18 +3309,6 @@ make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list,
                               dbg2=[zerf_all]}),
             %% io:format(user, "ZERF ~w\n",[machi_projection:make_summary(P2)]),
             P2;
-        throw:{zerf,{not_enough_up,Up2,_All2}} ->
-            %% Make it appear like nobody is up now: we'll have to
-            %% wait until the Up list changes so that
-            %% zerf_find_last_common() can confirm a common stable
-            %% last stable epoch.
-
-            P = make_none_projection(MyName, AllMembers, OldWitness_list,
-                                     MembersDict),
-            machi_projection:update_checksum(
-              P#projection_v1{epoch_number=OldEpochNum,
-                              mode=cp_mode,
-                              dbg2=[zerf_none, {up,Up2},{maj,MajoritySize}]});
         _X:_Y ->
             throw({zerf, {damn_exception, Up, _X, _Y, erlang:get_stacktrace()}})
     end.
