@@ -634,9 +634,16 @@ private_projections_are_stable(Namez, PollFunc) ->
                         io:format(user, "Priv2: EID ~W e ~w u ~w\n", [EpochID, 7, ExpectedFLUs, UsingFLUs]),
                         ordsets:is_subset(ordsets:from_list(ExpectedFLUs),
                                           ordsets:from_list(UsingFLUs));
-                    _Else ->
-                        io:format(user, "Priv2: Else ~p\n", [_Else]),
-                        false
+                    [{1=_Count,_EpochID}|_] ->
+                        %% Our list is sorted & reversed, so 1=_Count
+                        %% is biggest.  If everyone is using the none proj,
+                        %% then we're OK.
+                        Private2None = [X || {_,{_,[],[],_,_,_}}=X <- Private2],
+                        Private2 == Private2None;
+                    Else ->
+                        %% This is bad: we have a count that's less than
+                        %% FullMajority but greater than 1.
+                        throw({minority_error,Else,EpochIDs,private2,Private2})
                 end;
            CMode == ap_mode ->
                 true
