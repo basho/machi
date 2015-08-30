@@ -1160,29 +1160,30 @@ react_to_env_A20(Retries, #ch_mgr{name=MyName}=S) ->
 react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra,
                  #ch_mgr{name=MyName, consistency_mode=CMode,
                          proj=P_current} = S) ->
-    #projection_v1{epoch_number=Epoch_latest,
-                   author_server=Author_latest} = P_latest,
-    if CMode == cp_mode,
-       Epoch_latest > P_current#projection_v1.epoch_number,
-       Author_latest /= MyName ->
-            put(yyy_hack, []),
-            case make_zerf(P_current, S) of
-                Zerf when is_record(Zerf, projection_v1) ->
-                    ?REACT({a29, ?LINE,
-                            [{zerf_filler, true},
-                             {zerf_in, machi_projection:make_summary(Zerf)}]}),
-                    %% io:format(user, "zerf_in: A29: ~p: ~w\n\t~p\n", [MyName,  machi_projection:make_summary(Zerf), get(yyy_hack)]),
-                    P_current2 = Zerf#projection_v1{
-                                             flap=P_current#projection_v1.flap},
-                    S2 = set_proj(S, P_current2),
-                    react_to_env_A30(Retries, P_latest, LatestUnanimousP,
-                                     ReadExtra, S2);
-                Zerf ->
-                    {{{yo_todo_incomplete_fix_me_cp_mode, line, ?LINE, Zerf}}}
-            end;
-       true ->
-            react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra, S)
-    end.
+    react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra, S).
+    %% #projection_v1{epoch_number=Epoch_latest,
+    %%                author_server=Author_latest} = P_latest,
+    %% if CMode == cp_mode,
+    %%    Epoch_latest > P_current#projection_v1.epoch_number,
+    %%    Author_latest /= MyName ->
+    %%         put(yyy_hack, []),
+    %%         case make_zerf(P_current, S) of
+    %%             Zerf when is_record(Zerf, projection_v1) ->
+    %%                 ?REACT({a29, ?LINE,
+    %%                         [{zerf_filler, true},
+    %%                          {zerf_in, machi_projection:make_summary(Zerf)}]}),
+    %%                 %% io:format(user, "zerf_in: A29: ~p: ~w\n\t~p\n", [MyName,  machi_projection:make_summary(Zerf), get(yyy_hack)]),
+    %%                 P_current2 = Zerf#projection_v1{
+    %%                                          flap=P_current#projection_v1.flap},
+    %%                 S2 = set_proj(S, P_current2),
+    %%                 react_to_env_A30(Retries, P_latest, LatestUnanimousP,
+    %%                                  ReadExtra, S2);
+    %%             Zerf ->
+    %%                 {{{yo_todo_incomplete_fix_me_cp_mode, line, ?LINE, Zerf}}}
+    %%         end;
+    %%    true ->
+    %%         react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra, S)
+    %% end.
 
 react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                  #ch_mgr{name=MyName, proj=P_current,
