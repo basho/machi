@@ -306,8 +306,12 @@ handle_call({set_chain_members, MembersDict, Witness_list}, _From,
     %% config.
     All_list = [P#p_srvr.name || {_, P} <- orddict:to_list(MembersDict)],
     MissingInNew = OldAll_list -- All_list,
-    NewUPI = OldUPI -- MissingInNew,
-    NewDown = All_list -- NewUPI,
+    {NewUPI, NewDown} = if OldEpoch == 0 ->
+                                {All_list, []};
+                           true ->
+                                NUPI = OldUPI -- MissingInNew,
+                                {NUPI, All_list -- NUPI}
+                        end,
     NewEpoch = OldEpoch + ?SET_CHAIN_MEMBERS_EPOCH_SKIP,
     CMode = calc_consistency_mode(Witness_list),
     ok = set_consistency_mode(machi_flu_psup:make_proj_supname(MyName), CMode),
@@ -648,39 +652,34 @@ do_read_repair(FLUsRs, _Extra, #ch_mgr{proj=CurrentProj} = S) ->
 calc_projection(S, RelativeToServer) ->
     calc_projection(S, RelativeToServer, []).
 
-calc_projection(#ch_mgr{proj=LastProj, consistency_mode=CMode} = S,
+calc_projection(#ch_mgr{name=MyName, proj=P_current, consistency_mode=CMode,
+                        runenv=RunEnv}=S,
                 RelativeToServer, AllHosed) ->
     Dbg = [],
     %% OldThreshold = proplists:get_value(old_threshold, RunEnv),
     %% NoPartitionThreshold = proplists:get_value(no_partition_threshold, RunEnv),
     if CMode == ap_mode ->
-            calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg, S);
+            calc_projection2(P_current, RelativeToServer, AllHosed, Dbg, S);
        CMode == cp_mode ->
             #projection_v1{epoch_number=OldEpochNum,
                            all_members=AllMembers,
                            upi=OldUPI_list
-                          } = LastProj,
+                          } = P_current,
             UPI_length_ok_p =
                 length(OldUPI_list) >= full_majority_size(AllMembers),
             case {OldEpochNum, UPI_length_ok_p} of
                 {0, _} ->
-                    calc_projection2(LastProj, RelativeToServer, AllHosed,
+                    calc_projection2(P_current, RelativeToServer, AllHosed,
                                      Dbg, S);
                 {_, true} ->
-                    calc_projection2(LastProj, RelativeToServer, AllHosed,
+                    calc_projection2(P_current, RelativeToServer, AllHosed,
                                      Dbg, S);
                 {_, false} ->
-                    case make_zerf(LastProj, S) of
-                        Zerf when is_record(Zerf, projection_v1) ->
-                            ?REACT({calc,?LINE,
-                                    [{zerf_backstop, true},
-                                     {zerf_in, machi_projection:make_summary(Zerf)}]}),
-                            %% io:format(user, "zerf_in: ~p: ~w\n", [S#ch_mgr.name,  machi_projection:make_summary(Zerf)]),
-                            calc_projection2(Zerf, RelativeToServer, AllHosed,
-                                             [{zerf_backstop, true}]++Dbg, S);
-                        Zerf ->
-                            {{{yo_todo_incomplete_fix_me_cp_mode, OldEpochNum, OldUPI_list, Zerf}}}
-                    end
+                    io:format(user, "KEEP ~w current ~w ~w ~w\n", [MyName, P_current#projection_v1.epoch_number, P_current#projection_v1.upi, P_current#projection_v1.repairing]),
+                    {Up, Partitions, RunEnv2} = calc_up_nodes(
+                                                  MyName, AllMembers, RunEnv),
+                    %% We can't improve on the current projection.
+                    {P_current, S#ch_mgr{runenv=RunEnv2}, Up}
             end
     end.
 
@@ -1161,30 +1160,38 @@ react_to_env_A20(Retries, #ch_mgr{name=MyName}=S) ->
 react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra,
                  #ch_mgr{name=MyName, consistency_mode=CMode,
                          proj=P_current} = S) ->
-    react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra, S).
-    %% #projection_v1{epoch_number=Epoch_latest,
-    %%                author_server=Author_latest} = P_latest,
-    %% if CMode == cp_mode,
-    %%    Epoch_latest > P_current#projection_v1.epoch_number,
-    %%    Author_latest /= MyName ->
-    %%         put(yyy_hack, []),
-    %%         case make_zerf(P_current, S) of
-    %%             Zerf when is_record(Zerf, projection_v1) ->
-    %%                 ?REACT({a29, ?LINE,
-    %%                         [{zerf_filler, true},
-    %%                          {zerf_in, machi_projection:make_summary(Zerf)}]}),
-    %%                 %% io:format(user, "zerf_in: A29: ~p: ~w\n\t~p\n", [MyName,  machi_projection:make_summary(Zerf), get(yyy_hack)]),
-    %%                 P_current2 = Zerf#projection_v1{
-    %%                                          flap=P_current#projection_v1.flap},
-    %%                 S2 = set_proj(S, P_current2),
-    %%                 react_to_env_A30(Retries, P_latest, LatestUnanimousP,
-    %%                                  ReadExtra, S2);
-    %%             Zerf ->
-    %%                 {{{yo_todo_incomplete_fix_me_cp_mode, line, ?LINE, Zerf}}}
-    %%         end;
-    %%    true ->
-    %%         react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra, S)
-    %% end.
+    #projection_v1{epoch_number=Epoch_latest,
+                   author_server=Author_latest} = P_latest,
+    Trigger = if CMode == cp_mode,
+                 Epoch_latest > P_current#projection_v1.epoch_number,
+                 Author_latest /= MyName ->
+                      true;
+                 P_current#projection_v1.upi == [] ->
+                      true;
+                 true ->
+                      false
+              end,
+    if Trigger ->
+            put(yyy_hack, []),
+            case make_zerf(P_current, S) of
+                Zerf when is_record(Zerf, projection_v1) ->
+                    ?REACT({a29, ?LINE,
+                            [{zerf_backstop, true},
+                             {zerf_in, machi_projection:make_summary(Zerf)}]}),
+                    %% io:format(user, "zerf_in: A29: ~p: ~w\n\t~p\n", [MyName,  machi_projection:make_summary(Zerf), get(yyy_hack)]),
+                    #projection_v1{dbg=ZerfDbg} = Zerf,
+                    P_current2 = Zerf#projection_v1{
+                                   flap=P_current#projection_v1.flap,
+                                   dbg=[{zerf_backstop,true}|ZerfDbg]},
+                    S2 = set_proj(S, P_current2),
+                    react_to_env_A30(Retries, P_latest, LatestUnanimousP,
+                                     ReadExtra, S2);
+                Zerf ->
+                    {{{yo_todo_incomplete_fix_me_cp_mode, line, ?LINE, Zerf}}}
+            end;
+       true ->
+            react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra, S)
+    end.
 
 react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                  #ch_mgr{name=MyName, proj=P_current,
@@ -2618,8 +2625,8 @@ projection_transition_is_sane_final_review(
   _) when CMode1 /= CMode2 ->
     {wtf, cmode1, CMode1, cmode2, CMode2};
 projection_transition_is_sane_final_review(
-  #projection_v1{mode=cp_mode, upi=UPI1}=_P1,
-  #projection_v1{mode=cp_mode, upi=UPI2, witnesses=Witness_list, dbg=Dbg}=_P2,
+  #projection_v1{mode=cp_mode, upi=UPI1, dbg=P1_dbg}=_P1,
+  #projection_v1{mode=cp_mode, upi=UPI2, witnesses=Witness_list}=_P2,
   true) ->
     %% All earlier sanity checks has said that this transition is sane, but
     %% we also need to make certain that any CP mode transition preserves at
@@ -2629,9 +2636,9 @@ projection_transition_is_sane_final_review(
     UPI2_s = ordsets:from_list(UPI2 -- Witness_list),
     catch ?REACT({projection_transition_is_sane_final_review, ?LINE,
                   [{upi1,UPI1}, {upi2,UPI2}, {witnesses,Witness_list},
-                   {zerf_backstop, proplists:get_value(zerf_backstop, Dbg)},
+                   {zerf_backstop, proplists:get_value(zerf_backstop, P1_dbg)},
                    {upi1_s,UPI1}, {upi2_s,UPI2}]}),
-    case proplists:get_value(zerf_backstop, Dbg) of
+    case proplists:get_value(zerf_backstop, P1_dbg) of
         true when UPI1 == [] ->
             ?RETURN2(true);
         _ when UPI2 == [] ->
