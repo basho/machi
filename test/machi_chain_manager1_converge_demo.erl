@@ -635,10 +635,10 @@ private_projections_are_stable(Namez, PollFunc) ->
                                           ordsets:from_list(UsingFLUs));
                     [{1=_Count,_EpochID}|_] ->
                         %% Our list is sorted & reversed, so 1=_Count
-                        %% is biggest.  If everyone is using the none proj,
+                        %% is biggest.  If a majority is using the none proj,
                         %% then we're OK.
                         Private2None = [X || {_,{_,[],[],_,_,_}}=X <- Private2],
-                        Private2 == Private2None;
+                        length(Private2None) >= FullMajority;
                     Else ->
                         %% This is bad: we have a count that's less than
                         %% FullMajority but greater than 1.
