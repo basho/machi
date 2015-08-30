@@ -235,7 +235,7 @@ init({MyName, InitMembersDict, MgrOpts}) ->
     Opt = fun(Key, Default) -> proplists:get_value(Key, MgrOpts, Default) end,
     InitWitness_list = Opt(witnesses, []),
     ZeroAll_list = [P#p_srvr.name || {_,P} <- orddict:to_list(InitMembersDict)],
-    ZeroProj = make_none_projection(MyName, ZeroAll_list,
+    ZeroProj = make_none_projection(0, MyName, ZeroAll_list,
                                     InitWitness_list, InitMembersDict),
     ok = store_zeroth_projection_maybe(ZeroProj, MgrOpts),
     CMode = Opt(consistency_mode, ap_mode),
@@ -262,9 +262,8 @@ init({MyName, InitMembersDict, MgrOpts}) ->
         get_my_private_proj_boot_info(MgrOpts, InitMembersDict, ZeroProj),
     #projection_v1{epoch_number=CurrentEpoch,
                    all_members=All_list, witnesses=Witness_list} = Proj0,
-    Proj1 = make_none_projection(MyName, All_list, Witness_list, MembersDict),
-    Proj = machi_projection:update_checksum(
-             Proj1#projection_v1{epoch_number=CurrentEpoch}),
+    Proj = make_none_projection(CurrentEpoch,
+                                MyName, All_list, Witness_list, MembersDict),
 
     RunEnv = [{seed, Opt(seed, now())},
               {use_partition_simulator, Opt(use_partition_simulator, false)},
@@ -407,7 +406,7 @@ code_change(_OldVsn, S, _Extra) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-make_none_projection(MyName, All_list, Witness_list, MembersDict) ->
+make_none_projection(Epoch, MyName, All_list, Witness_list, MembersDict) ->
     Down_list = All_list,
     UPI_list = [],
     P = machi_projection:new(MyName, MembersDict, Down_list, UPI_list, [], []),
@@ -416,7 +415,8 @@ make_none_projection(MyName, All_list, Witness_list, MembersDict) ->
                Witness_list /= [] ->
                     cp_mode
             end,
-    machi_projection:update_checksum(P#projection_v1{mode=CMode,
+    machi_projection:update_checksum(P#projection_v1{epoch_number=Epoch,
+                                                     mode=CMode,
                                                      witnesses=Witness_list}).
 
 make_all_projection(MyName, All_list, Witness_list, MembersDict) ->
@@ -587,7 +587,7 @@ rank_and_sort_projections_with_extra(All_queried_list, FLUsRs, ProjectionType,
        orelse
        length(UnwrittenRs) == length(FLUsRs) ->
             Witness_list = CurrentProj#projection_v1.witnesses,
-            NoneProj = make_none_projection(MyName, [], Witness_list,
+            NoneProj = make_none_projection(0, MyName, [], Witness_list,
                                             orddict:new()),
             Extra2 = [{all_members_replied, true},
                       {all_queried_list, All_queried_list},
@@ -708,7 +708,8 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
 
     NewUp = Up -- LastUp,
     Down = AllMembers -- Up,
-    ?REACT({calc,?LINE,[{old_upi, OldUPI_list},
+    ?REACT({calc,?LINE,[{old_epoch,OldEpochNum},
+                        {old_upi, OldUPI_list},
                         {old_repairing,OldRepairing_list},
                         {last_up, LastUp}, {up0, Up0}, {all_hosed, AllHosed},
                         {up, Up}, {new_up, NewUp}, {down, Down}]}),
@@ -818,6 +819,7 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                             true ->
                                  ?REACT({calc,?LINE,[]}),
                                  P_none0 = make_none_projection(
+                                            OldEpochNum + 1,
                                             MyName, AllMembers, OldWitness_list,
                                             MembersDict),
                                  Why = if NewUPI == [] ->
@@ -826,7 +828,6 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                                                "Not enough witnesses are available now"
                                        end,
                                  P_none1 = P_none0#projection_v1{
-                                             epoch_number=OldEpochNum + 1,
                                              %% Stable creation time!
                                              creation_time={1,2,3},
                                              dbg=[{none_projection,true},
@@ -1707,7 +1708,8 @@ react_to_env_A49(_P_latest, FinalProps, #ch_mgr{name=MyName,
     #projection_v1{all_members=All_list,
                    witnesses=Witness_list,
                    members_dict=MembersDict} = P_current,
-    P_none = make_none_projection(MyName, All_list, Witness_list,
+    #projection_v1{epoch_number=EpochCurrent} = P_current,
+    P_none = make_none_projection(EpochCurrent, MyName, All_list, Witness_list,
                                   MembersDict),
     react_to_env_A50(P_none, FinalProps, set_proj(S, P_none)).
 
@@ -1716,6 +1718,7 @@ react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
     ?REACT({a50, ?LINE, [{current_epoch, P_current#projection_v1.epoch_number},
                          {latest_epoch, P_latest#projection_v1.epoch_number},
                          {final_props, FinalProps}]}),
+    %% if S#ch_mgr.name == c -> io:format(user, "A50: ~w: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
     {{no_change, FinalProps, P_current#projection_v1.epoch_number}, S}.
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
@@ -2036,9 +2039,9 @@ react_to_env_C103(#projection_v1{epoch_number=_Epoch_newprop} = _P_newprop,
                   #ch_mgr{name=MyName, proj=P_current}=S) ->
     #projection_v1{witnesses=Witness_list,
                    members_dict=MembersDict} = P_current,
-    P_none0 = make_none_projection(MyName, All_list, Witness_list, MembersDict),
-    P_none1 = P_none0#projection_v1{epoch_number=Epoch_latest,
-                                    flap=Flap,
+    P_none0 = make_none_projection(Epoch_latest,
+                                   MyName, All_list, Witness_list, MembersDict),
+    P_none1 = P_none0#projection_v1{flap=Flap,
                                     dbg=[{none_projection,true}]},
     P_none = machi_projection:update_checksum(P_none1),
     %% Use it, darn it, because it's 100% safe.  And exit flapping state.
@@ -2616,7 +2619,7 @@ projection_transition_is_sane_final_review(
     {wtf, cmode1, CMode1, cmode2, CMode2};
 projection_transition_is_sane_final_review(
   #projection_v1{mode=cp_mode, upi=UPI1}=_P1,
-  #projection_v1{mode=cp_mode, upi=UPI2, witnesses=Witness_list, dbg=Dbg2}=_P2,
+  #projection_v1{mode=cp_mode, upi=UPI2, witnesses=Witness_list, dbg=Dbg}=_P2,
   true) ->
     %% All earlier sanity checks has said that this transition is sane, but
     %% we also need to make certain that any CP mode transition preserves at
@@ -2624,7 +2627,11 @@ projection_transition_is_sane_final_review(
     %% verified that the ordering of the FLUs within the UPI list is ok.
     UPI1_s = ordsets:from_list(UPI1 -- Witness_list),
     UPI2_s = ordsets:from_list(UPI2 -- Witness_list),
-    case proplists:get_value(zerf_backstop, Dbg2) of
+    catch ?REACT({projection_transition_is_sane_final_review, ?LINE,
+                  [{upi1,UPI1}, {upi2,UPI2}, {witnesses,Witness_list},
+                   {zerf_backstop, proplists:get_value(zerf_backstop, Dbg)},
+                   {upi1_s,UPI1}, {upi2_s,UPI2}]}),
+    case proplists:get_value(zerf_backstop, Dbg) of
         true when UPI1 == [] ->
             ?RETURN2(true);
         _ when UPI2 == [] ->
@@ -3316,11 +3323,11 @@ make_zerf(#projection_v1{epoch_number=OldEpochNum,
             %% zerf_find_last_common() can confirm a common stable
             %% last stable epoch.
 
-            P = make_none_projection(MyName, AllMembers, OldWitness_list,
+            P = make_none_projection(OldEpochNum,
+                                     MyName, AllMembers, OldWitness_list,
                                      MembersDict),
             machi_projection:update_checksum(
-              P#projection_v1{epoch_number=OldEpochNum,
-                              mode=cp_mode,
+              P#projection_v1{mode=cp_mode,
                               flap=OldFlap,
                               dbg2=[zerf_none,{up,Up},{maj,MajoritySize}]});
         true ->
