@@ -1323,7 +1323,29 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
             %%       of what state C103 does?  Go to C103 instead?
             P_newprop12 = machi_projection:update_checksum(
                             P_newprop11#projection_v1{epoch_number=NewEpoch}),
-            react_to_env_C100(P_newprop12, P_newprop11, S);
+
+            %% Move to C300 to avoid repeating the same none proj (and
+            %% multiple writes to the same private epoch that
+            %% concidentally are permitted because the projection is
+            %% exactly the same)
+            %%
+            %% The other problem in this execution is that there are a
+            %% couple of other parties that are not flapping because
+            %% they see this A30->C100 problem & repeat is
+            %% short-circuiting all of the flapping logic.  If I
+            %% change A30->C100 to be A30->C300 instead, then I hope
+            %% that other effect will resolve itself correctly.
+
+            if P_latest#projection_v1.author_server == MyName,
+               P_latest#projection_v1.upi == [] ->
+                    ?REACT({a30, ?LINE, []}),
+                    io:format(user, "CONFIRM debug A30->C100 by ~w\n",[MyName]),
+                    react_to_env_C100(P_newprop12, P_latest, S);
+               true ->
+                    ?REACT({a30, ?LINE, []}),
+                    io:format(user, "CONFIRM debug A30->C300 by ~w\n",[MyName]),
+                    react_to_env_C300(P_newprop12, P_latest, S)
+            end;
        MoveToNorm_p,
        CMode == cp_mode,
        not CurrentHasZerf_p ->
