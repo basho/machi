@@ -1166,8 +1166,6 @@ react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra,
                  Epoch_latest > P_current#projection_v1.epoch_number,
                  Author_latest /= MyName ->
                       true;
-                 P_current#projection_v1.upi == [] ->
-                      true;
                  true ->
                       false
               end,
