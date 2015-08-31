@@ -1572,9 +1572,9 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
          orelse
          P_latestStable /= P_currentStable) ->
             ?REACT({a40, ?LINE,
-                    [{latest_epoch, P_latest#projection_v1.epoch_number},
-                     {current_epoch, P_current#projection_v1.epoch_number},
-                     {neq, P_latest /= P_current}]}),
+                    [{latest, P_latestStable},
+                     {current, P_currentStable},
+                     {neq, P_latestStable /= P_currentStable}]}),
 
             %% Both of these cases are rare.  Elsewhere, the code
             %% assumes that the local FLU's projection store is always
@@ -3566,7 +3566,7 @@ is_annotated(#projection_v1{dbg2=Dbg2}) ->
     proplists:get_value(private_proj_is_upi_unanimous, Dbg2, false).
 
 make_comparison_stable(P) ->
-    P#projection_v1{flap=undefined, dbg2=[]}.
+    P#projection_v1{creation_time=undefined, flap=undefined, dbg2=[]}.
 
 has_make_zerf_annotation(P) ->
     case proplists:get_value(make_zerf, P#projection_v1.dbg2) of
