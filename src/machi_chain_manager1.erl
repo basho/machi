@@ -675,7 +675,6 @@ calc_projection(#ch_mgr{name=MyName, proj=P_current, consistency_mode=CMode,
                     calc_projection2(P_current, RelativeToServer, AllHosed,
                                      Dbg, S);
                 {_, false} ->
-                    io:format(user, "KEEP ~w current ~w ~w ~w\n", [MyName, P_current#projection_v1.epoch_number, P_current#projection_v1.upi, P_current#projection_v1.repairing]),
                     {Up, Partitions, RunEnv2} = calc_up_nodes(
                                                   MyName, AllMembers, RunEnv),
                     %% We can't improve on the current projection.
@@ -1160,11 +1159,12 @@ react_to_env_A20(Retries, #ch_mgr{name=MyName}=S) ->
 react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra,
                  #ch_mgr{name=MyName, consistency_mode=CMode,
                          proj=P_current} = S) ->
-    #projection_v1{epoch_number=Epoch_latest,
-                   author_server=Author_latest} = P_latest,
-    Trigger = if CMode == cp_mode,
-                 Epoch_latest > P_current#projection_v1.epoch_number,
-                 Author_latest /= MyName ->
+    {Epoch_current,_} = EpochID_current =
+        machi_projection:get_epoch_id(P_current),
+    #projection_v1{author_server=Author_latest} = P_latest,
+    {Epoch_latest,_} = EpochID_latest = machi_projection:get_epoch_id(P_latest),
+    true = (Epoch_latest >= Epoch_current orelse Epoch_latest == 0), % sanity check
+    Trigger = if CMode == cp_mode, EpochID_latest /= EpochID_current ->
                       true;
                  true ->
                       false
@@ -1724,6 +1724,8 @@ react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
                          {latest_epoch, P_latest#projection_v1.epoch_number},
                          {final_props, FinalProps}]}),
     %% if S#ch_mgr.name == c -> io:format(user, "A50: ~w: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
+    %% V = case file:read_file("/tmp/moomoo") of {ok,_} -> true; _ -> false end,
+    %% if V, S#ch_mgr.name == c -> io:format("C110: ~w: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
     {{no_change, FinalProps, P_current#projection_v1.epoch_number}, S}.
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
@@ -3474,6 +3476,8 @@ diversion_c120_verbose_goop2(P_latest0, S) ->
     end.
 
 perhaps_verbose_c110(P_latest2, S) ->
+    %% V = case file:read_file("/tmp/moomoo") of {ok,_} -> true; _ -> false end,
+    %% if V, S#ch_mgr.name == c -> io:format("C110: ~w: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
         true ->
             {_,_,C} = os:timestamp(),
