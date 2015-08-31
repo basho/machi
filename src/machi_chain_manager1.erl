@@ -1376,7 +1376,12 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
 a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                           #ch_mgr{name=MyName, consistency_mode=CMode} = S) ->
     AllHosed = get_all_hosed(P_newprop3),
-    NewPropDown = P_newprop3#projection_v1.down,
+    NewPropDown = if P_newprop3#projection_v1.upi == [] ->
+                          %% This is a none proj, don't believe down list
+                          [];
+                     true ->
+                          P_newprop3#projection_v1.down
+                  end,
     P_current_has_inner_p = inner_projection_exists(P_current),
     P_current_ios = inner_projection_or_self(P_current),
     AllHosed_and_Down = lists:usort(AllHosed ++ NewPropDown),
