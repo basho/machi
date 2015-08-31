@@ -1164,17 +1164,15 @@ react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra,
     #projection_v1{author_server=Author_latest} = P_latest,
     {Epoch_latest,_} = EpochID_latest = machi_projection:get_epoch_id(P_latest),
     Trigger = if CMode == cp_mode, EpochID_latest /= EpochID_current ->
-                    ?REACT({a29, ?LINE,
-                            [{epoch_id_latest,EpochID_latest},
-                             {epoch_id_current,EpochID_current}]}),
                       true;
                  true ->
-                      ?REACT({a29, ?LINE, []}),
                       false
               end,
     if Trigger ->
             ?REACT({a29, ?LINE,
-                    [{old_current, machi_projection:make_summary(P_current)}]}),
+                    [{epoch_id_latest,EpochID_latest},
+                     {epoch_id_current,EpochID_current},
+                     {old_current, machi_projection:make_summary(P_current)}]}),
             if Epoch_latest >= Epoch_current orelse Epoch_latest == 0 orelse
                P_current#projection_v1.upi == [] ->
                     ok;                                 % sanity check
@@ -2572,14 +2570,14 @@ projection_transition_is_sane(P1, P2, RelativeToServer) ->
 projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
     put(myname, RelativeToServer),
     put(why2, []),
+    HasInner1 = inner_projection_exists(P1),
+    HasInner2 = inner_projection_exists(P2),
+    Inner1 = inner_projection_or_self(P1),
+    Inner2 = inner_projection_or_self(P2),
     case projection_transition_is_sane_with_si_epoch(
            P1, P2, RelativeToServer, RetrospectiveP) of
         true ->
-            HasInner1 = inner_projection_exists(P1),
-            HasInner2 = inner_projection_exists(P2),
             if HasInner1 orelse HasInner2 ->
-                    Inner1 = inner_projection_or_self(P1),
-                    Inner2 = inner_projection_or_self(P2),
                     if HasInner1 orelse HasInner2 ->
                        %% In case of transition with inner projections, we
                        %% must allow the epoch number to remain constant.
@@ -2590,6 +2588,7 @@ projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
                            projection_transition_is_sane_except_si_epoch(
                             Inner1, Inner2, RelativeToServer, RetrospectiveP)));
                    true ->
+                       exit(delete_this_inner_clause_impossible_with_two_identical_nested_if_clauses),
                        ?RETURN2(
                          projection_transition_is_sane_final_review(P1, P2,
                            projection_transition_is_sane_with_si_epoch(
@@ -2600,7 +2599,32 @@ projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
                                                                ?RETURN2(true))
             end;
         Else ->
-            ?RETURN2(Else)
+            if HasInner1 and (not HasInner2) ->
+                    %% OK, imagine that we used to be flapping but now we've
+                    %% stopped flapping.
+                    %%
+                    %% P1 = outer = upi=[a,d,e],repairing=[]  epoch 870
+                    %%      inner = upi=[a,e,d],repairing=[]  epoch 605
+                    %% to
+                    %% P2 = outer = upi=[a,e,d],repairing=[]  epoch 875
+                    %%      inner = undefined
+                    %%
+                    %% Everyone is using the inner projection [a,e,d],[],
+                    %% everyone thinks that that is OK. It has been in use
+                    %% for a while now.
+                    %%
+                    %% Now there's a new epoch, e875 that is saying that we
+                    %% should transition from inner e605 [a,e,d],[] -> outer
+                    %% e875 [a,e,d],[] This is SAFE!  The UPI is the *same*.
+                    %%
+                    %% Verify this Inner1->P2 transition, including SI epoch
+                    ?RETURN2(
+                       projection_transition_is_sane_final_review(P1, P2,
+                           projection_transition_is_sane_with_si_epoch(
+                            Inner1, P2, RelativeToServer, RetrospectiveP)));
+               true ->
+                    ?RETURN2(Else)
+            end
     end.
 
 projection_transition_is_sane_final_review(
@@ -2773,6 +2797,21 @@ projection_transition_is_sane_except_si_epoch(
 
     %% We won't check the checksum of P1, but we will of P2.
     P2 = machi_projection:update_checksum(P2),
+
+    %% CP mode extra sanity checks
+    if CMode1 == cp_mode ->
+            Majority = full_majority_size(All_list2),
+            if length(UPI_list2) == 0 ->
+                    ok;                         % none projection
+               length(UPI_list2) >= Majority ->
+                    %% We have at least one non-witness
+                    true = (length(UPI_list2 -- Witness_list2) > 0);
+               true ->
+                    error({majority_not_met, UPI_list2})
+            end;
+       CMode1 == ap_mode ->
+            ok
+    end,
 
     %% Hooray, all basic properties of the projection's elements are
     %% not obviously bad.  Now let's check if the UPI+Repairing->UPI
