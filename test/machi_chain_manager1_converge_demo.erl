@@ -552,9 +552,14 @@ todo_why_does_this_crash_sometimes(FLUName, FLU, PPPepoch) ->
     end.
 
 private_projections_are_stable(Namez, PollFunc) ->
-    Private1 = [{Name, get_latest_inner_proj_summ(FLU)} || {Name,FLU} <- Namez],
+    FilterNoneProj = fun({_EpochID,[],[],_Dn,_W,InnerP}) -> false;
+                        (_)                              -> true
+                     end,
+    Private1x = [{Name, get_latest_inner_proj_summ(FLU)} || {Name,FLU} <- Namez],
+    Private1 = [X || X={_,Proj} <- Private1x, FilterNoneProj(Proj)],
     [PollFunc(15, 1, 10) || _ <- lists:seq(1,6)],
-    Private2 = [{Name, get_latest_inner_proj_summ(FLU)} || {Name,FLU} <- Namez],
+    Private2x = [{Name, get_latest_inner_proj_summ(FLU)} || {Name,FLU} <- Namez],
+    Private2 = [X || X={_,Proj} <- Private2x, FilterNoneProj(Proj)],
     %% Is = [Inner_p || {_,_,_,_,Inner_p} <- Private1],
     put(stable, lists:sort(Private1)),
     %% We want either all true or all false (inner or not) ... except
