@@ -1163,13 +1163,28 @@ react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra,
         machi_projection:get_epoch_id(P_current),
     #projection_v1{author_server=Author_latest} = P_latest,
     {Epoch_latest,_} = EpochID_latest = machi_projection:get_epoch_id(P_latest),
-    true = (Epoch_latest >= Epoch_current orelse Epoch_latest == 0), % sanity check
     Trigger = if CMode == cp_mode, EpochID_latest /= EpochID_current ->
+                    ?REACT({a29, ?LINE,
+                            [{epoch_id_latest,EpochID_latest},
+                             {epoch_id_current,EpochID_current}]}),
                       true;
                  true ->
+                      ?REACT({a29, ?LINE, []}),
                       false
               end,
     if Trigger ->
+            ?REACT({a29, ?LINE,
+                    [{old_current, machi_projection:make_summary(P_current)}]}),
+            if Epoch_latest >= Epoch_current orelse Epoch_latest == 0 orelse
+               P_current#projection_v1.upi == [] ->
+                    ok;                                 % sanity check
+               true ->
+                    exit({?MODULE,?LINE,
+                          {epoch_latest,Epoch_latest},
+                          {epoch_current,Epoch_current},
+                          {latest,machi_projection:make_summary(P_latest)},
+                          {current,machi_projection:make_summary(P_current)}})
+            end,
             put(yyy_hack, []),
             case make_zerf(P_current, S) of
                 Zerf when is_record(Zerf, projection_v1) ->
@@ -1188,6 +1203,7 @@ react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra,
                     {{{yo_todo_incomplete_fix_me_cp_mode, line, ?LINE, Zerf}}}
             end;
        true ->
+            ?REACT({a29, ?LINE, []}),
             react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra, S)
     end.
 
@@ -1546,8 +1562,8 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
     LatestAuthorDownP = a40_latest_author_down(P_latest, P_newprop, S)
                         andalso
                         P_latest#projection_v1.author_server /= MyName,
-    P_latestStable = make_comparison_stable(P_latest),
-    P_currentStable = make_comparison_stable(P_current),
+    P_latestStable = make_basic_comparison_stable(P_latest),
+    P_currentStable = make_basic_comparison_stable(P_current),
     ?REACT({a40, ?LINE,
             [{latest_author, P_latest#projection_v1.author_server},
              {author_is_down_p, LatestAuthorDownP},
@@ -3570,8 +3586,12 @@ make_annotation(EpochID, Time) ->
 is_annotated(#projection_v1{dbg2=Dbg2}) ->
     proplists:get_value(private_proj_is_upi_unanimous, Dbg2, false).
 
-make_comparison_stable(P) ->
-    P#projection_v1{creation_time=undefined, flap=undefined, dbg2=[]}.
+make_basic_comparison_stable(P) ->
+    P#projection_v1{creation_time=undefined,
+                    flap=undefined,
+                    dbg=[],
+                    dbg2=[],
+                    members_dict=[]}.
 
 has_make_zerf_annotation(P) ->
     case proplists:get_value(make_zerf, P#projection_v1.dbg2) of
