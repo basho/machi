@@ -652,9 +652,12 @@ do_read_repair(FLUsRs, _Extra, #ch_mgr{proj=CurrentProj} = S) ->
 calc_projection(S, RelativeToServer) ->
     calc_projection(S, RelativeToServer, []).
 
-calc_projection(#ch_mgr{name=MyName, proj=P_current, consistency_mode=CMode,
+calc_projection(#ch_mgr{proj=P_current}=S, RelativeToServer, AllHosed) ->
+    calc_projection(S, RelativeToServer, AllHosed, P_current).
+
+calc_projection(#ch_mgr{name=MyName, consistency_mode=CMode,
                         runenv=RunEnv}=S,
-                RelativeToServer, AllHosed) ->
+                RelativeToServer, AllHosed, P_current) ->
     Dbg = [],
     %% OldThreshold = proplists:get_value(old_threshold, RunEnv),
     %% NoPartitionThreshold = proplists:get_value(no_partition_threshold, RunEnv),
@@ -1191,33 +1194,34 @@ react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra,
                              {zerf_in, machi_projection:make_summary(Zerf)}]}),
                     %% io:format(user, "zerf_in: A29: ~p: ~w\n\t~p\n", [MyName,  machi_projection:make_summary(Zerf), get(yyy_hack)]),
                     #projection_v1{dbg=ZerfDbg} = Zerf,
-                    P_current2 = Zerf#projection_v1{
-                                   flap=P_current#projection_v1.flap,
-                                   dbg=[{zerf_backstop,true}|ZerfDbg]},
-                    S2 = set_proj(S, P_current2),
+                    P_current_calc = Zerf#projection_v1{
+                                       flap=P_current#projection_v1.flap,
+                                       dbg=[{zerf_backstop,true}|ZerfDbg]},
                     react_to_env_A30(Retries, P_latest, LatestUnanimousP,
-                                     ReadExtra, S2);
+                                     P_current_calc, S);
                 Zerf ->
                     {{{yo_todo_incomplete_fix_me_cp_mode, line, ?LINE, Zerf}}}
             end;
        true ->
             ?REACT({a29, ?LINE, []}),
-            react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra, S)
+            react_to_env_A30(Retries, P_latest, LatestUnanimousP, P_current, S)
     end.
 
-react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
+react_to_env_A30(Retries, P_latest, LatestUnanimousP, P_current_calc,
                  #ch_mgr{name=MyName, proj=P_current,
                          consistency_mode=CMode, flap_limit=FlapLimit} = S) ->
     ?REACT(a30),
     %% case length(get(react)) of XX when XX > 500 -> io:format(user, "A30 ~w! ~w: ~P\n", [MyName, XX, get(react), 300]), timer:sleep(500); _ -> ok end,
-    {P_newprop1, S2, Up} = calc_projection(S, MyName),
+    AllHosed = [],
+    {P_newprop1, S2, Up} = calc_projection(S, MyName, AllHosed, P_current_calc),
     ?REACT({a30, ?LINE, [{current, machi_projection:make_summary(S#ch_mgr.proj)}]}),
+    ?REACT({a30, ?LINE, [{calc_current, machi_projection:make_summary(P_current_calc)}]}),
     ?REACT({a30, ?LINE, [{newprop1, machi_projection:make_summary(P_newprop1)}]}),
     ?REACT({a30, ?LINE, [{latest, machi_projection:make_summary(P_latest)}]}),
 
     %% Are we flapping yet?
-    {P_newprop2, S3} = calculate_flaps(P_newprop1, P_latest, P_current, Up,
-                                       FlapLimit, S2),
+    {P_newprop2, S3} = calculate_flaps(P_newprop1, P_latest, P_current_calc,
+                                       Up, FlapLimit, S2),
 
     %% Move the epoch number up ... originally done in C300.
     #projection_v1{epoch_number=Epoch_newprop2}=P_newprop2,
@@ -1238,7 +1242,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                                     {_FLU, {_EpkTime, FlapCount}} <- AFPs]) of
                     [SmallestFC|_] when SmallestFC > ?MINIMUM_ALL_FLAP_LIMIT ->
                         a30_make_inner_projection(
-                          P_current, P_newprop3, P_latest, Up, S3);
+                          P_current_calc, P_newprop3, P_latest, Up, S3);
                     _ ->
                         %% Not everyone is flapping enough.  Or perhaps
                         %% everyone was but we finally saw some new server X
@@ -1257,7 +1261,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
     %% a normal projection: the old proj has an inner but the newprop
     %% does not.
     MoveFromInnerToNorm_p =
-        case {inner_projection_exists(P_current),
+        case {inner_projection_exists(P_current_calc),
               inner_projection_exists(P_newprop11)} of
             {true, false} -> true;
             {_, _}        -> false
@@ -1286,7 +1290,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
 
     %% Remember! P_current is this manager's private in-use projection.
     %% It is always less than or equal to P_latest's epoch!
-    Current_flap_counts = get_all_flap_counts(P_current),
+    Current_flap_counts = get_all_flap_counts(P_current_calc),
     Latest_authors_flap_count_current = proplists:get_value(
                                          Author_latest, Current_flap_counts),
     Latest_flap_counts = get_all_flap_counts(P_latest),
@@ -1299,7 +1303,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                        %% count to zero flap count.  But ... do not kick out
                        %% of our flapping mode locally if we do not have an
                        %% inner projection.
-                       inner_projection_exists(P_current);
+                       inner_projection_exists(P_current_calc);
                    {_, _} ->
                        false
                end,
@@ -1310,7 +1314,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                   {move_from_inner, MoveFromInnerToNorm_p}],
     ?REACT({a30, ?LINE, ClauseInfo}),
     MoveToNorm_p = MoveFromInnerToNorm_p orelse Kicker_p,
-    CurrentHasZerf_p = has_make_zerf_annotation(P_current),
+    CurrentHasZerf_p = has_make_zerf_annotation(P_current_calc),
     if MoveToNorm_p,
        P_newprop11#projection_v1.upi == [],
        CMode == cp_mode ->
@@ -1360,18 +1364,17 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
             %% make_zerf() on our next iteration.
 
             ?REACT({a30, ?LINE, []}),
-            %% Fall back to the none projection as if we're restarting.
             react_to_env_A49(P_latest, [], S10);
        MoveToNorm_p ->
             %% Move from inner projection to outer.
-            P_inner2A = inner_projection_or_self(P_current),
+            P_inner2A = inner_projection_or_self(P_current_calc),
             ResetEpoch = P_newprop11#projection_v1.epoch_number,
-            ResetAuthor = case P_current#projection_v1.upi of
+            ResetAuthor = case P_current_calc#projection_v1.upi of
                               [] ->
                                   %% Drat, fall back to current's author.
-                                  P_current#projection_v1.author_server;
+                                  P_current_calc#projection_v1.author_server;
                               _ ->
-                                  lists:last(P_current#projection_v1.upi)
+                                  lists:last(P_current_calc#projection_v1.upi)
                           end,
             ClauseInfo2 = [{move_from_inner_to_outer, true},
                            {old_author, P_inner2A#projection_v1.author_server},
@@ -1400,8 +1403,11 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
             %% altered significantly.  Use calc_projection() to find out what
             %% nodes are down *now* (as best as we can tell right now).
             {P_o, S_o, _Up2} = calc_projection2(P_inner2B, MyName, [], [], S10),
+            ReactI2 = [{inner2po,machi_projection:make_summary(P_o)}],
+            ?REACT({a30, ?LINE, ReactI2}),
             %% NOTE: We are intentionally clearing flap info by not
             %% carrying it forwarding in the new projection.
+            %% TODO 2015-09-01: revisit clearing flapping state here?
             react_to_env_A40(Retries, P_o, P_latest, LatestUnanimousP, S_o);
        true ->
             ?REACT({a30, ?LINE, []}),
@@ -1410,7 +1416,8 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
     end.
 
 a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
-                          #ch_mgr{name=MyName, consistency_mode=CMode} = S) ->
+                          #ch_mgr{name=MyName, consistency_mode=CMode,
+                                  proj=P_current_real} = S) ->
     AllHosed = get_all_hosed(P_newprop3),
     NewPropDown = if P_newprop3#projection_v1.upi == [] ->
                           %% This is a none proj, don't believe down list
@@ -1465,23 +1472,30 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                 #projection_v1{epoch_number=Epoch_latest_i,
                                upi=UPI_latest_i,
                                repairing=Repairing_latest_i} = P_latest_i,
+                CurrentRealEpochCheck_p =
+                    case inner_projection_exists(P_current_real) of
+                        false ->
+                            %% We're definitely going to suggest making
+                            %% outer->inner transition.
+                            Epoch_latest_i >= P_current_real#projection_v1.epoch_number
+                            andalso
+                            Epoch_latest_i >= P_current#projection_v1.epoch_number;
+                        true ->
+                            true
+                    end,
                 ?REACT({a30, ?LINE, [{epoch_latest_i, Epoch_latest_i},
                                      {upi_latest_i, UPI_latest_i},
+                                     {current_real_epoch_check,
+                                      CurrentRealEpochCheck_p},
+                                     {x1,inner_projection_exists(P_current_real)},
+                                     {x2,Epoch_latest_i},
+                                     {x3,P_current_real#projection_v1.epoch_number},
+                                     {x4,P_current#projection_v1.epoch_number},
                                      {repairing_latest_i,Repairing_latest_i}]}),
                 LatestSameEnough_p =
-                    %% Experiment: With chain length=5, this check is a pain,
-                    %%             e.g. when make_zerf() verifies last
-                    %%             history of [c,d,e] *and no inner*, and now
-                    %%             others have proposed *with an inner* with
-                    %%             [a/witness,d,e] and bigger epoch.  So, the
-                    %%             experiment is that if we choose something
-                    %%             insane here, other steps will figure that
-                    %%             out and do something safe instead.
-                    %%
-                    %% ({UPI_latest_i, Repairing_latest_i} ==
-                    %%      {UPI_current_x, Repairing_current_x})
-                    %% andalso
                     UPI_latest_i /= []          % avoid hasty none proj jump
+                    andalso
+                    CurrentRealEpochCheck_p
                     andalso
                     Epoch_latest_i >= P_current_ios#projection_v1.epoch_number,
                 CurrentHasInner_and_LatestIsDisjoint_p =
@@ -1490,10 +1504,14 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                     ordsets:is_disjoint(
                       ordsets:from_list(UPI_current_x ++ Repairing_current_x),
                       ordsets:from_list(UPI_latest_i ++ Repairing_latest_i)),
+                ?REACT({a30, ?LINE,
+                    [{latest_same_enough,LatestSameEnough_p},
+                      {current_has_inner_p,P_current_has_inner_p},
+                      {current_hialid,CurrentHasInner_and_LatestIsDisjoint_p}]}),
                 if LatestSameEnough_p ->
                         ?REACT({a30, ?LINE, []}),
                         case P_current_has_inner_p andalso
-                            (UPI_current_x /= P_i3#projection_v1.upi orelse
+                           (UPI_current_x /= P_i3#projection_v1.upi orelse
                             Repairing_current_x /= P_i3#projection_v1.repairing)
                         of
                             true ->
@@ -1505,10 +1523,12 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                             false ->
                                 P_latest_i
                             end;
-                   CurrentHasInner_and_LatestIsDisjoint_p ->
+                   CurrentHasInner_and_LatestIsDisjoint_p
+                   andalso
+                   CurrentRealEpochCheck_p ->
                         ?REACT({a30, ?LINE, []}),
                         P_current_ios;
-                    true ->
+                   true ->
                         ?REACT({a30, ?LINE, []}),
                         false
                 end;
@@ -1534,13 +1554,13 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
             {P_newprop4, S_i};
        true ->
             FinalInnerEpoch =
-                case inner_projection_exists(P_current) of
+                case inner_projection_exists(P_current_real) of
                     false ->
                         ?REACT({a30xyzxyz, ?LINE, [P_newprop3#projection_v1.epoch_number]}),
                         FinalCreation = P_newprop3#projection_v1.creation_time,
                         P_newprop3#projection_v1.epoch_number;
                     true ->
-                        P_oldinner = inner_projection_or_self(P_current),
+                        P_oldinner = inner_projection_or_self(P_current_real),
                         ?REACT({a30xyzxyz, ?LINE, [{incrementing_based_on,P_oldinner#projection_v1.epoch_number + 1}]}),
                         FinalCreation = P_newprop3#projection_v1.creation_time,
                         P_oldinner#projection_v1.epoch_number + 1
@@ -1748,16 +1768,26 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
             end
     end.
 
-react_to_env_A49(_P_latest, FinalProps, #ch_mgr{name=MyName,
-                                                proj=P_current} = S) ->
+react_to_env_A49(P_latest, FinalProps, #ch_mgr{consistency_mode=cp_mode,
+                                               name=MyName,
+                                               proj=P_current} = S) ->
     ?REACT(a49),
-    #projection_v1{all_members=All_list,
-                   witnesses=Witness_list,
-                   members_dict=MembersDict} = P_current,
-    #projection_v1{epoch_number=EpochCurrent} = P_current,
-    P_none = make_none_projection(EpochCurrent, MyName, All_list, Witness_list,
-                                  MembersDict),
-    react_to_env_A50(P_none, FinalProps, set_proj(S, P_none)).
+    %% Using the none projection as our new P_current does *not* work:
+    %% if we forget what P_current is, then we risk not being able to
+    %% detect an insane chain transition or else risk a false positive
+    %% insane check.
+    %%
+    %% Instead, we will create an implicit annotation in P_current
+    %% that will force A29 to always use the projection from
+    %% make_zerf() as the basis for our next transition calculations.
+    %% In this wacky case, we break the checksum on P_current so that
+    %% A29's epoch_id comparison will always be unequal and thus
+    %% always trigger make_zerf().
+    Dbg = P_current#projection_v1.dbg,
+    P_current2 = P_current#projection_v1{epoch_csum= <<"broken">>,
+                                         dbg=[{zerf_backstop,true},
+                                              {zerf_in,a49}|Dbg]},
+    react_to_env_A50(P_latest, FinalProps, set_proj(S, P_current2)).
 
 react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
     ?REACT(a50),
@@ -1765,8 +1795,8 @@ react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
                          {latest_epoch, P_latest#projection_v1.epoch_number},
                          {final_props, FinalProps}]}),
     %% if S#ch_mgr.name == c -> io:format(user, "A50: ~w: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
-    %% V = case file:read_file("/tmp/moomoo") of {ok,_} -> true; _ -> false end,
-    %% if V, S#ch_mgr.name == c -> io:format("C110: ~w: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
+    V = case file:read_file("/tmp/moomoo."++atom_to_list(S#ch_mgr.name)) of {ok,_} -> true; _ -> false end,
+    if V -> io:format(user, "A50: ~w: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
     {{no_change, FinalProps, P_current#projection_v1.epoch_number}, S}.
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
@@ -1857,12 +1887,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
             if CMode == ap_mode ->
                     react_to_env_A50(P_latest, FinalProps, S);
                CMode == cp_mode ->
-                    %% Be more harsh, stop iterating by A49 so that when we
-                    %% resume we will have a much small opinion about the
-                    %% world.
-                    %% WHOOPS, doesn't allow convergence in simple cases,
-                    %% needs more work!!!!!!!!!!!!!!!! Monday evening!!!!
-                    %% react_to_env_A49(P_latest, FinalProps, S)
+                    %% Don't use A49, previous experiments failed, check git.
                     react_to_env_A50(P_latest, FinalProps, S)
             end;
 
@@ -1977,7 +2002,7 @@ react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
     Sane = projection_transition_is_sane(P_current, P_latest, MyName),
     QQ_current = lists:flatten(io_lib:format("~w:~w,~w/~w:~w,~w", [P_current#projection_v1.epoch_number, P_current#projection_v1.upi, P_current#projection_v1.repairing, (inner_projection_or_self(P_current))#projection_v1.epoch_number, (inner_projection_or_self(P_current))#projection_v1.upi, (inner_projection_or_self(P_current))#projection_v1.repairing])),
     QQ_latest = lists:flatten(io_lib:format("~w:~w,~w/~w:~w,~w", [P_latest#projection_v1.epoch_number, P_latest#projection_v1.upi, P_latest#projection_v1.repairing, (inner_projection_or_self(P_latest))#projection_v1.epoch_number, (inner_projection_or_self(P_latest))#projection_v1.upi, (inner_projection_or_self(P_latest))#projection_v1.repairing])),
-    if Sane == true -> ok;  true -> ?V("\n~w-insane-~w-auth=~w ~s -> ~s ~w\n    ~p\n", [?LINE, MyName, P_newprop#projection_v1.author_server, QQ_current, QQ_latest, Sane, get(react)]) end,
+    if Sane == true -> ok;  true -> ?V("\n~w-insane-~w-auth=~w ~s -> ~s ~w\n    ~p\n    ~p\n", [?LINE, MyName, P_newprop#projection_v1.author_server, QQ_current, QQ_latest, Sane, get(why2), get(react)]) end,
     Flap_latest = if is_record(Flap_latest0, flap_i) ->
                           Flap_latest0;
                      true ->
@@ -2067,7 +2092,8 @@ react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
             case get({zzz_quiet, P_latest#projection_v1.epoch_number}) of undefined -> ?V("YOYO-cp-mode,~w,current=~w,",[MyName, machi_projection:make_summary((S#ch_mgr.proj))]); _ -> ok end,
             put({zzz_quiet, P_latest#projection_v1.epoch_number}, true),
             react_to_env_A49(P_latest, [], S2);
-        N when N > ?TOO_FREQUENT_BREAKER ->
+        N when CMode == ap_mode,
+               N > ?TOO_FREQUENT_BREAKER ->
             ?V("\n\nYOYO ~w breaking the cycle of:\n  current: ~w\n  new    : ~w\n", [MyName, machi_projection:make_summary(S#ch_mgr.proj), machi_projection:make_summary(P_latest)]),
             ?REACT({c100, ?LINE, [{not_sanes_author_count, N}]}),
             react_to_env_C103(P_newprop, P_latest, S2);
@@ -2200,6 +2226,8 @@ react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H,
 io:format(user, "\nCONFIRM debug C120 ~w was annotated ~W outer ~w\n", [S#ch_mgr.name, (inner_projection_or_self(P_latest))#projection_v1.epoch_number, 5, P_latest#projection_v1.epoch_number]),
                  S2#ch_mgr{proj_unanimous=ConfTime}
          end,
+    V = case file:read_file("/tmp/moomoo."++atom_to_list(S#ch_mgr.name)) of {ok,_} -> true; _ -> false end,
+    if V -> io:format("C120: ~w: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
     {{now_using, FinalProps, P_latest#projection_v1.epoch_number}, S3}.
 
 add_and_trunc_history(P_latest, H, MaxLength) ->
@@ -2592,6 +2620,7 @@ projection_transition_is_sane(P1, P2, RelativeToServer) ->
 projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
     put(myname, RelativeToServer),
     put(why2, []),
+    CMode = P2#projection_v1.mode,
     HasInner1 = inner_projection_exists(P1),
     HasInner2 = inner_projection_exists(P2),
     Inner1 = inner_projection_or_self(P1),
@@ -2621,7 +2650,8 @@ projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
                                                                ?RETURN2(true))
             end;
         Else ->
-            if HasInner1 and (not HasInner2) ->
+            if CMode == cp_mode,
+               HasInner1 and (not HasInner2) ->
                     %% OK, imagine that we used to be flapping but now we've
                     %% stopped flapping.
                     %%
@@ -2644,6 +2674,34 @@ projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
                        projection_transition_is_sane_final_review(P1, P2,
                            projection_transition_is_sane_with_si_epoch(
                             Inner1, P2, RelativeToServer, RetrospectiveP)));
+               CMode == cp_mode,
+               (not HasInner1) and HasInner2 ->
+                    %% OK, imagine that we are entering flapping mode.
+                    %%
+                    %% P1 = outer = upi=[a,d,e],repairing=[c] epoch 298
+                    %%      inner = undefined
+                    %% to
+                    %% P2 = outer = upi=[d,e,c],repairing=[]  epoch 684
+                    %%      inner = upi=[a,d,e],repairing=[c]  epoch 163
+                    %%
+                    %% We have been unstable for a long time: 684-298 is a
+                    %% lot of churn.  Our internal sense of what the outer
+                    %% projection should look like is screwed up.  Someone
+                    %% thinks that there was a repair of c that finished in
+                    %% the outer projection, during the churn between 298 and
+                    %% 684, but we didn't adopt that change to the change.
+                    %% Perhaps we were asleep?
+                    %%
+                    %% Based on our last view of the world at 298, we are
+                    %% keeping that same view *and* we've decided to start
+                    %% flapping, hence the inner projection.  Make certain
+                    %% that that transition is ok relative to ourself, and
+                    %% let the other safety checks built into humming
+                    %% consensus & CP mode management take care of the rest.
+                    ?RETURN2(
+                       projection_transition_is_sane_final_review(P1, P2,
+                           projection_transition_is_sane_with_si_epoch(
+                            P1, Inner2, RelativeToServer, RetrospectiveP)));
                true ->
                     ?RETURN2(Else)
             end
@@ -2696,7 +2754,7 @@ projection_transition_is_sane_final_review(
   #projection_v1{mode=cp_mode, upi=UPI2, witnesses=Witness_list}=_P2,
   true) ->
     %% All earlier sanity checks has said that this transition is sane, but
-    %% we also need to make certain that any CP mode transition preserves at
+    %% we also need to make certain that any CP mode transition preserves at 
     %% least one non-witness server in the UPI list.  Earlier checks have
     %% verified that the ordering of the FLUs within the UPI list is ok.
     UPI1_s = ordsets:from_list(UPI1 -- Witness_list),
@@ -2707,6 +2765,20 @@ projection_transition_is_sane_final_review(
                    {upi1_s,UPI1}, {upi2_s,UPI2}]}),
     case proplists:get_value(zerf_backstop, P1_dbg) of
         true when UPI1 == [] ->
+            %% CAUTION, this is a dangerous case.  If the old projection, P1,
+            %% has a 'zerf_backstop' annotation, then when this function
+            %% returns true, we are (in effect) saying, "We trust you."  What
+            %% if we called make_zerf() a year ago because we took a 1 year
+            %% nap??  How can we trust this?
+            %%
+            %% The answer is: this is not our last safety enforcement for CP
+            %% mode, fortunately.  We are going from the none projection to a
+            %% quorum majority projection, *and* we will not unwedge ourself
+            %% until we can verify that all UPI members of the chain are
+            %% unanimous for this epoch.  So if we took a 1 year nap already,
+            %% or if we take a one year right now and delay writing our
+            %% private projection for 1 year, then if we disagree with the
+            %% quorum majority, we simply won't be able to unwedge.
             ?RETURN2(true);
         _ when UPI2 == [] ->
             %% We're down to the none projection to wedge ourself.  That's ok.
@@ -3257,7 +3329,8 @@ simple_chain_state_transition_is_sane(_Author1, UPI1, Repair1, Author2, UPI2) ->
                     author1,_Author1, upi1,UPI1, repair1,Repair1,
                     author2,Author2, upi2,UPI2,
                     keepsdels,KeepsDels, orders,Orders, numKeeps,NumKeeps,
-                    numOrders,NumOrders, answer1,Answer1}]}),
+                    numOrders,NumOrders, answer1,Answer1},
+                   {why2, get(why2)}]}),
     if not Answer1 ->
             ?RETURN2(Answer1);
        true ->
@@ -3558,8 +3631,6 @@ diversion_c120_verbose_goop2(P_latest0, S) ->
     end.
 
 perhaps_verbose_c110(P_latest2, S) ->
-    %% V = case file:read_file("/tmp/moomoo") of {ok,_} -> true; _ -> false end,
-    %% if V, S#ch_mgr.name == c -> io:format("C110: ~w: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
         true ->
             {_,_,C} = os:timestamp(),
