@@ -151,6 +151,7 @@ t(N, MgrOpts) ->
     convergence_demo_testfun(N, MgrOpts).
 
 convergence_demo_testfun(NumFLUs, MgrOpts0) ->
+      os:cmd("rm -f /tmp/moomoo.*"),
     timer:sleep(100),
     %% Faster test startup, commented: io:format(user, short_doc(), []),
     %% Faster test startup, commented: timer:sleep(3000),
@@ -255,6 +256,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
       PartitionCounts = lists:zip(AllPs, lists:seq(1, length(AllPs))),
       MaxIters = NumFLUs * (NumFLUs + 1) * 6,
       [begin
+%% if Partition == [] -> os:cmd("touch /tmp/moomoo.a /tmp/moomoo.b /tmp/moomoo.c /tmp/moomoo.d /tmp/moomoo.e"); true -> ok end,
            machi_partition_simulator:always_these_partitions(Partition),
            io:format(user, "\nSET partitions = ~w (~w of ~w) at ~w\n",
                      [Partition, Count, length(AllPs), time()]),
@@ -265,7 +267,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                             %% Run a few iterations
                             [DoIt(10, 10, 50) || _ <- lists:seq(1, 6)],
                             %% If stable, return true to short circuit remaining
-                            private_projections_are_stable(Namez, DoIt)
+                            private_projections_are_stable(Namez, DoIt, Partition)
                     end, false, lists:seq(0, MaxIters)),
            io:format(user, "\nSweet, private projections are stable\n", []),
            io:format(user, "\t~P\n", [get(stable), 14]),
@@ -320,7 +322,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
       io:format(user, "We should see convergence to 1 correct chain.\n", []),
       machi_partition_simulator:no_partitions(),
       [DoIt(50, 10, 50) || _ <- [1,2,3]],
-      true = private_projections_are_stable(Namez, DoIt),
+      true = private_projections_are_stable(Namez, DoIt, []),
       io:format(user, "~s\n", [os:cmd("date")]),
 
       %% We are stable now ... analyze it.
@@ -378,32 +380,36 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
 %% Uncomment *one* of the following make_partition_list() bodies.
 
 make_partition_list(All_list) ->
-    [
-     [{b,c}],
-     [{a,c},{b,c}]
-     %% [{b,c}],
-     %% [],
-     %% [{c,d}],
-     %% [],
-     %% [{d,e}],
-     %% [],
-     %% [{c,e}]
-    ].
+    %% [
+    %%  [{b,c}],
+    %%  [],
+    %%  [{b,c}],
+    %%  [{a,c},{b,c}],
+    %%  [{b,c}],
+    %%  [],
+    %%  [{c,d}],
+    %%  [],
+    %%  [{d,e}],
+    %%  [],
+    %%  [{c,e}]
+    %% ].
+    %% [ [{d,c}],
+    %%   [{b,c}] ].
 
-    %% _X_Ys1 = [[{X,Y}] || X <- All_list, Y <- All_list, X /= Y],
-    %% _X_Ys2 = [[{X,Y}, {A,B}] || X <- All_list, Y <- All_list, X /= Y,
-    %%                             A <- All_list, B <- All_list, A /= B,
-    %%                             X /= A],
-    %% _X_Ys3 = [[{X,Y}, {A,B}, {C,D}] || X <- All_list, Y <- All_list, X /= Y,
-    %%                                    A <- All_list, B <- All_list, A /= B,
-    %%                                    C <- All_list, D <- All_list, C /= D,
-    %%                                    X /= A, X /= C, A /= C],
-    %% Concat = _X_Ys1,
-    %% %% Concat = _X_Ys2,
-    %% %% Concat = _X_Ys1 ++ _X_Ys2,
-    %% %% %% Concat = _X_Ys3,
-    %% %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
-    %% random_sort(lists:usort([lists:sort(L) || L <- Concat])).
+    _X_Ys1 = [[{X,Y}] || X <- All_list, Y <- All_list, X /= Y],
+    _X_Ys2 = [[{X,Y}, {A,B}] || X <- All_list, Y <- All_list, X /= Y,
+                                A <- All_list, B <- All_list, A /= B,
+                                X /= A],
+    _X_Ys3 = [[{X,Y}, {A,B}, {C,D}] || X <- All_list, Y <- All_list, X /= Y,
+                                       A <- All_list, B <- All_list, A /= B,
+                                       C <- All_list, D <- All_list, C /= D,
+                                       X /= A, X /= C, A /= C],
+    Concat = _X_Ys1,
+    %% Concat = _X_Ys2,
+    %% Concat = _X_Ys1 ++ _X_Ys2,
+    %% %% Concat = _X_Ys3,
+    %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
+    random_sort(lists:usort([lists:sort(L) || L <- Concat])).
 
     %% [
     %%  [{b,c}],
@@ -551,7 +557,7 @@ todo_why_does_this_crash_sometimes(FLUName, FLU, PPPepoch) ->
             ?FLU_PC:read_projection(FLU, public, PPPepoch)
     end.
 
-private_projections_are_stable(Namez, PollFunc) ->
+private_projections_are_stable(Namez, PollFunc, Partition) ->
     FilterNoneProj = fun({_EpochID,[],[],_Dn,_W,InnerP}) -> false;
                         (_)                              -> true
                      end,
@@ -583,7 +589,7 @@ private_projections_are_stable(Namez, PollFunc) ->
     FLU_uses = [{Name, EpochID} ||
                    {Name,{EpochID,_UPI,Rep,_Dn,_W,InnerP}} <- Private2],
     Witnesses = hd([Ws ||
-                   {_Name,{_EpochID,_UPI,Rep,_Dn,Ws,InnerP}} <- Private2]),
+                   {_Name,{_EpochID,_UPI,Rep,_Dn,Ws,InnerP}} <- Private2x]),
     HaveWitnesses_p = Witnesses /= [],
     CMode = if HaveWitnesses_p -> cp_mode;
                true            -> ap_mode
@@ -644,6 +650,10 @@ private_projections_are_stable(Namez, PollFunc) ->
                         %% then we're OK.
                         Private2None = [X || {_,{_,[],[],_,_,_}}=X <- Private2],
                         length(Private2None) >= FullMajority;
+                    [] when Partition /= [] ->
+                        %% Everyone is stuck in the none projection because
+                        %% The current partition situation is bad enough.
+                        true;
                     Else ->
                         %% This is bad: we have a count that's less than
                         %% FullMajority but greater than 1.
@@ -653,7 +663,7 @@ private_projections_are_stable(Namez, PollFunc) ->
                 true
         end,
 
-    io:format(user, "\nPriv1 ~p\nPriv2 ~p\n1==2 ~w ap_disjoint ~w u_all_peers ~w cp_mode_agree ~w\n", [lists:sort(Private1), lists:sort(Private2), Private1 == Private2, AP_mode_disjoint_test_p, Unanimous_with_all_peers_p, CP_mode_agree_test_p]),
+    io:format(user, "\nPriv1x ~p\nPriv2x ~p\n1==2 ~w ap_disjoint ~w u_all_peers ~w cp_mode_agree ~w\n", [lists:sort(Private1x), lists:sort(Private2x), Private1 == Private2, AP_mode_disjoint_test_p, Unanimous_with_all_peers_p, CP_mode_agree_test_p]),
     Private1 == Private2 andalso
         AP_mode_disjoint_test_p andalso
         (
