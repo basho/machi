@@ -1415,9 +1415,9 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, P_current_calc,
                              LatestUnanimousP, S10)
     end.
 
-a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
+a30_make_inner_projection(P_current_calc, P_newprop3, P_latest, Up,
                           #ch_mgr{name=MyName, consistency_mode=CMode,
-                                  proj=P_current_real} = S) ->
+                                  proj=P_current} = S) ->
     AllHosed = get_all_hosed(P_newprop3),
     NewPropDown = if P_newprop3#projection_v1.upi == [] ->
                           %% This is a none proj, don't believe down list
@@ -1425,17 +1425,17 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                      true ->
                           P_newprop3#projection_v1.down
                   end,
-    P_current_has_inner_p = inner_projection_exists(P_current),
-    P_current_ios = inner_projection_or_self(P_current),
     AllHosed_and_Down = lists:usort(AllHosed ++ NewPropDown),
-    {P_i1, S_i, _Up} = calc_projection2(P_current_ios,
+    P_current_has_inner_p = inner_projection_exists(P_current),
+    P_current_calc_ios = inner_projection_or_self(P_current_calc),
+    {P_i1, S_i, _Up} = calc_projection2(P_current_calc_ios,
                                         MyName, AllHosed_and_Down, [], S),
     ?REACT({a30, ?LINE, [{raw_all_hosed,get_all_hosed(P_newprop3)},
                          {up, Up},
                          {all_hosed, AllHosed},
                          {new_prop_down, NewPropDown},
                          {all_hosed_and_down, AllHosed_and_Down},
-                         {p_c_i, machi_projection:make_summary(P_current_ios)},
+                         {p_c_i, machi_projection:make_summary(P_current_calc_ios)},
                          {p_i1, machi_projection:make_summary(P_i1)}]}),
     %% The inner projection will have a fake author, which
     %% everyone will agree is the largest UPI member's
@@ -1462,105 +1462,87 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                      down=P_i2#projection_v1.all_members
                      -- [MyName]}
            end,
-    HasCompatibleInner =
+    %% Alright, here's an experiment at the end of a weary stretch of work on
+    %% this branch.  We may want to use the inner projection from P_latest
+    %% because we have a general desire to avoid flapping the inner proj, duh,
+    %% the inner proj is supposed to be stable-almost-all-of-the-time.  So, if
+    %% someone else's P_latest has the same UPI+repairing as our new inner
+    %% proposal, P_i3, and if the epoch numbers are suitably
+    %% same-or-increasing, then we'll use P_latest instead.
+    LatestHasCompatibleInner =
         case inner_projection_exists(P_latest) of
             true ->
+                P_current_ios = inner_projection_or_self(P_current),
                 P_latest_i = inner_projection_or_self(P_latest),
-                #projection_v1{epoch_number=___Epoch_current_x,
-                               upi=UPI_current_x,
-                               repairing=Repairing_current_x} = P_current_ios,
                 #projection_v1{epoch_number=Epoch_latest_i,
                                upi=UPI_latest_i,
                                repairing=Repairing_latest_i} = P_latest_i,
-                CurrentRealEpochCheck_p =
-                    case inner_projection_exists(P_current_real) of
-                        false ->
-                            %% We're definitely going to suggest making
-                            %% outer->inner transition.
-                            Epoch_latest_i >= P_current_real#projection_v1.epoch_number
-                            andalso
-                            Epoch_latest_i >= P_current#projection_v1.epoch_number;
-                        true ->
-                            true
-                    end,
-                ?REACT({a30, ?LINE, [{epoch_latest_i, Epoch_latest_i},
-                                     {upi_latest_i, UPI_latest_i},
-                                     {current_real_epoch_check,
-                                      CurrentRealEpochCheck_p},
-                                     {x1,inner_projection_exists(P_current_real)},
-                                     {x2,Epoch_latest_i},
-                                     {x3,P_current_real#projection_v1.epoch_number},
-                                     {x4,P_current#projection_v1.epoch_number},
-                                     {repairing_latest_i,Repairing_latest_i}]}),
-                LatestSameEnough_p =
+                #projection_v1{epoch_number=Epoch_current_x,
+                           upi=UPI_current_x,
+                           repairing=Repairing_current_x} = P_current_ios,
+                CurrentMaxEpoch = P_current_ios#projection_v1.epoch_number,
+                ?REACT({a30, ?LINE, [{epoch_latest_i,Epoch_latest_i},
+                                     {upi_latest_i,UPI_latest_i},
+                                     {repairing_latest_i,Repairing_latest_i},
+                                     {current_max_epoch,CurrentMaxEpoch}]}),
+                LatestIsExactPlus_p =
+                    Epoch_latest_i >= CurrentMaxEpoch
+                    andalso
                     UPI_latest_i /= []          % avoid hasty none proj jump
                     andalso
-                    CurrentRealEpochCheck_p
+                    UPI_latest_i == UPI_current_x
                     andalso
-                    Epoch_latest_i >= P_current_ios#projection_v1.epoch_number,
-                CurrentHasInner_and_LatestIsDisjoint_p =
+                    Repairing_latest_i == Repairing_current_x,
+                CurrentHasInner_and_LatestIsNotNone_p =
+                    Epoch_latest_i >= CurrentMaxEpoch
+                    andalso
                     P_current_has_inner_p
                     andalso
-                    ordsets:is_disjoint(
-                      ordsets:from_list(UPI_current_x ++ Repairing_current_x),
-                      ordsets:from_list(UPI_latest_i ++ Repairing_latest_i)),
+                    UPI_current_x == [] andalso UPI_latest_i /= [],
                 ?REACT({a30, ?LINE,
-                    [{latest_same_enough,LatestSameEnough_p},
-                      {current_has_inner_p,P_current_has_inner_p},
-                      {current_hialid,CurrentHasInner_and_LatestIsDisjoint_p}]}),
-                if LatestSameEnough_p ->
+                   [{latest_is_exact_plus,LatestIsExactPlus_p},
+                     {current_has_inner_p,P_current_has_inner_p},
+                     {current_hialinn,CurrentHasInner_and_LatestIsNotNone_p}]}),
+                if LatestIsExactPlus_p
+                   orelse
+                   CurrentHasInner_and_LatestIsNotNone_p ->
                         ?REACT({a30, ?LINE, []}),
-                        case P_current_has_inner_p andalso
-                           (UPI_current_x /= P_i3#projection_v1.upi orelse
-                            Repairing_current_x /= P_i3#projection_v1.repairing)
-                        of
-                            true ->
-                                %% Current proj is inner *and* our new
-                                %% proposed inner proj differs substantially
-                                %% from the current.  Don't use latest or
-                                %% current.
-                                false;
-                            false ->
-                                P_latest_i
-                            end;
-                   CurrentHasInner_and_LatestIsDisjoint_p
-                   andalso
-                   CurrentRealEpochCheck_p ->
-                        ?REACT({a30, ?LINE, []}),
-                        P_current_ios;
+                        P_latest_i;
                    true ->
                         ?REACT({a30, ?LINE, []}),
                         false
                 end;
             false ->
-                #projection_v1{upi=UPI_i3,
-                               repairing=Repairing_i3} = P_i3,
-                if P_current_has_inner_p,
-                   UPI_i3 == P_current_ios#projection_v1.upi,
-                   Repairing_i3 == P_current_ios#projection_v1.repairing ->
-                        ?REACT({a30, ?LINE, []}),
-                        P_current_ios;
-                    true ->
-                        ?REACT({a30, ?LINE, []}),
-                        false
-                end
+                false
+                %% #projection_v1{upi=UPI_i3,
+                %%                repairing=Repairing_i3} = P_i3,
+                %% if P_current_has_inner_p,
+                %%    UPI_i3 == P_current_calc_ios#projection_v1.upi,
+                %%    Repairing_i3 == P_current_calc_ios#projection_v1.repairing ->
+                %%         ?REACT({a30, ?LINE, []}),
+                %%         P_current_calc_ios;
+                %%     true ->
+                %%         ?REACT({a30, ?LINE, []}),
+                %%         false
+                %% end
         end,
-    if HasCompatibleInner /= false ->
+    if LatestHasCompatibleInner /= false ->
             ?REACT({a30, ?LINE,
-                    [{inner_summary,
-                      machi_projection:make_summary(HasCompatibleInner)}]}),
+                  [{latest_has_compatible_inner,true},
+                   {inner_summary,
+                    machi_projection:make_summary(LatestHasCompatibleInner)}]}),
             P_newprop4 = machi_projection:update_checksum(
-                           P_newprop3#projection_v1{inner=HasCompatibleInner}),
+                      P_newprop3#projection_v1{inner=LatestHasCompatibleInner}),
             {P_newprop4, S_i};
        true ->
             FinalInnerEpoch =
-                case inner_projection_exists(P_current_real) of
+                case inner_projection_exists(P_current) of
                     false ->
                         ?REACT({a30xyzxyz, ?LINE, [P_newprop3#projection_v1.epoch_number]}),
                         FinalCreation = P_newprop3#projection_v1.creation_time,
                         P_newprop3#projection_v1.epoch_number;
                     true ->
-                        P_oldinner = inner_projection_or_self(P_current_real),
+                        P_oldinner = inner_projection_or_self(P_current),
                         ?REACT({a30xyzxyz, ?LINE, [{incrementing_based_on,P_oldinner#projection_v1.epoch_number + 1}]}),
                         FinalCreation = P_newprop3#projection_v1.creation_time,
                         P_oldinner#projection_v1.epoch_number + 1
@@ -2635,19 +2617,21 @@ projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
                        %% Thus, we call the function that does not check for
                        %% a strictly-increasing epoch.
                        ?RETURN2(
-                         projection_transition_is_sane_final_review(P1, P2,
+                         projection_transition_is_sane_final_review(
+                           P1, P2, RelativeToServer,
                            projection_transition_is_sane_except_si_epoch(
                             Inner1, Inner2, RelativeToServer, RetrospectiveP)));
                    true ->
                        exit(delete_this_inner_clause_impossible_with_two_identical_nested_if_clauses),
                        ?RETURN2(
-                         projection_transition_is_sane_final_review(P1, P2,
+                         projection_transition_is_sane_final_review(
+                           P1, P2, RelativeToServer,
                            projection_transition_is_sane_with_si_epoch(
                             Inner1, Inner2, RelativeToServer, RetrospectiveP)))
                     end;
                true ->
-                    projection_transition_is_sane_final_review(P1, P2,
-                                                               ?RETURN2(true))
+                    projection_transition_is_sane_final_review(
+                      P1, P2, RelativeToServer, ?RETURN2(true))
             end;
         Else ->
             if CMode == cp_mode,
@@ -2671,9 +2655,10 @@ projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
                     %%
                     %% Verify this Inner1->P2 transition, including SI epoch
                     ?RETURN2(
-                       projection_transition_is_sane_final_review(P1, P2,
-                           projection_transition_is_sane_with_si_epoch(
-                            Inner1, P2, RelativeToServer, RetrospectiveP)));
+                       projection_transition_is_sane_final_review(
+                         P1, P2, RelativeToServer,
+                         projection_transition_is_sane_with_si_epoch(
+                           Inner1, P2, RelativeToServer, RetrospectiveP)));
                CMode == cp_mode,
                (not HasInner1) and HasInner2 ->
                     %% OK, imagine that we are entering flapping mode.
@@ -2699,16 +2684,17 @@ projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
                     %% let the other safety checks built into humming
                     %% consensus & CP mode management take care of the rest.
                     ?RETURN2(
-                       projection_transition_is_sane_final_review(P1, P2,
-                           projection_transition_is_sane_with_si_epoch(
-                            P1, Inner2, RelativeToServer, RetrospectiveP)));
+                       projection_transition_is_sane_final_review(
+                         P1, P2, RelativeToServer,
+                         projection_transition_is_sane_with_si_epoch(
+                           P1, Inner2, RelativeToServer, RetrospectiveP)));
                true ->
                     ?RETURN2(Else)
             end
     end.
 
 projection_transition_is_sane_final_review(
-  P1, P2, {expected_author2,UPI1_tail,_}=Else) ->
+  P1, P2, _RelativeToServer, {expected_author2,UPI1_tail,_}=Else) ->
     %% Reminder: P1 & P2 are outer projections
     %%
     %% We have a small problem for state transition sanity checking in the
@@ -2747,12 +2733,12 @@ projection_transition_is_sane_final_review(
 projection_transition_is_sane_final_review(
   #projection_v1{mode=CMode1}=_P1,
   #projection_v1{mode=CMode2}=_P2,
-  _) when CMode1 /= CMode2 ->
+  _RelativeToServer, _) when CMode1 /= CMode2 ->
     {wtf, cmode1, CMode1, cmode2, CMode2};
 projection_transition_is_sane_final_review(
   #projection_v1{mode=cp_mode, upi=UPI1, dbg=P1_dbg}=_P1,
   #projection_v1{mode=cp_mode, upi=UPI2, witnesses=Witness_list}=_P2,
-  true) ->
+  _RelativeToServer, true) ->
     %% All earlier sanity checks has said that this transition is sane, but
     %% we also need to make certain that any CP mode transition preserves at 
     %% least one non-witness server in the UPI list.  Earlier checks have
@@ -2784,10 +2770,27 @@ projection_transition_is_sane_final_review(
             %% We're down to the none projection to wedge ourself.  That's ok.
             ?RETURN2(true);
         _ ->
-            ?RETURN2(not ordsets:is_disjoint(UPI1_s, UPI2_s))
+            %% TODO Review: I think this disjoint test is no longer relevant?
+            %% ?RETURN2(not ordsets:is_disjoint(UPI1_s, UPI2_s))
+            ?RETURN2(true)
     end;
-projection_transition_is_sane_final_review(_P1, _P2, Else) ->
-    ?RETURN2(Else).
+projection_transition_is_sane_final_review(P1, P2, RelativeToServer, Else) ->
+    #projection_v1{upi=UPI_ios1} = inner_projection_or_self(P1),
+    #projection_v1{mode=CMode,
+                   upi=UPI_ios2} = inner_projection_or_self(P2),
+    RelativeToServer_NotInvolved_p =
+        not lists:member(RelativeToServer, UPI_ios1 ++ UPI_ios2),
+    if CMode == cp_mode, Else == false, RelativeToServer_NotInvolved_p ->
+            %% We're in CP mode, 'false' means that we didn't fail a basic
+            %% sanity test but instead failed a chain ordering test, and we
+            %% were not involved any part of the chain.  This probably means
+            %% that we were in a minority partition during flapping, and now
+            %% that the partition is healed, we are now trying to catch up to
+            %% the state of the world.
+            ?RETURN2(true);
+       true ->
+            ?RETURN2(Else)
+    end.
 
 %% @doc Check if a projection transition is sane &amp; safe with a
 %%      strictly increasing epoch number.
