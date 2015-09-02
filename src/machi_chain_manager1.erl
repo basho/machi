@@ -1343,11 +1343,9 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, P_current_calc,
             if P_latest#projection_v1.author_server == MyName,
                P_latest#projection_v1.upi == [] ->
                     ?REACT({a30, ?LINE, []}),
-                    io:format(user, "CONFIRM debug A30->C100 by ~w\n",[MyName]),
                     react_to_env_C100(P_newprop12, P_latest, S);
                true ->
                     ?REACT({a30, ?LINE, []}),
-                    io:format(user, "CONFIRM debug A30->C300 by ~w\n",[MyName]),
                     react_to_env_C300(P_newprop12, P_latest, S)
             end;
        MoveToNorm_p,
@@ -2126,7 +2124,6 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName, proj=P_current,
                                  inner_projection_or_self(P_latest)),
                      UnanimousTime = ProjUnanimous,
                      A = make_annotation(EpochID, UnanimousTime),
-                     io:format(user, "\nCONFIRM debug C110 ~w annotates ~W outer ~w\n", [MyName, EpochID, 5, P_latest#projection_v1.epoch_number]),
                      [A, {annotated_by,c110}];
                  false ->
                      []
@@ -2205,7 +2202,6 @@ react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H,
              false ->
                  S2;
              {{_ConfEpoch, _ConfCSum}, ConfTime} ->
-io:format(user, "\nCONFIRM debug C120 ~w was annotated ~W outer ~w\n", [S#ch_mgr.name, (inner_projection_or_self(P_latest))#projection_v1.epoch_number, 5, P_latest#projection_v1.epoch_number]),
                  S2#ch_mgr{proj_unanimous=ConfTime}
          end,
     V = case file:read_file("/tmp/moomoo."++atom_to_list(S#ch_mgr.name)) of {ok,_} -> true; _ -> false end,
@@ -3721,11 +3717,17 @@ make_annotation(EpochID, Time) ->
 is_annotated(#projection_v1{dbg2=Dbg2}) ->
     proplists:get_value(private_proj_is_upi_unanimous, Dbg2, false).
 
-make_basic_comparison_stable(P) ->
-    P#projection_v1{creation_time=undefined,
+make_basic_comparison_stable(#projection_v1{inner=Inner} = P) ->
+    P#projection_v1{epoch_csum= <<"stable">>,
+                    creation_time=undefined,
                     flap=undefined,
                     dbg=[],
                     dbg2=[],
+                    %% inner=if Inner == undefined ->
+                    %%               Inner;
+                    %%          true ->
+                    %%               make_basic_comparison_stable(Inner)
+                    %%       end,
                     members_dict=[]}.
 
 has_make_zerf_annotation(P) ->
