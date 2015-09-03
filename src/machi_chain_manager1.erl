@@ -1352,10 +1352,10 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, P_current_calc,
             if P_latest#projection_v1.author_server == MyName,
                P_latest#projection_v1.upi == [] ->
                     ?REACT({a30, ?LINE, []}),
-                    react_to_env_C100(P_newprop12, P_latest, S);
+                    react_to_env_C100(P_newprop12, P_latest, S10);
                true ->
                     ?REACT({a30, ?LINE, []}),
-                    react_to_env_C300(P_newprop12, P_latest, S)
+                    react_to_env_C300(P_newprop12, P_latest, S10)
             end;
        MoveToNorm_p,
        CMode == cp_mode,
@@ -1479,20 +1479,33 @@ a30_make_inner_projection(P_current_calc, P_newprop3, P_latest, Up,
     LatestHasCompatibleInner =
         case inner_projection_exists(P_latest) of
             true ->
+                P_i3_ios = inner_projection_or_self(P_i3),
                 P_current_ios = inner_projection_or_self(P_current),
                 P_latest_i = inner_projection_or_self(P_latest),
                 #projection_v1{epoch_number=Epoch_latest_i,
                                upi=UPI_latest_i,
                                repairing=Repairing_latest_i} = P_latest_i,
+                #projection_v1{epoch_number=Epoch_i3_x,
+                               upi=UPI_i3_x,
+                               repairing=Repairing_i3_x} = P_i3_ios,
                 #projection_v1{epoch_number=Epoch_current_x,
-                           upi=UPI_current_x,
-                           repairing=Repairing_current_x} = P_current_ios,
+                               upi=UPI_current_x,
+                               repairing=Repairing_current_x} = P_current_ios,
+                I3MaxEpoch = P_i3_ios#projection_v1.epoch_number,
                 CurrentMaxEpoch = P_current_ios#projection_v1.epoch_number,
                 ?REACT({a30, ?LINE, [{epoch_latest_i,Epoch_latest_i},
                                      {upi_latest_i,UPI_latest_i},
                                      {repairing_latest_i,Repairing_latest_i},
-                                     {current_max_epoch,CurrentMaxEpoch}]}),
-                LatestIsExactPlus_p =
+                                     {p_i3_max_epoch,I3MaxEpoch}]}),
+                I3_vs_LatestIsExactPlus_p =
+                    Epoch_latest_i >= I3MaxEpoch
+                    andalso
+                    UPI_latest_i /= []          % avoid hasty none proj jump
+                    andalso
+                    UPI_latest_i == UPI_i3_x
+                    andalso
+                    Repairing_latest_i == Repairing_i3_x,
+                Current_vs_LatestIsExactPlus_p =
                     Epoch_latest_i >= CurrentMaxEpoch
                     andalso
                     UPI_latest_i /= []          % avoid hasty none proj jump
@@ -1500,19 +1513,19 @@ a30_make_inner_projection(P_current_calc, P_newprop3, P_latest, Up,
                     UPI_latest_i == UPI_current_x
                     andalso
                     Repairing_latest_i == Repairing_current_x,
-                CurrentHasInner_and_LatestIsNotNone_p =
-                    Epoch_latest_i >= CurrentMaxEpoch
+                CurrentHasInner_CurrentIsNone_LatestIsNotNone_p =
+                    Epoch_latest_i >= I3MaxEpoch
                     andalso
                     P_current_has_inner_p
                     andalso
-                    UPI_current_x == [] andalso UPI_latest_i /= [],
+                    UPI_i3_x == [] andalso UPI_latest_i /= [],
                 ?REACT({a30, ?LINE,
-                   [{latest_is_exact_plus,LatestIsExactPlus_p},
+                   [{latest_is_exact_plus,I3_vs_LatestIsExactPlus_p},
                      {current_has_inner_p,P_current_has_inner_p},
-                     {current_hialinn,CurrentHasInner_and_LatestIsNotNone_p}]}),
-                if LatestIsExactPlus_p
+                     {current_hialinn,CurrentHasInner_CurrentIsNone_LatestIsNotNone_p}]}),
+                if I3_vs_LatestIsExactPlus_p
                    orelse
-                   CurrentHasInner_and_LatestIsNotNone_p ->
+                   CurrentHasInner_CurrentIsNone_LatestIsNotNone_p ->
                         ?REACT({a30, ?LINE, []}),
                         P_latest_i;
                    true ->
@@ -1520,18 +1533,8 @@ a30_make_inner_projection(P_current_calc, P_newprop3, P_latest, Up,
                         false
                 end;
             false ->
+                ?REACT({a30, ?LINE, []}),
                 false
-                %% #projection_v1{upi=UPI_i3,
-                %%                repairing=Repairing_i3} = P_i3,
-                %% if P_current_has_inner_p,
-                %%    UPI_i3 == P_current_calc_ios#projection_v1.upi,
-                %%    Repairing_i3 == P_current_calc_ios#projection_v1.repairing ->
-                %%         ?REACT({a30, ?LINE, []}),
-                %%         P_current_calc_ios;
-                %%     true ->
-                %%         ?REACT({a30, ?LINE, []}),
-                %%         false
-                %% end
         end,
     if LatestHasCompatibleInner /= false ->
             ?REACT({a30, ?LINE,
