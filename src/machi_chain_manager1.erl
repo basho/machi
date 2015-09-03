@@ -1166,8 +1166,17 @@ react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra,
         machi_projection:get_epoch_id(P_current),
     #projection_v1{author_server=Author_latest} = P_latest,
     {Epoch_latest,_} = EpochID_latest = machi_projection:get_epoch_id(P_latest),
-    Trigger = if CMode == cp_mode, EpochID_latest /= EpochID_current ->
-                      true;
+    P_current_ios = inner_projection_or_self(P_current),
+    Trigger = if CMode == cp_mode ->
+                      if EpochID_latest /= EpochID_current ->
+                              true;
+                         P_current#projection_v1.upi == [] ->
+                              true;
+                         P_current_ios#projection_v1.upi == [] ->
+                              true;
+                         true ->
+                              false
+                      end;
                  true ->
                       false
               end,
@@ -1198,7 +1207,7 @@ react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra,
                                        flap=P_current#projection_v1.flap,
                                        dbg=[{zerf_backstop,true}|ZerfDbg]},
                     react_to_env_A30(Retries, P_latest, LatestUnanimousP,
-                                     P_current_calc, S);
+                                   P_current_calc, set_proj(S, P_current_calc));
                 Zerf ->
                     {{{yo_todo_incomplete_fix_me_cp_mode, line, ?LINE, Zerf}}}
             end;
@@ -1321,7 +1330,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, P_current_calc,
             %% Too much weird stuff may have hapened while we were suffering
             %% the flapping/asymmetric partition ... but we are now proposing
             %% the none projection.  We're going to use it so that we can
-            %% unwedge ourselve into the glorious none projection.
+            %% unwedge ourself into the glorious none projection.
             ?REACT({a30, ?LINE, []}),
             %% TODO: It seems a bit crazy, but this duplicates part/much
             %%       of what state C103 does?  Go to C103 instead?

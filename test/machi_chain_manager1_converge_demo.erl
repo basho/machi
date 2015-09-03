@@ -380,6 +380,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
 %% Uncomment *one* of the following make_partition_list() bodies.
 
 make_partition_list(All_list) ->
+    %% %% for len=5 and 2 witnesses
     %% [
     %%  [{b,c}],
     %%  [],
@@ -391,7 +392,27 @@ make_partition_list(All_list) ->
     %%  [],
     %%  [{d,e}],
     %%  [],
+    %%  [{d,c}],
+    %%  [{b,c}],
+    %%  [],
     %%  [{c,e}]
+    %% ].
+    %% for len=7 and 3 witnesses
+    %% [
+    %%  [{b,d}],
+    %%  [],
+    %%  [{b,d}],
+    %%  [{a,d},{b,d}],
+    %%  [{b,d}],
+    %%  [],
+    %%  [{d,f}],
+    %%  [],
+    %%  [{f,g}],
+    %%  [],
+    %%  [{f,d}],
+    %%  [{b,d}],
+    %%  [],
+    %%  [{d,g}]
     %% ].
     %% [ [{d,c}],
     %%   [{b,c}] ].
@@ -404,11 +425,11 @@ make_partition_list(All_list) ->
                                        A <- All_list, B <- All_list, A /= B,
                                        C <- All_list, D <- All_list, C /= D,
                                        X /= A, X /= C, A /= C],
-    Concat = _X_Ys1,
+    %% Concat = _X_Ys1,
     %% Concat = _X_Ys2,
     %% Concat = _X_Ys1 ++ _X_Ys2,
     %% %% Concat = _X_Ys3,
-    %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
+    Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
     random_sort(lists:usort([lists:sort(L) || L <- Concat])).
 
     %% [
@@ -483,6 +504,8 @@ make_partition_list(All_list) ->
     %%  [{b,a}]
     %% ].
 
+    %% 2015-09-01: Causes repeated none proj use of same epoch # when run via:
+    %% machi_chain_manager1_converge_demo:t(3, [{private_write_verbose,true}, {consistency_mode, cp_mode}, {witnesses, [a]}]).
     %% [
     %%   [{c,b}, {c,a}],
     %%   [{b,c}, {b,a}],
