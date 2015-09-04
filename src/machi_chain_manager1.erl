@@ -678,7 +678,7 @@ calc_projection(#ch_mgr{name=MyName, consistency_mode=CMode,
                     calc_projection2(P_current, RelativeToServer, AllHosed,
                                      Dbg, S);
                 {_, false} ->
-                    {Up, Partitions, RunEnv2} = calc_up_nodes(
+                    {Up, _Partitions, RunEnv2} = calc_up_nodes(
                                                   MyName, AllMembers, RunEnv),
                     %% We can't improve on the current projection.
                     {P_current, S#ch_mgr{runenv=RunEnv2}, Up}
@@ -1159,12 +1159,11 @@ react_to_env_A20(Retries, #ch_mgr{name=MyName}=S) ->
         end,
     react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra, S2).
 
-react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra,
-                 #ch_mgr{name=MyName, consistency_mode=CMode,
+react_to_env_A29(Retries, P_latest, LatestUnanimousP, _ReadExtra,
+                 #ch_mgr{consistency_mode=CMode,
                          proj=P_current} = S) ->
     {Epoch_current,_} = EpochID_current =
         machi_projection:get_epoch_id(P_current),
-    #projection_v1{author_server=Author_latest} = P_latest,
     {Epoch_latest,_} = EpochID_latest = machi_projection:get_epoch_id(P_latest),
     Trigger = if CMode == cp_mode, EpochID_latest /= EpochID_current ->
                       true;
@@ -1208,7 +1207,7 @@ react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra,
     end.
 
 react_to_env_A30(Retries, P_latest, LatestUnanimousP, P_current_calc,
-                 #ch_mgr{name=MyName, proj=P_current,
+                 #ch_mgr{name=MyName,
                          consistency_mode=CMode, flap_limit=FlapLimit} = S) ->
     ?REACT(a30),
     %% case length(get(react)) of XX when XX > 500 -> io:format(user, "A30 ~w! ~w: ~P\n", [MyName, XX, get(react), 300]), timer:sleep(500); _ -> ok end,
@@ -1769,7 +1768,6 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
     end.
 
 react_to_env_A49(P_latest, FinalProps, #ch_mgr{consistency_mode=cp_mode,
-                                               name=MyName,
                                                proj=P_current} = S) ->
     ?REACT(a49),
     %% Using the none projection as our new P_current does *not* work:
@@ -3584,14 +3582,6 @@ zerf_find_last_annotated(FLU, MajoritySize, S) ->
             []                                  % lists:flatten() will destroy
     end.
 
-my_lists_split(N, L) ->
-    try
-        lists:split(N, L)
-    catch
-        error:badarg ->
-            {L, []}
-    end.
-
 diversion_c120_verbose_goop(#projection_v1{upi=[], repairing=[]}, _S) ->
     ok;
 diversion_c120_verbose_goop(Proj, S) ->
@@ -3646,8 +3636,7 @@ perhaps_verbose_c110(P_latest2, S) ->
                     Summ2 = machi_projection:make_summary(P_latest2x),
                     case proplists:get_value(private_write_verbose,
                                              S#ch_mgr.opts) of
-                        true ->
-                        %% true when Summ2 /= Last2 ->
+                        true when Summ2 /= Last2 ->
                             put(last_verbose, Summ2),
                             ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses plain: ~w \n",
                               [HH,MM,SS,MSec, S#ch_mgr.name, Summ2]);
@@ -3661,8 +3650,7 @@ perhaps_verbose_c110(P_latest2, S) ->
                     Summ2 = machi_projection:make_summary(P_innerx),
                     case proplists:get_value(private_write_verbose,
                                              S#ch_mgr.opts) of
-                        true ->
-                        %% true when Summ2 /= Last2 ->
+                        true when Summ2 /= Last2 ->
                             put(last_verbose, Summ2),
                             ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w (outer ~w auth ~w flap ~w)\n",
                               [HH,MM,SS,MSec, S#ch_mgr.name, Summ2, P_latest2#projection_v1.epoch_number, P_latest2#projection_v1.author_server, P_latest2#projection_v1.flap]);
