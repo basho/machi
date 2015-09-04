@@ -72,7 +72,9 @@
           runenv          :: list(), %proplist()
           opts            :: list(),  %proplist()
           members_dict    :: p_srvr_dict(),
-          proxies_dict    :: orddict:orddict()
+          proxies_dict    :: orddict:orddict(),
+          active_gossip   :: orddict:orddict(),
+          pending_gossip  :: orddict:orddict()
          }).
 
 -define(FLU_PC, machi_proxy_flu1_client).
@@ -103,7 +105,7 @@
 %% API
 -export([start_link/2, start_link/3, stop/1, ping/1,
          set_chain_members/2, set_chain_members/3, set_active/2,
-         trigger_react_to_env/1]).
+         trigger_react_to_env/1, spam/3]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
@@ -175,6 +177,9 @@ set_active(Pid, Boolean) when Boolean == true; Boolean == false ->
 
 trigger_react_to_env(Pid) ->
     gen_server:call(Pid, {trigger_react_to_env}, infinity).
+
+spam(Pid, FromName, Dict) ->
+    gen_server:call(Pid, {spam, FromName, Dict}, infinity).
 
 -ifdef(TEST).
 
@@ -256,15 +261,19 @@ init({MyName, InitMembersDict, MgrOpts}) ->
               {simulate_repair, Opt(simulate_repair, true)},
               {network_partitions, Opt(network_partitions, [])},
               {network_islands, Opt(network_islands, [])},
-              {up_nodes, Opt(up_nodes, not_init_yet)}],
+              {last_up_nodes, []},
+              {last_up_nodes_time, now()},
+              {up_nodes, Opt(up_nodes, [])}],
     ActiveP = Opt(active_mode, true),
     S = set_proj(#ch_mgr{name=MyName,
-                timer='undefined',
-                proj_history=queue:new(),
-                not_sanes=orddict:new(),
-                consistency_mode=CMode,
-                runenv=RunEnv,
-                opts=MgrOpts}, Proj),
+                         timer='undefined',
+                         proj_history=queue:new(),
+                         not_sanes=orddict:new(),
+                         consistency_mode=CMode,
+                         runenv=RunEnv,
+                         opts=MgrOpts,
+                         active_gossip=orddict:new(),
+                         pending_gossip=orddict:new()}, Proj),
     {_, S2} = do_set_chain_members_dict(MembersDict, S),
     S3 = if ActiveP == false ->
                  S2;
@@ -342,6 +351,9 @@ handle_call({trigger_react_to_env}=Call, _From, S) ->
     gobble_calls(Call),
     {TODOtodo, S2} = do_react_to_env(S),
     {reply, TODOtodo, S2};
+handle_call({spam, Dict}, _From, S) ->
+    {Res, S2} = do_spam(Dict, S),
+    {reply, Res, S2};
 handle_call(_Call, _From, S) ->
     io:format(user, "\nBad call to ~p: ~p\n", [S#ch_mgr.name, _Call]),
     {reply, whaaaaaaaaaa, S}.
@@ -846,11 +858,24 @@ calc_up_nodes(#ch_mgr{name=MyName, proj=Proj, runenv=RunEnv1}=S) ->
     {UpNodes, Partitions, S#ch_mgr{runenv=RunEnv2}}.
 
 calc_up_nodes(MyName, AllMembers, RunEnv1) ->
+    put(myname_hack, MyName),
     case proplists:get_value(use_partition_simulator, RunEnv1) of
         true ->
             calc_up_nodes_sim(MyName, AllMembers, RunEnv1);
         false ->
-            {AllMembers -- get(remember_partition_hack), [], RunEnv1}
+            UpNodesNew = (AllMembers -- get(remember_partition_hack)),
+            RunEnv2 = update_runenv_with_up_nodes(UpNodesNew, RunEnv1),
+            {UpNodesNew, [], RunEnv2}
+    end.
+
+update_runenv_with_up_nodes(UpNodesNew, RunEnv1) ->
+    LastUpNodes0 = proplists:get_value(last_up_nodes, RunEnv1),
+    if UpNodesNew /= LastUpNodes0 ->
+            replace(RunEnv1,
+                    [{last_up_nodes, UpNodesNew},
+                     {last_up_nodes_time, now()}]);
+       true ->
+            RunEnv1
     end.
 
 calc_up_nodes_sim(MyName, AllMembers, RunEnv1) ->
@@ -868,7 +893,8 @@ calc_up_nodes_sim(MyName, AllMembers, RunEnv1) ->
     catch ?REACT({calc_up_nodes,?LINE,[{partitions,Partitions2},
                                        {islands,Islands2},
                                        {up_nodes, UpNodes}]}),
-    {UpNodes, Partitions2, RunEnv2}.
+    RunEnv3 = update_runenv_with_up_nodes(UpNodes, RunEnv2),
+    {UpNodes, Partitions2, RunEnv3}.
 
 replace(PropList, Items) ->
     Tmp = Items ++ PropList,
@@ -2489,3 +2515,6 @@ has_make_zerf_annotation(P) ->
         _ ->
             false
     end.
+
+do_spam(Dict, S) ->
+    error(finish_me).

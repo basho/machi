@@ -48,8 +48,11 @@
 
 -define(DUMMY_PV1_EPOCH, {0,<<0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0>>}).
 
+%% Kludge for spam gossip.  TODO: replace me
+-define(SPAM_PROJ_EPOCH, -5).
+
 -record(projection_v1, {
-          epoch_number    :: pv1_epoch_n(),
+          epoch_number    :: pv1_epoch_n() | ?SPAM_PROJ_EPOCH,
           epoch_csum      :: pv1_csum(),
           author_server   :: pv1_server(),
           all_members     :: [pv1_server()],
