@@ -306,11 +306,11 @@ do_proj_write3(ProjType, #projection_v1{epoch_number=Epoch,
             if CurEpoch == Epoch, CurCSum == CSum ->
                     do_proj_write4(ProjType, Proj, Path, Epoch, S);
                true ->
-                    io:format(user, "OUCH: on disk: ~w\n", [machi_projection:make_summary(binary_to_term(Bin))]),
-                    io:format(user, "OUCH: clobber: ~w\n", [machi_projection:make_summary(Proj)]),
-                    io:format(user, "OUCH: clobber: ~p\n", [Proj#projection_v1.dbg2]),
-                    %% {{error, written}, S}
-                    {{error, written, CurEpoch, Epoch, CurCSum, CSum}, S}
+                    %% io:format(user, "OUCH: on disk: ~w\n", [machi_projection:make_summary(binary_to_term(Bin))]),
+                    %% io:format(user, "OUCH: clobber: ~w\n", [machi_projection:make_summary(Proj)]),
+                    %% io:format(user, "OUCH: clobber: ~p\n", [Proj#projection_v1.dbg2]),
+                    %% {{error, written, CurEpoch, Epoch, CurCSum, CSum}, S}
+                    {{error, written}, S}
             end;
         {error, enoent} ->
             do_proj_write4(ProjType, Proj, Path, Epoch, S);
