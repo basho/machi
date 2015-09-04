@@ -59,7 +59,8 @@
          get_all_projections/2, get_all_projections/3,
          list_all_projections/2, list_all_projections/3
         ]).
--export([set_wedge_notify_pid/2]).
+-export([set_wedge_notify_pid/2, get_wedge_notify_pid/1,
+         set_consistency_mode/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -72,7 +73,8 @@
           private_dir = ""       :: string(),
           wedge_notify_pid       :: pid() | atom(),
           max_public_epochid =  ?NO_EPOCH :: {-1 | non_neg_integer(), binary()},
-          max_private_epochid = ?NO_EPOCH :: {-1 | non_neg_integer(), binary()}
+          max_private_epochid = ?NO_EPOCH :: {-1 | non_neg_integer(), binary()},
+          consistency_mode=ap_mode :: 'ap_mode' | 'cp_mode'
          }).
 
 %% @doc Start a new projection store server.
@@ -159,7 +161,16 @@ list_all_projections(PidSpec, ProjType, Timeout)
     g_call(PidSpec, {list_all_projections, ProjType}, Timeout).
 
 set_wedge_notify_pid(PidSpec, NotifyWedgeStateChanges) ->
-    gen_server:call(PidSpec, {set_wedge_notify_pid, NotifyWedgeStateChanges}).
+    gen_server:call(PidSpec, {set_wedge_notify_pid, NotifyWedgeStateChanges},
+                    infinity).
+
+get_wedge_notify_pid(PidSpec) ->
+    gen_server:call(PidSpec, {get_wedge_notify_pid},
+                    infinity).
+
+set_consistency_mode(PidSpec, CMode)
+  when CMode == ap_mode; CMode == cp_mode ->
+    gen_server:call(PidSpec, {set_consistency_mode, CMode}, infinity).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -224,6 +235,10 @@ handle_call({{list_all_projections, ProjType}, LC1}, _From, S) ->
     {reply, {{ok, find_all(Dir)}, LC2}, S};
 handle_call({set_wedge_notify_pid, NotifyWedgeStateChanges}, _From, S) ->
     {reply, ok, S#state{wedge_notify_pid=NotifyWedgeStateChanges}};
+handle_call({get_wedge_notify_pid}, _From, S) ->
+    {reply, {ok, S#state.wedge_notify_pid}, S};
+handle_call({set_consistency_mode, CMode}, _From, S) ->
+    {reply, ok, S#state{consistency_mode=CMode}};
 handle_call(_Request, _From, S) ->
     Reply = {whaaaaaaaaaaaaazz, _Request},
     {reply, Reply, S}.
@@ -261,61 +276,89 @@ do_proj_read(ProjType, Epoch, S_or_Dir) ->
             {{error, Else}, S_or_Dir}
     end.
 
-do_proj_write(public=ProjType, Proj, S) ->
-    do_proj_write2(ProjType, Proj, S);
-do_proj_write(private=ProjType, #projection_v1{epoch_number=Epoch}=Proj, S) ->
-    case S#state.max_public_epochid of
-        {PublicEpoch, _} when PublicEpoch =< Epoch ->
-            do_proj_write2(ProjType, Proj, S);
-        {PublicEpoch, _} ->
+do_proj_write(ProjType, Proj, S) ->
+    do_proj_write2(ProjType, Proj, S).
+
+do_proj_write2(ProjType, #projection_v1{epoch_csum=CSum}=Proj, S) ->
+    case (machi_projection:update_checksum(Proj))#projection_v1.epoch_csum of
+        CSum2 when CSum2 == CSum ->
+            do_proj_write3(ProjType, Proj, S);
+        _Else ->
             {{error, bad_arg}, S}
     end.
 
-do_proj_write2(ProjType, #projection_v1{epoch_number=Epoch}=Proj, S) ->
+do_proj_write3(ProjType, #projection_v1{epoch_number=Epoch,
+                                        epoch_csum=CSum}=Proj, S) ->
     %% TODO: We probably ought to check the projection checksum for sanity, eh?
     Dir = pick_path(ProjType, S),
     Path = filename:join(Dir, epoch2name(Epoch)),
-    case file:read_file_info(Path) of
-        {ok, _FI} ->
+    case file:read_file(Path) of
+        {ok, _Bin} when ProjType == public ->
             {{error, written}, S};
+        {ok, Bin} when ProjType == private ->
+            #projection_v1{epoch_number=CurEpoch,
+                           epoch_csum=CurCSum} = _CurProj = binary_to_term(Bin),
+            %% We've already checked that CSum is correct matches the
+            %% contents of this new projection version.  If the epoch_csum
+            %% values match, and if we trust the value on disk (TODO paranoid
+            %% check that, also), then the only difference must be the dbg2
+            %% list, which is ok.
+            if CurEpoch == Epoch, CurCSum == CSum ->
+                    do_proj_write4(ProjType, Proj, Path, Epoch, S);
+               true ->
+                    %% io:format(user, "OUCH: on disk: ~w\n", [machi_projection:make_summary(binary_to_term(Bin))]),
+                    %% io:format(user, "OUCH: clobber: ~w\n", [machi_projection:make_summary(Proj)]),
+                    %% io:format(user, "OUCH: clobber: ~p\n", [Proj#projection_v1.dbg2]),
+                    %% {{error, written, CurEpoch, Epoch, CurCSum, CSum}, S}
+                    {{error, written}, S}
+            end;
         {error, enoent} ->
-            {ok, FH} = file:open(Path, [write, raw, binary]),
-            ok = file:write(FH, term_to_binary(Proj)),
-            ok = file:sync(FH),
-            ok = file:close(FH),
-            EffectiveProj = machi_chain_manager1:inner_projection_or_self(Proj),
-            EffectiveEpoch = EffectiveProj#projection_v1.epoch_number,
-            EpochId = {Epoch, Proj#projection_v1.epoch_csum},
-            EffectiveEpochId = {EffectiveEpoch, EffectiveProj#projection_v1.epoch_csum},
-            %% 
-            NewS = if ProjType == public,
-                      Epoch > element(1, S#state.max_public_epochid) ->
-                           if Epoch == EffectiveEpoch ->
-                                   %% This is a regular projection, i.e.,
-                                   %% does not have an inner proj.
-                                   update_wedge_state(
-                                     S#state.wedge_notify_pid, true,
-                                     EffectiveEpochId);
-                              Epoch /= EffectiveEpoch ->
-                                   %% This projection has an inner proj.
-                                   %% The outer proj is flapping, so we do
-                                   %% not bother wedging.
-                                   ok
-                           end,
-                           S#state{max_public_epochid=EpochId};
-                      ProjType == private,
-                      Epoch > element(1, S#state.max_private_epochid) ->
-                           update_wedge_state(
-                                 S#state.wedge_notify_pid, false,
-                             EffectiveEpochId),
-                           S#state{max_private_epochid=EpochId};
-                      true ->
-                           S
-                   end,
-            {ok, NewS};
+            do_proj_write4(ProjType, Proj, Path, Epoch, S);
         {error, Else} ->
             {{error, Else}, S}
     end.
+
+do_proj_write4(ProjType, Proj, Path, Epoch, #state{consistency_mode=CMode}=S) ->
+    {ok, FH} = file:open(Path, [write, raw, binary]),
+    ok = file:write(FH, term_to_binary(Proj)),
+    ok = file:sync(FH),
+    ok = file:close(FH),
+    EffectiveProj = machi_chain_manager1:inner_projection_or_self(Proj),
+    EffectiveEpoch = EffectiveProj#projection_v1.epoch_number,
+    EpochId = {Epoch, Proj#projection_v1.epoch_csum},
+    EffectiveEpochId = {EffectiveEpoch, EffectiveProj#projection_v1.epoch_csum},
+    %%
+    NewS = if ProjType == public,
+              Epoch > element(1, S#state.max_public_epochid) ->
+                   if Epoch == EffectiveEpoch ->
+                           %% This is a regular projection, i.e.,
+                           %% does not have an inner proj.
+                           update_wedge_state(
+                             S#state.wedge_notify_pid, true,
+                             EffectiveEpochId);
+                      Epoch /= EffectiveEpoch ->
+                           %% This projection has an inner proj.
+                           %% The outer proj is flapping, so we do
+                           %% not bother wedging.
+                           ok
+                   end,
+                   S#state{max_public_epochid=EpochId};
+              ProjType == private,
+              Epoch > element(1, S#state.max_private_epochid) ->
+                   if CMode == ap_mode ->
+                           update_wedge_state(
+                             S#state.wedge_notify_pid, false,
+                             EffectiveEpochId);
+                      true ->
+                           %% If ProjType == private and CMode == cp_mode, then
+                           %% the unwedge action is not performed here!
+                           ok
+                   end,
+                   S#state{max_private_epochid=EpochId};
+              true ->
+                   S
+           end,
+    {ok, NewS}.
 
 update_wedge_state(PidSpec, Boolean, {0,_}=EpochId) ->
     %% Epoch #0 is a special case: no projection has been written yet.

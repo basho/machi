@@ -837,7 +837,7 @@ make_listener_regname(BaseName) ->
 %% registers.
 
 make_projection_server_regname(BaseName) ->
-    list_to_atom(atom_to_list(BaseName) ++ "_pstore2").
+    list_to_atom(atom_to_list(BaseName) ++ "_pstore").
 
 %% @doc Encode `Offset + Size + TaggedCSum' into an `iolist()' type for
 %% internal storage by the FLU.

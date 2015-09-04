@@ -186,7 +186,10 @@ flu_projection_common(Host, TcpPort, T) ->
     P_a = #p_srvr{name=a, address="localhost", port=4321},
     P1 = machi_projection:new(1, a, [P_a], [], [a], [], []),
     ok = ?FLU_C:write_projection(Host, TcpPort, T, P1),
-    {error, written} = ?FLU_C:write_projection(Host, TcpPort, T, P1),
+    case ?FLU_C:write_projection(Host, TcpPort, T, P1) of
+        {error, written} when T == public  -> ok;
+        ok               when T == private -> ok
+    end,
     {ok, P1} = ?FLU_C:read_projection(Host, TcpPort, T, 1),
     {ok, {1,_}} = ?FLU_C:get_latest_epochid(Host, TcpPort, T),
     {ok, P1} = ?FLU_C:read_latest_projection(Host, TcpPort, T),

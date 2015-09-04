@@ -31,7 +31,8 @@
          compare/2,
          get_epoch_id/1,
          make_summary/1,
-         make_members_dict/1
+         make_members_dict/1,
+         make_epoch_id/1
         ]).
 
 %% @doc Create a new projection record.
@@ -110,8 +111,26 @@ new(EpochNum, MyName, [] = _MembersDict0, _Down_list, _UPI_list,_Repairing_list,
 %% @doc Update the checksum element of a projection record.
 
 update_checksum(P) ->
+    %% Fields that we ignore when calculating checksum:
+    %% * epoch_csum
+    %% * dbg2: humming consensus participants may modify this at will without
+    %%         voiding the identity of the projection as a whole.
+    %% * flap: In some cases in CP mode, coode upstream of C120 may have
+    %%         updated the flapping information.  That's OK enough: we aren't
+    %%         going to violate chain replication safety rules (or
+    %%         accidentally encourage someone else sometime later) by
+    %%         replacing flapping information with our own local view at
+    %%         this instant in time.
+    %% * creation_time: With CP mode & inner projections, it's damn annoying
+    %%                  to have to copy this around 100% correctly.  {sigh}
+    %%                  That's a negative state of the code.  However, there
+    %%                  isn't a safety violation if the creation_time is
+    %%                  altered for any reason: it's there only for human
+    %%                  benefit for debugging.
     CSum = crypto:hash(sha,
                        term_to_binary(P#projection_v1{epoch_csum= <<>>,
+                                                      creation_time=undefined,
+                                                      flap=undefined,
                                                       dbg2=[]})),
     P#projection_v1{epoch_csum=CSum}.
 
@@ -146,6 +165,7 @@ get_epoch_id(#projection_v1{epoch_number=Epoch, epoch_csum=CSum}) ->
 %% @doc Create a proplist-style summary of a projection record.
 
 make_summary(#projection_v1{epoch_number=EpochNum,
+                            epoch_csum= <<_CSum4:4/binary, _/binary>>,
                             all_members=_All_list,
                             mode=CMode,
                             witnesses=Witness_list,
@@ -161,8 +181,8 @@ make_summary(#projection_v1{epoch_number=EpochNum,
                    true ->
                         []
                 end,
-    [{epoch,EpochNum},{author,Author},
-     {mode,CMode},{witnesses, Witness_list},
+    [{epoch,EpochNum}, {csum,_CSum4},
+     {author,Author}, {mode,CMode},{witnesses, Witness_list},
      {upi,UPI_list},{repair,Repairing_list},{down,Down_list}] ++
         InnerInfo ++
         [{flap, Flap}] ++
@@ -201,3 +221,6 @@ make_members_dict(Ps) ->
                     exit({badarg, {make_members_dict, lists:filter(F_neither, Ps)}})
             end
     end.
+
+make_epoch_id(#projection_v1{epoch_number=Epoch, epoch_csum=CSum}) ->
+    {Epoch, CSum}.

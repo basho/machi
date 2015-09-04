@@ -61,6 +61,7 @@
           name            :: pv1_server(),
           flap_limit      :: non_neg_integer(),
           proj            :: projection(),
+          proj_unanimous  :: 'false' | erlang:timestamp(),
           %%
           timer           :: 'undefined' | timer:tref(),
           ignore_timer    :: boolean(),
@@ -69,7 +70,7 @@
           flap_start=?NOT_FLAPPING_START
                           :: {{'epk', integer()}, erlang:timestamp()},
           flap_last_up=[] :: list(),
-          flap_last_up_change=now() :: erlang:now(),
+          flap_last_up_change=now() :: erlang:timestamp(),
           flap_counts_last=[] :: list(),
           not_sanes       :: orddict:orddict(),
           sane_transitions = 0 :: non_neg_integer(),
@@ -232,12 +233,18 @@ init({MyName, InitMembersDict, MgrOpts}) ->
     random:seed(now()),
     init_remember_partition_hack(),
     Opt = fun(Key, Default) -> proplists:get_value(Key, MgrOpts, Default) end,
-    CMode = Opt(consistency_mode, ap_mode),
     InitWitness_list = Opt(witnesses, []),
     ZeroAll_list = [P#p_srvr.name || {_,P} <- orddict:to_list(InitMembersDict)],
-    ZeroProj = make_none_projection(MyName, ZeroAll_list,
+    ZeroProj = make_none_projection(0, MyName, ZeroAll_list,
                                     InitWitness_list, InitMembersDict),
     ok = store_zeroth_projection_maybe(ZeroProj, MgrOpts),
+    CMode = Opt(consistency_mode, ap_mode),
+    case get_projection_store_regname(MgrOpts) of
+        undefined ->
+            ok;
+        PS ->
+            ok = set_consistency_mode(PS, CMode)
+    end,
 
     %% Using whatever is the largest epoch number in our local private
     %% store, this manager starts out using the "none" projection.  If
@@ -255,9 +262,8 @@ init({MyName, InitMembersDict, MgrOpts}) ->
         get_my_private_proj_boot_info(MgrOpts, InitMembersDict, ZeroProj),
     #projection_v1{epoch_number=CurrentEpoch,
                    all_members=All_list, witnesses=Witness_list} = Proj0,
-    Proj1 = make_none_projection(MyName, All_list, Witness_list, MembersDict),
-    Proj = machi_projection:update_checksum(
-             Proj1#projection_v1{epoch_number=CurrentEpoch}),
+    Proj = make_none_projection(CurrentEpoch,
+                                MyName, All_list, Witness_list, MembersDict),
 
     RunEnv = [{seed, Opt(seed, now())},
               {use_partition_simulator, Opt(use_partition_simulator, false)},
@@ -266,8 +272,7 @@ init({MyName, InitMembersDict, MgrOpts}) ->
               {network_islands, Opt(network_islands, [])},
               {up_nodes, Opt(up_nodes, not_init_yet)}],
     ActiveP = Opt(active_mode, true),
-    S = #ch_mgr{name=MyName,
-                proj=Proj,
+    S = set_proj(#ch_mgr{name=MyName,
                 %% TODO 2015-03-04: revisit, should this constant be bigger?
                 %% Yes, this should be bigger, but it's a hack.  There is
                 %% no guarantee that all parties will advance to a minimum
@@ -278,7 +283,7 @@ init({MyName, InitMembersDict, MgrOpts}) ->
                 not_sanes=orddict:new(),
                 consistency_mode=CMode,
                 runenv=RunEnv,
-                opts=MgrOpts},
+                opts=MgrOpts}, Proj),
     {_, S2} = do_set_chain_members_dict(MembersDict, S),
     S3 = if ActiveP == false ->
                  S2;
@@ -301,14 +306,15 @@ handle_call({set_chain_members, MembersDict, Witness_list}, _From,
     %% config.
     All_list = [P#p_srvr.name || {_, P} <- orddict:to_list(MembersDict)],
     MissingInNew = OldAll_list -- All_list,
-    NewUPI = OldUPI -- MissingInNew,
-    NewDown = All_list -- NewUPI,
+    {NewUPI, NewDown} = if OldEpoch == 0 ->
+                                {All_list, []};
+                           true ->
+                                NUPI = OldUPI -- MissingInNew,
+                                {NUPI, All_list -- NUPI}
+                        end,
     NewEpoch = OldEpoch + ?SET_CHAIN_MEMBERS_EPOCH_SKIP,
-    CMode = if Witness_list == [] ->
-                    ap_mode;
-               Witness_list /= [] ->
-                    cp_mode
-            end,
+    CMode = calc_consistency_mode(Witness_list),
+    ok = set_consistency_mode(machi_flu_psup:make_proj_supname(MyName), CMode),
     NewProj = machi_projection:update_checksum(
                 OldProj#projection_v1{author_server=MyName,
                                       creation_time=now(),
@@ -322,8 +328,8 @@ handle_call({set_chain_members, MembersDict, Witness_list}, _From,
                                       members_dict=MembersDict}),
     %% Reset all flapping state.
     NewProj2 = NewProj#projection_v1{flap=make_flapping_i()},
-    S3 = clear_flapping_state(S2#ch_mgr{proj=NewProj2,
-                                        proj_history=queue:new()}),
+    S3 = clear_flapping_state(set_proj(S2#ch_mgr{proj_history=queue:new()},
+                                       NewProj2)),
     {_QQ, S4} = do_react_to_env(S3),
     {reply, Reply, S4};
 handle_call({set_active, Boolean}, _From, #ch_mgr{timer=TRef}=S) ->
@@ -404,7 +410,7 @@ code_change(_OldVsn, S, _Extra) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-make_none_projection(MyName, All_list, Witness_list, MembersDict) ->
+make_none_projection(Epoch, MyName, All_list, Witness_list, MembersDict) ->
     Down_list = All_list,
     UPI_list = [],
     P = machi_projection:new(MyName, MembersDict, Down_list, UPI_list, [], []),
@@ -413,7 +419,8 @@ make_none_projection(MyName, All_list, Witness_list, MembersDict) ->
                Witness_list /= [] ->
                     cp_mode
             end,
-    machi_projection:update_checksum(P#projection_v1{mode=CMode,
+    machi_projection:update_checksum(P#projection_v1{epoch_number=Epoch,
+                                                     mode=CMode,
                                                      witnesses=Witness_list}).
 
 make_all_projection(MyName, All_list, Witness_list, MembersDict) ->
@@ -442,7 +449,7 @@ get_my_proj_boot_info(MgrOpts, DefaultDict, DefaultProj, ProjType) ->
 %% 0th epoch is already written, there's no problem.
 
 store_zeroth_projection_maybe(ZeroProj, MgrOpts) ->
-    case proplists:get_value(projection_store_registered_name, MgrOpts) of
+    case get_projection_store_regname(MgrOpts) of
         undefined ->
             ok;
         Store ->
@@ -450,6 +457,14 @@ store_zeroth_projection_maybe(ZeroProj, MgrOpts) ->
             _ = machi_projection_store:write(Store, private, ZeroProj),
             ok
     end.
+
+get_projection_store_regname(MgrOpts) ->
+    proplists:get_value(projection_store_registered_name, MgrOpts).
+
+set_consistency_mode(undefined, _CMode) ->
+    ok;
+set_consistency_mode(ProjStore, CMode) ->
+    machi_projection_store:set_consistency_mode(ProjStore, CMode).
 
 set_active_timer(#ch_mgr{name=MyName, members_dict=MembersDict}=S) ->
     FLU_list = [P#p_srvr.name || {_,P} <- orddict:to_list(MembersDict)],
@@ -525,6 +540,12 @@ read_latest_projection_call_only(ProjectionType, AllHosed,
     #projection_v1{all_members=All_list} = CurrentProj,
     All_queried_list = All_list -- AllHosed,
 
+    {Rs, S2} = read_latest_projection_call_only2(ProjectionType,
+                                                 All_queried_list, S),
+    FLUsRs = lists:zip(All_queried_list, Rs),
+    {All_queried_list, FLUsRs, S2}.
+
+read_latest_projection_call_only2(ProjectionType, All_queried_list, S) ->
     {_UpNodes, Partitions, S2} = calc_up_nodes(S),
     DoIt = fun(Pid) ->
                    case (?FLU_PC:read_latest_projection(Pid, ProjectionType, ?TO)) of
@@ -532,12 +553,21 @@ read_latest_projection_call_only(ProjectionType, AllHosed,
                        Else    -> Else
                    end
            end,
-    Rs = [perhaps_call_t(S, Partitions, FLU, fun(Pid) -> DoIt(Pid) end) ||
+    Rs = [(catch perhaps_call_t(S, Partitions, FLU, fun(Pid) -> DoIt(Pid) end)) ||
              FLU <- All_queried_list],
-    %% Rs = [perhaps_call_t(S, Partitions, FLU, fun(Pid) -> DoIt(Pid) end) ||
-    %%          FLU <- All_queried_list],
-    FLUsRs = lists:zip(All_queried_list, Rs),
-    {All_queried_list, FLUsRs, S2}.
+    {Rs, S2}.
+
+read_projection_call_only2(ProjectionType, Epoch, All_queried_list, S) ->
+    {_UpNodes, Partitions, S2} = calc_up_nodes(S),
+    DoIt = fun(Pid) ->
+                   case (?FLU_PC:read_projection(Pid, ProjectionType, Epoch, ?TO)) of
+                       {ok, P} -> P;
+                       Else    -> Else
+                   end
+           end,
+    Rs = [(catch perhaps_call_t(S, Partitions, FLU, fun(Pid) -> DoIt(Pid) end)) ||
+             FLU <- All_queried_list],
+    {Rs, S2}.
 
 cl_read_latest_projection(ProjectionType, S) ->
     AllHosed = [],
@@ -561,7 +591,7 @@ rank_and_sort_projections_with_extra(All_queried_list, FLUsRs, ProjectionType,
        orelse
        length(UnwrittenRs) == length(FLUsRs) ->
             Witness_list = CurrentProj#projection_v1.witnesses,
-            NoneProj = make_none_projection(MyName, [], Witness_list,
+            NoneProj = make_none_projection(0, MyName, [], Witness_list,
                                             orddict:new()),
             Extra2 = [{all_members_replied, true},
                       {all_queried_list, All_queried_list},
@@ -622,39 +652,36 @@ do_read_repair(FLUsRs, _Extra, #ch_mgr{proj=CurrentProj} = S) ->
 calc_projection(S, RelativeToServer) ->
     calc_projection(S, RelativeToServer, []).
 
-calc_projection(#ch_mgr{proj=LastProj, consistency_mode=CMode} = S,
-                RelativeToServer, AllHosed) ->
+calc_projection(#ch_mgr{proj=P_current}=S, RelativeToServer, AllHosed) ->
+    calc_projection(S, RelativeToServer, AllHosed, P_current).
+
+calc_projection(#ch_mgr{name=MyName, consistency_mode=CMode,
+                        runenv=RunEnv}=S,
+                RelativeToServer, AllHosed, P_current) ->
     Dbg = [],
     %% OldThreshold = proplists:get_value(old_threshold, RunEnv),
     %% NoPartitionThreshold = proplists:get_value(no_partition_threshold, RunEnv),
     if CMode == ap_mode ->
-            calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg, S);
+            calc_projection2(P_current, RelativeToServer, AllHosed, Dbg, S);
        CMode == cp_mode ->
             #projection_v1{epoch_number=OldEpochNum,
                            all_members=AllMembers,
                            upi=OldUPI_list
-                          } = LastProj,
+                          } = P_current,
             UPI_length_ok_p =
                 length(OldUPI_list) >= full_majority_size(AllMembers),
             case {OldEpochNum, UPI_length_ok_p} of
                 {0, _} ->
-                    calc_projection2(LastProj, RelativeToServer, AllHosed,
+                    calc_projection2(P_current, RelativeToServer, AllHosed,
                                      Dbg, S);
                 {_, true} ->
-                    calc_projection2(LastProj, RelativeToServer, AllHosed,
+                    calc_projection2(P_current, RelativeToServer, AllHosed,
                                      Dbg, S);
                 {_, false} ->
-                    case make_zerf(LastProj, S) of
-                        Zerf when is_record(Zerf, projection_v1) ->
-                            ?REACT({calc,?LINE,
-                                    [{zerf_backstop, true},
-                                     {zerf_in, machi_projection:make_summary(Zerf)}]}),
-                            %% io:format(user, "zerf_in: ~p: ~w\n", [S#ch_mgr.name,  machi_projection:make_summary(Zerf)]),
-                            calc_projection2(Zerf, RelativeToServer, AllHosed,
-                                             [{zerf_backstop, true}]++Dbg, S);
-                        Zerf ->
-                            {{{yo_todo_incomplete_fix_me_cp_mode, OldEpochNum, OldUPI_list, Zerf}}}
-                    end
+                    {Up, Partitions, RunEnv2} = calc_up_nodes(
+                                                  MyName, AllMembers, RunEnv),
+                    %% We can't improve on the current projection.
+                    {P_current, S#ch_mgr{runenv=RunEnv2}, Up}
             end
     end.
 
@@ -682,7 +709,8 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
 
     NewUp = Up -- LastUp,
     Down = AllMembers -- Up,
-    ?REACT({calc,?LINE,[{old_upi, OldUPI_list},
+    ?REACT({calc,?LINE,[{old_epoch,OldEpochNum},
+                        {old_upi, OldUPI_list},
                         {old_repairing,OldRepairing_list},
                         {last_up, LastUp}, {up0, Up0}, {all_hosed, AllHosed},
                         {up, Up}, {new_up, NewUp}, {down, Down}]}),
@@ -792,22 +820,30 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                             true ->
                                  ?REACT({calc,?LINE,[]}),
                                  P_none0 = make_none_projection(
+                                            OldEpochNum + 1,
                                             MyName, AllMembers, OldWitness_list,
                                             MembersDict),
+                                 Why = if NewUPI == [] ->
+                                               "No real servers in old upi are available now";
+                                          true ->
+                                               "Not enough witnesses are available now"
+                                       end,
                                  P_none1 = P_none0#projection_v1{
-                                             epoch_number=OldEpochNum + 1,
+                                             %% Stable creation time!
+                                             creation_time={1,2,3},
                                              dbg=[{none_projection,true},
                                                   {up0, Up0},
                                                   {up, Up},
                                                   {all_hosed, AllHosed},
-                                                  {oldepoch, OldEpochNum},
                                                   {oldupi, OldUPI_list},
                                                   {newupi, NewUPI_list},
                                                   {newupi3, NewUPI_list3},
                                                   {tent_upi, TentativeUPI},
                                                   {new_upi, NewUPI},
                                                   {up_witnesses, UpWitnesses},
-                                                  {not_enough_witnesses,true}]},
+                                                  {why_none, Why}],
+                                             dbg2=[
+                                               {creation_time,os:timestamp()}]},
                                  machi_projection:update_checksum(P_none1)
                          end
                  end;
@@ -970,8 +1006,10 @@ do_react_to_env(#ch_mgr{name=MyName,
             {{empty_members_dict, [], Epoch}, S};
         true ->
             {_, S2} = do_set_chain_members_dict(NewMembersDict, S),
+            CMode = calc_consistency_mode(NewProj#projection_v1.witnesses),
             {{empty_members_dict, [], Epoch},
-             S2#ch_mgr{proj=NewProj, members_dict=NewMembersDict}}
+             set_proj(S2#ch_mgr{members_dict=NewMembersDict,
+                                consistency_mode=CMode}, NewProj)}
     end;
 do_react_to_env(S) ->
     %% The not_sanes manager counting dictionary is not strictly
@@ -1018,13 +1056,15 @@ do_react_to_env(S) ->
     %%
     put(react, []),
     try
-        if S#ch_mgr.sane_transitions > 3 ->         % TODO review this constant
-                %% ?V("Skr,~w,", [S#ch_mgr.name]),
-                react_to_env_A10(S#ch_mgr{not_sanes=orddict:new()});
-           true ->
-                %% ?V("Sk,~w,~w,", [S#ch_mgr.name, S#ch_mgr.sane_transitions]),
-                react_to_env_A10(S)
-        end
+        S2 = if S#ch_mgr.sane_transitions > 3 -> % TODO review this constant
+                S#ch_mgr{not_sanes=orddict:new()};
+                true ->
+                     S
+             end,
+        %% When in CP mode, we call the poll function twice: once before
+        %% reacting & once after.  This call is the 2nd.
+        {Res, S3} = react_to_env_A10(S2),
+        {Res, poll_private_proj_is_upi_unanimous(S3)}
     catch
         throw:{zerf,_}=_Throw ->
             Proj = S#ch_mgr.proj,
@@ -1034,7 +1074,7 @@ io:format(user, "zerf ~p caught ~p\n", [S#ch_mgr.name, _Throw]),
 
 react_to_env_A10(S) ->
     ?REACT(a10),
-    react_to_env_A20(0, S).
+    react_to_env_A20(0, poll_private_proj_is_upi_unanimous(S)).
 
 react_to_env_A20(Retries, #ch_mgr{name=MyName}=S) ->
     ?REACT(a20),
@@ -1122,42 +1162,66 @@ react_to_env_A20(Retries, #ch_mgr{name=MyName}=S) ->
 react_to_env_A29(Retries, P_latest, LatestUnanimousP, ReadExtra,
                  #ch_mgr{name=MyName, consistency_mode=CMode,
                          proj=P_current} = S) ->
-    #projection_v1{epoch_number=Epoch_latest,
-                   author_server=Author_latest} = P_latest,
-    if CMode == cp_mode,
-       Epoch_latest > P_current#projection_v1.epoch_number,
-       Author_latest /= MyName ->
+    {Epoch_current,_} = EpochID_current =
+        machi_projection:get_epoch_id(P_current),
+    #projection_v1{author_server=Author_latest} = P_latest,
+    {Epoch_latest,_} = EpochID_latest = machi_projection:get_epoch_id(P_latest),
+    Trigger = if CMode == cp_mode, EpochID_latest /= EpochID_current ->
+                      true;
+                 true ->
+                      false
+              end,
+    if Trigger ->
+            ?REACT({a29, ?LINE,
+                    [{epoch_id_latest,EpochID_latest},
+                     {epoch_id_current,EpochID_current},
+                     {old_current, machi_projection:make_summary(P_current)}]}),
+            if Epoch_latest >= Epoch_current orelse Epoch_latest == 0 orelse
+               P_current#projection_v1.upi == [] ->
+                    ok;                                 % sanity check
+               true ->
+                    exit({?MODULE,?LINE,
+                          {epoch_latest,Epoch_latest},
+                          {epoch_current,Epoch_current},
+                          {latest,machi_projection:make_summary(P_latest)},
+                          {current,machi_projection:make_summary(P_current)}})
+            end,
+            put(yyy_hack, []),
             case make_zerf(P_current, S) of
                 Zerf when is_record(Zerf, projection_v1) ->
                     ?REACT({a29, ?LINE,
-                            [{zerf_filler, true},
+                            [{zerf_backstop, true},
                              {zerf_in, machi_projection:make_summary(Zerf)}]}),
-                    %% io:format(user, "zerf_in @ A29: ~p: ~w\n", [MyName,  machi_projection:make_summary(Zerf)]),
-                    P_current2 = Zerf#projection_v1{
-                                             flap=P_current#projection_v1.flap},
-                    %% io:format(user, "A29 ~w cur_flap ~W, ", [S#ch_mgr.name, P_current#projection_v1.flap, 8]),
+                    %% io:format(user, "zerf_in: A29: ~p: ~w\n\t~p\n", [MyName,  machi_projection:make_summary(Zerf), get(yyy_hack)]),
+                    #projection_v1{dbg=ZerfDbg} = Zerf,
+                    P_current_calc = Zerf#projection_v1{
+                                       flap=P_current#projection_v1.flap,
+                                       dbg=[{zerf_backstop,true}|ZerfDbg]},
                     react_to_env_A30(Retries, P_latest, LatestUnanimousP,
-                                     ReadExtra, S#ch_mgr{proj=P_current2});
+                                     P_current_calc, S);
                 Zerf ->
                     {{{yo_todo_incomplete_fix_me_cp_mode, line, ?LINE, Zerf}}}
             end;
        true ->
-            react_to_env_A30(Retries, P_latest, LatestUnanimousP, ReadExtra, S)
+            ?REACT({a29, ?LINE, []}),
+            react_to_env_A30(Retries, P_latest, LatestUnanimousP, P_current, S)
     end.
 
-react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
+react_to_env_A30(Retries, P_latest, LatestUnanimousP, P_current_calc,
                  #ch_mgr{name=MyName, proj=P_current,
                          consistency_mode=CMode, flap_limit=FlapLimit} = S) ->
     ?REACT(a30),
     %% case length(get(react)) of XX when XX > 500 -> io:format(user, "A30 ~w! ~w: ~P\n", [MyName, XX, get(react), 300]), timer:sleep(500); _ -> ok end,
-    {P_newprop1, S2, Up} = calc_projection(S, MyName),
+    AllHosed = [],
+    {P_newprop1, S2, Up} = calc_projection(S, MyName, AllHosed, P_current_calc),
     ?REACT({a30, ?LINE, [{current, machi_projection:make_summary(S#ch_mgr.proj)}]}),
+    ?REACT({a30, ?LINE, [{calc_current, machi_projection:make_summary(P_current_calc)}]}),
     ?REACT({a30, ?LINE, [{newprop1, machi_projection:make_summary(P_newprop1)}]}),
     ?REACT({a30, ?LINE, [{latest, machi_projection:make_summary(P_latest)}]}),
 
     %% Are we flapping yet?
-    {P_newprop2, S3} = calculate_flaps(P_newprop1, P_latest, P_current, Up,
-                                       FlapLimit, S2),
+    {P_newprop2, S3} = calculate_flaps(P_newprop1, P_latest, P_current_calc,
+                                       Up, FlapLimit, S2),
 
     %% Move the epoch number up ... originally done in C300.
     #projection_v1{epoch_number=Epoch_newprop2}=P_newprop2,
@@ -1178,7 +1242,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                                     {_FLU, {_EpkTime, FlapCount}} <- AFPs]) of
                     [SmallestFC|_] when SmallestFC > ?MINIMUM_ALL_FLAP_LIMIT ->
                         a30_make_inner_projection(
-                          P_current, P_newprop3, P_latest, Up, S3);
+                          P_current_calc, P_newprop3, P_latest, Up, S3);
                     _ ->
                         %% Not everyone is flapping enough.  Or perhaps
                         %% everyone was but we finally saw some new server X
@@ -1190,20 +1254,21 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                                     {flap_limit, FlapLimit}]}),
                 {P_newprop3, S3}
         end,
-    ?REACT({a30, ?LINE, [{newprop10, machi_projection:make_summary(P_newprop10)}]}),
+    P_newprop11 = machi_projection:update_checksum(P_newprop10),
+    ?REACT({a30, ?LINE, [{newprop11, machi_projection:make_summary(P_newprop11)}]}),
 
     %% Here's a more common reason for moving from inner projection to
     %% a normal projection: the old proj has an inner but the newprop
     %% does not.
     MoveFromInnerToNorm_p =
-        case {inner_projection_exists(P_current),
-              inner_projection_exists(P_newprop10)} of
+        case {inner_projection_exists(P_current_calc),
+              inner_projection_exists(P_newprop11)} of
             {true, false} -> true;
             {_, _}        -> false
         end,
 
     %% If P_current says that we believe that we're currently flapping,
-    %% and if P_newprop10 says that we're no longer flapping, then we
+    %% and if P_newprop11 says that we're no longer flapping, then we
     %% really ought to stop flapping, right.
     %%
     %% Not quite so simple....
@@ -1225,7 +1290,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
 
     %% Remember! P_current is this manager's private in-use projection.
     %% It is always less than or equal to P_latest's epoch!
-    Current_flap_counts = get_all_flap_counts(P_current),
+    Current_flap_counts = get_all_flap_counts(P_current_calc),
     Latest_authors_flap_count_current = proplists:get_value(
                                          Author_latest, Current_flap_counts),
     Latest_flap_counts = get_all_flap_counts(P_latest),
@@ -1238,7 +1303,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                        %% count to zero flap count.  But ... do not kick out
                        %% of our flapping mode locally if we do not have an
                        %% inner projection.
-                       inner_projection_exists(P_current);
+                       inner_projection_exists(P_current_calc);
                    {_, _} ->
                        false
                end,
@@ -1249,22 +1314,67 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                   {move_from_inner, MoveFromInnerToNorm_p}],
     ?REACT({a30, ?LINE, ClauseInfo}),
     MoveToNorm_p = MoveFromInnerToNorm_p orelse Kicker_p,
-    if MoveToNorm_p, CMode == cp_mode ->
+    CurrentHasZerf_p = has_make_zerf_annotation(P_current_calc),
+    if MoveToNorm_p,
+       P_newprop11#projection_v1.upi == [],
+       CMode == cp_mode ->
             %% Too much weird stuff may have hapened while we were suffering
-            %% the flapping/asymmetric partition.  Fall back to the none
-            %% projection as if we're restarting.
-            ?REACT({a30, ?LINE, [{move_to_norm, MoveToNorm_p}]}),
+            %% the flapping/asymmetric partition ... but we are now proposing
+            %% the none projection.  We're going to use it so that we can
+            %% unwedge ourselve into the glorious none projection.
+            ?REACT({a30, ?LINE, []}),
+            %% TODO: It seems a bit crazy, but this duplicates part/much
+            %%       of what state C103 does?  Go to C103 instead?
+            P_newprop12 = machi_projection:update_checksum(
+                            P_newprop11#projection_v1{epoch_number=NewEpoch}),
+
+            %% Move to C300 to avoid repeating the same none proj (and
+            %% multiple writes to the same private epoch that
+            %% concidentally are permitted because the projection is
+            %% exactly the same)
+            %%
+            %% The other problem in this execution is that there are a
+            %% couple of other parties that are not flapping because
+            %% they see this A30->C100 problem & repeat is
+            %% short-circuiting all of the flapping logic.  If I
+            %% change A30->C100 to be A30->C300 instead, then I hope
+            %% that other effect will resolve itself correctly.
+
+            if P_latest#projection_v1.author_server == MyName,
+               P_latest#projection_v1.upi == [] ->
+                    ?REACT({a30, ?LINE, []}),
+                    io:format(user, "CONFIRM debug A30->C100 by ~w\n",[MyName]),
+                    react_to_env_C100(P_newprop12, P_latest, S);
+               true ->
+                    ?REACT({a30, ?LINE, []}),
+                    io:format(user, "CONFIRM debug A30->C300 by ~w\n",[MyName]),
+                    react_to_env_C300(P_newprop12, P_latest, S)
+            end;
+       MoveToNorm_p,
+       CMode == cp_mode,
+       not CurrentHasZerf_p ->
+            %% Too much weird stuff may have hapened while we were suffering
+            %% the flapping/asymmetric partition.
+            %%
+            %% The make_zerf() function will annotate the dbg2 list with
+            %% {make_zerf,Epoch} where Epoch should equal the epoch_number.
+            %% If annotated, then we have already passed through this if
+            %% clause in a prior iteration, and therefore we should go to A40
+            %% now.  If not annotated, go to A49 so that we *will* trigger a
+            %% make_zerf() on our next iteration.
+
+            ?REACT({a30, ?LINE, []}),
             react_to_env_A49(P_latest, [], S10);
-       MoveToNorm_p, CMode == ap_mode ->
+       MoveToNorm_p ->
             %% Move from inner projection to outer.
-            P_inner2A = inner_projection_or_self(P_current),
-            ResetEpoch = P_newprop10#projection_v1.epoch_number,
-            ResetAuthor = case P_current#projection_v1.upi of
+            P_inner2A = inner_projection_or_self(P_current_calc),
+            ResetEpoch = P_newprop11#projection_v1.epoch_number,
+            ResetAuthor = case P_current_calc#projection_v1.upi of
                               [] ->
                                   %% Drat, fall back to current's author.
-                                  P_current#projection_v1.author_server;
+                                  P_current_calc#projection_v1.author_server;
                               _ ->
-                                  lists:last(P_current#projection_v1.upi)
+                                  lists:last(P_current_calc#projection_v1.upi)
                           end,
             ClauseInfo2 = [{move_from_inner_to_outer, true},
                            {old_author, P_inner2A#projection_v1.author_server},
@@ -1293,25 +1403,38 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, _ReadExtra,
             %% altered significantly.  Use calc_projection() to find out what
             %% nodes are down *now* (as best as we can tell right now).
             {P_o, S_o, _Up2} = calc_projection2(P_inner2B, MyName, [], [], S10),
+            ReactI2 = [{inner2po,machi_projection:make_summary(P_o)}],
+            ?REACT({a30, ?LINE, ReactI2}),
             %% NOTE: We are intentionally clearing flap info by not
             %% carrying it forwarding in the new projection.
+            %% TODO 2015-09-01: revisit clearing flapping state here?
             react_to_env_A40(Retries, P_o, P_latest, LatestUnanimousP, S_o);
        true ->
             ?REACT({a30, ?LINE, []}),
-            react_to_env_A40(Retries, P_newprop10, P_latest,
+            react_to_env_A40(Retries, P_newprop11, P_latest,
                              LatestUnanimousP, S10)
     end.
 
 a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
-                          #ch_mgr{name=MyName, consistency_mode=CMode} = S) ->
+                          #ch_mgr{name=MyName, consistency_mode=CMode,
+                                  proj=P_current_real} = S) ->
     AllHosed = get_all_hosed(P_newprop3),
+    NewPropDown = if P_newprop3#projection_v1.upi == [] ->
+                          %% This is a none proj, don't believe down list
+                          [];
+                     true ->
+                          P_newprop3#projection_v1.down
+                  end,
     P_current_has_inner_p = inner_projection_exists(P_current),
     P_current_ios = inner_projection_or_self(P_current),
+    AllHosed_and_Down = lists:usort(AllHosed ++ NewPropDown),
     {P_i1, S_i, _Up} = calc_projection2(P_current_ios,
-                                        MyName, AllHosed, [], S),
+                                        MyName, AllHosed_and_Down, [], S),
     ?REACT({a30, ?LINE, [{raw_all_hosed,get_all_hosed(P_newprop3)},
                          {up, Up},
                          {all_hosed, AllHosed},
+                         {new_prop_down, NewPropDown},
+                         {all_hosed_and_down, AllHosed_and_Down},
                          {p_c_i, machi_projection:make_summary(P_current_ios)},
                          {p_i1, machi_projection:make_summary(P_i1)}]}),
     %% The inner projection will have a fake author, which
@@ -1349,12 +1472,30 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                 #projection_v1{epoch_number=Epoch_latest_i,
                                upi=UPI_latest_i,
                                repairing=Repairing_latest_i} = P_latest_i,
+                CurrentRealEpochCheck_p =
+                    case inner_projection_exists(P_current_real) of
+                        false ->
+                            %% We're definitely going to suggest making
+                            %% outer->inner transition.
+                            Epoch_latest_i >= P_current_real#projection_v1.epoch_number
+                            andalso
+                            Epoch_latest_i >= P_current#projection_v1.epoch_number;
+                        true ->
+                            true
+                    end,
                 ?REACT({a30, ?LINE, [{epoch_latest_i, Epoch_latest_i},
                                      {upi_latest_i, UPI_latest_i},
+                                     {current_real_epoch_check,
+                                      CurrentRealEpochCheck_p},
+                                     {x1,inner_projection_exists(P_current_real)},
+                                     {x2,Epoch_latest_i},
+                                     {x3,P_current_real#projection_v1.epoch_number},
+                                     {x4,P_current#projection_v1.epoch_number},
                                      {repairing_latest_i,Repairing_latest_i}]}),
                 LatestSameEnough_p =
-                    (UPI_latest_i ++ Repairing_latest_i) ==
-                        (UPI_current_x ++ Repairing_current_x)
+                    UPI_latest_i /= []          % avoid hasty none proj jump
+                    andalso
+                    CurrentRealEpochCheck_p
                     andalso
                     Epoch_latest_i >= P_current_ios#projection_v1.epoch_number,
                 CurrentHasInner_and_LatestIsDisjoint_p =
@@ -1363,10 +1504,14 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                     ordsets:is_disjoint(
                       ordsets:from_list(UPI_current_x ++ Repairing_current_x),
                       ordsets:from_list(UPI_latest_i ++ Repairing_latest_i)),
+                ?REACT({a30, ?LINE,
+                    [{latest_same_enough,LatestSameEnough_p},
+                      {current_has_inner_p,P_current_has_inner_p},
+                      {current_hialid,CurrentHasInner_and_LatestIsDisjoint_p}]}),
                 if LatestSameEnough_p ->
                         ?REACT({a30, ?LINE, []}),
                         case P_current_has_inner_p andalso
-                            (UPI_current_x /= P_i3#projection_v1.upi orelse
+                           (UPI_current_x /= P_i3#projection_v1.upi orelse
                             Repairing_current_x /= P_i3#projection_v1.repairing)
                         of
                             true ->
@@ -1378,10 +1523,12 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
                             false ->
                                 P_latest_i
                             end;
-                   CurrentHasInner_and_LatestIsDisjoint_p ->
+                   CurrentHasInner_and_LatestIsDisjoint_p
+                   andalso
+                   CurrentRealEpochCheck_p ->
                         ?REACT({a30, ?LINE, []}),
                         P_current_ios;
-                    true ->
+                   true ->
                         ?REACT({a30, ?LINE, []}),
                         false
                 end;
@@ -1407,14 +1554,14 @@ a30_make_inner_projection(P_current, P_newprop3, P_latest, Up,
             {P_newprop4, S_i};
        true ->
             FinalInnerEpoch =
-                case inner_projection_exists(P_current) of
+                case inner_projection_exists(P_current_real) of
                     false ->
                         ?REACT({a30xyzxyz, ?LINE, [P_newprop3#projection_v1.epoch_number]}),
                         FinalCreation = P_newprop3#projection_v1.creation_time,
                         P_newprop3#projection_v1.epoch_number;
                     true ->
-                        P_oldinner = inner_projection_or_self(P_current),
-                        ?REACT({a30xyzxyz, ?LINE, [P_oldinner#projection_v1.epoch_number + 1]}),
+                        P_oldinner = inner_projection_or_self(P_current_real),
+                        ?REACT({a30xyzxyz, ?LINE, [{incrementing_based_on,P_oldinner#projection_v1.epoch_number + 1}]}),
                         FinalCreation = P_newprop3#projection_v1.creation_time,
                         P_oldinner#projection_v1.epoch_number + 1
                 end,
@@ -1455,6 +1602,8 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
     LatestAuthorDownP = a40_latest_author_down(P_latest, P_newprop, S)
                         andalso
                         P_latest#projection_v1.author_server /= MyName,
+    P_latestStable = make_basic_comparison_stable(P_latest),
+    P_currentStable = make_basic_comparison_stable(P_current),
     ?REACT({a40, ?LINE,
             [{latest_author, P_latest#projection_v1.author_server},
              {author_is_down_p, LatestAuthorDownP},
@@ -1482,11 +1631,11 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
         andalso
         (P_latest#projection_v1.epoch_number < P_current#projection_v1.epoch_number
          orelse
-         P_latest /= P_current) ->
+         P_latestStable /= P_currentStable) ->
             ?REACT({a40, ?LINE,
-                    [{latest_epoch, P_latest#projection_v1.epoch_number},
-                     {current_epoch, P_current#projection_v1.epoch_number},
-                     {neq, P_latest /= P_current}]}),
+                    [{latest, P_latestStable},
+                     {current, P_currentStable},
+                     {neq, P_latestStable /= P_currentStable}]}),
 
             %% Both of these cases are rare.  Elsewhere, the code
             %% assumes that the local FLU's projection store is always
@@ -1570,6 +1719,7 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
 
         true ->
             ?REACT({a40, ?LINE, [true]}),
+            CurrentZerfInStatus_p = has_make_zerf_annotation(P_current),
             GoTo50_p =
                 case inner_projection_exists(P_current) andalso
                      inner_projection_exists(P_newprop) andalso
@@ -1593,8 +1743,20 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                                 true
                         end;
                     false ->
-                        ?REACT({a40, ?LINE, []}),
-                        true
+                        ?REACT({a40, ?LINE, [{currentzerfinstatus_p,CurrentZerfInStatus_p}]}),
+                        if CurrentZerfInStatus_p andalso
+                           P_newprop#projection_v1.upi /= [] ->
+                                %% One scenario here: we are waking up after
+                                %% a slumber with the none proj and need to
+                                %% send P_newprop (which has non/empty UPI)
+                                %% through the process to continue chain
+                                %% recovery.
+                                ?REACT({a40, ?LINE, []}),
+                                false;
+                           true ->
+                                ?REACT({a40, ?LINE, []}),
+                                true
+                        end
                 end,
             if GoTo50_p ->
                     ?REACT({a40, ?LINE, []}),
@@ -1606,22 +1768,35 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
             end
     end.
 
-react_to_env_A49(_P_latest, FinalProps, #ch_mgr{name=MyName,
-                                                proj=P_current} = S) ->
+react_to_env_A49(P_latest, FinalProps, #ch_mgr{consistency_mode=cp_mode,
+                                               name=MyName,
+                                               proj=P_current} = S) ->
     ?REACT(a49),
-    #projection_v1{all_members=All_list,
-                   witnesses=Witness_list,
-                   members_dict=MembersDict} = P_current,
-    P_none = make_none_projection(MyName, All_list, Witness_list,
-                                  MembersDict),
-    react_to_env_A50(P_none, FinalProps, S#ch_mgr{proj=P_none}).
+    %% Using the none projection as our new P_current does *not* work:
+    %% if we forget what P_current is, then we risk not being able to
+    %% detect an insane chain transition or else risk a false positive
+    %% insane check.
+    %%
+    %% Instead, we will create an implicit annotation in P_current
+    %% that will force A29 to always use the projection from
+    %% make_zerf() as the basis for our next transition calculations.
+    %% In this wacky case, we break the checksum on P_current so that
+    %% A29's epoch_id comparison will always be unequal and thus
+    %% always trigger make_zerf().
+    Dbg = P_current#projection_v1.dbg,
+    P_current2 = P_current#projection_v1{epoch_csum= <<"broken">>,
+                                         dbg=[{zerf_backstop,true},
+                                              {zerf_in,a49}|Dbg]},
+    react_to_env_A50(P_latest, FinalProps, set_proj(S, P_current2)).
 
 react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
     ?REACT(a50),
     ?REACT({a50, ?LINE, [{current_epoch, P_current#projection_v1.epoch_number},
                          {latest_epoch, P_latest#projection_v1.epoch_number},
                          {final_props, FinalProps}]}),
-    %% if S#ch_mgr.name == b; S#ch_mgr.name == c -> io:format(user, "A50: ~p: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
+    %% if S#ch_mgr.name == c -> io:format(user, "A50: ~w: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
+    V = case file:read_file("/tmp/moomoo."++atom_to_list(S#ch_mgr.name)) of {ok,_} -> true; _ -> false end,
+    if V -> io:format(user, "A50: ~w: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
     {{no_change, FinalProps, P_current#projection_v1.epoch_number}, S}.
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
@@ -1668,6 +1843,8 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
     %% compound predicate below.  I'm yanking it out now. TODO re-study?
     #projection_v1{upi=P_newprop_upi_ooi, repairing=P_newprop_repairing_ooi} =
         inner_projection_or_self(P_newprop),
+    CurrentZerfInStatus_p = has_make_zerf_annotation(P_current),
+    CurrentEpoch = P_current#projection_v1.epoch_number,
     EnoughAreFlapping_and_IamBad_p =
         %% Ignore inner_projection_exists(P_current): We might need to
         %% shut up quickly (adopting a new P_current can take a long
@@ -1675,21 +1852,28 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
         (inner_projection_exists(P_latest) orelse
          inner_projection_exists(P_newprop)) andalso
         %% I have been flapping for a while
-        S#ch_mgr.flap_count > 100 andalso
+        S#ch_mgr.flap_count > 200 andalso
         %% I'm suspected of being bad
         lists:member(MyName, P_newprop_AllHosedPlus) andalso
         %% I'm not in the critical UPI or repairing lists
         (not lists:member(MyName, P_newprop_upi_ooi++P_newprop_repairing_ooi))
         andalso
         %% My down lists are the same, i.e., no state change to announce
-        P_current#projection_v1.down == P_newprop#projection_v1.down,
+        %% Or if P_current is a CP mode result of zerf_in & valid (epoch #),
+        %% then this down list comparison should be skipped.
+        ((P_current#projection_v1.down == P_newprop#projection_v1.down)
+         orelse
+         CurrentZerfInStatus_p),
     ?REACT({b10, ?LINE, [{0,EnoughAreFlapping_and_IamBad_p},
                          {1,inner_projection_exists(P_current)},
                          {2,inner_projection_exists(P_latest)},
                          {3,inner_projection_exists(P_newprop)},
                          {4,MyUniquePropCount},
-                         {5,{MyName, P_newprop_AllHosedPlus}},
-                         {6,UnanimousLatestInnerNotRelevant_p}]}),
+                         {5,S#ch_mgr.flap_count},
+                         {6,{MyName, P_newprop_AllHosedPlus}},
+                         {7,P_current#projection_v1.down},
+                         {8,P_newprop#projection_v1.down},
+                         {9,{CurrentZerfInStatus_p,CurrentEpoch}}]}),
     if
         EnoughAreFlapping_and_IamBad_p ->
             ?REACT({b10, ?LINE, []}),
@@ -1703,12 +1887,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
             if CMode == ap_mode ->
                     react_to_env_A50(P_latest, FinalProps, S);
                CMode == cp_mode ->
-                    %% Be more harsh, stop iterating by A49 so that when we
-                    %% resume we will have a much small opinion about the
-                    %% world.
-                    %% WHOOPS, doesn't allow convergence in simple cases,
-                    %% needs more work!!!!!!!!!!!!!!!! Monday evening!!!!
-                    %% react_to_env_A49(P_latest, FinalProps, S)
+                    %% Don't use A49, previous experiments failed, check git.
                     react_to_env_A50(P_latest, FinalProps, S)
             end;
 
@@ -1821,7 +2000,9 @@ react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
     ?REACT(c100),
 
     Sane = projection_transition_is_sane(P_current, P_latest, MyName),
-    if Sane == true -> ok;  true -> ?V("~w-insane-~w-auth=~w:~w:~w:~w:~w:~w:~w-~p,", [?LINE, MyName, P_newprop#projection_v1.author_server, P_newprop#projection_v1.epoch_number, P_newprop#projection_v1.upi, P_newprop#projection_v1.repairing, (inner_projection_or_self(P_newprop))#projection_v1.epoch_number, (inner_projection_or_self(P_newprop))#projection_v1.upi, (inner_projection_or_self(P_newprop))#projection_v1.repairing, Sane]) end, %%% DELME!!!
+    QQ_current = lists:flatten(io_lib:format("~w:~w,~w/~w:~w,~w", [P_current#projection_v1.epoch_number, P_current#projection_v1.upi, P_current#projection_v1.repairing, (inner_projection_or_self(P_current))#projection_v1.epoch_number, (inner_projection_or_self(P_current))#projection_v1.upi, (inner_projection_or_self(P_current))#projection_v1.repairing])),
+    QQ_latest = lists:flatten(io_lib:format("~w:~w,~w/~w:~w,~w", [P_latest#projection_v1.epoch_number, P_latest#projection_v1.upi, P_latest#projection_v1.repairing, (inner_projection_or_self(P_latest))#projection_v1.epoch_number, (inner_projection_or_self(P_latest))#projection_v1.upi, (inner_projection_or_self(P_latest))#projection_v1.repairing])),
+    if Sane == true -> ok;  true -> ?V("\n~w-insane-~w-auth=~w ~s -> ~s ~w\n    ~p\n    ~p\n", [?LINE, MyName, P_newprop#projection_v1.author_server, QQ_current, QQ_latest, Sane, get(why2), get(react)]) end,
     Flap_latest = if is_record(Flap_latest0, flap_i) ->
                           Flap_latest0;
                      true ->
@@ -1836,7 +2017,9 @@ react_to_env_C100(P_newprop, #projection_v1{author_server=Author_latest,
     %%       construction errors, checksum error, etc.
     case Sane of
         _ when P_current#projection_v1.epoch_number == 0 ->
-            %% Epoch == 0 is reserved for first-time, just booting conditions.
+            %% Epoch == 0 is reserved for first-time, just booting conditions
+            %% or for when we got stuck in an insane projection transition
+            %% and were forced to the none projection to recover.
             ?REACT({c100, ?LINE, [first_write]}),
             if Sane == true -> ok;  true -> ?V("~w-insane-~w-~w:~w:~w,", [?LINE, MyName, P_newprop#projection_v1.epoch_number, P_newprop#projection_v1.upi, P_newprop#projection_v1.repairing]) end, %%% DELME!!!
             react_to_env_C110(P_latest, S);
@@ -1909,7 +2092,8 @@ react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
             case get({zzz_quiet, P_latest#projection_v1.epoch_number}) of undefined -> ?V("YOYO-cp-mode,~w,current=~w,",[MyName, machi_projection:make_summary((S#ch_mgr.proj))]); _ -> ok end,
             put({zzz_quiet, P_latest#projection_v1.epoch_number}, true),
             react_to_env_A49(P_latest, [], S2);
-        N when N > ?TOO_FREQUENT_BREAKER ->
+        N when CMode == ap_mode,
+               N > ?TOO_FREQUENT_BREAKER ->
             ?V("\n\nYOYO ~w breaking the cycle of:\n  current: ~w\n  new    : ~w\n", [MyName, machi_projection:make_summary(S#ch_mgr.proj), machi_projection:make_summary(P_latest)]),
             ?REACT({c100, ?LINE, [{not_sanes_author_count, N}]}),
             react_to_env_C103(P_newprop, P_latest, S2);
@@ -1929,11 +2113,9 @@ react_to_env_C103(#projection_v1{epoch_number=_Epoch_newprop} = _P_newprop,
                   #ch_mgr{name=MyName, proj=P_current}=S) ->
     #projection_v1{witnesses=Witness_list,
                    members_dict=MembersDict} = P_current,
-    P_none0 = make_none_projection(MyName, All_list, Witness_list, MembersDict),
-    %% P_none1 = P_none0#projection_v1{epoch_number=erlang:max(Epoch_newprop,
-    %%                                                         Epoch_latest),
-    P_none1 = P_none0#projection_v1{epoch_number=Epoch_latest,
-                                    flap=Flap,
+    P_none0 = make_none_projection(Epoch_latest,
+                                   MyName, All_list, Witness_list, MembersDict),
+    P_none1 = P_none0#projection_v1{flap=Flap,
                                     dbg=[{none_projection,true}]},
     P_none = machi_projection:update_checksum(P_none1),
     %% Use it, darn it, because it's 100% safe.  And exit flapping state.
@@ -1946,11 +2128,29 @@ react_to_env_C103(#projection_v1{epoch_number=_Epoch_newprop} = _P_newprop,
     %% looping C100->C103->C100.
     react_to_env_C100(P_none, P_none, clear_flapping_state(S)).
 
-react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
+react_to_env_C110(P_latest, #ch_mgr{name=MyName, proj=P_current,
+                                    proj_unanimous=ProjUnanimous} = S) ->
     ?REACT(c110),
     ?REACT({c110, ?LINE, [{latest_epoch,P_latest#projection_v1.epoch_number}]}),
-    Extra_todo = [{react,get(react)}],
-    P_latest2 = machi_projection:update_dbg2(P_latest, Extra_todo),
+    Extra1 = case inner_projection_exists(P_current) andalso
+                  inner_projection_exists(P_latest) andalso
+                  (machi_projection:get_epoch_id(
+                     inner_projection_or_self(P_current)) ==
+                   machi_projection:get_epoch_id(
+                     inner_projection_or_self(P_latest)))
+                 andalso ProjUnanimous /= false of
+                 true ->
+                     EpochID = machi_projection:get_epoch_id(
+                                 inner_projection_or_self(P_latest)),
+                     UnanimousTime = ProjUnanimous,
+                     A = make_annotation(EpochID, UnanimousTime),
+                     io:format(user, "\nCONFIRM debug C110 ~w annotates ~W outer ~w\n", [MyName, EpochID, 5, P_latest#projection_v1.epoch_number]),
+                     [A, {annotated_by,c110}];
+                 false ->
+                     []
+             end,
+    Extra2 = [{react,get(react)}],
+    P_latest2 = machi_projection:update_dbg2(P_latest, Extra1 ++ Extra2),
 
     MyNamePid = proxy_pid(MyName, S),
     Goo = P_latest2#projection_v1.epoch_number,
@@ -1963,10 +2163,12 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     case {?FLU_PC:write_projection(MyNamePid, private, P_latest2,?TO*30),Goo} of
         {ok, Goo} ->
             ?REACT({c120, [{write, ok}]}),
-            perhaps_verbose_c110(P_latest2, S),
             %% We very intentionally do *not* pass P_latest2 forward:
             %% we must avoid bloating the dbg2 list!
-            react_to_env_C120(P_latest, [], S);
+            P_latest2_perhaps_annotated =
+                machi_projection:update_dbg2(P_latest, Extra1),
+            perhaps_verbose_c110(P_latest2_perhaps_annotated, S),
+            react_to_env_C120(P_latest2_perhaps_annotated, [], S);
         {{error, bad_arg}, _Goo} ->
             ?REACT({c120, [{write, bad_arg}]}),
 
@@ -1998,7 +2200,7 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
             %% React to newer public write by restarting the iteration.
             react_to_env_A20(0, S);
         Else ->
-            Summ = machi_projection:make_summary(P_latest),
+            Summ = machi_projection:make_summary(P_latest2),
             io:format(user, "C110 error by ~w: ~w, ~w\n~p\n",
                       [MyName, Else, Summ, get(react)]),
             error_logger:error_msg("C110 error by ~w: ~w, ~w, ~w\n",
@@ -2013,11 +2215,20 @@ react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H,
     MaxLength = length(P_latest#projection_v1.all_members) * 1.5,
     H2   = add_and_trunc_history(P_latest, H, MaxLength),
 
-    diversion_c120_verbose_goop(P_latest, S),
+    %% diversion_c120_verbose_goop(P_latest, S),
     ?REACT({c120, [{latest, machi_projection:make_summary(P_latest)}]}),
-    {{now_using, FinalProps, P_latest#projection_v1.epoch_number},
-     S#ch_mgr{proj=P_latest, proj_history=H2,
-              sane_transitions=Xtns + 1}}.
+    S2 = set_proj(S#ch_mgr{proj_history=H2,
+                           sane_transitions=Xtns + 1}, P_latest),
+    S3 = case is_annotated(P_latest) of
+             false ->
+                 S2;
+             {{_ConfEpoch, _ConfCSum}, ConfTime} ->
+io:format(user, "\nCONFIRM debug C120 ~w was annotated ~W outer ~w\n", [S#ch_mgr.name, (inner_projection_or_self(P_latest))#projection_v1.epoch_number, 5, P_latest#projection_v1.epoch_number]),
+                 S2#ch_mgr{proj_unanimous=ConfTime}
+         end,
+    V = case file:read_file("/tmp/moomoo."++atom_to_list(S#ch_mgr.name)) of {ok,_} -> true; _ -> false end,
+    if V -> io:format("C120: ~w: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
+    {{now_using, FinalProps, P_latest#projection_v1.epoch_number}, S3}.
 
 add_and_trunc_history(P_latest, H, MaxLength) ->
     H2 = if P_latest#projection_v1.epoch_number > 0 ->
@@ -2099,6 +2310,7 @@ react_to_env_C310(P_newprop, S) ->
 
 calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                 #ch_mgr{name=MyName, proj_history=H,
+                        consistency_mode=CMode,
                         flap_start=FlapStart,
                         flap_count=FlapCount, flap_last_up=FlapLastUp,
                         flap_last_up_change=LastUpChange0,
@@ -2112,6 +2324,14 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                            LastUpChange0
                    end,
     LastUpChange_diff = timer:now_diff(now(), LastUpChange) / 1000000,
+    ?REACT({calculate_flaps,?LINE,[{flap_start,FlapStart},
+                                   {flap_count,FlapCount},
+                                   {flap_last_up,FlapLastUp},
+                                   {flap_counts_last,FlapCountsLast},
+                                   {my_unique_prop_count,MyUniquePropCount},
+                                   {current_up,CurrentUp},
+                                   {last_up_change,LastUpChange},
+                                   {last_up_change_diff,LastUpChange_diff}]}),
 
     %% TODO: Do we want to try to use BestP below to short-circuit
     %% calculation if we notice that the best private epoch # from
@@ -2131,8 +2351,7 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
         [X || {_FLU, {{_FlEpk,FlTime}, _FlapCount}}=X <- RemoteTransFlapCounts1,
               FlTime /= ?NOT_FLAPPING],
     TempNewFlapCount = FlapCount + 1,
-    TempAllFlapCounts = lists:sort([{MyName, {FlapStart, TempNewFlapCount}}|
-                                    RemoteTransFlapCounts]),
+    TempAllFlapCounts = lists:sort([{MyName, FlapStart}|RemoteTransFlapCounts]),
     %% Sanity check.
     true = lists:all(fun({_FLU,{_EpkTime,_Count}}) -> true;
                         (_)                        -> false
@@ -2161,9 +2380,11 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
     ?REACT({calculate_flaps, ?LINE, [{queue_len, queue:len(H)},
                                      {uniques, UniqueProposalSummaries}]}),
     P_latest_Flap = get_raw_flapping_i(P_latest),
-    AmFlappingNow_p = not (FlapStart == ?NOT_FLAPPING_START)
-                      andalso
-                      length(UniqueProposalSummaries) == 1,
+    AmFlappingNow_p = not (FlapStart == ?NOT_FLAPPING_START),
+                      %% TODO: revisit why I added this extra length()
+                      %%       condition back on commit 3dfe5c2.
+                      %% andalso
+                      %% length(UniqueProposalSummaries) == 1,
     P_latest_flap_start = case P_latest_Flap of
                               undefined ->
                                   ?NOT_FLAPPING_START;
@@ -2181,17 +2402,19 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
             {N, _} when N >= MinQueueLen,
                         P_latest_flap_start /= ?NOT_FLAPPING_START ->
                 ?REACT({calculate_flaps,?LINE,
-                        [{manifesto_clause,2},
+                        [{manifesto_clause,{start,2}},
                          {latest_epoch, P_latest#projection_v1.epoch_number},
                          {latest_flap_count,P_latest_Flap#flap_i.flap_count}]}),
                 true;
             {N, [_]} when N >= MinQueueLen ->
-                ?REACT({calculate_flaps,?LINE,[{manifesto_clause,1}]}),
+                ?REACT({calculate_flaps,?LINE,[{manifesto_clause,{start,1}}]}),
                 true;
             {_N, _} ->
                 ?REACT({calculate_flaps,?LINE,[]}),
                 false
         end,
+        %% TODO: 2015-08-29: Grr, we really need CP cases of none projection
+        %% flapping to propagate problem_with information.
     LeaveFlapping_p =
         if 
             LastUpChange_diff < 3.0 ->
@@ -2205,9 +2428,16 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                 %% that intent.
                 ?REACT({calculate_flaps,?LINE,[]}),
                 false;
+            %% TODO: 2015-08-29: Grr, we really need CP cases of none projection
+            %% flapping to propagate problem_with information.
+            %% AmFlappingNow_p andalso
+            %% P_newprop#projection_v1.upi == [] ->
+            %%     %% P_newprop is the none projection, stop flapping.
+            %%     ?REACT({calculate_flaps,?LINE,[]}),
+            %%     true;
             AmFlappingNow_p andalso
             CurrentUp /= FlapLastUp ->
-                ?REACT({calculate_flaps,?LINE,[{manifesto_clause,1}]}),
+                ?REACT({calculate_flaps,?LINE,[{manifesto_clause,{leave,1}}]}),
                 true;
             AmFlappingNow_p ->
                 P_latest_LastStartTime =
@@ -2223,11 +2453,13 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                         %% latest proj flapping & flapping last time
                         ?REACT({calculate_flaps,?LINE,[]}),
                         false;
-                    {0=Curtime, 0} when P_latest_LastStartTime /= undefined,
+                    {0=Curtime, 0} when P_latest#projection_v1.author_server
+                                        /= MyName,
+                                        P_latest_LastStartTime /= undefined,
                                         P_latest_LastStartTime /= ?NOT_FLAPPING_START ->
 
                         ?REACT({calculate_flaps,?LINE,
-                                [{manifesto_clause,2},
+                                [{manifesto_clause,{leave,2}},
                                  {p_latest, machi_projection:make_summary(P_latest)},
                                  {curtime, Curtime},
                                  {flap_counts_last, FlapCountsLast},
@@ -2266,11 +2498,18 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
                                     HosedAnnotations)),
             AllHosed = lists:usort(HosedAnnotations ++ Magic),
             %%io:format(user, "ALLHOSED ~p: ~p ~w\n", [MyName, Magic, HosedAnnotations]),
+            ?REACT({calculate_flaps,?LINE,[{new_flap_count,NewFlapCount},
+                                           {bad_flus,BadFLUs},
+                                           {hosed_t_u_ts,HosedTransUnionTs},
+                                           {hosed_annotations,HosedAnnotations},
+                                           {magic,Magic},
+                                           {all_hosed,AllHosed}]}),
             AllHosed;
        not AmFlapping_p ->
             NewFlapCount = 0,
             NewFlapStart = ?NOT_FLAPPING_START,
             AllFlapCounts = [],
+            ?REACT({calculate_flaps,?LINE,[]}),
             AllHosed = []
     end,
 
@@ -2292,12 +2531,34 @@ calculate_flaps(P_newprop, P_latest, _P_current, CurrentUp, _FlapLimit,
     %% TODO: 2015-03-04: I'm growing increasingly suspicious of
     %% the 'runenv' variable that's threaded through all this code.
     %% It isn't doing what I'd originally intended.  Fix it.
+    ?REACT({calculate_flaps,?LINE,[{flapping_i,FlappingI},
+                                   {am_flapping_p,AmFlapping_p},
+                                   {ch_mgr_updates,follow},
+                                   {flap_count,NewFlapCount},
+                                   {flap_start,NewFlapStart},
+                                   {flap_last_up,CurrentUp},
+                                   {flap_last_up_change,LastUpChange},
+                                   {flap_counts_last,AllFlapCounts}]}),
     S2 = S#ch_mgr{flap_count=NewFlapCount, flap_start=NewFlapStart,
                   flap_last_up=CurrentUp, flap_last_up_change=LastUpChange,
                   flap_counts_last=AllFlapCounts,
                   runenv=RunEnv1},
-    {machi_projection:update_checksum(P_newprop#projection_v1{
-                                                         flap=FlappingI}),
+
+    P_newprop2 = case proplists:get_value(MyName, AllHosed) of
+                     true when CMode == cp_mode ->
+                         %% Experiment: try none proj but keep the epoch #.
+                         ?REACT({calculate_flaps,?LINE,[]}),
+                         P_newprop#projection_v1{
+                           upi=[], repairing=[],
+                           down=P_newprop#projection_v1.all_members};
+                     _ ->
+                         ?REACT({calculate_flaps,?LINE,[]}),
+                         P_newprop
+                 end,
+    ?REACT({calculate_flaps,?LINE,[{zzz_1,P_newprop2#projection_v1.upi},
+                                  {zzz_2,P_newprop2#projection_v1.repairing},
+                                  {zzz_3,catch (P_newprop2#projection_v1.flap)#flap_i.all_hosed}]}),
+    {machi_projection:update_checksum(P_newprop2#projection_v1{flap=FlappingI}),
      if AmFlapping_p ->
              S2;
         true ->
@@ -2359,24 +2620,26 @@ projection_transition_is_sane(P1, P2, RelativeToServer) ->
 projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
     put(myname, RelativeToServer),
     put(why2, []),
+    CMode = P2#projection_v1.mode,
+    HasInner1 = inner_projection_exists(P1),
+    HasInner2 = inner_projection_exists(P2),
+    Inner1 = inner_projection_or_self(P1),
+    Inner2 = inner_projection_or_self(P2),
     case projection_transition_is_sane_with_si_epoch(
            P1, P2, RelativeToServer, RetrospectiveP) of
         true ->
-            HasInner1 = inner_projection_exists(P1),
-            HasInner2 = inner_projection_exists(P2),
             if HasInner1 orelse HasInner2 ->
-                    Inner1 = inner_projection_or_self(P1),
-                    Inner2 = inner_projection_or_self(P2),
-                    if HasInner1 andalso HasInner2 ->
-                       %% In case of inner->inner transition, we must allow
-                       %% the epoch number to remain constant.  Thus, we
-                       %% call the function that does not check for a
-                       %% strictly-increasing epoch.
+                    if HasInner1 orelse HasInner2 ->
+                       %% In case of transition with inner projections, we
+                       %% must allow the epoch number to remain constant.
+                       %% Thus, we call the function that does not check for
+                       %% a strictly-increasing epoch.
                        ?RETURN2(
                          projection_transition_is_sane_final_review(P1, P2,
                            projection_transition_is_sane_except_si_epoch(
                             Inner1, Inner2, RelativeToServer, RetrospectiveP)));
                    true ->
+                       exit(delete_this_inner_clause_impossible_with_two_identical_nested_if_clauses),
                        ?RETURN2(
                          projection_transition_is_sane_final_review(P1, P2,
                            projection_transition_is_sane_with_si_epoch(
@@ -2387,7 +2650,61 @@ projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
                                                                ?RETURN2(true))
             end;
         Else ->
-            ?RETURN2(Else)
+            if CMode == cp_mode,
+               HasInner1 and (not HasInner2) ->
+                    %% OK, imagine that we used to be flapping but now we've
+                    %% stopped flapping.
+                    %%
+                    %% P1 = outer = upi=[a,d,e],repairing=[]  epoch 870
+                    %%      inner = upi=[a,e,d],repairing=[]  epoch 605
+                    %% to
+                    %% P2 = outer = upi=[a,e,d],repairing=[]  epoch 875
+                    %%      inner = undefined
+                    %%
+                    %% Everyone is using the inner projection [a,e,d],[],
+                    %% everyone thinks that that is OK. It has been in use
+                    %% for a while now.
+                    %%
+                    %% Now there's a new epoch, e875 that is saying that we
+                    %% should transition from inner e605 [a,e,d],[] -> outer
+                    %% e875 [a,e,d],[] This is SAFE!  The UPI is the *same*.
+                    %%
+                    %% Verify this Inner1->P2 transition, including SI epoch
+                    ?RETURN2(
+                       projection_transition_is_sane_final_review(P1, P2,
+                           projection_transition_is_sane_with_si_epoch(
+                            Inner1, P2, RelativeToServer, RetrospectiveP)));
+               CMode == cp_mode,
+               (not HasInner1) and HasInner2 ->
+                    %% OK, imagine that we are entering flapping mode.
+                    %%
+                    %% P1 = outer = upi=[a,d,e],repairing=[c] epoch 298
+                    %%      inner = undefined
+                    %% to
+                    %% P2 = outer = upi=[d,e,c],repairing=[]  epoch 684
+                    %%      inner = upi=[a,d,e],repairing=[c]  epoch 163
+                    %%
+                    %% We have been unstable for a long time: 684-298 is a
+                    %% lot of churn.  Our internal sense of what the outer
+                    %% projection should look like is screwed up.  Someone
+                    %% thinks that there was a repair of c that finished in
+                    %% the outer projection, during the churn between 298 and
+                    %% 684, but we didn't adopt that change to the change.
+                    %% Perhaps we were asleep?
+                    %%
+                    %% Based on our last view of the world at 298, we are
+                    %% keeping that same view *and* we've decided to start
+                    %% flapping, hence the inner projection.  Make certain
+                    %% that that transition is ok relative to ourself, and
+                    %% let the other safety checks built into humming
+                    %% consensus & CP mode management take care of the rest.
+                    ?RETURN2(
+                       projection_transition_is_sane_final_review(P1, P2,
+                           projection_transition_is_sane_with_si_epoch(
+                            P1, Inner2, RelativeToServer, RetrospectiveP)));
+               true ->
+                    ?RETURN2(Else)
+            end
     end.
 
 projection_transition_is_sane_final_review(
@@ -2433,17 +2750,35 @@ projection_transition_is_sane_final_review(
   _) when CMode1 /= CMode2 ->
     {wtf, cmode1, CMode1, cmode2, CMode2};
 projection_transition_is_sane_final_review(
-  #projection_v1{mode=cp_mode, upi=UPI1}=_P1,
-  #projection_v1{mode=cp_mode, upi=UPI2, witnesses=Witness_list, dbg=Dbg2}=_P2,
+  #projection_v1{mode=cp_mode, upi=UPI1, dbg=P1_dbg}=_P1,
+  #projection_v1{mode=cp_mode, upi=UPI2, witnesses=Witness_list}=_P2,
   true) ->
     %% All earlier sanity checks has said that this transition is sane, but
-    %% we also need to make certain that any CP mode transition preserves at
+    %% we also need to make certain that any CP mode transition preserves at 
     %% least one non-witness server in the UPI list.  Earlier checks have
     %% verified that the ordering of the FLUs within the UPI list is ok.
     UPI1_s = ordsets:from_list(UPI1 -- Witness_list),
     UPI2_s = ordsets:from_list(UPI2 -- Witness_list),
-    case proplists:get_value(zerf_backstop, Dbg2) of
+    catch ?REACT({projection_transition_is_sane_final_review, ?LINE,
+                  [{upi1,UPI1}, {upi2,UPI2}, {witnesses,Witness_list},
+                   {zerf_backstop, proplists:get_value(zerf_backstop, P1_dbg)},
+                   {upi1_s,UPI1}, {upi2_s,UPI2}]}),
+    case proplists:get_value(zerf_backstop, P1_dbg) of
         true when UPI1 == [] ->
+            %% CAUTION, this is a dangerous case.  If the old projection, P1,
+            %% has a 'zerf_backstop' annotation, then when this function
+            %% returns true, we are (in effect) saying, "We trust you."  What
+            %% if we called make_zerf() a year ago because we took a 1 year
+            %% nap??  How can we trust this?
+            %%
+            %% The answer is: this is not our last safety enforcement for CP
+            %% mode, fortunately.  We are going from the none projection to a
+            %% quorum majority projection, *and* we will not unwedge ourself
+            %% until we can verify that all UPI members of the chain are
+            %% unanimous for this epoch.  So if we took a 1 year nap already,
+            %% or if we take a one year right now and delay writing our
+            %% private projection for 1 year, then if we disagree with the
+            %% quorum majority, we simply won't be able to unwedge.
             ?RETURN2(true);
         _ when UPI2 == [] ->
             %% We're down to the none projection to wedge ourself.  That's ok.
@@ -2557,6 +2892,21 @@ projection_transition_is_sane_except_si_epoch(
     %% We won't check the checksum of P1, but we will of P2.
     P2 = machi_projection:update_checksum(P2),
 
+    %% CP mode extra sanity checks
+    if CMode1 == cp_mode ->
+            Majority = full_majority_size(All_list2),
+            if length(UPI_list2) == 0 ->
+                    ok;                         % none projection
+               length(UPI_list2) >= Majority ->
+                    %% We have at least one non-witness
+                    true = (length(UPI_list2 -- Witness_list2) > 0);
+               true ->
+                    error({majority_not_met, UPI_list2})
+            end;
+       CMode1 == ap_mode ->
+            ok
+    end,
+
     %% Hooray, all basic properties of the projection's elements are
     %% not obviously bad.  Now let's check if the UPI+Repairing->UPI
     %% transition is good.
@@ -2583,6 +2933,114 @@ projection_transition_is_sane_except_si_epoch(
           react, get(react),
           stack, Trace}
  end.
+
+poll_private_proj_is_upi_unanimous(#ch_mgr{consistency_mode=ap_mode} = S) ->
+    S;
+poll_private_proj_is_upi_unanimous(#ch_mgr{consistency_mode=cp_mode,
+                                           proj_unanimous={_,_,_}} = S) ->
+    %% #ch_mgr{name=MyName, proj=Proj} = S,
+    %% io:format(user, "\nCONFIRM debug ~w skip poll for inner ~w outer ~w\n",
+    %%           [MyName, (inner_projection_or_self(Proj))#projection_v1.epoch_number, Proj#projection_v1.epoch_number]),
+    S;
+poll_private_proj_is_upi_unanimous(#ch_mgr{consistency_mode=cp_mode,
+                                           proj_unanimous=false,
+                                           proj=Proj} = S) ->
+    if Proj#projection_v1.upi == [] % Nobody to poll?
+       orelse
+       Proj#projection_v1.epoch_number == 0 -> % Skip polling for epoch 0?
+            S;
+       true ->
+            poll_private_proj_is_upi_unanimous_sleep(0, S)
+    end.
+
+poll_private_proj_is_upi_unanimous_sleep(Count, S) when Count > 2 ->
+    S;
+poll_private_proj_is_upi_unanimous_sleep(Count, #ch_mgr{runenv=RunEnv}=S) ->
+    Denom = case proplists:get_value(use_partition_simulator, RunEnv, false) of
+                true ->
+                    20;
+                _ ->
+                    1
+            end,
+    timer:sleep(((Count * Count) * 50) div Denom),
+    case poll_private_proj_is_upi_unanimous3(S) of
+        #ch_mgr{proj_unanimous=false} = S2 ->
+            poll_private_proj_is_upi_unanimous_sleep(Count + 1, S2);
+        S2 ->
+            S2
+    end.
+
+poll_private_proj_is_upi_unanimous3(#ch_mgr{name=MyName, proj=P_current,
+                                            opts=MgrOpts} = S) ->
+    Proj_ios = inner_projection_or_self(P_current),
+    UPI = Proj_ios#projection_v1.upi,
+    EpochID = machi_projection:make_epoch_id(Proj_ios),
+    {Rs, S2} = read_latest_projection_call_only2(private, UPI, S),
+    Rs2 = [if is_record(R, projection_v1) ->
+                   machi_projection:make_epoch_id(inner_projection_or_self(R));
+              true ->
+                   R                            % probably {error, unwritten}
+           end || R <- Rs],
+    case lists:usort(Rs2) of
+        [EID] when EID == EpochID ->
+            %% We have a debugging problem, alas.  It would be really great
+            %% if we could preserve the dbg2 info that's in the current
+            %% projection that's on disk.  However, the full dbg2 list
+            %% with 'react' trace data isn't in the #ch_mgr.proj copy of
+            %% the projection.  So, go read it from the store.
+            %%
+            %% But of course there's another small problem.  P_current could
+            %% be the result of make_zerf(), which helps us "fast forward" to
+            %% a newer CP mode projection.  And so what we just read in the
+            %% 'Rs' at the top of this function may be for a new epoch that
+            %% we've never seen before and therefore doesn't exist in our
+            %% local private projection store.  But if it came from
+            %% make_zerf(), by definition it must be annotated, so don't try
+            %% to proceed any further.
+            ProxyPid = proxy_pid(MyName, S),
+            OuterEpoch = P_current#projection_v1.epoch_number,
+            case ?FLU_PC:read_projection(ProxyPid, private, OuterEpoch) of
+                {ok, P_currentFull} ->
+                    Now = os:timestamp(),
+                    Annotation = make_annotation(EpochID, Now),
+                    NewDbg2 = [Annotation|P_currentFull#projection_v1.dbg2],
+                    NewProj = P_currentFull#projection_v1{dbg2=NewDbg2},
+                    ProjStore = case get_projection_store_regname(MgrOpts) of
+                                   undefined ->
+                                       machi_flu_psup:make_proj_supname(MyName);
+                                   PStr ->
+                                       PStr
+                                end,
+                    #projection_v1{epoch_number=_EpochRep,
+                                   epoch_csum= <<_CSumRep:4/binary,_/binary>>,
+                                   upi=_UPIRep,
+                                   repairing=_RepairingRep} =
+                        inner_projection_or_self(NewProj),
+                    io:format(user, "\nCONFIRM epoch ~w ~w upi ~w rep ~w by ~w ~w\n", [_EpochRep, _CSumRep, _UPIRep, _RepairingRep, MyName, if P_current#projection_v1.inner == undefined -> outer; true -> {inner,{outer,P_current#projection_v1.epoch_number}} end]),
+                    ok = machi_projection_store:write(ProjStore, private, NewProj),
+                    %% Unwedge our FLU.
+                    {ok, NotifyPid} = machi_projection_store:get_wedge_notify_pid(ProjStore),
+                    _ = machi_flu1:update_wedge_state(NotifyPid, false, EpochID),
+                    S2#ch_mgr{proj_unanimous=Now};
+                _ ->
+                    S2
+            end;
+        _Else ->
+            %% io:format(user, "poll by ~w: want ~W got ~W\n",
+            %%           [MyName, EpochID, 6, _Else, 8]),
+            S2
+    end.
+
+poll_read_private_projections(#projection_v1{inner=undefined,
+                                             epoch_number=Epoch,
+                                             upi=UPI}=_P_current, S) ->
+    read_projection_call_only2(private, Epoch, UPI, S);
+poll_read_private_projections(#projection_v1{inner=_not_undefined,
+                                             upi=UPI}=_P_current, S) ->
+    %% For inner projections, we are (by definition) flapping, and the
+    %% outer epoch numbers are (by definition) unstable.  However, any
+    %% observed use of the the inner proj epoch # is what we need.
+    read_latest_projection_call_only2(private, UPI, S).
 
 sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list) ->
     USec = calc_sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list),
@@ -2871,7 +3329,8 @@ simple_chain_state_transition_is_sane(_Author1, UPI1, Repair1, Author2, UPI2) ->
                     author1,_Author1, upi1,UPI1, repair1,Repair1,
                     author2,Author2, upi2,UPI2,
                     keepsdels,KeepsDels, orders,Orders, numKeeps,NumKeeps,
-                    numOrders,NumOrders, answer1,Answer1}]}),
+                    numOrders,NumOrders, answer1,Answer1},
+                   {why2, get(why2)}]}),
     if not Answer1 ->
             ?RETURN2(Answer1);
        true ->
@@ -3009,121 +3468,120 @@ full_majority_size(L) when is_list(L) ->
 make_zerf(#projection_v1{epoch_number=OldEpochNum,
                          all_members=AllMembers,
                          members_dict=MembersDict,
-                         witnesses=OldWitness_list
+                         witnesses=OldWitness_list,
+                         flap=OldFlap
                         } = _LastProj,
           #ch_mgr{name=MyName,
                   consistency_mode=cp_mode,
                   runenv=RunEnv1} = S) ->
     {Up, _Partitions, _RunEnv2} = calc_up_nodes(MyName,
                                                 AllMembers, RunEnv1),
+    (catch put(yyy_hack, [{up,Up}|get(yyy_hack)])),
     MajoritySize = full_majority_size(AllMembers),
     case length(Up) >= MajoritySize of
         false ->
-            throw({zerf, {not_enough_up, Up, AllMembers}});
+            %% Make it appear like nobody is up now: we'll have to
+            %% wait until the Up list changes so that
+            %% zerf_find_last_common() can confirm a common stable
+            %% last stable epoch.
+
+            P = make_none_projection(OldEpochNum,
+                                     MyName, AllMembers, OldWitness_list,
+                                     MembersDict),
+            machi_projection:update_checksum(
+              P#projection_v1{mode=cp_mode,
+                              flap=OldFlap,
+                              dbg2=[zerf_none,{up,Up},{maj,MajoritySize}]});
         true ->
             make_zerf2(OldEpochNum, Up, MajoritySize, MyName,
-                       AllMembers, OldWitness_list, MembersDict, S)
+                       AllMembers, OldWitness_list, MembersDict, OldFlap, S)
     end.
 
-make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list, MembersDict, S) ->
+make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list,
+           MembersDict, OldFlap, S) ->
     try
-        Epochs = lists:reverse(
-                   lists:usort(
-                     lists:flatten(
-                       [begin
-                            Proxy = proxy_pid(FLU, S),
-                            {ok, Es} = ?FLU_PC:list_all_projections(
-                                          Proxy, private, ?TO*5),
-                            [E || E <- Es]
-                        end || FLU <- Up]))),
-        put(epochs, Epochs),
-        Relation = [],
-        Proj = zerf_find_last_common(Epochs, Relation, MajoritySize, Up, S),
-        Proj#projection_v1{flap=make_flapping_i()}
+        #projection_v1{epoch_number=Epoch} = Proj =
+            zerf_find_last_common(MajoritySize, Up, S),
+        Proj2 = Proj#projection_v1{flap=OldFlap, dbg2=[{make_zerf,Epoch}]},
+        %% io:format(user, "ZERF ~w\n",[machi_projection:make_summary(Proj2)]),
+        Proj2
     catch
         throw:{zerf,no_common} ->
-            FirstEpoch_p = case get(epochs) of
-                               [0]    -> true;
-                               [_, 0] -> true;
-                               _      -> false
-                           end,
-            if FirstEpoch_p ->
-                    %% Epoch 0 special case: make the "all" projection.
-                    %% calc_projection2() will then filter out any FLUs that
-                    %% aren't currently up to create the first chain.  If not
-                    %% enough are up now, then it will fail to create a first
-                    %% chain.
-                    %%
-                    %% If epoch 0 isn't the only epoch that we've looked at,
-                    %% but we still couldn't find a common projection, then
-                    %% we still need to default to the "all" projection and let
-                    %% subsequent chain calculations do their calculations....
-                    P = make_all_projection(MyName, AllMembers, OldWitness_list,
-                                            MembersDict),
-                    machi_projection:update_checksum(
-                      P#projection_v1{epoch_number=OldEpochNum,
-                                      mode=cp_mode,
-                                      dbg2=[zerf_all]});
-               true ->
-                    %% Make it appear like nobody is up now: we'll have to
-                    %% wait until the Up list changes so that
-                    %% zerf_find_last_common() can confirm a common stable
-                    %% last stable epoch.
-
-                    P = make_none_projection(MyName, AllMembers,OldWitness_list,
-                                             MembersDict),
-                    machi_projection:update_checksum(
-                      P#projection_v1{epoch_number=OldEpochNum,
-                                      mode=cp_mode,
-                                      dbg2=[zerf_none, {es, get(epochs)},{up,Up},{maj,MajoritySize}]})
-            end;
+            %% Epoch 0 special case: make the "all" projection.
+            %% calc_projection2() will then filter out any FLUs that
+            %% aren't currently up to create the first chain.  If not
+            %% enough are up now, then it will fail to create a first
+            %% chain.
+            %%
+            %% If epoch 0 isn't the only epoch that we've looked at,
+            %% but we still couldn't find a common projection, then
+            %% we still need to default to the "all" projection and let
+            %% subsequent chain calculations do their calculations....
+            P = make_all_projection(MyName, AllMembers, OldWitness_list,
+                                    MembersDict),
+            P2 =
+            machi_projection:update_checksum(
+              P#projection_v1{epoch_number=OldEpochNum,
+                              mode=cp_mode,
+                              dbg2=[zerf_all]}),
+            %% io:format(user, "ZERF ~w\n",[machi_projection:make_summary(P2)]),
+            P2;
         _X:_Y ->
             throw({zerf, {damn_exception, Up, _X, _Y, erlang:get_stacktrace()}})
-    after
-        erase(epochs)
     end.
 
-zerf_find_last_common([], _Relation, _MajoritySize, _Up, _S) ->
-    throw({zerf, no_common});
-zerf_find_last_common(UnsearchedEpochs, Relation, MajoritySize, Up, S) ->
-    {NowEpochs, NextEpochs} = my_lists_split(5, UnsearchedEpochs),
-    Rel2 = lists:foldl(
-             fun({E, FLU}, Rel) ->
-                     Proxy = proxy_pid(FLU, S),
-                     case (catch ?FLU_PC:read_projection(Proxy, private,
-                                                         E, ?TO)) of
-                         {ok, Proj} ->
-                             %% Sort order: we want inner = bigger.
-                             CSum = Proj#projection_v1.epoch_csum,
-                             OorI = case inner_projection_exists(Proj) of
-                                        true  -> z_inner;
-                                        false -> a_outer
-                                    end,
-                             K = {E, CSum, OorI, Proj#projection_v1{dbg2=[]}},
-                             Rel2 = case lists:keyfind(K, 1, Rel) of
-                                        false ->
-                                            [{K, [FLU]}|Rel];
-                                        {K, OldV} ->
-                                            NewV = lists:usort([FLU|OldV]),
-                                            NewT = {K, NewV},
-                                            lists:keyreplace(K, 1, Rel,
-                                                             NewT)
-                                    end,
-                             Rel2;
-                         _ ->
-                             Rel
-                     end
-             end, Relation, lists:reverse([{E, FLU} || E <- NowEpochs, FLU <- Up])),
-    SortedRel = lists:reverse(lists:sort(Rel2)),
-    case [T || T={{_E, _CSum, _OorI, Proj}, WrittenFLUs} <- SortedRel,
-               ordsets:is_subset(ordsets:from_list(Proj#projection_v1.upi),
-                                 ordsets:from_list(WrittenFLUs))
-               andalso
-               length(Proj#projection_v1.upi) >= MajoritySize] of
+zerf_find_last_common(MajoritySize, Up, S) ->
+    case lists:reverse(
+           lists:sort(
+             lists:flatten(
+               [zerf_find_last_annotated(FLU,MajoritySize,S) || FLU <- Up]))) of
         [] ->
-            zerf_find_last_common(NextEpochs, Rel2, MajoritySize, Up, S);
-        [{{_E, _CSum, _OorI, Proj}, _WrittenFLUs}|_] ->
-            Proj
+            throw({zerf,no_common});
+        [P|_]=_TheList ->
+            %% TODO is this simple sort really good enough?
+            P
+    end.
+
+zerf_find_last_annotated(FLU, MajoritySize, S) ->
+    Proxy = proxy_pid(FLU, S),
+    {ok, Epochs} = ?FLU_PC:list_all_projections(Proxy, private, 60*1000),
+    P = lists:foldl(
+          fun(_Epoch, #projection_v1{}=Proj) ->
+                  Proj;
+             (Epoch, Acc) ->
+                  {ok, Proj} = ?FLU_PC:read_projection(Proxy, private,
+                                                       Epoch, ?TO*10),
+                  case is_annotated(Proj) of
+                      false ->
+                          (catch put(yyy_hack, [{FLU, Epoch, not_annotated}|get(yyy_hack)])),
+                          Acc;
+                      {{ConfEpoch, ConfCSum}, _ConfTime} ->
+                          Px = if ConfEpoch == Epoch ->
+                          (catch put(yyy_hack, [{FLU, Epoch, outer_ok}|get(yyy_hack)])),
+                                       Proj;
+                                  true ->
+                                       %% We only use Proj2 for sanity checking
+                                       %% here, do not return an inner!
+                                       Proj2 = inner_projection_or_self(Proj),
+                                       %% Sanity checking
+                                       ConfEpoch = Proj2#projection_v1.epoch_number,
+                                       ConfCSum  = Proj2#projection_v1.epoch_csum,
+                          (catch put(yyy_hack, [{FLU, Epoch, inner_ok_return_original_outerplusinner}|get(yyy_hack)])),
+                                       Proj
+                               end,
+                          if length(Px#projection_v1.upi) >= MajoritySize ->
+                          (catch put(yyy_hack, [{FLU, Epoch, yay}|get(yyy_hack)])),
+                                  Px;
+                             true ->
+                          (catch put(yyy_hack, [{FLU, Epoch, skip}|get(yyy_hack)])),
+                                  Acc
+                          end
+                  end
+          end, first_accumulator, lists:reverse(Epochs)),
+    if is_record(P, projection_v1) ->
+            P;
+       true ->
+            []                                  % lists:flatten() will destroy
     end.
 
 my_lists_split(N, L) ->
@@ -3178,14 +3636,18 @@ perhaps_verbose_c110(P_latest2, S) ->
             {_,_,C} = os:timestamp(),
             MSec = trunc(C / 1000),
             {HH,MM,SS} = time(),
-            P_latest2x = P_latest2#projection_v1{dbg2=[]}, % limit verbose len.
+            Dbg2X = lists:keydelete(react, 1,
+                                    P_latest2#projection_v1.dbg2) ++
+                [{is_annotated,is_annotated(P_latest2)}],
+            P_latest2x = P_latest2#projection_v1{dbg2=Dbg2X}, % limit verbose len.
             case inner_projection_exists(P_latest2) of
                 false ->
                     Last2 = get(last_verbose),
                     Summ2 = machi_projection:make_summary(P_latest2x),
                     case proplists:get_value(private_write_verbose,
                                              S#ch_mgr.opts) of
-                        true when Summ2 /= Last2 ->
+                        true ->
+                        %% true when Summ2 /= Last2 ->
                             put(last_verbose, Summ2),
                             ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses plain: ~w \n",
                               [HH,MM,SS,MSec, S#ch_mgr.name, Summ2]);
@@ -3195,11 +3657,12 @@ perhaps_verbose_c110(P_latest2, S) ->
                 true ->
                     Last2 = get(last_verbose),
                     P_inner = inner_projection_or_self(P_latest2),
-                    P_innerx = P_inner#projection_v1{dbg2=[]}, % limit verbose len.
+                    P_innerx = P_inner#projection_v1{dbg2=Dbg2X}, % limit verbose len.
                     Summ2 = machi_projection:make_summary(P_innerx),
                     case proplists:get_value(private_write_verbose,
                                              S#ch_mgr.opts) of
-                        true when Summ2 /= Last2 ->
+                        true ->
+                        %% true when Summ2 /= Last2 ->
                             put(last_verbose, Summ2),
                             ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses inner: ~w (outer ~w auth ~w flap ~w)\n",
                               [HH,MM,SS,MSec, S#ch_mgr.name, Summ2, P_latest2#projection_v1.epoch_number, P_latest2#projection_v1.author_server, P_latest2#projection_v1.flap]);
@@ -3240,3 +3703,32 @@ calc_magic_down([H|T], G) ->
 
 search_last_flap_counts(FLU, FlapCountsLast) ->
     proplists:get_value(FLU, FlapCountsLast, undefined).
+
+calc_consistency_mode(_Witness_list = []) ->
+    ap_mode;
+calc_consistency_mode(_Witness_list) ->
+    cp_mode.
+
+set_proj(S, Proj) ->
+    S#ch_mgr{proj=Proj, proj_unanimous=false}.
+
+make_annotation(EpochID, Time) ->
+    {private_proj_is_upi_unanimous, {EpochID, Time}}.
+
+is_annotated(#projection_v1{dbg2=Dbg2}) ->
+    proplists:get_value(private_proj_is_upi_unanimous, Dbg2, false).
+
+make_basic_comparison_stable(P) ->
+    P#projection_v1{creation_time=undefined,
+                    flap=undefined,
+                    dbg=[],
+                    dbg2=[],
+                    members_dict=[]}.
+
+has_make_zerf_annotation(P) ->
+    case proplists:get_value(make_zerf, P#projection_v1.dbg2) of
+        Z_epoch when Z_epoch == P#projection_v1.epoch_number ->
+            true;
+        _ ->
+            false
+    end.

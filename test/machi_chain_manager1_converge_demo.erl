@@ -239,6 +239,14 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
 
       %% machi_partition_simulator:reset_thresholds(10, 50),
       %% io:format(user, "\nLet loose the dogs of war!\n", []),
+      %% [DoIt(20, 0, 0) || _ <- lists:seq(1,9)],
+      %% %% io:format(user, "\nVariations of puppies and dogs of war!\n", []),
+      %% %% [begin
+      %% %%      machi_partition_simulator:reset_thresholds(90, 90),
+      %% %%      DoIt(7, 0, 0),
+      %% %%      machi_partition_simulator:always_these_partitions([]),
+      %% %%      DoIt(7, 0, 0)
+      %% %%  end || _ <- lists:seq(1, 3)],
       machi_partition_simulator:always_these_partitions([]),
       io:format(user, "\nPuppies for everyone!\n", []),
       [DoIt(20, 0, 0) || _ <- lists:seq(1,9)],
@@ -372,12 +380,14 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
 make_partition_list(All_list) ->
     [
      [{b,c}],
-     [],
-     [{c,d}],
-     [],
-     [{d,e}],
-     [],
-     [{c,e}]
+     [{a,c},{b,c}]
+     %% [{b,c}],
+     %% [],
+     %% [{c,d}],
+     %% [],
+     %% [{d,e}],
+     %% [],
+     %% [{c,e}]
     ].
 
     %% _X_Ys1 = [[{X,Y}] || X <- All_list, Y <- All_list, X /= Y],
@@ -542,9 +552,14 @@ todo_why_does_this_crash_sometimes(FLUName, FLU, PPPepoch) ->
     end.
 
 private_projections_are_stable(Namez, PollFunc) ->
-    Private1 = [{Name, get_latest_inner_proj_summ(FLU)} || {Name,FLU} <- Namez],
+    FilterNoneProj = fun({_EpochID,[],[],_Dn,_W,InnerP}) -> false;
+                        (_)                              -> true
+                     end,
+    Private1x = [{Name, get_latest_inner_proj_summ(FLU)} || {Name,FLU} <- Namez],
+    Private1 = [X || X={_,Proj} <- Private1x, FilterNoneProj(Proj)],
     [PollFunc(15, 1, 10) || _ <- lists:seq(1,6)],
-    Private2 = [{Name, get_latest_inner_proj_summ(FLU)} || {Name,FLU} <- Namez],
+    Private2x = [{Name, get_latest_inner_proj_summ(FLU)} || {Name,FLU} <- Namez],
+    Private2 = [X || X={_,Proj} <- Private2x, FilterNoneProj(Proj)],
     %% Is = [Inner_p || {_,_,_,_,Inner_p} <- Private1],
     put(stable, lists:sort(Private1)),
     %% We want either all true or all false (inner or not) ... except
@@ -623,15 +638,22 @@ private_projections_are_stable(Namez, PollFunc) ->
                         io:format(user, "Priv2: EID ~W e ~w u ~w\n", [EpochID, 7, ExpectedFLUs, UsingFLUs]),
                         ordsets:is_subset(ordsets:from_list(ExpectedFLUs),
                                           ordsets:from_list(UsingFLUs));
-                    _Else ->
-                        io:format(user, "Priv2: Else ~p\n", [_Else]),
+                    [{1=_Count,_EpochID}|_] ->
+                        %% Our list is sorted & reversed, so 1=_Count
+                        %% is biggest.  If a majority is using the none proj,
+                        %% then we're OK.
+                        Private2None = [X || {_,{_,[],[],_,_,_}}=X <- Private2],
+                        length(Private2None) >= FullMajority;
+                    Else ->
+                        %% This is bad: we have a count that's less than
+                        %% FullMajority but greater than 1.
                         false
                 end;
            CMode == ap_mode ->
                 true
         end,
 
-    io:format(user, "\nPriv1 ~P\n1==2 ~w ap_disjoint ~w u_all_peers ~w cp_mode_agree ~w\n", [lists:sort(Private1), 20, Private1 == Private2, AP_mode_disjoint_test_p, Unanimous_with_all_peers_p, CP_mode_agree_test_p]),
+    io:format(user, "\nPriv1 ~p\nPriv2 ~p\n1==2 ~w ap_disjoint ~w u_all_peers ~w cp_mode_agree ~w\n", [lists:sort(Private1), lists:sort(Private2), Private1 == Private2, AP_mode_disjoint_test_p, Unanimous_with_all_peers_p, CP_mode_agree_test_p]),
     Private1 == Private2 andalso
         AP_mode_disjoint_test_p andalso
         (
@@ -651,12 +673,12 @@ private_projections_are_stable(Namez, PollFunc) ->
 
 get_latest_inner_proj_summ(FLU) ->
     {ok, Proj} = ?FLU_PC:read_latest_projection(FLU, private),
-    #projection_v1{epoch_number=E, epoch_csum=CSum,
+    #projection_v1{epoch_number=E, epoch_csum= <<CSum4:4/binary, _/binary>>,
                    upi=UPI, repairing=Repairing,
                    witnesses=Witnesses, down=Down} =
         machi_chain_manager1:inner_projection_or_self(Proj),
     Inner_p = machi_chain_manager1:inner_projection_exists(Proj),
-    EpochID = {E, CSum},
+    EpochID = {E, CSum4},
     {EpochID, UPI, Repairing, Down, Witnesses, Inner_p}.
 
 random_sort(L) ->
