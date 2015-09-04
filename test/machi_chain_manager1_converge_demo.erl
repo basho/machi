@@ -378,16 +378,12 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
 %% Uncomment *one* of the following make_partition_list() bodies.
 
 make_partition_list(All_list) ->
+    Island1 = [hd(All_list), lists:last(All_list)],
+    Island2 = All_list -- Island1,
     [
-     [{b,c}],
-     [{a,c},{b,c}]
-     %% [{b,c}],
-     %% [],
-     %% [{c,d}],
-     %% [],
-     %% [{d,e}],
-     %% [],
-     %% [{c,e}]
+     [{X,Y} || X <- Island1, Y <- Island2]
+     ++
+     [{X,Y} || X <- Island2, Y <- Island1]
     ].
 
     %% _X_Ys1 = [[{X,Y}] || X <- All_list, Y <- All_list, X /= Y],
@@ -404,6 +400,35 @@ make_partition_list(All_list) ->
     %% %% %% Concat = _X_Ys3,
     %% %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
     %% random_sort(lists:usort([lists:sort(L) || L <- Concat])).
+
+   %% %% for len=5 and 2 witnesses
+   %%  [
+   %%   [{b,c}],
+   %%   [],
+   %%   [{b,c}],
+   %%   [{a,c},{b,c}],
+   %%   [{b,c}],
+   %%   [],
+   %%   [{c,d}],
+   %%   [],
+   %%   [{d,e}],
+   %%   [],
+   %%   [{d,c}],
+   %%   [{b,c}],
+   %%   [],
+   %%   [{c,e}]
+   %%  ].
+    %% [
+    %%  [{b,c}],
+    %%  [{a,c},{b,c}]
+    %%  %% [{b,c}],
+    %%  %% [],
+    %%  %% [{c,d}],
+    %%  %% [],
+    %%  %% [{d,e}],
+    %%  %% [],
+    %%  %% [{c,e}]
+    %% ].
 
     %% [
     %%  [{b,c}],
@@ -675,9 +700,8 @@ get_latest_inner_proj_summ(FLU) ->
     {ok, Proj} = ?FLU_PC:read_latest_projection(FLU, private),
     #projection_v1{epoch_number=E, epoch_csum= <<CSum4:4/binary, _/binary>>,
                    upi=UPI, repairing=Repairing,
-                   witnesses=Witnesses, down=Down} =
-        machi_chain_manager1:inner_projection_or_self(Proj),
-    Inner_p = machi_chain_manager1:inner_projection_exists(Proj),
+                   witnesses=Witnesses, down=Down} = Proj,
+    Inner_p = false,
     EpochID = {E, CSum4},
     {EpochID, UPI, Repairing, Down, Witnesses, Inner_p}.
 

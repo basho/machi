@@ -323,10 +323,10 @@ do_proj_write4(ProjType, Proj, Path, Epoch, #state{consistency_mode=CMode}=S) ->
     ok = file:write(FH, term_to_binary(Proj)),
     ok = file:sync(FH),
     ok = file:close(FH),
-    EffectiveProj = machi_chain_manager1:inner_projection_or_self(Proj),
+    EffectiveProj = Proj,
     EffectiveEpoch = EffectiveProj#projection_v1.epoch_number,
-    EpochId = {Epoch, Proj#projection_v1.epoch_csum},
-    EffectiveEpochId = {EffectiveEpoch, EffectiveProj#projection_v1.epoch_csum},
+    EpochId = machi_projection:get_epoch_id(Proj),
+    EffectiveEpochId = machi_projection:get_epoch_id(EffectiveProj),
     %%
     NewS = if ProjType == public,
               Epoch > element(1, S#state.max_public_epochid) ->

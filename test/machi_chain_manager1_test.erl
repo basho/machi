@@ -81,7 +81,7 @@ unanimous_report(Epoch, Namez) ->
     FLU_Projs = [{FLUName,
                   case ?FLU_PC:read_projection(FLU, private, Epoch) of
                       {ok, T} ->
-                          machi_chain_manager1:inner_projection_or_self(T);
+                          T;
                       _Else ->
                           not_in_this_epoch
                   end} || {FLUName, FLU} <- Namez],

@@ -59,8 +59,6 @@
           upi             :: [pv1_server()],
           repairing       :: [pv1_server()],
           down            :: [pv1_server()],
-          flap            :: 'undefined' | #flap_i{},  % flapping information
-          inner           :: 'undefined' | #projection_v1{},
           dbg             :: list(), %proplist(), is checksummed
           dbg2            :: list(), %proplist(), is not checksummed
           members_dict    :: p_srvr_dict()
