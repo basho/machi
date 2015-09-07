@@ -382,7 +382,11 @@ nonunanimous_setup_and_fix_test() ->
         {ok, P2pb} = ?FLU_PC:read_latest_projection(Proxy_b, private),
         P2 = P2pb#projection_v1{dbg2=[]},
 
-timer:sleep(3000),
+        Pspam = machi_projection:update_checksum(
+                  P1b#projection_v1{epoch_number=?SPAM_PROJ_EPOCH,
+                                    dbg=[hello_spam]}),
+        ok = ?FLU_PC:write_projection(Proxy_b, public, Pspam),
+
         ok
     after
         ok = ?MGR:stop(Ma),

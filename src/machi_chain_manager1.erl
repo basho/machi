@@ -351,8 +351,8 @@ handle_call({trigger_react_to_env}=Call, _From, S) ->
     gobble_calls(Call),
     {TODOtodo, S2} = do_react_to_env(S),
     {reply, TODOtodo, S2};
-handle_call({spam, Dict}, _From, S) ->
-    {Res, S2} = do_spam(Dict, S),
+handle_call({spam, Author, Dict}, _From, S) ->
+    {Res, S2} = do_spam(Author, Dict, S),
     {reply, Res, S2};
 handle_call(_Call, _From, S) ->
     io:format(user, "\nBad call to ~p: ~p\n", [S#ch_mgr.name, _Call]),
@@ -2516,5 +2516,7 @@ has_make_zerf_annotation(P) ->
             false
     end.
 
-do_spam(Dict, S) ->
-    error(finish_me).
+do_spam(Author, Dict, S) ->
+    {{error, {finish_me, Author, Dict}}, S}.
+
+

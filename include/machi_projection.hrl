@@ -49,7 +49,7 @@
 -define(DUMMY_PV1_EPOCH, {0,<<0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0>>}).
 
 %% Kludge for spam gossip.  TODO: replace me
--define(SPAM_PROJ_EPOCH, -5).
+-define(SPAM_PROJ_EPOCH, ((1 bsl 32) - 7)).
 
 -record(projection_v1, {
           epoch_number    :: pv1_epoch_n() | ?SPAM_PROJ_EPOCH,
