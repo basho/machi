@@ -88,8 +88,8 @@ Implementation sketch:
 2. If map key is not atom, then atom->string or atom->binary is fine.
 3. For map value, is it possible CRDT LWW type?
 
-** TODO Investigate riak_dt data structure definition, manipulating, etc.
-** TODO Add dependency on riak_dt
+** DONE Investigate riak_dt data structure definition, manipulating, etc.
+** DONE Add dependency on riak_dt
 ** DONE Update is an entire dict from Observer O
 *** TODO Merge my pending map + update map + my last mod time + my unfit list
 *** TODO if merged /= pending:
