@@ -55,3 +55,59 @@ func, and pattern match Erlang style in that func.
 
 ** TODO Move the FLU server to gen_server behavior?
 
+
+* DONE Chain manager CP mode, Plan B
+** SKIP Maybe? Change ch_mgr to use middleworker
+**** DONE Is it worthwhile?  Is the parallelism so important?  No, probably.
+**** SKIP Move middleworker func to utility module?
+** DONE Add new proc to psup group
+*** DONE Name: machi_fitness
+** DONE ch_mgr keeps its current proc struct: i.e. same 1 proc as today
+** NO chmgr asks hosed mgr for hosed list @ start of react_to_env
+** DONE For all hosed, do *async*: try to read latest proj.
+*** NO If OK, inform hosed mgr: status change will be used by next HC iter.
+*** NO If fail, no change, because that server is already known to be hosed
+*** DONE For all non-hosed, continue as the chain manager code does today
+*** DONE Any new errors are added to UpNodes/DownNodes tracking as used today
+*** DONE At end of react loop, if UpNodes list differs, inform hosed mgr.
+
+* TODO fitness_mon, the fitness monitor
+** DONE Map key & val sketch
+
+Logical sketch:
+
+Map key: ObservingServerName::atom()
+
+Map val: { ObservingServerLastModTime::now(),
+           UnfitList::list(ServerName::atom()),
+           Props::proplist() }
+
+Implementation sketch:
+
+1. Use CRDT map.
+2. If map key is not atom, then atom->string or atom->binary is fine.
+3. For map value, is it possible CRDT LWW type?
+
+** TODO Investigate riak_dt data structure definition, manipulating, etc.
+** TODO Add dependency on riak_dt
+** DONE Update is an entire dict from Observer O
+*** TODO Merge my pending map + update map + my last mod time + my unfit list
+*** TODO if merged /= pending:
+**** TODO Schedule async tick (more)
+
+Tick message contains list of servers with differing state as of this
+instant in time... we want to avoid triggering decisions about
+fitness/unfitness for other servers where we might have received less
+than a full time period's worth of waiting.
+
+**** TODO Spam merged map to All_list -- [Me, O]
+**** TODO Set pending <- merged
+
+*** TODO When we receive an async tick
+**** TODO set active map <- pending map for all servers in ticks list
+**** TODO Send ch_mgr a react_to_env tick trigger
+*** TODO react_to_env tick trigger actions
+**** TODO Filter active map to remove stale entries (i.e. no update in 1 hour)
+**** TODO If time since last map spam is too long, spam our *pending* map
+**** TODO Proceed with normal react processing, using *active* map for AllHosed!
+

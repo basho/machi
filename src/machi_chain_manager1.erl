@@ -73,8 +73,8 @@
           opts            :: list(),  %proplist()
           members_dict    :: p_srvr_dict(),
           proxies_dict    :: orddict:orddict(),
-          active_gossip   :: orddict:orddict(),
-          pending_gossip  :: orddict:orddict()
+          last_down       :: list(),
+          fitness_svr     :: atom()
          }).
 
 -define(FLU_PC, machi_proxy_flu1_client).
@@ -222,7 +222,7 @@ test_read_latest_public_projection(Pid, ReadRepairP) ->
 
 init({MyName, InitMembersDict, MgrOpts}) ->
     random:seed(now()),
-    init_remember_partition_hack(),
+    init_remember_down_list(),
     Opt = fun(Key, Default) -> proplists:get_value(Key, MgrOpts, Default) end,
     InitWitness_list = Opt(witnesses, []),
     ZeroAll_list = [P#p_srvr.name || {_,P} <- orddict:to_list(InitMembersDict)],
@@ -272,8 +272,9 @@ init({MyName, InitMembersDict, MgrOpts}) ->
                          consistency_mode=CMode,
                          runenv=RunEnv,
                          opts=MgrOpts,
-                         active_gossip=orddict:new(),
-                         pending_gossip=orddict:new()}, Proj),
+                         last_down=[],
+                         fitness_svr=machi_flu_psup:make_fitness_regname(MyName)
+                        }, Proj),
     {_, S2} = do_set_chain_members_dict(MembersDict, S),
     S3 = if ActiveP == false ->
                  S2;
@@ -863,7 +864,7 @@ calc_up_nodes(MyName, AllMembers, RunEnv1) ->
         true ->
             calc_up_nodes_sim(MyName, AllMembers, RunEnv1);
         false ->
-            UpNodesNew = (AllMembers -- get(remember_partition_hack)),
+            UpNodesNew = (AllMembers -- get_remember_down_list()),
             RunEnv2 = update_runenv_with_up_nodes(UpNodesNew, RunEnv1),
             {UpNodesNew, [], RunEnv2}
     end.
@@ -1041,15 +1042,35 @@ do_react_to_env(S) ->
                 true ->
                      S
              end,
-        %% When in CP mode, we call the poll function twice: once before
-        %% reacting & once after.  This call is the 2nd.
+        %% NOTE: If we use the fitness server's unfit list at the start, then
+        %% we would need to add some kind of poll/check for down members to
+        %% check if they are now up.  Instead, our lazy attempt to read from
+        %% all servers in A20 will give us the info we need to remove a down
+        %% server from our last_down list (and also inform our fitness server
+        %% of the down->up change).
+        %% 
+        %% TODO? We may need to change this behavior to make our latency
+        %% jitter smoother by only talking to servers that we believe are fit.
+        %% But we will defer such work because it may never be necessary.
         {Res, S3} = react_to_env_A10(S2),
-        {Res, poll_private_proj_is_upi_unanimous(S3)}
+        S4 = manage_last_down_list(S3),
+        %% When in CP mode, we call the poll function twice: once at the start
+        %% of reacting (in state A10) & once after.  This call is the 2nd.
+        {Res, poll_private_proj_is_upi_unanimous(S4)}
     catch
         throw:{zerf,_}=_Throw ->
             Proj = S#ch_mgr.proj,
 io:format(user, "zerf ~p caught ~p\n", [S#ch_mgr.name, _Throw]),
             {{no_change, [], Proj#projection_v1.epoch_number}, S}
+    end.
+
+manage_last_down_list(#ch_mgr{last_down=LastDown,fitness_svr=FitnessSvr}=S) ->
+    case get_remember_down_list() of
+        Down when Down == LastDown ->
+            S;
+        Down ->
+            machi_fitness:update_local_down_list(FitnessSvr, Down),
+            S#ch_mgr{last_down=Down}
     end.
 
 react_to_env_A10(S) ->
@@ -1058,7 +1079,7 @@ react_to_env_A10(S) ->
 
 react_to_env_A20(Retries, #ch_mgr{name=MyName}=S) ->
     ?REACT(a20),
-    init_remember_partition_hack(),
+    init_remember_down_list(),
     {UnanimousTag, P_latest, ReadExtra, S2} =
         do_cl_read_latest_public_projection(true, S),
     LastComplaint = get(rogue_server_epoch),
@@ -1188,8 +1209,7 @@ react_to_env_A29(Retries, P_latest, LatestUnanimousP, _ReadExtra,
 react_to_env_A30(Retries, P_latest, LatestUnanimousP, P_current_calc,
                  #ch_mgr{name=MyName} = S) ->
     ?REACT(a30),
-    %% case length(get(react)) of XX when XX > 500 -> io:format(user, "A30 ~w! ~w: ~P\n", [MyName, XX, get(react), 300]), timer:sleep(500); _ -> ok end,
-    AllHosed = [],
+    AllHosed = get_unfit_list(S#ch_mgr.fitness_svr),
     {P_newprop1, S2,_Up} = calc_projection(S, MyName, AllHosed, P_current_calc),
     ?REACT({a30, ?LINE, [{current, machi_projection:make_summary(S#ch_mgr.proj)}]}),
     ?REACT({a30, ?LINE, [{calc_current, machi_projection:make_summary(P_current_calc)}]}),
@@ -2122,10 +2142,10 @@ perhaps_call_t(S, Partitions, FLU, DoIt) ->
         perhaps_call(S, Partitions, FLU, DoIt)
     catch
         exit:timeout ->
-            remember_partition_hack(FLU),
+            update_remember_down_list(FLU),
             {error, partition};
         exit:{timeout,_} ->
-            remember_partition_hack(FLU),
+            update_remember_down_list(FLU),
             {error, partition}
     end.
 
@@ -2137,7 +2157,7 @@ perhaps_call(#ch_mgr{name=MyName}=S, Partitions, FLU, DoIt) ->
         false ->
             Res = DoIt(ProxyPid),
             if Res == {error, partition} ->
-                    remember_partition_hack(FLU);
+                    update_remember_down_list(FLU);
                true ->
                     ok
             end,
@@ -2148,16 +2168,25 @@ perhaps_call(#ch_mgr{name=MyName}=S, Partitions, FLU, DoIt) ->
                     (catch put(react, [{timeout2,me,MyName,to,FLU,RemoteFLU_p,Partitions}|get(react)])),
                     exit(timeout)
             end;
-        _ ->
+        true ->
             (catch put(react, [{timeout1,me,MyName,to,FLU,RemoteFLU_p,Partitions}|get(react)])),
             exit(timeout)
     end.
 
-init_remember_partition_hack() ->
-    put(remember_partition_hack, []).
+%% Why are we using the process dictionary for this?  In part because
+%% we're lazy and in part because we don't want to clutter up the
+%% return value of perhaps_call_t() in order to make perhaps_call_t()
+%% a 100% pure function.
 
-remember_partition_hack(FLU) ->
-    put(remember_partition_hack, [FLU|get(remember_partition_hack)]).
+init_remember_down_list() ->
+    put(remember_down_list, []).
+
+update_remember_down_list(FLU) ->
+    put(remember_down_list,
+        lists:usort([FLU|get_remember_down_list()])).
+
+get_remember_down_list() ->
+    get(remember_down_list).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -2519,4 +2548,12 @@ has_make_zerf_annotation(P) ->
 do_spam(Author, Dict, S) ->
     {{error, {finish_me, Author, Dict}}, S}.
 
+get_unfit_list(FitnessServer) ->
+    try
+        machi_fitness:get_unfit_list(FitnessServer)
+    catch exit:{noproc,_} ->
+            %% We are probably operating in an eunit test that hasn't used
+            %% the machi_flu_psup supervisor for startup.
+            []
+    end.
 

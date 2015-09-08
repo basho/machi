@@ -151,48 +151,50 @@ t(N, MgrOpts) ->
     convergence_demo_testfun(N, MgrOpts).
 
 convergence_demo_testfun(NumFLUs, MgrOpts0) ->
-    timer:sleep(100),
     %% Faster test startup, commented: io:format(user, short_doc(), []),
     %% Faster test startup, commented: timer:sleep(3000),
 
+    MgrOpts = MgrOpts0 ++ ?DEFAULT_MGR_OPTS,
     TcpPort = 62877,
-    ok = filelib:ensure_dir("/tmp/c/not-used"),
+    TDir = "/tmp/c",
+    ok = filelib:ensure_dir(TDir ++ "/not-used"),
+    _ = os:cmd("rm -rf " ++ TDir ++ "/*"),
     FluInfo = [
-               {a,TcpPort+0,"/tmp/c/data.a"}, {b,TcpPort+1,"/tmp/c/data.b"},
-               {c,TcpPort+2,"/tmp/c/data.c"}, {d,TcpPort+3,"/tmp/c/data.d"},
-               {e,TcpPort+4,"/tmp/c/data.e"}, {f,TcpPort+5,"/tmp/c/data.f"},
-               {g,TcpPort+6,"/tmp/c/data.g"}, {h,TcpPort+7,"/tmp/c/data.h"},
-               {i,TcpPort+8,"/tmp/c/data.i"}, {j,TcpPort+9,"/tmp/c/data.j"},
-               {k,TcpPort+10,"/tmp/c/data.k"}, {l,TcpPort+11,"/tmp/c/data.l"},
-               {m,TcpPort+12,"/tmp/c/data.m"}, {n,TcpPort+13,"/tmp/c/data.n"},
-               {o,TcpPort+14,"/tmp/c/data.o"}, {p,TcpPort+15,"/tmp/c/data.p"},
-               {q,TcpPort+16,"/tmp/c/data.q"}, {r,TcpPort+17,"/tmp/c/data.r"}
+               {a,TcpPort+0,TDir++"/data.a"}, {b,TcpPort+1,TDir++"/data.b"},
+               {c,TcpPort+2,TDir++"/data.c"}, {d,TcpPort+3,TDir++"/data.d"},
+               {e,TcpPort+4,TDir++"/data.e"}, {f,TcpPort+5,TDir++"/data.f"},
+               {g,TcpPort+6,TDir++"/data.g"}, {h,TcpPort+7,TDir++"/data.h"},
+               {i,TcpPort+8,TDir++"/data.i"}, {j,TcpPort+9,TDir++"/data.j"},
+               {k,TcpPort+10,TDir++"/data.k"}, {l,TcpPort+11,TDir++"/data.l"},
+               {m,TcpPort+12,TDir++"/data.m"}, {n,TcpPort+13,TDir++"/data.n"},
+               {o,TcpPort+14,TDir++"/data.o"}, {p,TcpPort+15,TDir++"/data.p"},
+               {q,TcpPort+16,TDir++"/data.q"}, {r,TcpPort+17,TDir++"/data.r"}
               ],
     FLU_biglist = [X || {X,_,_} <- FluInfo],
     All_list = lists:sublist(FLU_biglist, NumFLUs),
     io:format(user, "\nSET # of FLUs = ~w members ~w).\n",
               [NumFLUs, All_list]),
+
     machi_partition_simulator:start_link({111,222,33}, 0, 100),
     _ = machi_partition_simulator:get(All_list),
 
-    Ps = [#p_srvr{name=Name,address="localhost",port=Port} ||
-             {Name,Port,_Dir} <- lists:sublist(FluInfo, NumFLUs)],
-    PsDirs = lists:zip(Ps,
-                       [Dir || {_,_,Dir} <- lists:sublist(FluInfo, NumFLUs)]),
-    FLU_pids = [machi_flu1_test:setup_test_flu(Name, Port, Dir) ||
-                   {#p_srvr{name=Name,port=Port}, Dir} <- PsDirs],
+    Ps = [#p_srvr{name=Name,address="localhost",port=Port,
+                  props=[{data_dir,Dir}|MgrOpts]} ||
+             {Name,Port,Dir} <- lists:sublist(FluInfo, NumFLUs)],
+    {ok, SupPid} = machi_flu_sup:start_link(),
+    [{ok, _} = machi_flu_psup:start_flu_package(P) || P <- Ps],
     Namez = [begin
                  {ok, PPid} = ?FLU_PC:start_link(P),
                  {Name, PPid}
-             end || {#p_srvr{name=Name}=P, _Dir} <- PsDirs],
+             end || #p_srvr{name=Name}=P <- Ps],
     MembersDict = machi_projection:make_members_dict(Ps),
-    MgrOpts = MgrOpts0 ++ ?DEFAULT_MGR_OPTS,
-    MgrNamez =
-        [begin
-             {ok, MPid} = ?MGR:start_link(P#p_srvr.name, MembersDict, MgrOpts),
-             {P#p_srvr.name, MPid}
-         end || P <- Ps],
-    CpApMode = case is_list(proplists:get_value(witnesses, MgrOpts)) of
+    Witnesses = proplists:get_value(witnesses, MgrOpts, []),
+    MgrNamez = [begin
+                    MgrName = machi_flu_psup:make_mgr_supname(Name),
+                    ok = ?MGR:set_chain_members(MgrName,MembersDict,Witnesses),
+                    {Name, MgrName}
+                end || #p_srvr{name=Name} <- Ps],
+    CpApMode = case Witnesses /= [] of
                    true  -> cp_mode;
                    false -> ap_mode
                end,
@@ -366,10 +368,10 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                       [XX, YY, erlang:get_stacktrace()]),
             exit({bummer,XX,YY})
     after
-        [ok = ?MGR:stop(MgrPid) || {_, MgrPid} <- MgrNamez],
+        exit(SupPid, normal),
+        ok = machi_partition_simulator:stop(),
         [ok = ?FLU_PC:quit(PPid) || {_, PPid} <- Namez],
-        [ok = machi_flu1:stop(FLUPid) || FLUPid <- FLU_pids],
-        ok = machi_partition_simulator:stop()
+        machi_util:wait_for_death(SupPid, 100)
     end.
 
 %% Many of the static partition lists below have been problematic at one
