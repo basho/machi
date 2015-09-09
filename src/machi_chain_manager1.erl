@@ -1202,13 +1202,37 @@ react_to_env_A29(Retries, P_latest, LatestUnanimousP, _ReadExtra,
     end.
 
 react_to_env_A30(Retries, P_latest, LatestUnanimousP, P_current_calc,
-                 #ch_mgr{name=MyName} = S) ->
+                 #ch_mgr{name=MyName, consistency_mode=CMode} = S) ->
     ?REACT(a30),
     AllHosed = get_unfit_list(S#ch_mgr.fitness_svr),
-    ?REACT({a30, ?LINE, [{all_hosed, AllHosed}]}),
+    ?REACT({a30, ?LINE,
+            [{current, machi_projection:make_summary(S#ch_mgr.proj)},
+             {calc_current, machi_projection:make_summary(P_current_calc)},
+             {latest, machi_projection:make_summary(P_latest)},
+             {all_hosed, AllHosed}
+            ]}),
+    ?REACT({a30, ?LINE, []}),
     case lists:member(MyName, AllHosed) of
         true ->
-            react_to_env_A50(P_latest, [{i_am_hosed, AllHosed}], S);
+            io:format(user, "AmHosed: ~w, ", [MyName]),
+            #projection_v1{epoch_number=Epoch, all_members=All_list,
+                           witnesses=Witness_list,
+                           members_dict=MembersDict} = P_latest,
+            P = #projection_v1{down=Down} =
+                make_none_projection(Epoch + 1, MyName, All_list,
+                                     Witness_list, MembersDict),
+            P_newprop = if CMode == ap_mode ->
+                                %% Not really none proj: just myself, AP style
+                                machi_projection:update_checksum(
+                                  P#projection_v1{upi=[MyName],
+                                                  down=Down -- [MyName],
+                                                  dbg=[{hosed_list,AllHosed}]});
+                           CMode == cp_mode ->
+                                machi_projection:update_checksum(
+                                  P#projection_v1{dbg=[{hosed_list,AllHosed}]})
+                        end,
+            react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
+                             true, S);
         false ->
             react_to_env_A31(Retries, P_latest, LatestUnanimousP,
                              P_current_calc, AllHosed, S)
@@ -1217,12 +1241,8 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, P_current_calc,
 react_to_env_A31(Retries, P_latest, LatestUnanimousP, P_current_calc,
                  AllHosed, #ch_mgr{name=MyName} = S) ->
     {P_newprop1, S2,_Up} = calc_projection(S, MyName, AllHosed, P_current_calc),
-    ?REACT({a30, ?LINE,
-            [{current, machi_projection:make_summary(S#ch_mgr.proj)},
-             {calc_current, machi_projection:make_summary(P_current_calc)},
-             {latest, machi_projection:make_summary(P_latest)},
-             {newprop1, machi_projection:make_summary(P_newprop1)}
-            ]}),
+    ?REACT({a31, ?LINE,
+            [{newprop1, machi_projection:make_summary(P_newprop1)}]}),
 
     {P_newprop2, S3} = {P_newprop1, S2},
 
@@ -1231,14 +1251,14 @@ react_to_env_A31(Retries, P_latest, LatestUnanimousP, P_current_calc,
     #projection_v1{epoch_number=Epoch_latest}=P_latest,
     NewEpoch = erlang:max(Epoch_newprop2, Epoch_latest) + 1,
     P_newprop3 = P_newprop2#projection_v1{epoch_number=NewEpoch},
-    ?REACT({a30, ?LINE, [{newprop3, machi_projection:make_summary(P_newprop3)}]}),
+    ?REACT({a31, ?LINE, [{newprop3, machi_projection:make_summary(P_newprop3)}]}),
 
     {P_newprop10, S10} = {P_newprop3, S3},
     P_newprop11 = machi_projection:update_checksum(P_newprop10),
-    ?REACT({a30, ?LINE, [{newprop11, machi_projection:make_summary(P_newprop11)}]}),
+    ?REACT({a31, ?LINE, [{newprop11, machi_projection:make_summary(P_newprop11)}]}),
 
-    react_to_env_A40(Retries, P_newprop11, P_latest,
-                     LatestUnanimousP, S10).
+    react_to_env_A40(Retries, P_newprop11, P_latest, LatestUnanimousP,
+                     false, S10).
 
 a40_latest_author_down(#projection_v1{author_server=LatestAuthor}=_P_latest,
                        #projection_v1{upi=[], repairing=[],
@@ -1253,7 +1273,7 @@ a40_latest_author_down(#projection_v1{author_server=LatestAuthor}=_P_latest,
                        #projection_v1{down=NewPropDown}=_P_newprop, _S) ->
     lists:member(LatestAuthor, NewPropDown).
 
-react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
+react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP, AmHosedP,
                  #ch_mgr{name=MyName, proj=P_current}=S) ->
     ?REACT(a40),
     [{Rank_newprop, _}] = rank_projections([P_newprop], P_current),
@@ -1268,6 +1288,33 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
              {author_is_down_p, LatestAuthorDownP}]}),
 
     if
+        AmHosedP ->
+            if P_current#projection_v1.upi /= []
+               andalso
+               P_newprop#projection_v1.upi == [] ->
+                    io:format(user, "TODO this clause needs more review!\n",[]),
+                    %% This is a cp_mode case only.
+                    %% I am hosed.  I need to shut up and quit disturbing my
+                    %% peers.  If P_latest is the none projection that I wrote
+                    %% on a previous iteration and it's also unanimous, then
+                    %% go to B10 so that I can adopt it.  Otherwise, tell the
+                    %% world my intention via C300.
+                    if P_latest#projection_v1.author_server == MyName andalso
+                       P_latest#projection_v1.upi == [] andalso
+                       LatestUnanimousP ->
+                            ?REACT({a40, ?LINE, []}),
+                            react_to_env_B10(Retries, P_newprop, P_latest,
+                                             LatestUnanimousP,
+                                             AmHosedP, Rank_newprop, Rank_latest, S);
+                       true ->
+                            ?REACT({a40, ?LINE, []}),
+                            react_to_env_C300(P_newprop, P_latest, S)
+                    end;
+               true ->
+                    ?REACT({a40, ?LINE, []}),
+                    react_to_env_A50(P_latest, [], S)
+            end;
+
         %% Epoch == 0 is reserved for first-time, just booting conditions.
         (Rank_newprop > 0 orelse (Rank_newprop == ?RANK_CP_MINORITY_QUORUM))
         andalso
@@ -1282,7 +1329,7 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                      {latest_unanimous_p, LatestUnanimousP}]}),
 
             react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
-                             Rank_newprop, Rank_latest, S);
+                             AmHosedP, Rank_newprop, Rank_latest, S);
 
         Rank_newprop > 0
         andalso
@@ -1313,7 +1360,7 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
             %% I'm keeping this 'if' clause just in case the local FLU
             %% projection store assumption changes.
             react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
-                             Rank_newprop, Rank_latest, S);
+                             AmHosedP, Rank_newprop, Rank_latest, S);
 
         %% A40a (see flowchart)
         Rank_newprop > Rank_latest ->
@@ -1417,8 +1464,7 @@ react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
     {{no_change, FinalProps, P_current#projection_v1.epoch_number}, S}.
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
-                 Rank_newprop, Rank_latest,
-                 #ch_mgr{name=MyName}=S)->
+                 AmHosedP, Rank_newprop, Rank_latest, #ch_mgr{name=MyName}=S) ->
     ?REACT(b10),
 
     ?REACT({b10,?LINE,[{newprop_epoch,P_newprop#projection_v1.epoch_number}]}),

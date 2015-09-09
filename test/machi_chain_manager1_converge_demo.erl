@@ -380,28 +380,28 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
 %% Uncomment *one* of the following make_partition_list() bodies.
 
 make_partition_list(All_list) ->
-    Island1 = [hd(All_list), lists:last(All_list)],
-    Island2 = All_list -- Island1,
-    [
-     [{X,Y} || X <- Island1, Y <- Island2]
-     ++
-     [{X,Y} || X <- Island2, Y <- Island1]
-    ].
+    %% Island1 = [hd(All_list), lists:last(All_list)],
+    %% Island2 = All_list -- Island1,
+    %% [
+    %%  [{X,Y} || X <- Island1, Y <- Island2]
+    %%  ++
+    %%  [{X,Y} || X <- Island2, Y <- Island1]
+    %% ].
 
-    %% _X_Ys1 = [[{X,Y}] || X <- All_list, Y <- All_list, X /= Y],
-    %% _X_Ys2 = [[{X,Y}, {A,B}] || X <- All_list, Y <- All_list, X /= Y,
-    %%                             A <- All_list, B <- All_list, A /= B,
-    %%                             X /= A],
-    %% _X_Ys3 = [[{X,Y}, {A,B}, {C,D}] || X <- All_list, Y <- All_list, X /= Y,
-    %%                                    A <- All_list, B <- All_list, A /= B,
-    %%                                    C <- All_list, D <- All_list, C /= D,
-    %%                                    X /= A, X /= C, A /= C],
+    _X_Ys1 = [[{X,Y}] || X <- All_list, Y <- All_list, X /= Y],
+    _X_Ys2 = [[{X,Y}, {A,B}] || X <- All_list, Y <- All_list, X /= Y,
+                                A <- All_list, B <- All_list, A /= B,
+                                X /= A],
+    _X_Ys3 = [[{X,Y}, {A,B}, {C,D}] || X <- All_list, Y <- All_list, X /= Y,
+                                       A <- All_list, B <- All_list, A /= B,
+                                       C <- All_list, D <- All_list, C /= D,
+                                       X /= A, X /= C, A /= C],
     %% Concat = _X_Ys1,
-    %% %% Concat = _X_Ys2,
-    %% %% Concat = _X_Ys1 ++ _X_Ys2,
-    %% %% %% Concat = _X_Ys3,
-    %% %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
-    %% random_sort(lists:usort([lists:sort(L) || L <- Concat])).
+    %% Concat = _X_Ys2,
+    %% Concat = _X_Ys1 ++ _X_Ys2,
+    %% %% Concat = _X_Ys3,
+    Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
+    random_sort(lists:usort([lists:sort(L) || L <- Concat])).
 
    %% %% for len=5 and 2 witnesses
    %%  [

@@ -67,6 +67,7 @@ send_fitness_update_spam(Pid, FromName, Dict) ->
 init([{MyFluName}|_Args]) ->
     RegName = machi_flu_psup:make_fitness_regname(MyFluName),
     register(RegName, self()),
+timer:send_interval(1000, dump),
     {ok, #state{my_flu_name=MyFluName, reg_name=RegName}}.
 
 handle_call({get_unfit_list}, _From, #state{active_unfit=ActiveUnfit}=S) ->
@@ -98,6 +99,7 @@ handle_info({adjust_down_list, FLU}, #state{active_unfit=ActiveUnfit}=S) ->
     NewUnfit = make_unfit_list(S),
     Added_to_new     = NewUnfit -- ActiveUnfit,
     Dropped_from_new = ActiveUnfit -- NewUnfit,
+    io:format(user, "adjust_down_list: ~w: adjust ~w: add ~p drop ~p\n", [S#state.my_flu_name, FLU, Added_to_new, Dropped_from_new]),
     case {lists:member(FLU,Added_to_new), lists:member(FLU,Dropped_from_new)} of
         {true, true} ->
             error({bad, ?MODULE, ?LINE, FLU, ActiveUnfit, NewUnfit});
@@ -108,6 +110,10 @@ handle_info({adjust_down_list, FLU}, #state{active_unfit=ActiveUnfit}=S) ->
         {false, false} ->
             {noreply, S}
     end;
+handle_info(dump, #state{my_flu_name=MyFluName,active_unfit=ActiveUnfit,
+                         pending_map=Map}=S) ->
+    io:format(user, "DUMP: ~w: ~p ~w\n", [MyFluName, ActiveUnfit, map_value(Map)]),
+    {noreply, S};
 handle_info(_Info, S) ->
     {noreply, S}.
 
