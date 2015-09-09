@@ -152,12 +152,12 @@ dt_understanding_test() ->
     ?MAP:merge(Map1, Map2) == ?MAP:merge(Map2, Map1).
 
 smoke_test() ->
-    {ok, Map1} = map_set(a, ?MAP:new(), k1, val1),
-    {ok, Map2} = map_set(a, Map1, k2, val2),
+    Map1 = map_set(a, ?MAP:new(), k1, val1),
+    Map2 = map_set(a, Map1, k2, val2),
     {ok, val1} = map_get(Map2, k1),
     {ok, val2} = map_get(Map2, k2),
     error = map_get(Map2, does_not_exist),
-    {ok, Map3} = map_set(a, Map2, k3, val3),
+    Map3 = map_set(a, Map2, k3, val3),
 
     [{k3,1},{k2,1},{k1,1}] = map_fold(fun({K,_}, Acc) -> [{K,1}|Acc] end,
                                       [], Map3),
