@@ -1274,7 +1274,8 @@ a40_latest_author_down(#projection_v1{author_server=LatestAuthor}=_P_latest,
     lists:member(LatestAuthor, NewPropDown).
 
 react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP, AmHosedP,
-                 #ch_mgr{name=MyName, proj=P_current}=S) ->
+                 #ch_mgr{name=MyName, proj=P_current,
+                         consistency_mode=CMode}=S) ->
     ?REACT(a40),
     [{Rank_newprop, _}] = rank_projections([P_newprop], P_current),
     [{Rank_latest, _}] = rank_projections([P_latest], P_current),
@@ -1289,18 +1290,20 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP, AmHosedP,
 
     if
         AmHosedP ->
-            if P_current#projection_v1.upi /= []
+            ExpectedUPI = if CMode == cp_mode -> [];
+                             CMode == ap_mode -> [MyName]
+                          end,
+io:format(user, "A40: hosed ~w: current upi ~w newprop upi ~w auth ~w\n", [MyName, P_current#projection_v1.upi, P_newprop#projection_v1.upi, P_current#projection_v1.author_server]),
+            if P_current#projection_v1.upi /= ExpectedUPI
                andalso
-               P_newprop#projection_v1.upi == [] ->
-                    io:format(user, "TODO this clause needs more review!\n",[]),
-                    %% This is a cp_mode case only.
+               P_newprop#projection_v1.upi == ExpectedUPI ->
                     %% I am hosed.  I need to shut up and quit disturbing my
                     %% peers.  If P_latest is the none projection that I wrote
                     %% on a previous iteration and it's also unanimous, then
                     %% go to B10 so that I can adopt it.  Otherwise, tell the
                     %% world my intention via C300.
                     if P_latest#projection_v1.author_server == MyName andalso
-                       P_latest#projection_v1.upi == [] andalso
+                       P_latest#projection_v1.upi == ExpectedUPI andalso
                        LatestUnanimousP ->
                             ?REACT({a40, ?LINE, []}),
                             react_to_env_B10(Retries, P_newprop, P_latest,
@@ -1464,9 +1467,10 @@ react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
     {{no_change, FinalProps, P_current#projection_v1.epoch_number}, S}.
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
-                 AmHosedP, Rank_newprop, Rank_latest, #ch_mgr{name=MyName}=S) ->
+                _AmHosedP, Rank_newprop, Rank_latest, #ch_mgr{name=MyName}=S) ->
     ?REACT(b10),
 
+if _AmHosedP -> io:format(user, "B10: ~w: AmHosedP\n", [MyName]); true -> ok end,
     ?REACT({b10,?LINE,[{newprop_epoch,P_newprop#projection_v1.epoch_number}]}),
     if
         LatestUnanimousP ->
