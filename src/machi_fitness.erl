@@ -71,7 +71,6 @@ init([{MyFluName}|_Args]) ->
 
 handle_call({get_unfit_list}, _From, #state{active_unfit=ActiveUnfit}=S) ->
     Reply = ActiveUnfit,
-    io:format(user, "Unfit answer @ ~w: ~p\n", [S#state.my_flu_name, ActiveUnfit]),
     {reply, Reply, S};
 handle_call({update_local_down_list, Down, MembersDict}, _From,
             #state{my_flu_name=MyFluName, pending_map=OldMap,
@@ -96,7 +95,6 @@ handle_cast(_Msg, S) ->
     {noreply, S}.
 
 handle_info({adjust_down_list, FLU}, #state{active_unfit=ActiveUnfit}=S) ->
-    io:format(user, "ADJUST: ~w: {adjust_down_list, ~w}\n", [S#state.my_flu_name,FLU]),
     NewUnfit = make_unfit_list(S),
     Added_to_new     = NewUnfit -- ActiveUnfit,
     Dropped_from_new = ActiveUnfit -- NewUnfit,
@@ -156,7 +154,6 @@ send_spam(NewMap, DontSendList, MembersDict, #state{my_flu_name=MyFluName}) ->
                                                dbg2=[],
                                                members_dict=[]                                           }),
                    %% Best effort, don't care about failure.
-                   io:format(user, "send_spam: ~w -> ~w not=~w\n", [MyFluName, FLU, DontSendList]),
                    spawn(fun() ->
                                  machi_flu1_client:write_projection(
                                    Host, TcpPort, public, SpamProj)
@@ -172,7 +169,6 @@ send_spam(NewMap, DontSendList, MembersDict, #state{my_flu_name=MyFluName}) ->
                 end
         end,
     Sent = orddict:fold(F, [], MembersDict),
-    io:format(user, "send_spam: ~w: sent to ~w\n", [MyFluName, Sent]),
     ok.
 
 calc_unfit(All_list, HosedAnnotations) ->
