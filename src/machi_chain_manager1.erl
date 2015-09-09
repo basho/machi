@@ -1310,9 +1310,11 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP, AmHosedP,
             ExpectedUPI = if CMode == cp_mode -> [];
                              CMode == ap_mode -> [MyName]
                           end,
-            if P_current#projection_v1.upi /= ExpectedUPI
+            if (P_current#projection_v1.upi /= ExpectedUPI orelse
+                P_current#projection_v1.repairing /= [])
                andalso
-               P_newprop#projection_v1.upi == ExpectedUPI ->
+               (P_newprop#projection_v1.upi == ExpectedUPI andalso
+                P_newprop#projection_v1.repairing == []) ->
                     %% I am hosed.  I need to shut up and quit disturbing my
                     %% peers.  If P_latest is the none projection that I wrote
                     %% on a previous iteration and it's also unanimous, then
