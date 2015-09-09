@@ -457,11 +457,11 @@ do_server_proj_request({read_projection, ProjType, Epoch},
 do_server_proj_request({write_projection, ProjType, Proj},
                        #state{flu_name=FluName, proj_store=ProjStore}) ->
     if Proj#projection_v1.epoch_number == ?SPAM_PROJ_EPOCH ->
-            io:format(user, "DBG ~s ~w ~P\n", [?MODULE, ?LINE, Proj, 5]),
-            Chmgr = machi_chain_manager1:make_chmgr_regname(FluName),
-            catch machi_chain_manager1:spam(Chmgr,
-                                            Proj#projection_v1.author_server,
-                                            Proj#projection_v1.dbg);
+            %% io:format(user, "DBG ~s ~w ~P\n", [?MODULE, ?LINE, Proj, 5]),
+            Chmgr = machi_flu_psup:make_fitness_regname(FluName),
+            [Map] = Proj#projection_v1.dbg,
+            catch machi_fitness:send_fitness_update_spam(
+                    Chmgr, Proj#projection_v1.author_server, Map);
        true ->
             catch machi_projection_store:write(ProjStore, ProjType, Proj)
     end;

@@ -90,7 +90,7 @@ Implementation sketch:
 
 ** DONE Investigate riak_dt data structure definition, manipulating, etc.
 ** DONE Add dependency on riak_dt
-** DONE Update is an entire dict from Observer O
+** WORKING Update is an entire dict from Observer O
 *** TODO Merge my pending map + update map + my last mod time + my unfit list
 *** TODO if merged /= pending:
 **** TODO Schedule async tick (more)

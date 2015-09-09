@@ -105,7 +105,7 @@
 %% API
 -export([start_link/2, start_link/3, stop/1, ping/1,
          set_chain_members/2, set_chain_members/3, set_active/2,
-         trigger_react_to_env/1, spam/3]).
+         trigger_react_to_env/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
@@ -177,9 +177,6 @@ set_active(Pid, Boolean) when Boolean == true; Boolean == false ->
 
 trigger_react_to_env(Pid) ->
     gen_server:call(Pid, {trigger_react_to_env}, infinity).
-
-spam(Pid, FromName, Dict) ->
-    gen_server:call(Pid, {spam, FromName, Dict}, infinity).
 
 -ifdef(TEST).
 
@@ -272,7 +269,7 @@ init({MyName, InitMembersDict, MgrOpts}) ->
                          consistency_mode=CMode,
                          runenv=RunEnv,
                          opts=MgrOpts,
-                         last_down=[],
+                         last_down=[no_such_server_initial_value_only],
                          fitness_svr=machi_flu_psup:make_fitness_regname(MyName)
                         }, Proj),
     {_, S2} = do_set_chain_members_dict(MembersDict, S),
@@ -352,9 +349,6 @@ handle_call({trigger_react_to_env}=Call, _From, S) ->
     gobble_calls(Call),
     {TODOtodo, S2} = do_react_to_env(S),
     {reply, TODOtodo, S2};
-handle_call({spam, Author, Dict}, _From, S) ->
-    {Res, S2} = do_spam(Author, Dict, S),
-    {reply, Res, S2};
 handle_call(_Call, _From, S) ->
     io:format(user, "\nBad call to ~p: ~p\n", [S#ch_mgr.name, _Call]),
     {reply, whaaaaaaaaaa, S}.
@@ -1064,12 +1058,13 @@ io:format(user, "zerf ~p caught ~p\n", [S#ch_mgr.name, _Throw]),
             {{no_change, [], Proj#projection_v1.epoch_number}, S}
     end.
 
-manage_last_down_list(#ch_mgr{last_down=LastDown,fitness_svr=FitnessSvr}=S) ->
+manage_last_down_list(#ch_mgr{last_down=LastDown,fitness_svr=FitnessSvr,
+                              members_dict=MembersDict}=S) ->
     case get_remember_down_list() of
         Down when Down == LastDown ->
             S;
         Down ->
-            machi_fitness:update_local_down_list(FitnessSvr, Down),
+            machi_fitness:update_local_down_list(FitnessSvr, Down, MembersDict),
             S#ch_mgr{last_down=Down}
     end.
 
@@ -2490,33 +2485,6 @@ perhaps_verbose_c110(P_latest2, S) ->
             ok
     end.
 
-%% digraph_magic(All_list, HosedAnnotations) ->
-%%     G = digraph:new(),
-%%     [digraph:add_vertex(G, V) || V <- All_list],
-%%     [digraph:add_edge(G, V1, V2) || {V1, problem_with, V2} <- HosedAnnotations],
-%%     calc_magic_down(lists:sort(digraph:vertices(G)), G).
-
-%% calc_magic_down([], G) ->
-%%     digraph:delete(G),
-%%     [];
-%% calc_magic_down([H|T], G) ->
-%%     case digraph:in_degree(G, H) of
-%%         0 ->
-%%             calc_magic_down(T, G);
-%%         1 ->
-%%             Neighbors = digraph:in_neighbours(G, H),
-%%             case [V || V <- Neighbors, digraph:in_degree(G, V) == 1] of
-%%                 [AlsoOne|_] ->
-%%                     %% TODO: be smarter here about the choice of which is down.
-%%                     [H|calc_magic_down(T -- [AlsoOne], G)];
-%%                 [] ->
-%%                     %% H is "on the end", e.g. 1-2-1, so it's OK.
-%%                     calc_magic_down(T, G)
-%%             end;
-%%         N when N > 1 ->
-%%             [H|calc_magic_down(T, G)]
-%%     end.
-
 calc_consistency_mode(_Witness_list = []) ->
     ap_mode;
 calc_consistency_mode(_Witness_list) ->
@@ -2544,9 +2512,6 @@ has_make_zerf_annotation(P) ->
         _ ->
             false
     end.
-
-do_spam(Author, Dict, S) ->
-    {{error, {finish_me, Author, Dict}}, S}.
 
 get_unfit_list(FitnessServer) ->
     try
