@@ -1232,7 +1232,6 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, P_current_calc,
     ?REACT({a30, ?LINE, []}),
     case lists:member(MyName, AllHosed) of
         true ->
-            io:format(user, "AmHosed: ~w, ", [MyName]),
             #projection_v1{epoch_number=Epoch, all_members=All_list,
                            witnesses=Witness_list,
                            members_dict=MembersDict} = P_latest,
@@ -1311,7 +1310,6 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP, AmHosedP,
             ExpectedUPI = if CMode == cp_mode -> [];
                              CMode == ap_mode -> [MyName]
                           end,
-io:format(user, "A40: hosed ~w: current upi ~w newprop upi ~w auth ~w\n", [MyName, P_current#projection_v1.upi, P_newprop#projection_v1.upi, P_current#projection_v1.author_server]),
             if P_current#projection_v1.upi /= ExpectedUPI
                andalso
                P_newprop#projection_v1.upi == ExpectedUPI ->
