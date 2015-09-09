@@ -578,9 +578,26 @@ rank_and_sort_projections_with_extra(All_queried_list, FLUsRs, ProjectionType,
             {needs_repair, FLUsRs, [flarfus], S};
        true ->
             [{_Rank, BestProj}|_] = rank_and_sort_projections(Ps, CurrentProj),
+            BestEpoch = BestProj#projection_v1.epoch_number,
             NotBestPs = [Proj || Proj <- Ps, Proj /= BestProj],
-            UnanimousTag = if NotBestPs == [] -> unanimous;
-                              true            -> not_unanimous
+            NotBestPsEpochFilt =
+                [Proj || Proj <- Ps, Proj /= BestProj,
+                         Proj#projection_v1.epoch_number == BestEpoch],
+            %% Wow, I'm not sure how long this bug has been here, but it's
+            %% likely 5 months old (April 2015).  I just now noticed a problem
+            %% where BestProj was epoch 1194, but NotBestPs contained a
+            %% projection at smaller epoch 1192.  The test for nonempty
+            %% NotBestPs list caused the 1194 BestProj to be marked
+            %% not_unanimous incorrectly.  (This can happen in asymmetric
+            %% partition cases, hooray for crazy corner cases.)
+            %%
+            %% We correct the bug by filtering NotBestPs further to include
+            %% only not-equal projections that also share BestProj's epoch.
+            %% We'll get the correct answer we seek using this list == []
+            %% method, as long as rank_and_sort_projections() will always pick
+            %% a proj with the highest visible epoch.
+            UnanimousTag = if NotBestPsEpochFilt == [] -> unanimous;
+                              true                     -> not_unanimous
                            end,
             Extra = [{all_members_replied, length(FLUsRs) == length(All_queried_list)}],
             Best_FLUs = [FLU || {FLU, Projx} <- FLUsRs, Projx == BestProj],
@@ -590,7 +607,8 @@ rank_and_sort_projections_with_extra(All_queried_list, FLUsRs, ProjectionType,
                       {not_unanimous_flus, All_queried_list --
                                                  (Best_FLUs ++ BadAnswerFLUs)},
                       {bad_answer_flus, BadAnswerFLUs},
-                      {not_unanimous_answers, NotBestPs}|Extra],
+                      {not_best_ps, NotBestPs},
+                      {not_best_ps_epoch_filt, NotBestPsEpochFilt}|Extra],
             {UnanimousTag, BestProj, Extra2, S}
     end.
 
