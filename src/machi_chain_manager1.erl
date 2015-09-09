@@ -1205,11 +1205,24 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, P_current_calc,
                  #ch_mgr{name=MyName} = S) ->
     ?REACT(a30),
     AllHosed = get_unfit_list(S#ch_mgr.fitness_svr),
+    ?REACT({a30, ?LINE, [{all_hosed, AllHosed}]}),
+    case lists:member(MyName, AllHosed) of
+        true ->
+            react_to_env_A50(P_latest, [{i_am_hosed, AllHosed}], S);
+        false ->
+            react_to_env_A31(Retries, P_latest, LatestUnanimousP,
+                             P_current_calc, AllHosed, S)
+    end.
+
+react_to_env_A31(Retries, P_latest, LatestUnanimousP, P_current_calc,
+                 AllHosed, #ch_mgr{name=MyName} = S) ->
     {P_newprop1, S2,_Up} = calc_projection(S, MyName, AllHosed, P_current_calc),
-    ?REACT({a30, ?LINE, [{current, machi_projection:make_summary(S#ch_mgr.proj)}]}),
-    ?REACT({a30, ?LINE, [{calc_current, machi_projection:make_summary(P_current_calc)}]}),
-    ?REACT({a30, ?LINE, [{newprop1, machi_projection:make_summary(P_newprop1)}]}),
-    ?REACT({a30, ?LINE, [{latest, machi_projection:make_summary(P_latest)}]}),
+    ?REACT({a30, ?LINE,
+            [{current, machi_projection:make_summary(S#ch_mgr.proj)},
+             {calc_current, machi_projection:make_summary(P_current_calc)},
+             {latest, machi_projection:make_summary(P_latest)},
+             {newprop1, machi_projection:make_summary(P_newprop1)}
+            ]}),
 
     {P_newprop2, S3} = {P_newprop1, S2},
 
