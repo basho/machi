@@ -1221,6 +1221,8 @@ react_to_env_A29(Retries, P_latest, LatestUnanimousP, _ReadExtra,
 
 react_to_env_A30(Retries, P_latest, LatestUnanimousP, P_current_calc,
                  #ch_mgr{name=MyName, consistency_mode=CMode} = S) ->
+    V = case file:read_file("/tmp/moomoo."++atom_to_list(S#ch_mgr.name)) of {ok,_} -> true; _ -> false end,
+    if V -> io:format(user, "A30: ~w: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
     ?REACT(a30),
     AllHosed = get_unfit_list(S#ch_mgr.fitness_svr),
     ?REACT({a30, ?LINE,
@@ -1609,10 +1611,6 @@ react_to_env_C103(#projection_v1{epoch_number=_Epoch_newprop} = _P_newprop,
     ?REACT({c103, ?LINE,
             [{current_epoch, P_current#projection_v1.epoch_number},
              {none_projection_epoch, P_none#projection_v1.epoch_number}]}),
-    %% Reset the not_sanes count dictionary here, or else an already
-    %% ?TOO_FREQUENT_BREAKER count for an author might prevent a
-    %% transition from C100_inner()->C300, which can lead to infinite
-    %% looping C100->C103->C100.
     react_to_env_C100(P_none, P_none, S).
 
 react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->

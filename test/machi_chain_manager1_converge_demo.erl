@@ -396,11 +396,19 @@ make_partition_list(All_list) ->
                                        A <- All_list, B <- All_list, A /= B,
                                        C <- All_list, D <- All_list, C /= D,
                                        X /= A, X /= C, A /= C],
+    _X_Ys4 = [[{X,Y}, {A,B}, {C,D}, {E,F}] ||
+                                       X <- All_list, Y <- All_list, X /= Y,
+                                       A <- All_list, B <- All_list, A /= B,
+                                       C <- All_list, D <- All_list, C /= D,
+                                       E <- All_list, F <- All_list, E /= F,
+                                       X /= A, X /= C, X /= E, A /= C, A /= E,
+                                       C /= E],
     %% Concat = _X_Ys1,
     %% Concat = _X_Ys2,
     %% Concat = _X_Ys1 ++ _X_Ys2,
     %% %% Concat = _X_Ys3,
-    Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
+    %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
+    Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3 ++ _X_Ys4,
     random_sort(lists:usort([lists:sort(L) || L <- Concat])).
 
    %% %% for len=5 and 2 witnesses
