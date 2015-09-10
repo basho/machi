@@ -1563,7 +1563,14 @@ react_to_env_C100(P_newprop,
         true ->
             ?REACT({c100, ?LINE, [sane]}),
             if Sane == true -> ok;  true -> ?V("~w-insane-~w-~w:~w:~w@~w,", [?LINE, MyName, P_newprop#projection_v1.epoch_number, P_newprop#projection_v1.upi, P_newprop#projection_v1.repairing, ?LINE]) end, %%% DELME!!!
-            react_to_env_C110(P_latest, S);
+
+    V = case file:read_file("/tmp/bugbug."++atom_to_list(S#ch_mgr.name)) of {ok,_} -> true; _ -> false end,
+    if V -> 
+            react_to_env_C103(P_newprop, P_latest, S);
+       true ->
+            react_to_env_C110(P_latest, S)
+    end;
+            %% ORIGINAL react_to_env_C110(P_latest, S);
         NotSaneBummer ->
             ?REACT({c100, ?LINE, [{not_sane, NotSaneBummer}]}),
             react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
@@ -1607,10 +1614,14 @@ react_to_env_C103(#projection_v1{epoch_number=_Epoch_newprop} = _P_newprop,
                                    MyName, All_list, Witness_list, MembersDict),
     P_none1 = P_none0#projection_v1{dbg=[{none_projection,true}]},
     P_none = machi_projection:update_checksum(P_none1),
-    %% Use it, darn it, because it's 100% safe for AP mode.
     ?REACT({c103, ?LINE,
             [{current_epoch, P_current#projection_v1.epoch_number},
              {none_projection_epoch, P_none#projection_v1.epoch_number}]}),
+    io:format(user, "SET add_admin_down(~w) at ~w =====================================\n", [MyName, time()]),
+    machi_fitness:add_admin_down(S#ch_mgr.fitness_svr, MyName, []),
+    timer:sleep(5*1000),
+    io:format(user, "SET delete_admin_down(~w) at ~w =====================================\n", [MyName, time()]),
+    machi_fitness:delete_admin_down(S#ch_mgr.fitness_svr, MyName),
     react_to_env_C100(P_none, P_none, S).
 
 react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
@@ -1791,6 +1802,14 @@ projection_transition_is_sane(P1, P2, RelativeToServer, RetrospectiveP) ->
         true ->
             projection_transition_is_sane_final_review(P1, P2,
                                                        ?RETURN2(true));
+        {epoch_not_si,SameEpoch,not_gt,SameEpoch}=Reason ->
+            if P1#projection_v1.upi == [],
+               P2#projection_v1.upi == [] ->
+                    %% None proj -> none proj is ok
+                    ?RETURN2(true);
+               true ->
+                    ?RETURN2(Reason)
+            end;
         Else ->
             ?RETURN2(Else)
     end.
