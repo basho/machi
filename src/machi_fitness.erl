@@ -100,13 +100,16 @@ handle_call({update_local_down_list, Down, MembersDict}, _From,
          end,
     {reply, ok, S2#state{local_down=Down}};
 handle_call({add_admin_down, DownFLU, DownProps}, _From,
-            #state{my_flu_name=MyFluName, local_down=Down, admin_down=AdminDown,
-                   pending_map=OldMap, members_dict=MembersDict}=S) ->
+            #state{local_down=OldDown, admin_down=AdminDown}=S) ->
     NewAdminDown = [{DownFLU,DownProps}|lists:keydelete(DownFLU, 1, AdminDown)],
-    NewMap = store_in_map(OldMap, MyFluName, erlang:now(), Down,
-                          NewAdminDown, [props_yo]),
-    S2 = S#state{admin_down=NewAdminDown},
-    S3 = do_map_change(NewMap, [MyFluName], MembersDict, S2),
+    S3 = finish_admin_down(erlang:now(), OldDown, NewAdminDown,
+                           [props_yo], S),
+    {reply, ok, S3};
+handle_call({delete_admin_down, DownFLU}, _From,
+            #state{local_down=OldDown, admin_down=AdminDown}=S) ->
+    NewAdminDown = lists:keydelete(DownFLU, 1, AdminDown),
+    S3 = finish_admin_down(erlang:now(), OldDown, NewAdminDown,
+                           [props_yo], S),
     {reply, ok, S3};
 handle_call({incoming_spam, Author, Dict}, _From, S) ->
     {Res, S2} = do_incoming_spam(Author, Dict, S),
@@ -205,7 +208,7 @@ store_in_map(Map, Name, Now, Down, AdminDown, Props) ->
     map_set(Name, Map, Name, Val).
 
 send_spam(NewMap, DontSendList, MembersDict, #state{my_flu_name=MyFluName}) ->
-    Send = fun(FLU, #p_srvr{address=Host, port=TcpPort}) ->
+    Send = fun(_FLU, #p_srvr{address=Host, port=TcpPort}) ->
                    SpamProj = machi_projection:update_checksum(
                                 #projection_v1{epoch_number=?SPAM_PROJ_EPOCH,
                                                author_server=MyFluName,
@@ -302,6 +305,14 @@ find_changed_servers(OldMap, NewMap, _MyFluName) ->
 schedule_adjust_messages(FLU_list) ->
     [erlang:send_after(?DELAY_TIME_MS, self(), {adjust_down_list, FLU}) ||
         FLU <- FLU_list].
+
+finish_admin_down(Time, Down, NewAdminDown, Props,
+                  #state{my_flu_name=MyFluName, local_down=Down,
+                         pending_map=OldMap, members_dict=MembersDict}=S) ->
+    NewMap = store_in_map(OldMap, MyFluName, erlang:now(), Down,
+                          NewAdminDown, Props),
+    S2 = S#state{admin_down=NewAdminDown},
+    do_map_change(NewMap, [MyFluName], MembersDict, S2).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
