@@ -215,6 +215,7 @@ witness_smoke_test2() ->
 
         %% Stop 'b' and let the chain reset.
         ok = machi_flu_psup:stop_flu_package(b),
+        %% ok = machi_fitness:add_admin_down(a_fitness, admin_down_bogus_flu, [{why,because}]),
         %% Run ticks enough times to force auto-unwedge of both a & c.
         [run_ticks([a_chmgr,c_chmgr]) || _ <- [1,2,3,4] ],
 

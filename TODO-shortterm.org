@@ -80,6 +80,7 @@ Map key: ObservingServerName::atom()
 
 Map val: { ObservingServerLastModTime::now(),
            UnfitList::list(ServerName::atom()),
+           AdminDownList::list(ServerName::atom()),
            Props::proplist() }
 
 Implementation sketch:

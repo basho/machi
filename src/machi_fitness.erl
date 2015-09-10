@@ -36,6 +36,7 @@
 %% API
 -export([start_link/1,
          get_unfit_list/1, update_local_down_list/3,
+         add_admin_down/3, delete_admin_down/2,
          send_fitness_update_spam/3]).
 
 %% gen_server callbacks
@@ -46,6 +47,7 @@
           my_flu_name                :: atom() | binary(),
           reg_name                   :: atom(),
           local_down=[]              :: list(),
+          admin_down=[]              :: list({term(),term()}),
           members_dict=orddict:new() :: orddict:orddict(),
           active_unfit=[]            :: list(),
           pending_map=?MAP:new()     :: ?MAP:riak_dt_map()
@@ -59,6 +61,14 @@ get_unfit_list(PidSpec) ->
 
 update_local_down_list(PidSpec, Down, MembersDict) ->
     gen_server:call(PidSpec, {update_local_down_list, Down, MembersDict},
+                    infinity).
+
+add_admin_down(PidSpec, DownFLU, DownProps) ->
+    gen_server:call(PidSpec, {add_admin_down, DownFLU, DownProps},
+                    infinity).
+
+delete_admin_down(PidSpec, DownFLU) ->
+    gen_server:call(PidSpec, {delete_admin_down, DownFLU},
                     infinity).
 
 send_fitness_update_spam(Pid, FromName, Dict) ->
@@ -77,8 +87,10 @@ handle_call({get_unfit_list}, _From, #state{active_unfit=ActiveUnfit}=S) ->
     {reply, Reply, S};
 handle_call({update_local_down_list, Down, MembersDict}, _From,
             #state{my_flu_name=MyFluName, pending_map=OldMap,
-                   local_down=OldDown, members_dict=OldMembersDict}=S) ->
-    NewMap = store_in_map(OldMap, MyFluName, erlang:now(), Down, [props_yo]),
+                   local_down=OldDown, members_dict=OldMembersDict,
+                   admin_down=AdminDown}=S) ->
+    NewMap = store_in_map(OldMap, MyFluName, erlang:now(), Down,
+                          AdminDown, [props_yo]),
     S2 = if Down == OldDown, MembersDict == OldMembersDict ->
                  %% Do nothing only if both are equal.  If members_dict is
                  %% changing, that's sufficient reason to spam.
@@ -87,6 +99,15 @@ handle_call({update_local_down_list, Down, MembersDict}, _From,
                  do_map_change(NewMap, [MyFluName], MembersDict, S)
          end,
     {reply, ok, S2#state{local_down=Down}};
+handle_call({add_admin_down, DownFLU, DownProps}, _From,
+            #state{my_flu_name=MyFluName, local_down=Down, admin_down=AdminDown,
+                   pending_map=OldMap, members_dict=MembersDict}=S) ->
+    NewAdminDown = [{DownFLU,DownProps}|lists:keydelete(DownFLU, 1, AdminDown)],
+    NewMap = store_in_map(OldMap, MyFluName, erlang:now(), Down,
+                          NewAdminDown, [props_yo]),
+    S2 = S#state{admin_down=NewAdminDown},
+    S3 = do_map_change(NewMap, [MyFluName], MembersDict, S2),
+    {reply, ok, S3};
 handle_call({incoming_spam, Author, Dict}, _From, S) ->
     {Res, S2} = do_incoming_spam(Author, Dict, S),
     {reply, Res, S2};
@@ -161,22 +182,26 @@ code_change(_OldVsn, S, _Extra) ->
 
 make_unfit_list(#state{members_dict=MembersDict}=S) ->
     Now = erlang:now(),
-    F = fun({Server, {UpdateTime, DownList, _Props}}, Acc) ->
+    F = fun({Server, {UpdateTime, DownList, AdminDown, _Props}},
+            {ProblemAcc, AdminAcc}) ->
                 case timer:now_diff(Now, UpdateTime) div (1000*1000) of
-                    N when N > 900 ->
-                        Acc;
+                    N when N > 900 ->           % TODO make configurable
+                        {ProblemAcc, AdminAcc};
                     _ ->
                         Probs = [{Server,problem_with,D} || D <- DownList],
-                        [Probs|Acc]
+                        {[Probs|ProblemAcc], AdminDown++AdminAcc}
                 end
         end,
-    Problems = (catch lists:flatten(map_fold(F, [], S#state.pending_map))),
+    {Problems0, AdminDown} = map_fold(F, {[], []}, S#state.pending_map),
+    Problems = lists:flatten(Problems0),
     All_list = [K || {K,_V} <- orddict:to_list(MembersDict)],
     Unfit = calc_unfit(All_list, Problems),
-    Unfit.
+    lists:usort(Unfit ++ AdminDown).
 
-store_in_map(Map, Name, Now, Down, Props) ->
-    Val = {Now, Down, Props},
+store_in_map(Map, Name, Now, Down, AdminDown, Props) ->
+    {AdminDownServers, AdminDownProps0} = lists:unzip(AdminDown),
+    AdminDownProps = lists:append(AdminDownProps0), % flatten one level
+    Val = {Now, Down, AdminDownServers, Props ++ AdminDownProps},
     map_set(Name, Map, Name, Val).
 
 send_spam(NewMap, DontSendList, MembersDict, #state{my_flu_name=MyFluName}) ->
@@ -267,7 +292,9 @@ do_map_change(NewMap, DontSendList, MembersDict,
     S#state{pending_map=NewMap, members_dict=MembersDict}.
 
 find_changed_servers(OldMap, NewMap, _MyFluName) ->
-    AddBad = fun({_Who, {_Time, BadList, _Props}}, Acc) -> BadList ++ Acc end,
+    AddBad = fun({_Who, {_Time, BadList, AdminDown, _Props}}, Acc) ->
+                     BadList ++ AdminDown ++ Acc
+             end,
     OldBad = map_fold(AddBad, [], OldMap),
     NewBad = map_fold(AddBad, [], NewMap),
     lists:usort((OldBad -- NewBad) ++ (NewBad -- OldBad)).
