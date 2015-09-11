@@ -50,7 +50,8 @@
           admin_down=[]              :: list({term(),term()}),
           members_dict=orddict:new() :: orddict:orddict(),
           active_unfit=[]            :: list(),
-          pending_map=?MAP:new()     :: ?MAP:riak_dt_map()
+          pending_map=?MAP:new()     :: ?MAP:riak_dt_map(),
+          partition_simulator=false  :: boolean()
          }).
 
 start_link(Args) ->
@@ -79,6 +80,7 @@ send_fitness_update_spam(Pid, FromName, Dict) ->
 init([{MyFluName}|_Args]) ->
     RegName = machi_flu_psup:make_fitness_regname(MyFluName),
     register(RegName, self()),
+io:format(user, "Starting fitness for ~w, args ~p\n", [MyFluName, _Args]),
 timer:send_interval(1000, dump),
     {ok, #state{my_flu_name=MyFluName, reg_name=RegName}}.
 
@@ -208,7 +210,7 @@ store_in_map(Map, Name, Now, Down, AdminDown, Props) ->
     map_set(Name, Map, Name, Val).
 
 send_spam(NewMap, DontSendList, MembersDict, #state{my_flu_name=MyFluName}) ->
-    Send = fun(_FLU, #p_srvr{address=Host, port=TcpPort}) ->
+    Send = fun(FLU, #p_srvr{address=Host, port=TcpPort}) ->
                    SpamProj = machi_projection:update_checksum(
                                 #projection_v1{epoch_number=?SPAM_PROJ_EPOCH,
                                                author_server=MyFluName,
@@ -223,8 +225,7 @@ send_spam(NewMap, DontSendList, MembersDict, #state{my_flu_name=MyFluName}) ->
                                                members_dict=[]                                           }),
                    %% Best effort, don't care about failure.
                    spawn(fun() ->
-                                 machi_flu1_client:write_projection(
-                                   Host, TcpPort, public, SpamProj)
+                                 send_projection(FLU, Host, TcpPort, SpamProj)
                          end)
            end,
     F = fun(FLU, P_srvr, Acc) ->
@@ -236,8 +237,14 @@ send_spam(NewMap, DontSendList, MembersDict, #state{my_flu_name=MyFluName}) ->
                         [FLU|Acc]
                 end
         end,
-    Sent = orddict:fold(F, [], MembersDict),
+    _Sent = orddict:fold(F, [], MembersDict),
     ok.
+
+send_projection(_FLU, Host, TcpPort, SpamProj) ->
+    %% At the moment, we're using utterly-temporary-hack method of tunneling
+    %% our messages through the write_projection API.  Eventually the PB
+    %% API should be expanded to accomodate this new fitness service.
+    machi_flu1_client:write_projection(Host, TcpPort, public, SpamProj).
 
 calc_unfit(All_list, HosedAnnotations) ->
     G = digraph:new(),
@@ -309,8 +316,7 @@ schedule_adjust_messages(FLU_list) ->
 finish_admin_down(Time, Down, NewAdminDown, Props,
                   #state{my_flu_name=MyFluName, local_down=Down,
                          pending_map=OldMap, members_dict=MembersDict}=S) ->
-    NewMap = store_in_map(OldMap, MyFluName, erlang:now(), Down,
-                          NewAdminDown, Props),
+    NewMap = store_in_map(OldMap, MyFluName, Time, Down, NewAdminDown, Props),
     S2 = S#state{admin_down=NewAdminDown},
     do_map_change(NewMap, [MyFluName], MembersDict, S2).
 

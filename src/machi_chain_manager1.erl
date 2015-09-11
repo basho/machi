@@ -125,6 +125,7 @@
 -export([test_calc_projection/2,
          test_write_public_projection/2,
          test_read_latest_public_projection/2]).
+-export([perhaps_call/5]). % for partition simulator use w/machi_fitness
 
 -ifdef(EQC).
 -include_lib("eqc/include/eqc.hrl").
@@ -2241,9 +2242,10 @@ sanitize_repair_state(S) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-perhaps_call_t(S, Partitions, FLU, DoIt) ->
+perhaps_call_t(#ch_mgr{name=MyName}=S, Partitions, FLU, DoIt) ->
     try
-        perhaps_call(S, Partitions, FLU, DoIt)
+        ProxyPid = proxy_pid(FLU, S),
+        perhaps_call(ProxyPid, MyName, Partitions, FLU, DoIt)
     catch
         exit:timeout ->
             update_remember_down_list(FLU),
@@ -2253,8 +2255,7 @@ perhaps_call_t(S, Partitions, FLU, DoIt) ->
             {error, partition}
     end.
 
-perhaps_call(#ch_mgr{name=MyName}=S, Partitions, FLU, DoIt) ->
-    ProxyPid = proxy_pid(FLU, S),
+perhaps_call(ProxyPid, MyName, Partitions, FLU, DoIt) ->
     RemoteFLU_p = FLU /= MyName,
     erase(bad_sock),
     case RemoteFLU_p andalso lists:member({MyName, FLU}, Partitions) of
