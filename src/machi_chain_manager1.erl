@@ -1501,13 +1501,54 @@ react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
     {{no_change, FinalProps, P_current#projection_v1.epoch_number}, S}.
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
-                _AmHosedP, Rank_newprop, Rank_latest, #ch_mgr{name=MyName}=S) ->
+                _AmHosedP, Rank_newprop, Rank_latest,
+                 #ch_mgr{name=MyName, consistency_mode=CMode,
+                         proj=P_current}=S) ->
     ?REACT(b10),
 
-if _AmHosedP -> io:format(user, "B10: ~w: AmHosedP\n", [MyName]); true -> ok end,
-    ?REACT({b10,?LINE,[{newprop_epoch,P_newprop#projection_v1.epoch_number}]}),
+    P_current_upi = if is_record(P_current, projection_v1) ->
+                            P_current#projection_v1.upi;
+                       true ->
+                            []
+                    end,
+    #projection_v1{author_server=P_latest_author, upi=P_latest_upi,
+                   repairing=P_latest_repairing} = P_latest,
+    I_am_in_P_latest_upi = lists:member(MyName, P_latest_upi),
+    I_am_in_P_latest_repairing = lists:member(MyName, P_latest_repairing),
+    IsRelevantToMe_p = if CMode == cp_mode ->
+                               true;
+                          CMode == ap_mode,
+                          P_latest_author == MyName ->
+                               true;
+                          CMode == ap_mode,
+                          not (I_am_in_P_latest_upi
+                               orelse I_am_in_P_latest_repairing) ->
+                               %% There is no sense for me to leave whatever
+                               %% chain I'm in and go join some other chain
+                               %% that doesn't include me at all in either
+                               %% UPI or repairing.  E.g., someone else
+                               %% fell back to none proj ... that proj is
+                               %% now P_latest and it's unanimous.  But that
+                               %% doesn't make it a good idea.  ^_^
+                               false;
+                          CMode == ap_mode,
+                          I_am_in_P_latest_repairing ->
+                               %% If I'm already in the current UPI, and the
+                               %% UPI is longer than 1 (i.e., more than just
+                               %% me), then it makes no sense to leave the UPI
+                               %% to go to someone else's suggestion of
+                               %% repairing.  If I'm the only member of
+                               %% P_current UPI, then sure, then having me
+                               %% join a repairing list is relevant.
+                               not (lists:member(MyName, P_current_upi) andalso
+                                    length(P_current_upi) > 1);
+                          CMode == ap_mode ->
+                               true
+                       end,
+    ?REACT({b10,?LINE,[{newprop_epoch,P_newprop#projection_v1.epoch_number},
+                       {is_relevant_to_me_p,IsRelevantToMe_p}]}),
     if
-        LatestUnanimousP ->
+        LatestUnanimousP andalso IsRelevantToMe_p ->
             ?REACT({b10, ?LINE,
                     [{latest_unanimous_p, LatestUnanimousP},
                      {latest_epoch,P_latest#projection_v1.epoch_number},
