@@ -1,0 +1,225 @@
+% 1. start file proxy supervisor
+% 2. start projection store
+% 3. start listener
+-module(machi_flu_listener).
+
+-include("machi.hrl").
+
+-record(state, {
+          flu_name        :: atom(),
+          proj_store      :: pid(),
+          append_pid      :: pid(),
+          tcp_port        :: non_neg_integer(),
+          data_dir        :: string(),
+          wedged = true   :: boolean(),
+          etstab          :: ets:tid(),
+          epoch_id        :: 'undefined' | machi_dt:epoch_id(),
+          pb_mode = undefined  :: 'undefined' | 'high' | 'low',
+          high_clnt       :: 'undefined' | pid(),
+          dbg_props = []  :: list(), % proplist
+          props = []      :: list(),  % proplist
+          proxies = orddict:new() :: orddict:orddict()
+         }).
+
+
+
+make_listener_regname(BaseName) ->
+    list_to_atom(atom_to_list(BaseName) ++ "_listener").
+
+
+
+setup_listen_state() ->
+    S0 = #state{flu_name=FluName,
+                proj_store=ProjectionPid,
+                tcp_port=TcpPort,
+                data_dir=DataDir,
+                wedged=Wedged_p,
+                etstab=ets_table_name(FluName),
+                epoch_id=EpochId,
+                dbg_props=DbgProps,
+                props=Props},
+    S1 = S0#state{append_pid=AppendPid},
+    ListenPid = start_listen_server(S1).
+
+start_listen_server(S) ->
+    proc_lib:spawn_link(fun() -> run_listen_server(S) end).
+
+run_listen_server(#state{flu_name=FluName, tcp_port=TcpPort}=S) ->
+    register(make_listener_regname(FluName), self()),
+    SockOpts = ?PB_PACKET_OPTS ++
+        [{reuseaddr, true}, {mode, binary}, {active, false}],
+    case gen_tcp:listen(TcpPort, SockOpts) of
+        {ok, LSock} ->
+            listen_server_loop(LSock, S);
+        Else ->
+            error_logger:warning_msg("~s:run_listen_server: "
+                                     "listen to TCP port ~w: ~w\n",
+                                     [?MODULE, TcpPort, Else]),
+            exit({?MODULE, run_listen_server, tcp_port, TcpPort, Else})
+    end.
+
+net_server_loop(Sock, S) ->
+    case gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT) of
+        {ok, Bin} ->
+            {RespBin, S2} = 
+                case machi_pb:decode_mpb_ll_request(Bin) of
+                    LL_req when LL_req#mpb_ll_request.do_not_alter == 2 ->
+                        {R, NewS} = do_pb_ll_request(LL_req, S),
+                        {maybe_encode_response(R), mode(low, NewS)};
+                    _ ->
+                        HL_req = machi_pb:decode_mpb_request(Bin),
+                        1 = HL_req#mpb_request.do_not_alter,
+                        {R, NewS} = do_pb_hl_request(HL_req, make_high_clnt(S)),
+                        {machi_pb:encode_mpb_response(R), mode(high, NewS)}
+                end,
+            if RespBin == async_no_response ->
+                    ok;
+               true ->
+                    ok = gen_tcp:send(Sock, RespBin)
+            end,
+            net_server_loop(Sock, S2);
+        {error, SockError} ->
+            Msg = io_lib:format("Socket error ~w", [SockError]),
+            R = #mpb_ll_response{req_id= <<>>,
+                                 generic=#mpb_errorresp{code=1, msg=Msg}},
+            Resp = machi_pb:encode_mpb_ll_response(R),
+            %% TODO: Weird that sometimes neither catch nor try/catch
+            %%       can prevent OTP's SASL from logging an error here.
+            %%       Error in process <0.545.0> with exit value: {badarg,[{erlang,port_command,.......
+            %% TODO: is this what causes the intermittent PULSE deadlock errors?
+            %% _ = (catch gen_tcp:send(Sock, Resp)), timer:sleep(1000),
+            (catch gen_tcp:close(Sock)),
+            exit(normal)
+    end.
+
+listen_server_loop(LSock, S) ->
+    {ok, Sock} = gen_tcp:accept(LSock),
+    spawn_link(fun() -> net_server_loop(Sock, S) end),
+    listen_server_loop(LSock, S).
+
+
+make_high_clnt(#state{high_clnt=undefined}=S) ->
+    {ok, Proj} = machi_projection_store:read_latest_projection(
+                   S#state.proj_store, private),
+    Ps = [P_srvr || {_, P_srvr} <- orddict:to_list(
+                                     Proj#projection_v1.members_dict)],
+    {ok, Clnt} = machi_cr_client:start_link(Ps),
+    S#state{high_clnt=Clnt};
+make_high_clnt(S) ->
+    S.
+
+maybe_encode_response(async_no_response=X) ->
+    X;
+maybe_encode_response(R) ->
+    machi_pb:encode_mpb_ll_response(R).
+
+mode(Mode, #state{pb_mode=undefined}=S) ->
+    S#state{pb_mode=Mode};
+mode(_, S) ->
+    S.
+
+do_pb_ll_request(#mpb_ll_request{req_id=ReqID}, #state{pb_mode=high}=S) ->
+    Result = {high_error, 41, "Low protocol request while in high mode"},
+    {machi_pb_translate:to_pb_response(ReqID, unused, Result), S};
+do_pb_ll_request(PB_request, S) ->
+    Req = machi_pb_translate:from_pb_request(PB_request),
+    {ReqID, Cmd, Result, S2} = 
+        case Req of
+            {RqID, {LowCmd, _}=CMD}
+              when LowCmd == low_proj;
+                   LowCmd == low_wedge_status; LowCmd == low_list_files ->
+                %% Skip wedge check for projection commands!
+                %% Skip wedge check for these unprivileged commands
+                {Rs, NewS} = do_pb_ll_request3(CMD, S),
+                {RqID, CMD, Rs, NewS};
+            {RqID, CMD} ->
+                EpochID = element(2, CMD),      % by common convention
+                {Rs, NewS} = do_pb_ll_request2(EpochID, CMD, S),
+                {RqID, CMD, Rs, NewS}
+        end,
+    {machi_pb_translate:to_pb_response(ReqID, Cmd, Result), S2}.
+
+do_pb_ll_request2(EpochID, CMD, S) ->
+    {Wedged_p, CurrentEpochID} = ets:lookup_element(S#state.etstab, epoch, 2),
+    if Wedged_p == true ->
+            {{error, wedged}, S#state{epoch_id=CurrentEpochID}};
+       is_tuple(EpochID)
+       andalso
+       EpochID /= CurrentEpochID ->
+            {Epoch, _} = EpochID,
+            {CurrentEpoch, _} = CurrentEpochID,
+            if Epoch < CurrentEpoch ->
+                    ok;
+               true ->
+                    %% We're at same epoch # but different checksum, or
+                    %% we're at a newer/bigger epoch #.
+                    wedge_myself(S#state.flu_name, CurrentEpochID),
+                    ok
+            end,
+            {{error, bad_epoch}, S#state{epoch_id=CurrentEpochID}};
+       true ->
+            do_pb_ll_request3(CMD, S#state{epoch_id=CurrentEpochID})
+    end.
+
+do_pb_ll_request3({low_echo, _BogusEpochID, Msg}, S) ->
+    {Msg, S};
+do_pb_ll_request3({low_auth, _BogusEpochID, _User, _Pass}, S) ->
+    {-6, S};
+do_pb_ll_request3({low_append_chunk, _EpochID, PKey, Prefix, Chunk, CSum_tag,
+                CSum, ChunkExtra}, S) ->
+    {do_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
+                            ChunkExtra, S), S};
+do_pb_ll_request3({low_write_chunk, _EpochID, File, Offset, Chunk, CSum_tag,
+                   CSum}, S) ->
+    {do_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum, S), S};
+do_pb_ll_request3({low_read_chunk, _EpochID, File, Offset, Size, Opts}, S) ->
+    {do_server_read_chunk(File, Offset, Size, Opts, S), S};
+do_pb_ll_request3({low_checksum_list, _EpochID, File}, S) ->
+    {do_server_checksum_listing(File, S), S};
+do_pb_ll_request3({low_list_files, _EpochID}, S) ->
+    {do_server_list_files(S), S};
+do_pb_ll_request3({low_wedge_status, _EpochID}, S) ->
+    {do_server_wedge_status(S), S};
+do_pb_ll_request3({low_delete_migration, _EpochID, File}, S) ->
+    {do_server_delete_migration(File, S), S};
+do_pb_ll_request3({low_trunc_hack, _EpochID, File}, S) ->
+    {do_server_trunc_hack(File, S), S};
+do_pb_ll_request3({low_proj, PCMD}, S) ->
+    {do_server_proj_request(PCMD, S), S}.
+
+
+do_pb_hl_request(#mpb_request{req_id=ReqID}, #state{pb_mode=low}=S) ->
+    Result = {low_error, 41, "High protocol request while in low mode"},
+    {machi_pb_translate:to_pb_response(ReqID, unused, Result), S};
+do_pb_hl_request(PB_request, S) ->
+    {ReqID, Cmd} = machi_pb_translate:from_pb_request(PB_request),
+    {Result, S2} = do_pb_hl_request2(Cmd, S),
+    {machi_pb_translate:to_pb_response(ReqID, Cmd, Result), S2}.
+
+do_pb_hl_request2({high_echo, Msg}, S) ->
+    {Msg, S};
+do_pb_hl_request2({high_auth, _User, _Pass}, S) ->
+    {-77, S};
+do_pb_hl_request2({high_append_chunk, _todoPK, Prefix, ChunkBin, TaggedCSum,
+                   ChunkExtra}, #state{high_clnt=Clnt}=S) ->
+    Chunk = {TaggedCSum, ChunkBin},
+    Res = machi_cr_client:append_chunk_extra(Clnt, Prefix, Chunk,
+                                             ChunkExtra),
+    {Res, S};
+do_pb_hl_request2({high_write_chunk, File, Offset, ChunkBin, TaggedCSum},
+                  #state{high_clnt=Clnt}=S) ->
+    Chunk = {TaggedCSum, ChunkBin},
+    Res = machi_cr_client:write_chunk(Clnt, File, Offset, Chunk),
+    {Res, S};
+do_pb_hl_request2({high_read_chunk, File, Offset, Size},
+                  #state{high_clnt=Clnt}=S) ->
+    Res = machi_cr_client:read_chunk(Clnt, File, Offset, Size),
+    {Res, S};
+do_pb_hl_request2({high_checksum_list, File}, #state{high_clnt=Clnt}=S) ->
+    Res = machi_cr_client:checksum_list(Clnt, File),
+    {Res, S};
+do_pb_hl_request2({high_list_files}, #state{high_clnt=Clnt}=S) ->
+    Res = machi_cr_client:list_files(Clnt),
+    {Res, S}.
+
+
