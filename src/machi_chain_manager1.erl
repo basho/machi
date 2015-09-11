@@ -2067,11 +2067,18 @@ projection_transition_is_sane_except_si_epoch(
           stack, Trace}
  end.
 
-poll_private_proj_is_upi_unanimous(#ch_mgr{consistency_mode=ap_mode} = S) ->
+poll_private_proj_is_upi_unanimous(#ch_mgr{proj_unanimous={_,_,_}} = S) ->
     S;
-poll_private_proj_is_upi_unanimous(#ch_mgr{consistency_mode=cp_mode,
-                                           proj_unanimous={_,_,_}} = S) ->
-    S;
+poll_private_proj_is_upi_unanimous(#ch_mgr{consistency_mode=ap_mode,
+                                           proj=Proj} = S) ->
+    if Proj#projection_v1.upi == [] % Nobody to poll?
+       orelse
+       Proj#projection_v1.epoch_number == 0 -> % Skip polling for epoch 0?
+            S;
+       true ->
+            %% Try it just a single time, no other waiting
+            poll_private_proj_is_upi_unanimous3(S)
+    end;
 poll_private_proj_is_upi_unanimous(#ch_mgr{consistency_mode=cp_mode,
                                            proj_unanimous=false,
                                            proj=Proj} = S) ->
