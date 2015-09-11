@@ -51,7 +51,7 @@
           members_dict=orddict:new() :: orddict:orddict(),
           active_unfit=[]            :: list(),
           pending_map=?MAP:new()     :: ?MAP:riak_dt_map(),
-          partition_simulator=false  :: boolean()
+          partition_simulator_p      :: boolean()
          }).
 
 start_link(Args) ->
@@ -77,12 +77,13 @@ send_fitness_update_spam(Pid, FromName, Dict) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init([{MyFluName}|_Args]) ->
+init([{MyFluName}|Args]) ->
     RegName = machi_flu_psup:make_fitness_regname(MyFluName),
     register(RegName, self()),
-io:format(user, "Starting fitness for ~w, args ~p\n", [MyFluName, _Args]),
 timer:send_interval(1000, dump),
-    {ok, #state{my_flu_name=MyFluName, reg_name=RegName}}.
+    UseSimulatorP = proplists:get_value(use_partition_simulator, Args, false),
+    {ok, #state{my_flu_name=MyFluName, reg_name=RegName,
+                partition_simulator_p=UseSimulatorP}}.
 
 handle_call({get_unfit_list}, _From, #state{active_unfit=ActiveUnfit}=S) ->
     Reply = ActiveUnfit,
@@ -209,7 +210,7 @@ store_in_map(Map, Name, Now, Down, AdminDown, Props) ->
     Val = {Now, Down, AdminDownServers, Props ++ AdminDownProps},
     map_set(Name, Map, Name, Val).
 
-send_spam(NewMap, DontSendList, MembersDict, #state{my_flu_name=MyFluName}) ->
+send_spam(NewMap, DontSendList, MembersDict, #state{my_flu_name=MyFluName}=S) ->
     Send = fun(FLU, #p_srvr{address=Host, port=TcpPort}) ->
                    SpamProj = machi_projection:update_checksum(
                                 #projection_v1{epoch_number=?SPAM_PROJ_EPOCH,
@@ -225,7 +226,7 @@ send_spam(NewMap, DontSendList, MembersDict, #state{my_flu_name=MyFluName}) ->
                                                members_dict=[]                                           }),
                    %% Best effort, don't care about failure.
                    spawn(fun() ->
-                                 send_projection(FLU, Host, TcpPort, SpamProj)
+                                send_projection(FLU, Host, TcpPort, SpamProj, S)
                          end)
            end,
     F = fun(FLU, P_srvr, Acc) ->
@@ -240,11 +241,35 @@ send_spam(NewMap, DontSendList, MembersDict, #state{my_flu_name=MyFluName}) ->
     _Sent = orddict:fold(F, [], MembersDict),
     ok.
 
-send_projection(_FLU, Host, TcpPort, SpamProj) ->
+send_projection(FLU, Host, TcpPort, SpamProj,
+                #state{my_flu_name=MyFluName, members_dict=MembersDict,
+                       partition_simulator_p=SimulatorP}) ->
     %% At the moment, we're using utterly-temporary-hack method of tunneling
     %% our messages through the write_projection API.  Eventually the PB
     %% API should be expanded to accomodate this new fitness service.
-    machi_flu1_client:write_projection(Host, TcpPort, public, SpamProj).
+    DoIt = fun(_ProxyPid) ->
+                   machi_flu1_client:write_projection(Host, TcpPort,
+                                                      public, SpamProj)
+           end,
+    ProxyPidPlaceholder = proxy_pid_unused,
+    if SimulatorP ->
+            AllMembers = [K || {K,_V} <- orddict:to_list(MembersDict)],
+            {Partitions, _Islands} = machi_partition_simulator:get(AllMembers),
+            machi_chain_manager1:init_remember_down_list(),
+            Res = machi_chain_manager1:perhaps_call(ProxyPidPlaceholder,
+                                                    MyFluName,
+                                                    Partitions, FLU, DoIt),
+            %% case machi_chain_manager1:get_remember_down_list() of
+            %%     [] ->
+            %%         ok;
+            %%     _ ->
+            %%         io:format(user, "fitness error ~w -> ~w\n",
+            %%                   [MyFluName, FLU])
+            %% end,
+            Res;
+       true ->
+            DoIt(ProxyPidPlaceholder)
+    end.
 
 calc_unfit(All_list, HosedAnnotations) ->
     G = digraph:new(),

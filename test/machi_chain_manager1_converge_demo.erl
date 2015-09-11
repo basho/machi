@@ -272,7 +272,8 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
            io:format(user, "\nSweet, private projections are stable\n", []),
            io:format(user, "\t~P\n", [get(stable), 14]),
            io:format(user, "Rolling sanity check ... ", []),
-           MaxFiles = 800,
+           MaxFiles = 130, io:format(user, "Sweet, NOTICE: alternative MaxFiles=~w\n", [MaxFiles]),
+           %% MaxFiles = 800,
            PrivProjs = [{Name, begin
                                    {ok, Ps8} = ?FLU_PC:get_all_projections(
                                                   FLU, private, infinity),

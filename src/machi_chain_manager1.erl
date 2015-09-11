@@ -125,7 +125,9 @@
 -export([test_calc_projection/2,
          test_write_public_projection/2,
          test_read_latest_public_projection/2]).
--export([perhaps_call/5]). % for partition simulator use w/machi_fitness
+-export([perhaps_call/5, % for partition simulator use w/machi_fitness
+         init_remember_down_list/0, update_remember_down_list/1,
+         get_remember_down_list/0]).
 
 -ifdef(EQC).
 -include_lib("eqc/include/eqc.hrl").
@@ -2243,9 +2245,12 @@ sanitize_repair_state(S) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 perhaps_call_t(#ch_mgr{name=MyName}=S, Partitions, FLU, DoIt) ->
+    ProxyPid = proxy_pid(FLU, S),
+    perhaps_call(ProxyPid, MyName, Partitions, FLU, DoIt).
+
+perhaps_call(ProxyPid, MyName, Partitions, FLU, DoIt) ->
     try
-        ProxyPid = proxy_pid(FLU, S),
-        perhaps_call(ProxyPid, MyName, Partitions, FLU, DoIt)
+        perhaps_call2(ProxyPid, MyName, Partitions, FLU, DoIt)
     catch
         exit:timeout ->
             update_remember_down_list(FLU),
@@ -2255,7 +2260,7 @@ perhaps_call_t(#ch_mgr{name=MyName}=S, Partitions, FLU, DoIt) ->
             {error, partition}
     end.
 
-perhaps_call(ProxyPid, MyName, Partitions, FLU, DoIt) ->
+perhaps_call2(ProxyPid, MyName, Partitions, FLU, DoIt) ->
     RemoteFLU_p = FLU /= MyName,
     erase(bad_sock),
     case RemoteFLU_p andalso lists:member({MyName, FLU}, Partitions) of
@@ -2287,8 +2292,8 @@ init_remember_down_list() ->
     put(remember_down_list, []).
 
 update_remember_down_list(FLU) ->
-    put(remember_down_list,
-        lists:usort([FLU|get_remember_down_list()])).
+    catch put(remember_down_list,
+              lists:usort([FLU|get_remember_down_list()])).
 
 get_remember_down_list() ->
     get(remember_down_list).
