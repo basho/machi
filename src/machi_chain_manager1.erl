@@ -112,7 +112,7 @@
 -export([make_chmgr_regname/1, projection_transitions_are_sane/2,
          simple_chain_state_transition_is_sane/3,
          simple_chain_state_transition_is_sane/5,
-         chain_state_transition_is_sane/5]).
+         chain_state_transition_is_sane/6]).
 %% Exports so that EDoc docs generated for these internal funcs.
 -export([mk/3]).
 
@@ -1575,7 +1575,7 @@ react_to_env_C100(P_newprop,
             if Sane == true -> ok;  true -> ?V("~w-insane-~w-~w:~w:~w,", [?LINE, MyName, P_newprop#projection_v1.epoch_number, P_newprop#projection_v1.upi, P_newprop#projection_v1.repairing]) end, %%% DELME!!!
             react_to_env_C110(P_latest, S);
         true ->
-            ?REACT({c100, ?LINE, [sane]}),
+            ?REACT({c100, ?LINE, [{sane,get(why2)}]}),
             if Sane == true -> ok;  true -> ?V("~w-insane-~w-~w:~w:~w@~w,", [?LINE, MyName, P_newprop#projection_v1.epoch_number, P_newprop#projection_v1.upi, P_newprop#projection_v1.repairing, ?LINE]) end, %%% DELME!!!
 
     V = case file:read_file("/tmp/bugbug."++atom_to_list(S#ch_mgr.name)) of {ok,_} -> true; _ -> false end,
@@ -2011,7 +2011,8 @@ projection_transition_is_sane_except_si_epoch(
     UPI_list2w = UPI_list2 -- Witness_list2,
     ?RETURN2(
        chain_state_transition_is_sane(AuthorServer1, UPI_list1w,Repairing_list1,
-                                      AuthorServer2, UPI_list2w))
+                                      AuthorServer2, UPI_list2w,
+                                      RelativeToServer))
  catch
      _Type:_Err ->
          ?RETURN2(oops),
@@ -2386,7 +2387,8 @@ simple_chain_state_transition_is_sane(_Author1, UPI1, Repair1, Author2, UPI2) ->
 %% functions) are the only functions (throughout all of the chain state
 %% transition sanity checking functions) that is allowed to return `false'.
 
-chain_state_transition_is_sane(Author1, UPI1, Repair1, Author2, UPI2) ->
+chain_state_transition_is_sane(Author1, UPI1, Repair1, Author2, UPI2,
+                               RelativeToServer) ->
     ToSelfOnly_p = if UPI2 == [Author2] -> true;
                       true              -> false
                    end,
@@ -2402,9 +2404,10 @@ chain_state_transition_is_sane(Author1, UPI1, Repair1, Author2, UPI2) ->
        Disjoint_UPIs ->
             %% The transition from UPI1 -> UPI2 where the two are
             %% disjoint/no FLUs in common.
-            %% For AP mode, this transition is always safe (though not
-            %% always optimal for highest availability).
-            ?RETURN2(true);
+            %% For AP mode, this transition is safe (though not
+            %% always optimal for highest availability) if I am not
+            %% a member of the new UPI.
+            ?RETURN2(not lists:member(RelativeToServer, UPI2));
        true ->
             ?RETURN2(
                simple_chain_state_transition_is_sane(Author1, UPI1, Repair1,

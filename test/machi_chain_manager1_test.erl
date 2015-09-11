@@ -230,7 +230,7 @@ prop_compare_legacy_with_v2_chain_transition_check(Style) ->
         case Style of
             primitive ->
                 New_res = ?MGR:chain_state_transition_is_sane(
-                             Author1, UPI1, Repair1, Author2, UPI2),
+                             Author1, UPI1, Repair1, Author2, UPI2, Author2),
                 New_p = case New_res of true -> true;
                                         _    -> false
                         end;
