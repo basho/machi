@@ -1330,7 +1330,18 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP, AmHosedP,
                                              LatestUnanimousP,
                                              AmHosedP, Rank_newprop, Rank_latest, S);
                        true ->
-                            ?REACT({a40, ?LINE, []}),
+                            ?REACT({a40, ?LINE, [{q1,P_current#projection_v1.upi},
+                                                 {q2,P_current#projection_v1.repairing},
+                                                 {q3,P_newprop#projection_v1.upi},
+                                                 {q4,P_newprop#projection_v1.repairing},
+                                                 {q5, ExpectedUPI}]}),
+                            %% Ha, there's a "fun" sync problem with the
+                            %% machi_chain_manager1_converge_demo simulator:
+                            %% two servers could get caught in a mutual lock-
+                            %% step that we would end up in this branch 100%
+                            %% of the time because each would only ever see
+                            %% P_newprop authored by the other server.
+                            timer:sleep(random:uniform(100)),
                             react_to_env_C300(P_newprop, P_latest, S)
                     end;
                true ->
