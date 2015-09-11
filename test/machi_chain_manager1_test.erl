@@ -333,15 +333,19 @@ nonunanimous_setup_and_fix_test() ->
               {Name,Port,_Dir} <- FluInfo],
     
     [machi_flu1_test:clean_up_data_dir(Dir) || {_,_,Dir} <- FluInfo],
-    FLUs = [element(2, machi_flu1:start_link([{Name,Port,Dir}])) ||
+    {ok, SupPid} = machi_flu_sup:start_link(),
+    Opts = [{active_mode, false}],
+    %% {ok, Mb} = ?MGR:start_link(b, MembersDict, [{active_mode, false}]++XX),
+    [{ok,_}=machi_flu_psup:start_flu_package(Name, Port, Dir, Opts) ||
                {Name,Port,Dir} <- FluInfo],
+    FLUs = [machi_flu_psup:make_flu_regname(Name) ||
+               {Name,_Port,_Dir} <- FluInfo],
     [Proxy_a, Proxy_b] = Proxies =
         [element(2,?FLU_PC:start_link(P)) || P <- P_s],
     MembersDict = machi_projection:make_members_dict(P_s),
-    XX = [],
-    %% XX = [{private_write_verbose,true}],
-    {ok, Ma} = ?MGR:start_link(a, MembersDict, [{active_mode, false}]++XX),
-    {ok, Mb} = ?MGR:start_link(b, MembersDict, [{active_mode, false}]++XX),
+    [Ma,Mb] = [a_chmgr, b_chmgr],
+    ok = machi_chain_manager1:set_chain_members(Ma, MembersDict, []),
+    ok = machi_chain_manager1:set_chain_members(Mb, MembersDict, []),
     try
         {ok, P1} = ?MGR:test_calc_projection(Ma, false),
 
@@ -372,13 +376,9 @@ nonunanimous_setup_and_fix_test() ->
         {ok, P2pa} = ?FLU_PC:read_latest_projection(Proxy_a, private),
         P2 = P2pa#projection_v1{dbg2=[]},
 
-        %% %% FLUb should have nothing written to private because it hasn't
-        %% %% reacted yet.
-        %% {error, not_written} = ?FLU_PC:read_latest_projection(Proxy_b, private),
-
-        %% %% Poke FLUb to react ... should be using the same private proj
-        %% %% as FLUa.
-        %% {now_using, _, EpochNum_a} = ?MGR:trigger_react_to_env(Mb),
+        %% Poke FLUb to react ... should be using the same private proj
+        %% as FLUa.
+        {now_using, _, EpochNum_a} = ?MGR:trigger_react_to_env(Mb),
         {ok, P2pb} = ?FLU_PC:read_latest_projection(Proxy_b, private),
         P2 = P2pb#projection_v1{dbg2=[]},
 
@@ -389,10 +389,8 @@ nonunanimous_setup_and_fix_test() ->
 
         ok
     after
-        ok = ?MGR:stop(Ma),
-        ok = ?MGR:stop(Mb),
+        exit(SupPid, normal),
         [ok = ?FLU_PC:quit(X) || X <- Proxies],
-        [ok = machi_flu1:stop(X) || X <- FLUs],
         ok = machi_partition_simulator:stop()
     end.
 
