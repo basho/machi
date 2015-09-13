@@ -1667,15 +1667,7 @@ react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
     NotSanesDict = orddict:update_counter(Author_latest, 1, NotSanesDict0),
     S2 = S#ch_mgr{not_sanes=NotSanesDict, sane_transitions=0},
     case orddict:fetch(Author_latest, NotSanesDict) of
-        %% N when CMode == cp_mode ->
-        %%    ?V("YOYO-cp-mode,~w,~w,~w,",[MyName, P_latest#projection_v1.epoch_number,N]),
-        %%     ?REACT({c100, ?LINE, [{cmode,CMode},
-        %%                           {not_sanes_author_count, N}]}),
-        %%     case get({zzz_quiet, P_latest#projection_v1.epoch_number}) of undefined -> ?V("YOYO-cp-mode,~w,current=~w,",[MyName, machi_projection:make_summary((S#ch_mgr.proj))]); _ -> ok end,
-        %%     put({zzz_quiet, P_latest#projection_v1.epoch_number}, true),
-        %%     react_to_env_A49(P_latest, [], S2);
-        N when %% EXPERIMENT! Delme? CMode == ap_mode,
-               N > ?TOO_FREQUENT_BREAKER ->
+        N when N > ?TOO_FREQUENT_BREAKER ->
             ?V("\n\nYOYO ~w breaking the cycle of:\n  current: ~w\n  new    : ~w\n", [MyName, machi_projection:make_summary(S#ch_mgr.proj), machi_projection:make_summary(P_latest)]),
             ?REACT({c100, ?LINE, [{not_sanes_author_count, N}]}),
             react_to_env_C103(P_newprop, P_latest, P_current_calc, S2);
