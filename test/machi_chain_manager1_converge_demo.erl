@@ -272,16 +272,10 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
            io:format(user, "\nSweet, private projections are stable\n", []),
            io:format(user, "\t~P\n", [get(stable), 14]),
            io:format(user, "Rolling sanity check ... ", []),
-           MaxFiles = 20,
            PrivProjs = [{Name, begin
                                    {ok, Ps8} = ?FLU_PC:get_all_projections(
                                                   FLU, private, infinity),
-                                   Ps9 = if length(Ps8) < MaxFiles ->
-                                                 Ps8;
-                                            true ->
-                                                 lists:nthtail(MaxFiles, Ps8)
-                                         end,
-                                   [P || P <- Ps9,
+                                   [P || P <- Ps8,
                                          P#projection_v1.epoch_number /= 0]
                                end} || {Name, FLU} <- Namez],
            try
@@ -300,6 +294,9 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
            true = machi_chain_manager1_test:all_reports_are_disjoint(ReportXX),
            io:format(user, "Yay for ReportXX!\n", []),
 
+           %% TODO: static count is not sufficient.  Must not delete the last
+           %%       private_proj_is_upi_unanimous projection!
+           MaxFiles = 123,
            [begin
                 Privs = filelib:wildcard(Dir ++ "/projection/private/*"),
                 FilesToDel1 = lists:sublist(Privs,
@@ -409,7 +406,8 @@ make_partition_list(All_list) ->
     %% %% Concat = _X_Ys3,
     %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
     Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3 ++ _X_Ys4,
-    random_sort(lists:usort([lists:sort(L) || L <- Concat])).
+    NoPartitions = lists:duplicate(trunc(length(Concat) * 0.2), []),
+    random_sort(lists:usort([lists:sort(L) || L <- Concat]) ++ NoPartitions).
 
    %% %% for len=5 and 2 witnesses
    %%  [
