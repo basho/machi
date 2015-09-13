@@ -202,7 +202,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
     try
       [{_, Ma}|_] = MgrNamez,
       {ok, P1} = ?MGR:test_calc_projection(Ma, false),
-      [ok = ?FLU_PC:write_projection(FLUPid, public, P1) ||
+      [_ = ?FLU_PC:write_projection(FLUPid, public, P1) ||
           {_, FLUPid} <- Namez, FLUPid /= Ma],
 
       machi_partition_simulator:reset_thresholds(10, 50),
@@ -293,6 +293,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
            ReportXX = machi_chain_manager1_test:unanimous_report(Namez),
            true = machi_chain_manager1_test:all_reports_are_disjoint(ReportXX),
            io:format(user, "Yay for ReportXX!\n", []),
+timer:sleep(1234),
 
            %% TODO: static count is not sufficient.  Must not delete the last
            %%       private_proj_is_upi_unanimous projection!
@@ -377,6 +378,9 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
 %% Uncomment *one* of the following make_partition_list() bodies.
 
 make_partition_list(All_list) ->
+    %% [ [{a,c},{b,c}],
+    %%   [{a,b},{c,b}] ].
+
     %% Island1 = [hd(All_list), lists:last(All_list)],
     %% Island2 = All_list -- Island1,
     %% [
@@ -406,7 +410,7 @@ make_partition_list(All_list) ->
     %% %% Concat = _X_Ys3,
     %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
     Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3 ++ _X_Ys4,
-    NoPartitions = lists:duplicate(trunc(length(Concat) * 0.2), []),
+    NoPartitions = lists:duplicate(trunc(length(Concat) * 0.1), []),
     random_sort(lists:usort([lists:sort(L) || L <- Concat]) ++ NoPartitions).
 
    %% %% for len=5 and 2 witnesses
