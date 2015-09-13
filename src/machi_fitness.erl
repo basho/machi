@@ -312,7 +312,11 @@ do_incoming_spam(Author, Map,
             NewMap = map_merge(OldMap, Map),
             %% NewMapV = map_value(NewMap),
             %% io:format(user, "YY3 ~p\n", [NewMapV]),
-            S2 = do_map_change(NewMap, [MyFluName, Author], MembersDict, S),
+
+            %% Hrm, we may have changes that are interesting to the
+            %% Author of this update, so perhaps we shouldn't exclude
+            %% Author from our update, right?
+            S2 = do_map_change(NewMap, [MyFluName], MembersDict, S),
             {ok, S2}
     end.
 

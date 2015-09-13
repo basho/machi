@@ -1516,12 +1516,8 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                    repairing=P_latest_repairing} = P_latest,
     I_am_in_P_latest_upi = lists:member(MyName, P_latest_upi),
     I_am_in_P_latest_repairing = lists:member(MyName, P_latest_repairing),
-    IsRelevantToMe_p = if CMode == cp_mode ->
+    IsRelevantToMe_p = if P_latest_author == MyName ->
                                true;
-                          CMode == ap_mode,
-                          P_latest_author == MyName ->
-                               true;
-                          CMode == ap_mode,
                           not (I_am_in_P_latest_upi
                                orelse I_am_in_P_latest_repairing) ->
                                %% There is no sense for me to leave whatever
@@ -1532,7 +1528,6 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                                %% now P_latest and it's unanimous.  But that
                                %% doesn't make it a good idea.  ^_^
                                false;
-                          CMode == ap_mode,
                           I_am_in_P_latest_repairing ->
                                %% If I'm already in the current UPI, and the
                                %% UPI is longer than 1 (i.e., more than just
@@ -1543,7 +1538,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                                %% join a repairing list is relevant.
                                not (lists:member(MyName, P_current_upi) andalso
                                     length(P_current_upi) > 1);
-                          CMode == ap_mode ->
+                          true ->
                                true
                        end,
     ?REACT({b10,?LINE,[{newprop_epoch,P_newprop#projection_v1.epoch_number},
