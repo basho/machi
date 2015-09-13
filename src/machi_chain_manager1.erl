@@ -1568,6 +1568,13 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP, P_current_calc,
             %% Let's try to write P_newprop and see what happens!
             react_to_env_C300(P_newprop, P_latest, S);
 
+        Rank_latest < 0 andalso Rank_newprop < 0 ->
+            ?REACT({b10, ?LINE,
+                    [{rank_latest, Rank_latest},
+                     {rank_newprop, Rank_newprop}]}),
+            %% The latest projection is none proj, so is my newprop.
+            react_to_env_A50(P_latest, [], S);
+
         Rank_latest >= Rank_newprop
         andalso
         P_latest#projection_v1.author_server /= MyName ->
