@@ -1572,8 +1572,20 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP, P_current_calc,
             ?REACT({b10, ?LINE,
                     [{rank_latest, Rank_latest},
                      {rank_newprop, Rank_newprop}]}),
-            %% The latest projection is none proj, so is my newprop.
-            react_to_env_A50(P_latest, [], S);
+            %% The latest projection is none proj, so is my newprop.  In CP
+            %% mode and asymmetric partitions, we might write a lot of new
+            %% none projs, but this action also helps trigger others to change
+            %% their projections in a healthy way.  TODO: perhaps use a
+            %% counter here to silence ourselves for good after a certain time
+            %% and/or number of retries?
+            case random:uniform(100) of
+                N when N < 4 ->
+                    ?REACT({b10, ?LINE}),
+                    react_to_env_C300(P_newprop, P_latest, S);
+                _ ->
+                    ?REACT({b10, ?LINE}),
+                    react_to_env_A50(P_latest, [], S)
+            end;
 
         Rank_latest >= Rank_newprop
         andalso
@@ -1612,11 +1624,13 @@ react_to_env_C100(P_newprop,
     if Sane == true ->
             ok;
        true ->
-            QQ_current = lists:flatten(io_lib:format("~w:~w,~w", [P_current#projection_v1.epoch_number, P_current#projection_v1.upi, P_current#projection_v1.repairing])),
+            QQ_current = lists:flatten(io_lib:format("cur=~w:~w,~w/calc=~w:~w,~w", [P_current#projection_v1.epoch_number, P_current#projection_v1.upi, P_current#projection_v1.repairing, P_current_calc#projection_v1.epoch_number, P_current_calc#projection_v1.upi, P_current_calc#projection_v1.repairing])),
             QQ_latest = lists:flatten(io_lib:format("~w:~w,~w", [P_latest#projection_v1.epoch_number, P_latest#projection_v1.upi, P_latest#projection_v1.repairing])),
             ?V("\n~w-insane-~w-auth=~w ~s -> ~s ~w\n    ~p\n    ~p\n", [?LINE, MyName, P_newprop#projection_v1.author_server, QQ_current, QQ_latest, Sane, get(why2), get(react)])
     end,
-    ?REACT({c100, ?LINE, [zoo, {me,MyName}, {author_latest,Author_latest}]}),
+    ?REACT({c100, ?LINE, [zoo, {me,MyName},
+                          {author_latest,Author_latest},
+                          {why2, get(why2)}]}),
 
     %% Note: The value of `Sane' may be `true', `false', or `term() /= true'.
     %%       The error value `false' is reserved for chain order violations.
@@ -1631,7 +1645,7 @@ react_to_env_C100(P_newprop,
             if Sane == true -> ok;  true -> ?V("~w-insane-~w-~w:~w:~w,", [?LINE, MyName, P_newprop#projection_v1.epoch_number, P_newprop#projection_v1.upi, P_newprop#projection_v1.repairing]) end, %%% DELME!!!
             react_to_env_C110(P_latest, S);
         true ->
-            ?REACT({c100, ?LINE, [{sane,get(why2)}]}),
+            ?REACT({c100, ?LINE, []}),
             if Sane == true -> ok;  true -> ?V("~w-insane-~w-~w:~w:~w@~w,", [?LINE, MyName, P_newprop#projection_v1.epoch_number, P_newprop#projection_v1.upi, P_newprop#projection_v1.repairing, ?LINE]) end, %%% DELME!!!
 
     V = case file:read_file("/tmp/bugbug."++atom_to_list(S#ch_mgr.name)) of {ok,_} -> true; _ -> false end,
@@ -1653,14 +1667,14 @@ react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
     NotSanesDict = orddict:update_counter(Author_latest, 1, NotSanesDict0),
     S2 = S#ch_mgr{not_sanes=NotSanesDict, sane_transitions=0},
     case orddict:fetch(Author_latest, NotSanesDict) of
-        N when CMode == cp_mode ->
-           ?V("YOYO-cp-mode,~w,~w,~w,",[MyName, P_latest#projection_v1.epoch_number,N]),
-            ?REACT({c100, ?LINE, [{cmode,CMode},
-                                  {not_sanes_author_count, N}]}),
-            case get({zzz_quiet, P_latest#projection_v1.epoch_number}) of undefined -> ?V("YOYO-cp-mode,~w,current=~w,",[MyName, machi_projection:make_summary((S#ch_mgr.proj))]); _ -> ok end,
-            put({zzz_quiet, P_latest#projection_v1.epoch_number}, true),
-            react_to_env_A49(P_latest, [], S2);
-        N when CMode == ap_mode,
+        %% N when CMode == cp_mode ->
+        %%    ?V("YOYO-cp-mode,~w,~w,~w,",[MyName, P_latest#projection_v1.epoch_number,N]),
+        %%     ?REACT({c100, ?LINE, [{cmode,CMode},
+        %%                           {not_sanes_author_count, N}]}),
+        %%     case get({zzz_quiet, P_latest#projection_v1.epoch_number}) of undefined -> ?V("YOYO-cp-mode,~w,current=~w,",[MyName, machi_projection:make_summary((S#ch_mgr.proj))]); _ -> ok end,
+        %%     put({zzz_quiet, P_latest#projection_v1.epoch_number}, true),
+        %%     react_to_env_A49(P_latest, [], S2);
+        N when %% EXPERIMENT! Delme? CMode == ap_mode,
                N > ?TOO_FREQUENT_BREAKER ->
             ?V("\n\nYOYO ~w breaking the cycle of:\n  current: ~w\n  new    : ~w\n", [MyName, machi_projection:make_summary(S#ch_mgr.proj), machi_projection:make_summary(P_latest)]),
             ?REACT({c100, ?LINE, [{not_sanes_author_count, N}]}),
@@ -1934,6 +1948,25 @@ projection_transition_is_sane_final_review(
         _ ->
             ?RETURN2(not ordsets:is_disjoint(UPI1_s, UPI2_s))
     end;
+projection_transition_is_sane_final_review(
+  #projection_v1{mode=cp_mode, upi=UPI1, repairing=Repairing1}=_P1,
+  #projection_v1{mode=cp_mode, upi=UPI2, repairing=Repairing2}=_P2,
+  {epoch_not_si,EpochX,not_gt,EpochY}=Else) ->
+    if EpochX == EpochY, UPI1 == UPI2, Repairing1 == Repairing2 ->
+            %% TODO: So, technically speaking, I think, probably, that this is
+            %% cheating.  But it's also safe cheating: the UPI & repairing
+            %% lists are identical.  If we end up in this case, where the
+            %% epoch isn't strictly increasing, I'm *guessing*, is because
+            %% there's a flaw in the adoption of the null projection (as a
+            %% safety fall-back) and not always (?) writing that none proj
+            %% through the usual C300-and-reiterate cycle?  In terms of chain
+            %% state transition, equal UPI and equal repairing is 100% safe.
+            %% However, in acceptin this transition, we run a risk of creating
+            %% an infinite-loop-via-always-same-epoch-number problem.
+            ?RETURN2(true);
+       true ->
+            ?RETURN2(Else)
+    end;
 projection_transition_is_sane_final_review(_P1, _P2, Else) ->
     ?RETURN2(Else).
 
@@ -2167,8 +2200,8 @@ poll_private_proj_is_upi_unanimous3(#ch_mgr{name=MyName, proj=P_current,
                                    epoch_csum= <<_CSumRep:4/binary,_/binary>>,
                                    upi=_UPIRep,
                                    repairing=_RepairingRep} = NewProj,
-                    io:format(user, "\nCONFIRM epoch ~w ~w upi ~w rep ~w by ~w\n", [_EpochRep, _CSumRep, _UPIRep, _RepairingRep, MyName]),
                     ok = machi_projection_store:write(ProjStore, private, NewProj),
+                    io:format(user, "\nCONFIRM epoch ~w ~w upi ~w rep ~w by ~w\n", [_EpochRep, _CSumRep, _UPIRep, _RepairingRep, MyName]),
                     %% Unwedge our FLU.
                     {ok, NotifyPid} = machi_projection_store:get_wedge_notify_pid(ProjStore),
                     _ = machi_flu1:update_wedge_state(NotifyPid, false, EpochID),
@@ -2583,7 +2616,6 @@ make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list,
             P2 = machi_projection:update_checksum(
                    P#projection_v1{epoch_number=OldEpochNum,
                                    mode=cp_mode, dbg2=[zerf_all]}),
-            io:format(user, "\n=========================== CONFIRM dbg ~w zerf_all for oldepoch ~w\n", [MyName, OldEpochNum]),
             P2;
         _X:_Y ->
             throw({zerf, {damn_exception, Up, _X, _Y, erlang:get_stacktrace()}})
