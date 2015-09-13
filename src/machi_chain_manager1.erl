@@ -317,7 +317,8 @@ handle_call({set_chain_members, MembersDict, Witness_list}, _From,
                                       repairing=[],
                                       down=NewDown,
                                       members_dict=MembersDict}),
-    S3 = set_proj(S2#ch_mgr{proj_history=queue:new()}, NewProj),
+    S3 = set_proj(S2#ch_mgr{proj_history=queue:new(),
+                            consistency_mode=CMode}, NewProj),
     {_QQ, S4} = do_react_to_env(S3),
     {reply, Reply, S4};
 handle_call({set_active, Boolean}, _From, #ch_mgr{timer=TRef}=S) ->
