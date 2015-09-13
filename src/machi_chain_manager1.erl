@@ -1211,8 +1211,13 @@ react_to_env_A29(Retries, P_latest, LatestUnanimousP, _ReadExtra,
                              {zerf_in, machi_projection:make_summary(Zerf)}]}),
                     %% io:format(user, "zerf_in: A29: ~p: ~w\n\t~p\n", [MyName,  machi_projection:make_summary(Zerf), get(yyy_hack)]),
                     #projection_v1{dbg=ZerfDbg} = Zerf,
+                    Backstop = if Zerf#projection_v1.upi == [] ->
+                                       [];
+                                  true ->
+                                       [{zerf_backstop,true}]
+                               end,
                     P_current_calc = Zerf#projection_v1{
-                                       dbg=[{zerf_backstop,true}|ZerfDbg]},
+                                       dbg=Backstop ++ ZerfDbg},
                     react_to_env_A30(Retries, P_latest, LatestUnanimousP,
                                      P_current_calc, S);
                 Zerf ->
@@ -1231,7 +1236,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, P_current_calc,
     AllHosed = get_unfit_list(S#ch_mgr.fitness_svr),
     ?REACT({a30, ?LINE,
             [{current, machi_projection:make_summary(S#ch_mgr.proj)},
-             {calc_current, machi_projection:make_summary(P_current_calc)},
+             {current_calc, machi_projection:make_summary(P_current_calc)},
              {latest, machi_projection:make_summary(P_latest)},
              {all_hosed, AllHosed}
             ]}),
@@ -1255,7 +1260,7 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, P_current_calc,
                                   P#projection_v1{dbg=[{hosed_list,AllHosed}]})
                         end,
             react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
-                             true, S);
+                             P_current_calc, true, S);
         false ->
             react_to_env_A31(Retries, P_latest, LatestUnanimousP,
                              P_current_calc, AllHosed, S)
@@ -1281,7 +1286,7 @@ react_to_env_A31(Retries, P_latest, LatestUnanimousP, P_current_calc,
     ?REACT({a31, ?LINE, [{newprop11, machi_projection:make_summary(P_newprop11)}]}),
 
     react_to_env_A40(Retries, P_newprop11, P_latest, LatestUnanimousP,
-                     false, S10).
+                     P_current_calc, false, S10).
 
 a40_latest_author_down(#projection_v1{author_server=LatestAuthor}=_P_latest,
                        #projection_v1{upi=[], repairing=[],
@@ -1296,9 +1301,9 @@ a40_latest_author_down(#projection_v1{author_server=LatestAuthor}=_P_latest,
                        #projection_v1{down=NewPropDown}=_P_newprop, _S) ->
     lists:member(LatestAuthor, NewPropDown).
 
-react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP, AmHosedP,
-                 #ch_mgr{name=MyName, proj=P_current,
-                         consistency_mode=CMode}=S) ->
+react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
+                 P_current_calc, AmHosedP, #ch_mgr{name=MyName, proj=P_current,
+                                                   consistency_mode=CMode}=S) ->
     ?REACT(a40),
     [{Rank_newprop, _}] = rank_projections([P_newprop], P_current),
     [{Rank_latest, _}] = rank_projections([P_latest], P_current),
@@ -1331,7 +1336,7 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP, AmHosedP,
                        LatestUnanimousP ->
                             ?REACT({a40, ?LINE, []}),
                             react_to_env_B10(Retries, P_newprop, P_latest,
-                                             LatestUnanimousP,
+                                             LatestUnanimousP, P_current_calc,
                                              AmHosedP, Rank_newprop, Rank_latest, S);
                        true ->
                             ?REACT({a40, ?LINE, [{q1,P_current#projection_v1.upi},
@@ -1367,7 +1372,8 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP, AmHosedP,
                      {latest_unanimous_p, LatestUnanimousP}]}),
 
             react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
-                             AmHosedP, Rank_newprop, Rank_latest, S);
+                             P_current_calc, AmHosedP,
+                             Rank_newprop, Rank_latest, S);
 
         Rank_newprop > 0
         andalso
@@ -1398,7 +1404,8 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP, AmHosedP,
             %% I'm keeping this 'if' clause just in case the local FLU
             %% projection store assumption changes.
             react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
-                             AmHosedP, Rank_newprop, Rank_latest, S);
+                             P_current_calc, AmHosedP,
+                             Rank_newprop, Rank_latest, S);
 
         %% A40a (see flowchart)
         Rank_newprop > Rank_latest ->
@@ -1501,10 +1508,9 @@ react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
     if V -> io:format(user, "A50: ~w: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
     {{no_change, FinalProps, P_current#projection_v1.epoch_number}, S}.
 
-react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
+react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP, P_current_calc,
                 _AmHosedP, Rank_newprop, Rank_latest,
-                 #ch_mgr{name=MyName, consistency_mode=CMode,
-                         proj=P_current}=S) ->
+                 #ch_mgr{name=MyName, proj=P_current}=S) ->
     ?REACT(b10),
 
     P_current_upi = if is_record(P_current, projection_v1) ->
@@ -1553,7 +1559,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                      {newprop_author,P_newprop#projection_v1.author_server}
                     ]}),
 
-            react_to_env_C100(P_newprop, P_latest, S);
+            react_to_env_C100(P_newprop, P_latest, P_current_calc, S);
 
         Retries > 2 ->
             ?REACT({b10, ?LINE, [{retries, Retries}]}),
@@ -1585,11 +1591,17 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
 
 react_to_env_C100(P_newprop,
                   #projection_v1{author_server=Author_latest}=P_latest,
-                  #ch_mgr{name=MyName, proj=P_current,
+                  P_current_calc,
+                  #ch_mgr{name=MyName, proj=P_current, consistency_mode=CMode,
                           not_sanes=NotSanesDict0}=S) ->
     ?REACT(c100),
 
-    Sane = projection_transition_is_sane(P_current, P_latest, MyName),
+    P_cur_for_sanity = if CMode == cp_mode ->
+                               P_current_calc;
+                          CMode == ap_mode ->
+                               P_current
+                       end,
+    Sane = projection_transition_is_sane(P_cur_for_sanity, P_latest, MyName),
     if Sane == true ->
             ok;
        true ->
@@ -1617,7 +1629,7 @@ react_to_env_C100(P_newprop,
 
     V = case file:read_file("/tmp/bugbug."++atom_to_list(S#ch_mgr.name)) of {ok,_} -> true; _ -> false end,
     if V -> 
-            react_to_env_C103(P_newprop, P_latest, S);
+            react_to_env_C103(P_newprop, P_latest, P_current_calc, S);
        true ->
             react_to_env_C110(P_latest, S)
     end;
@@ -1625,11 +1637,11 @@ react_to_env_C100(P_newprop,
         NotSaneBummer ->
             ?REACT({c100, ?LINE, [{not_sane, NotSaneBummer}]}),
             react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
-                                    P_newprop, P_latest, S)
+                                    P_newprop, P_latest, P_current_calc, S)
     end.
 
 react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
-                        P_newprop, P_latest,
+                        P_newprop, P_latest, P_current_calc,
                         #ch_mgr{consistency_mode=CMode} = S) ->
     NotSanesDict = orddict:update_counter(Author_latest, 1, NotSanesDict0),
     S2 = S#ch_mgr{not_sanes=NotSanesDict, sane_transitions=0},
@@ -1645,7 +1657,7 @@ react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
                N > ?TOO_FREQUENT_BREAKER ->
             ?V("\n\nYOYO ~w breaking the cycle of:\n  current: ~w\n  new    : ~w\n", [MyName, machi_projection:make_summary(S#ch_mgr.proj), machi_projection:make_summary(P_latest)]),
             ?REACT({c100, ?LINE, [{not_sanes_author_count, N}]}),
-            react_to_env_C103(P_newprop, P_latest, S2);
+            react_to_env_C103(P_newprop, P_latest, P_current_calc, S2);
         N ->
            ?V("YOYO,~w,~w,~w,",[MyName, P_latest#projection_v1.epoch_number,N]),
             ?REACT({c100, ?LINE, [{not_sanes_author_count, N}]}),
@@ -1658,6 +1670,7 @@ react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
 react_to_env_C103(#projection_v1{epoch_number=_Epoch_newprop} = _P_newprop,
                   #projection_v1{epoch_number=Epoch_latest,
                                  all_members=All_list} = _P_latest,
+                  P_current_calc,
                   #ch_mgr{name=MyName, proj=P_current}=S) ->
     #projection_v1{witnesses=Witness_list,
                    members_dict=MembersDict} = P_current,
@@ -1673,7 +1686,7 @@ react_to_env_C103(#projection_v1{epoch_number=_Epoch_newprop} = _P_newprop,
     timer:sleep(5*1000),
     io:format(user, "SET delete_admin_down(~w) at ~w =====================================\n", [MyName, time()]),
     machi_fitness:delete_admin_down(S#ch_mgr.fitness_svr, MyName),
-    react_to_env_C100(P_none, P_none, S).
+    react_to_env_C100(P_none, P_none, P_current_calc, S).
 
 react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     ?REACT(c110),
@@ -2560,12 +2573,10 @@ make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list,
             %% subsequent chain calculations do their calculations....
             P = make_all_projection(MyName, AllMembers, OldWitness_list,
                                     MembersDict),
-            P2 =
-            machi_projection:update_checksum(
-              P#projection_v1{epoch_number=OldEpochNum,
-                              mode=cp_mode,
-                              dbg2=[zerf_all]}),
-            %% io:format(user, "ZERF ~w\n",[machi_projection:make_summary(P2)]),
+            P2 = machi_projection:update_checksum(
+                   P#projection_v1{epoch_number=OldEpochNum,
+                                   mode=cp_mode, dbg2=[zerf_all]}),
+            io:format(user, "\n=========================== CONFIRM dbg ~w zerf_all for oldepoch ~w\n", [MyName, OldEpochNum]),
             P2;
         _X:_Y ->
             throw({zerf, {damn_exception, Up, _X, _Y, erlang:get_stacktrace()}})

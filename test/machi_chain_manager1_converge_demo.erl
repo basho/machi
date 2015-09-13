@@ -618,7 +618,7 @@ private_projections_are_stable(Namez, PollFunc) ->
     FLU_uses = [{Name, EpochID} ||
                    {Name,{EpochID,_UPI,Rep,_Dn,_W,InnerP}} <- Private2],
     Witnesses = hd([Ws ||
-                   {_Name,{_EpochID,_UPI,Rep,_Dn,Ws,InnerP}} <- Private2]),
+                   {_Name,{_EpochID,_UPI,Rep,_Dn,Ws,InnerP}} <- Private2x]),
     HaveWitnesses_p = Witnesses /= [],
     CMode = if HaveWitnesses_p -> cp_mode;
                true            -> ap_mode
@@ -679,6 +679,9 @@ private_projections_are_stable(Namez, PollFunc) ->
                         %% then we're OK.
                         Private2None = [X || {_,{_,[],[],_,_,_}}=X <- Private2],
                         length(Private2None) >= FullMajority;
+                    [] when Private2 == [], Private2x /= [] ->
+                        %% Everyone is using none proj, chain is unavailable.
+                        true;
                     Else ->
                         %% This is bad: we have a count that's less than
                         %% FullMajority but greater than 1.
