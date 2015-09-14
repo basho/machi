@@ -37,6 +37,7 @@
          read_max_filenum/2, increment_max_filenum/2,
          info_msg/2, verb/1, verb/2,
          mbytes/1,
+         pretty_time/0, pretty_time/2,
          %% TCP protocol helpers
          connect/2, connect/3,
          %% List twiddling
@@ -261,6 +262,15 @@ mbytes(0) ->
     "0.0";
 mbytes(Size) ->
     lists:flatten(io_lib:format("~.1.0f", [max(0.1, Size / (1024*1024))])).
+
+pretty_time() ->
+    {_,_,C} = os:timestamp(),
+    MSec = trunc(C / 1000),
+    pretty_time(time(), MSec).
+
+pretty_time({HH,MM,SS}, MSec) ->
+    lists:flatten(
+      io_lib:format("~2..0w:~2..0w:~2..0w.~3..0w", [HH, MM, SS, MSec])).
 
 %% @doc Log an 'info' level message.
 

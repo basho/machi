@@ -1516,8 +1516,8 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP, P_current_calc,
                        true ->
                             []
                     end,
-    #projection_v1{author_server=P_latest_author, upi=P_latest_upi,
-                   repairing=P_latest_repairing} = P_latest,
+    #projection_v1{author_server=P_latest_author, witnesses=P_latest_witnesses,
+                   upi=P_latest_upi, repairing=P_latest_repairing} = P_latest,
     I_am_in_P_latest_upi = lists:member(MyName, P_latest_upi),
     I_am_in_P_latest_repairing = lists:member(MyName, P_latest_repairing),
     IsRelevantToMe_p = if P_latest_author == MyName ->
@@ -1531,7 +1531,19 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP, P_current_calc,
                                %% fell back to none proj ... that proj is
                                %% now P_latest and it's unanimous.  But that
                                %% doesn't make it a good idea.  ^_^
-                               false;
+                               case lists:member(MyName, P_latest_witnesses) of
+                                   true ->
+                                       %% CP mode: Commentary above doesn't
+                                       %% apply to me.  For example, I am a
+                                       %% witness, and P_current
+                                       %% upi=[Me,NonWit1].  Now P_latest is
+                                       %% upi=[NonWit1,NonWit2]. Yes, this
+                                       %% projection is definitely relevant.
+                                       true;
+                                   false ->
+                                       %% Commentary above does apply.
+                                       false
+                               end;
                           I_am_in_P_latest_repairing ->
                                %% If I'm already in the current UPI, and the
                                %% current UPI is longer than P_latest's UPI,
@@ -2242,7 +2254,12 @@ poll_private_proj_is_upi_unanimous3(#ch_mgr{name=MyName, proj=P_current,
                                    upi=_UPIRep,
                                    repairing=_RepairingRep} = NewProj,
                     ok = machi_projection_store:write(ProjStore, private, NewProj),
-                    io:format(user, "\nCONFIRM epoch ~w ~w upi ~w rep ~w by ~w\n", [_EpochRep, _CSumRep, _UPIRep, _RepairingRep, MyName]),
+                    case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
+                        true ->
+                            io:format(user, "\n~s CONFIRM epoch ~w ~w upi ~w rep ~w by ~w\n", [machi_util:pretty_time(), _EpochRep, _CSumRep, _UPIRep, _RepairingRep, MyName]);
+                        _ ->
+                            ok
+                    end,
                     %% Unwedge our FLU.
                     {ok, NotifyPid} = machi_projection_store:get_wedge_notify_pid(ProjStore),
                     _ = machi_flu1:update_wedge_state(NotifyPid, false, EpochID),
@@ -2716,21 +2733,26 @@ zerf_find_last_annotated(FLU, MajoritySize, S) ->
 perhaps_verbose_c110(P_latest2, S) ->
     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
         true ->
-            {_,_,C} = os:timestamp(),
-            MSec = trunc(C / 1000),
-            {HH,MM,SS} = time(),
             Dbg2X = lists:keydelete(react, 1,
                                     P_latest2#projection_v1.dbg2) ++
                 [{is_annotated,is_annotated(P_latest2)}],
             P_latest2x = P_latest2#projection_v1{dbg2=Dbg2X}, % limit verbose len.
             Last2 = get(last_verbose),
             Summ2 = machi_projection:make_summary(P_latest2x),
+            if P_latest2#projection_v1.upi == [],
+               (S#ch_mgr.proj)#projection_v1.upi /= [] ->
+                    <<CSumRep:4/binary,_/binary>> =
+                                          P_latest2#projection_v1.epoch_csum,
+                    io:format(user, "\n~s CONFIRM epoch ~w ~w upi ~w rep ~w by ~w\n", [machi_util:pretty_time(), (S#ch_mgr.proj)#projection_v1.epoch_number, CSumRep, P_latest2#projection_v1.upi, P_latest2#projection_v1.repairing, S#ch_mgr.name]);
+               true ->
+                    ok
+            end,
             case proplists:get_value(private_write_verbose,
                                      S#ch_mgr.opts) of
                 true when Summ2 /= Last2 ->
                     put(last_verbose, Summ2),
-                    ?V("\n~2..0w:~2..0w:~2..0w.~3..0w ~p uses plain: ~w \n",
-                       [HH,MM,SS,MSec, S#ch_mgr.name, Summ2]);
+                    ?V("\n~s ~p uses plain: ~w \n",
+                       [machi_util:pretty_time(), S#ch_mgr.name, Summ2]);
                 _ ->
                     ok
             end;

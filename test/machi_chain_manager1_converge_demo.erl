@@ -258,8 +258,8 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
       MaxIters = NumFLUs * (NumFLUs + 1) * 6,
       [begin
            machi_partition_simulator:always_these_partitions(Partition),
-           io:format(user, "\nSET partitions = ~w (~w of ~w) at ~w\n",
-                     [Partition, Count, length(AllPs), time()]),
+           io:format(user, "\n~s SET partitions = ~w (~w of ~w)\n",
+                     [machi_util:pretty_time(), Partition, Count, length(AllPs)]),
            true = lists:foldl(
                     fun(_, true) ->
                             true;
@@ -269,7 +269,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                             %% If stable, return true to short circuit remaining
                             private_projections_are_stable(Namez, DoIt)
                     end, false, lists:seq(0, MaxIters)),
-           io:format(user, "\nSweet, private projections are stable at ~w\n", [time()]),
+           io:format(user, "\n~s Sweet, private projections are stable\n", [machi_util:pretty_time()]),
            io:format(user, "\t~P\n", [get(stable), 14]),
            io:format(user, "Rolling sanity check ... ", []),
            PrivProjs = [{Name, begin
@@ -406,10 +406,10 @@ make_partition_list(All_list) ->
                                        C /= E],
     %% Concat = _X_Ys1,
     %% Concat = _X_Ys2,
-    %% Concat = _X_Ys1 ++ _X_Ys2,
+    Concat = _X_Ys1 ++ _X_Ys2,
     %% %% Concat = _X_Ys3,
     %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
-    Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3 ++ _X_Ys4,
+    %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3 ++ _X_Ys4,
     NoPartitions = lists:duplicate(trunc(length(Concat) * 0.1), []),
     uniq_reverse(random_sort(lists:usort([lists:sort(L) || L <- Concat])
                              ++ NoPartitions)).
