@@ -37,7 +37,8 @@
 -export([start_link/1,
          get_unfit_list/1, update_local_down_list/3,
          add_admin_down/3, delete_admin_down/2,
-         send_fitness_update_spam/3]).
+         send_fitness_update_spam/3,
+         send_spam_to_everyone/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -74,6 +75,9 @@ delete_admin_down(PidSpec, DownFLU) ->
 
 send_fitness_update_spam(Pid, FromName, Dict) ->
     gen_server:call(Pid, {incoming_spam, FromName, Dict}, infinity).
+
+send_spam_to_everyone(Pid) ->
+    gen_server:call(Pid, {send_spam_to_everyone}, infinity).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -116,6 +120,9 @@ handle_call({delete_admin_down, DownFLU}, _From,
     {reply, ok, S3};
 handle_call({incoming_spam, Author, Dict}, _From, S) ->
     {Res, S2} = do_incoming_spam(Author, Dict, S),
+    {reply, Res, S2};
+handle_call({send_spam_to_everyone}, _From, S) ->
+    {Res, S2} = do_send_spam_to_everyone(S),
     {reply, Res, S2};
 handle_call(_Request, _From, S) ->
     Reply = whhhhhhhhhhhhhhaaaaaaaaaaaaaaa,
@@ -299,7 +306,7 @@ calc_unfit2([H|T], G) ->
             [H|calc_unfit2(T, G)]
     end.
 
-do_incoming_spam(Author, Map,
+do_incoming_spam(_Author, Map,
                  #state{my_flu_name=MyFluName,pending_map=OldMap,
                         members_dict=MembersDict}=S) ->
     OldMapV = map_value(OldMap),
@@ -319,6 +326,11 @@ do_incoming_spam(Author, Map,
             S2 = do_map_change(NewMap, [MyFluName], MembersDict, S),
             {ok, S2}
     end.
+
+do_send_spam_to_everyone(#state{my_flu_name=MyFluName,
+                                pending_map=Map,members_dict=MembersDict}=S) ->
+    _ = send_spam(Map, [MyFluName], MembersDict, S),
+    {ok, S}.
 
 do_map_change(NewMap, DontSendList, MembersDict,
               #state{my_flu_name=_MyFluName, pending_map=OldMap}=S) ->

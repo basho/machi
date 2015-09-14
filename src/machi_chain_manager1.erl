@@ -1062,6 +1062,11 @@ do_react_to_env(S) ->
                 true ->
                      S
              end,
+        %% Perhaps tell the fitness server to spam everyone.
+        case random:uniform(100) of
+            42 -> machi_fitness:send_spam_to_everyone(S#ch_mgr.fitness_svr);
+            _  -> ok
+        end,
         %% NOTE: If we use the fitness server's unfit list at the start, then
         %% we would need to add some kind of poll/check for down members to
         %% check if they are now up.  Instead, our lazy attempt to read from
