@@ -1764,6 +1764,18 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
             %%
             %% React to newer public write by restarting the iteration.
             react_to_env_A20(0, S);
+        {error, TO_or_part}=Else when TO_or_part == timeout;
+                                      TO_or_part == partition ->
+            %% TODO: Hrm, I know that there's currently a bug in the
+            %% machi_flu1_client that causes use of 'undefined' instead of a
+            %% valid TCP socket port() that causes {error,partition} problems
+            %% when talking to remote projection stores.  However, I've now
+            %% twice witnessed (and also recognized ^_^) that this same error
+            %% can happen when talking to our local projection store.  Verrry
+            %% interesting.  Let's assume that this is a very rare
+            %% happenstance, and when it does happen, we just punt and go to
+            %% A50.
+            react_to_env_A50(P_latest, [{c110_error,Else}], S);
         Else ->
             Summ = machi_projection:make_summary(P_latest2),
             io:format(user, "C110 error by ~w: ~w, ~w\n~p\n",
