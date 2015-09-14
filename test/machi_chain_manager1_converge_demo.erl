@@ -269,7 +269,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                             %% If stable, return true to short circuit remaining
                             private_projections_are_stable(Namez, DoIt)
                     end, false, lists:seq(0, MaxIters)),
-           io:format(user, "\nSweet, private projections are stable\n", []),
+           io:format(user, "\nSweet, private projections are stable at ~w\n", [time()]),
            io:format(user, "\t~P\n", [get(stable), 14]),
            io:format(user, "Rolling sanity check ... ", []),
            PrivProjs = [{Name, begin
@@ -411,7 +411,8 @@ make_partition_list(All_list) ->
     %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
     Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3 ++ _X_Ys4,
     NoPartitions = lists:duplicate(trunc(length(Concat) * 0.1), []),
-    random_sort(lists:usort([lists:sort(L) || L <- Concat]) ++ NoPartitions).
+    uniq_reverse(random_sort(lists:usort([lists:sort(L) || L <- Concat])
+                             ++ NoPartitions)).
 
    %% %% for len=5 and 2 witnesses
    %%  [
@@ -720,9 +721,21 @@ get_latest_inner_proj_summ(FLU) ->
     EpochID = {E, CSum4},
     {EpochID, UPI, Repairing, Down, Witnesses, Inner_p}.
 
+uniq_reverse(L) ->
+    uniq_reverse(L, []).
+
+uniq_reverse([], Acc) ->
+    Acc;
+uniq_reverse([H|T], []) ->
+    uniq_reverse(T, [H]);
+uniq_reverse([Same|T], [Same|_]=Acc) ->
+    uniq_reverse(T, Acc);
+uniq_reverse([H|T], Acc) ->
+    uniq_reverse(T, [H|Acc]).
+
 random_sort(L) ->
     random:seed(now()),
-    L1 = [{random:uniform(99999), X} || X <- L],
+    L1 = [{random:uniform(), X} || X <- L],
     [X || {_, X} <- lists:sort(L1)].
 
 foo(NumFLUs, MgrOpts0) ->

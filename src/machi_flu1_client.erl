@@ -667,7 +667,17 @@ do_pb_request_common(Sock, ReqID, Req, GetReply_p) ->
             {error, {badmatch, Noo, erlang:get_stacktrace()}};
         error:{badmatch,_}=BadMatch ->
             put(bad_sock, Sock),
-            {error, {badmatch, BadMatch, erlang:get_stacktrace()}}
+            {error, {badmatch, BadMatch, erlang:get_stacktrace()}};
+        error:Whoa ->
+            put(bad_sock, Sock),
+            %% TODO: The machi_chain_manager1_converge_demo:t() test can
+            %%       create a large number of these errors when moving from
+            %%       no partitions to many partitions:
+            %%       Whoa undefined: function_clause
+            %% In theory this is harmless, because the client will retry
+            %% with a new socket.  But, fix it anyway.
+            io:format(user, "DBG Whoa ~w: ~w\n", [Sock, Whoa]),
+            {error, {whoa, Whoa, erlang:get_stacktrace()}}
     end.
 
 filter_sock_error_result({error, closed}) ->

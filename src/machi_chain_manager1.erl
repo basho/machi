@@ -384,8 +384,9 @@ handle_info({'DOWN',_Ref,process,Worker,Res},
     {noreply, S#ch_mgr{ignore_timer=false,
                        repair_worker=undefined,
                        repair_final_status=Res}};
-handle_info(Msg, S) ->
-    case get(todo_bummer) of undefined -> io:format("TODO: got ~p\n", [Msg]);
+handle_info(Msg, #ch_mgr{name=MyName}=S) ->
+    case get(todo_bummer) of undefined -> io:format("TODO: ~w got ~p\n",
+                                                    [MyName, Msg]);
                              _         -> ok
     end,
     put(todo_bummer, true),
@@ -1371,6 +1372,14 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                      {current_epoch, P_current#projection_v1.epoch_number},
                      {latest_unanimous_p, LatestUnanimousP}]}),
 
+            %% TODO 2015-09-14: Should rank be factored in here?  If P_latest
+            %% rank is definitely lower than current rank (or perhaps lower
+            %% than P_newprop rank?), then don't accept it.  Hrm, I'm not sure
+            %% how that would ripple through the rest of this state machine &
+            %% interactions with the other state machines, hrmmmm.  For a real
+            %% example, if current upi/rep = [c,b,g,a],[f], going to P_latest
+            %% of [b,g,f],[a,c] doesn't make sense (even if we ignore the UPI
+            %% sanity problem in this example).
             react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP,
                              P_current_calc, AmHosedP,
                              Rank_newprop, Rank_latest, S);
@@ -1536,14 +1545,14 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP, P_current_calc,
                                false;
                           I_am_in_P_latest_repairing ->
                                %% If I'm already in the current UPI, and the
-                               %% UPI is longer than 1 (i.e., more than just
-                               %% me), then it makes no sense to leave the UPI
-                               %% to go to someone else's suggestion of
+                               %% current UPI is longer than P_latest's UPI,
+                               %% then it makes no sense to leave the UPI to
+                               %% go to someone else's suggestion of
                                %% repairing.  If I'm the only member of
                                %% P_current UPI, then sure, then having me
                                %% join a repairing list is relevant.
                                not (lists:member(MyName, P_current_upi) andalso
-                                    length(P_current_upi) > 1);
+                                  length(P_current_upi) > length(P_latest_upi));
                           true ->
                                true
                        end,
