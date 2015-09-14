@@ -22,6 +22,7 @@
 
 -behaviour(gen_server).
 
+-include("machi.hrl").
 -include("machi_projection.hrl").
 
 -ifdef(TEST).
@@ -180,7 +181,7 @@ handle_info({adjust_down_list, FLU}, #state{active_unfit=ActiveUnfit}=S) ->
     end;
 handle_info(dump, #state{my_flu_name=MyFluName,active_unfit=ActiveUnfit,
                          pending_map=Map}=S) ->
-    io:format(user, "\nDUMP: ~w: ~p ~p\n", [MyFluName, ActiveUnfit, map_value(Map)]),
+    io:format(user, "DUMP: ~w: ~p ~W\n", [MyFluName, ActiveUnfit, map_value(Map), 13]),
     %% io:format(user, "DUMP ~w: ~w, ", [MyFluName, ActiveUnfit]),
     {noreply, S};
 handle_info(_Info, S) ->
@@ -392,6 +393,23 @@ map_merge(Map1, Map2) ->
 
 -ifdef(TEST).
 
+testing_sleep_perhaps() ->
+    try
+        [{_,Max}] = ets:lookup(?TEST_ETS_TABLE, projection_store_sleep_time),
+        MSec = random:uniform(Max),
+        timer:sleep(MSec),
+        ok
+    catch _X:_Y ->
+            ok
+    end.
+-else. % TEST
+
+testing_sleep_perhaps() ->
+    ok.
+
+-endif. % TEST
+
+-ifdef(TEST).
 
 dt_understanding_test() ->
     F1 = {'X', riak_dt_lwwreg},

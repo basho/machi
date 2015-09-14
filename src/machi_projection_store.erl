@@ -40,6 +40,7 @@
 
 -module(machi_projection_store).
 
+-include("machi.hrl").
 -include("machi_projection.hrl").
 -define(V(X,Y), ok).
 %% -include("machi_verbose.hrl").
@@ -175,6 +176,7 @@ set_consistency_mode(PidSpec, CMode)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 g_call(PidSpec, Arg, Timeout) ->
+    testing_sleep_perhaps(),
     LC1 = lclock_get(),
     {Res, LC2} = gen_server:call(PidSpec, {Arg, LC1}, Timeout),
     lclock_update(LC2),
@@ -431,6 +433,16 @@ lclock_get() ->
 lclock_update(LC) ->
     lamport_clock:update(LC).
 
+testing_sleep_perhaps() ->
+    try
+        [{_,Max}] = ets:lookup(?TEST_ETS_TABLE, projection_store_sleep_time),
+        MSec = random:uniform(Max),
+        timer:sleep(MSec * 5),
+        ok
+    catch _X:_Y ->
+            ok
+    end.
+
 -else.  % TEST
 
 lclock_init() ->
@@ -440,6 +452,9 @@ lclock_get() ->
     ok.
 
 lclock_update(_LC) ->
+    ok.
+
+testing_sleep_perhaps() ->
     ok.
 
 -endif. % TEST

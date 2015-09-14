@@ -199,6 +199,8 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                    false -> ap_mode
                end,
 
+    ets:insert(?TEST_ETS_TABLE, {projection_store_sleep_time, 25}),
+
     try
       [{_, Ma}|_] = MgrNamez,
       {ok, P1} = ?MGR:test_calc_projection(Ma, false),
@@ -406,10 +408,10 @@ make_partition_list(All_list) ->
                                        C /= E],
     %% Concat = _X_Ys1,
     %% Concat = _X_Ys2,
-    Concat = _X_Ys1 ++ _X_Ys2,
+    %% Concat = _X_Ys1 ++ _X_Ys2,
     %% %% Concat = _X_Ys3,
     %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
-    %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3 ++ _X_Ys4,
+    Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3 ++ _X_Ys4,
     NoPartitions = lists:duplicate(trunc(length(Concat) * 0.1), []),
     uniq_reverse(random_sort(lists:usort([lists:sort(L) || L <- Concat])
                              ++ NoPartitions)).
