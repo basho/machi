@@ -1549,10 +1549,10 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP, P_current_calc,
     UniqueHistories = lists:usort(HistoryList),
     UniqueHistoryTrigger_p = length(HistoryList) > (?MAX_HISTORY_LENGTH-1)
                              andalso case UniqueHistories of
-                                 [ [] ]       -> false;
-                                 [ [MyName] ] -> false;
-                                 [ _  ]       -> true;
-                                 _            -> false
+                                 [ {[],[]} ]       -> false;
+                                 [ {[MyName],[]} ] -> false;
+                                 [ _  ]            -> true;
+                                 _                 -> false
                              end,
     ?REACT({b10,?LINE,[{newprop_epoch,P_newprop#projection_v1.epoch_number},
                        {is_relevant_to_me_p,IsRelevantToMe_p},
