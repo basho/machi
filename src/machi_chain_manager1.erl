@@ -1522,6 +1522,11 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP, P_current_calc,
     I_am_in_P_latest_repairing = lists:member(MyName, P_latest_repairing),
     IsRelevantToMe_p = if P_latest_author == MyName ->
                                true;
+                          P_latest_upi == [] ->
+                               %% If we're here, P_latest's author is not me.
+                               %% If someone else suggests upi=[], it's not
+                               %% relevant to me.
+                               false;
                           not (I_am_in_P_latest_upi
                                orelse I_am_in_P_latest_repairing) ->
                                %% There is no sense for me to leave whatever
