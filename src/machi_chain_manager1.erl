@@ -102,6 +102,9 @@
 %% Amount of epoch number skip-ahead for set_chain_members call
 -define(SET_CHAIN_MEMBERS_EPOCH_SKIP, 1111).
 
+%% Maximum length of the history of adopted projections (via C120).
+-define(MAX_HISTORY_LENGTH, 30).
+
 %% API
 -export([start_link/2, start_link/3, stop/1, ping/1,
          set_chain_members/2, set_chain_members/3, set_active/2,
@@ -1487,26 +1490,6 @@ io:format(user, "CONFIRM debug question line ~w\n", [?LINE]),
             end
     end.
 
-react_to_env_A49(P_latest, FinalProps, #ch_mgr{consistency_mode=cp_mode,
-                                               proj=P_current} = S) ->
-    ?REACT(a49),
-    %% Using the none projection as our new P_current does *not* work:
-    %% if we forget what P_current is, then we risk not being able to
-    %% detect an insane chain transition or else risk a false positive
-    %% insane check.
-    %%
-    %% Instead, we will create an implicit annotation in P_current
-    %% that will force A29 to always use the projection from
-    %% make_zerf() as the basis for our next transition calculations.
-    %% In this wacky case, we break the checksum on P_current so that
-    %% A29's epoch_id comparison will always be unequal and thus
-    %% always trigger make_zerf().
-    Dbg = P_current#projection_v1.dbg,
-    P_current2 = P_current#projection_v1{epoch_csum= <<"broken">>,
-                                         dbg=[{zerf_backstop,true},
-                                              {zerf_in,a49}|Dbg]},
-    react_to_env_A50(P_latest, FinalProps, set_proj(S, P_current2)).
-
 react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
     ?REACT(a50),
     ?REACT({a50, ?LINE, [{current_epoch, P_current#projection_v1.epoch_number},
@@ -1519,7 +1502,8 @@ react_to_env_A50(P_latest, FinalProps, #ch_mgr{proj=P_current}=S) ->
 
 react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP, P_current_calc,
                 _AmHosedP, Rank_newprop, Rank_latest,
-                 #ch_mgr{name=MyName, proj=P_current}=S) ->
+                 #ch_mgr{name=MyName, proj=P_current,
+                         proj_history=History}=S) ->
     ?REACT(b10),
 
     P_current_upi = if is_record(P_current, projection_v1) ->
@@ -1556,9 +1540,50 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP, P_current_calc,
                           true ->
                                true
                        end,
+    HistoryList = queue:to_list(History),
+    UniqueHistories = lists:usort(HistoryList),
+    UniqueHistoryTrigger_p = length(HistoryList) > (?MAX_HISTORY_LENGTH-1)
+                             andalso case UniqueHistories of
+                                 [ [] ]       -> false;
+                                 [ [MyName] ] -> false;
+                                 [ _  ]       -> true;
+                                 _            -> false
+                             end,
     ?REACT({b10,?LINE,[{newprop_epoch,P_newprop#projection_v1.epoch_number},
-                       {is_relevant_to_me_p,IsRelevantToMe_p}]}),
+                       {is_relevant_to_me_p,IsRelevantToMe_p},
+                       {unique_histories,UniqueHistories},
+                       {unique_history_trigger_p,UniqueHistoryTrigger_p}]}),
     if
+        UniqueHistoryTrigger_p ->
+            ?REACT({b10, ?LINE, []}),
+            %% We need to do something drastic: we're repeating ourselves.  In
+            %% a former version of this code, we called this "flapping" and
+            %% would enter an alternative projection calculation mode in order
+            %% to dampen the flapping.  In today's version of the code, we use
+            %% the machi_fitness service to help us figure out who is causing
+            %% the flapping so that we can exclude them from our projection
+            %% calculations.
+            %%
+            %% In this hypothetical example (i.e., I haven't witnessed this
+            %% actually happening with this code, but it's a valid scenario, I
+            %% believe), with a chain length of 7, during an asymmetric
+            %% partition scenario, we could have:
+            %%     f suggests       : upi=[b,g,f] repairing=[c]
+            %%     c,b,g all suggest: upi=[c,b,g], repairing=[f]
+            %%
+            %% The projection ranking and UPI lengths are the same, but the
+            %% UPIs are incompatible.  In the Git history, very recently, we
+            %% hit a case very similar to this one.  The fix, after more
+            %% thought, wasn't sufficient.  A more comprehensive fix, I
+            %% believe, is using the older "flapping" detection mechanism for
+            %% this worst-case condition: go to C103, fall back to shortest &
+            %% safe projection, tell fitness server we're administratively
+            %% down for a short while (to signal to other state machines that
+            %% they need to adapt to our bad situation), and then resume.
+
+            io:format(user, "\nCONFIRM dbg *************************** ~w UniqueHistoryTrigger_p\n", [MyName]),
+            react_to_env_C103(P_newprop, P_latest, P_current_calc, S);
+
         LatestUnanimousP andalso IsRelevantToMe_p ->
             ?REACT({b10, ?LINE,
                     [{latest_unanimous_p, LatestUnanimousP},
@@ -1671,8 +1696,7 @@ react_to_env_C100(P_newprop,
     end.
 
 react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
-                        P_newprop, P_latest, P_current_calc,
-                        #ch_mgr{consistency_mode=CMode} = S) ->
+                        P_newprop, P_latest, P_current_calc, S) ->
     NotSanesDict = orddict:update_counter(Author_latest, 1, NotSanesDict0),
     S2 = S#ch_mgr{not_sanes=NotSanesDict, sane_transitions=0},
     case orddict:fetch(Author_latest, NotSanesDict) of
@@ -1788,9 +1812,7 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
 react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H,
                                                 sane_transitions=Xtns}=S) ->
     ?REACT(c120),
-    %% TODO: revisit this constant?
-    MaxLength = length(P_latest#projection_v1.all_members) * 1.5,
-    H2   = add_and_trunc_history(P_latest, H, MaxLength),
+    H2   = add_and_trunc_history(P_latest, H, ?MAX_HISTORY_LENGTH),
 
     %% diversion_c120_verbose_goop(P_latest, S),
     ?REACT({c120, [{latest, machi_projection:make_summary(P_latest)}]}),
@@ -1808,8 +1830,9 @@ react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H,
     {{now_using, FinalProps, P_latest#projection_v1.epoch_number}, S3}.
 
 add_and_trunc_history(P_latest, H, MaxLength) ->
+    Latest_U_R = {P_latest#projection_v1.upi, P_latest#projection_v1.repairing},
     H2 = if P_latest#projection_v1.epoch_number > 0 ->
-                 queue:in(P_latest, H);
+                 queue:in(Latest_U_R, H);
             true ->
                  H
          end,
