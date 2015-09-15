@@ -1321,9 +1321,29 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                         P_latest#projection_v1.author_server /= MyName,
     P_latestStable = make_basic_comparison_stable(P_latest),
     P_currentStable = make_basic_comparison_stable(P_current),
+    %% 2015-09-15: Experiment time.  For CP mode, if the P_latest UPI includes
+    %% me, then this clause is possible.  However, if P_latest has a server in
+    %% UPI or repairing that I believe is down, then this projection is not
+    %% relevant to me.  E.g. in CP mode, if P_newprop is none proj (not
+    %% because AmHosedP is true but because I've decided that a majority
+    %% quorum is not possible now), then P_newprop will have a very low rank!
+    Latest_vs_newprop_down_p =
+        if CMode == ap_mode ->
+                %% TODO: Apply 2015-09-15 comment above to AP mode also?
+                false;
+           CMode == cp_mode ->
+                P_latest_s = ordsets:from_list(P_latest#projection_v1.upi ++
+                                              P_latest#projection_v1.repairing),
+                Down_s = ordsets:from_list(P_newprop#projection_v1.down),
+                %% If any of P_latest's servers are in P_newprop's down, then
+                %% we have a disagreement.
+                not ordsets:is_disjoint(P_latest_s, Down_s)
+        end,
     ?REACT({a40, ?LINE,
             [{latest_author, P_latest#projection_v1.author_server},
-             {author_is_down_p, LatestAuthorDownP}]}),
+             {author_is_down_p, LatestAuthorDownP},
+             {rank_latest, Rank_latest},
+             {rank_newprop, Rank_newprop}]}),
 
     if
         AmHosedP ->
@@ -1464,6 +1484,12 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                    [{latest_author, P_latest#projection_v1.author_server},
                     {author_is_down_p, LatestAuthorDownP}]}),
 
+            react_to_env_C300(P_newprop, P_latest, S);
+
+    Latest_vs_newprop_down_p ->
+            ?REACT({a40, ?LINE, []}),
+            %% P_latest isn't relevant: it has at least one member of UPI
+            %% and/or repairing that we believe is down.  Write P_newprop.
             react_to_env_C300(P_newprop, P_latest, S);
 
         true ->
