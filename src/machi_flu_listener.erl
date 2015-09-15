@@ -1,65 +1,34 @@
 % 1. start file proxy supervisor
 % 2. start projection store
 % 3. start listener
--module(machi_flu_listener).
+-module(machi_flu_protocol).
+-behaviour(ranch_protocol).
+
+-export([start_link/4]).
+-export([init/4]).
 
 -include("machi.hrl").
 
 -record(state, {
-          flu_name        :: atom(),
-          proj_store      :: pid(),
-          append_pid      :: pid(),
-          tcp_port        :: non_neg_integer(),
-          data_dir        :: string(),
-          wedged = true   :: boolean(),
-          etstab          :: ets:tid(),
-          epoch_id        :: 'undefined' | machi_dt:epoch_id(),
-          pb_mode = undefined  :: 'undefined' | 'high' | 'low',
-          high_clnt       :: 'undefined' | pid(),
-          dbg_props = []  :: list(), % proplist
-          props = []      :: list(),  % proplist
-          proxies = orddict:new() :: orddict:orddict()
-         }).
+    pb_mode,
+    high_clnt
+}).
 
+-define(SERVER_CMD_READ_TIMEOUT, 600 * 1000).
 
+start_link(Ref, Socket, Transport, Opts) ->
+    Pid = spawn_link(?MODULE, init, [Ref, Socket, Transport, Opts]),
+    {ok, Pid}.
 
-make_listener_regname(BaseName) ->
-    list_to_atom(atom_to_list(BaseName) ++ "_listener").
+init(Ref, Socket, Transport, _Opts = []) ->
+    ok = ranch:accept_ack(Ref),
+    %% By default, ranch sets sockets to
+    %% {active, false}, {packet, raw}, {reuseaddr, true}
+    ok = Transport:setopts(Socket, ?PB_PACKET_OPTS),
+    loop(Socket, Transport, #state{}).
 
-
-
-setup_listen_state() ->
-    S0 = #state{flu_name=FluName,
-                proj_store=ProjectionPid,
-                tcp_port=TcpPort,
-                data_dir=DataDir,
-                wedged=Wedged_p,
-                etstab=ets_table_name(FluName),
-                epoch_id=EpochId,
-                dbg_props=DbgProps,
-                props=Props},
-    S1 = S0#state{append_pid=AppendPid},
-    ListenPid = start_listen_server(S1).
-
-start_listen_server(S) ->
-    proc_lib:spawn_link(fun() -> run_listen_server(S) end).
-
-run_listen_server(#state{flu_name=FluName, tcp_port=TcpPort}=S) ->
-    register(make_listener_regname(FluName), self()),
-    SockOpts = ?PB_PACKET_OPTS ++
-        [{reuseaddr, true}, {mode, binary}, {active, false}],
-    case gen_tcp:listen(TcpPort, SockOpts) of
-        {ok, LSock} ->
-            listen_server_loop(LSock, S);
-        Else ->
-            error_logger:warning_msg("~s:run_listen_server: "
-                                     "listen to TCP port ~w: ~w\n",
-                                     [?MODULE, TcpPort, Else]),
-            exit({?MODULE, run_listen_server, tcp_port, TcpPort, Else})
-    end.
-
-net_server_loop(Sock, S) ->
-    case gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT) of
+loop(Socket, Transport, S) ->
+    case Transport:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT) of
         {ok, Bin} ->
             {RespBin, S2} = 
                 case machi_pb:decode_mpb_ll_request(Bin) of
@@ -75,28 +44,13 @@ net_server_loop(Sock, S) ->
             if RespBin == async_no_response ->
                     ok;
                true ->
-                    ok = gen_tcp:send(Sock, RespBin)
+                    ok = Transport:send(Socket, RespBin)
             end,
-            net_server_loop(Sock, S2);
+            loop(Socket, Transport, S2);
         {error, SockError} ->
-            Msg = io_lib:format("Socket error ~w", [SockError]),
-            R = #mpb_ll_response{req_id= <<>>,
-                                 generic=#mpb_errorresp{code=1, msg=Msg}},
-            Resp = machi_pb:encode_mpb_ll_response(R),
-            %% TODO: Weird that sometimes neither catch nor try/catch
-            %%       can prevent OTP's SASL from logging an error here.
-            %%       Error in process <0.545.0> with exit value: {badarg,[{erlang,port_command,.......
-            %% TODO: is this what causes the intermittent PULSE deadlock errors?
-            %% _ = (catch gen_tcp:send(Sock, Resp)), timer:sleep(1000),
-            (catch gen_tcp:close(Sock)),
-            exit(normal)
+            lager:error("Socket error ~w", [SockError]),
+            (catch Transport:close(Socket)),
     end.
-
-listen_server_loop(LSock, S) ->
-    {ok, Sock} = gen_tcp:accept(LSock),
-    spawn_link(fun() -> net_server_loop(Sock, S) end),
-    listen_server_loop(LSock, S).
-
 
 make_high_clnt(#state{high_clnt=undefined}=S) ->
     {ok, Proj} = machi_projection_store:read_latest_projection(
