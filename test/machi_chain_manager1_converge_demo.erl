@@ -155,8 +155,8 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
     %% Faster test startup, commented: timer:sleep(3000),
 
     MgrOpts = MgrOpts0 ++ ?DEFAULT_MGR_OPTS,
-    TcpPort = 62877,
-    TDir = "/tmp/c",
+    TcpPort = proplists:get_value(port_base, MgrOpts, 62877),
+    TDir = proplists:get_value(tmp_dir, MgrOpts, "/tmp/c"),
     ok = filelib:ensure_dir(TDir ++ "/not-used"),
     _ = os:cmd("rm -rf " ++ TDir ++ "/*"),
     FluInfo = [
@@ -199,7 +199,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                    false -> ap_mode
                end,
 
-    ets:insert(?TEST_ETS_TABLE, {projection_store_sleep_time, 25}),
+    %% ets:insert(?TEST_ETS_TABLE, {projection_store_sleep_time, 25}),
 
     try
       [{_, Ma}|_] = MgrNamez,
@@ -310,7 +310,7 @@ timer:sleep(1234),
                                             max(0, length(Pubs)-MaxFiles)),
                 [_ = file:delete(File) || File <- FilesToDel2],
                 io:format(user, "Yay, now prune: ~w ~w, ", [length(FilesToDel1), length(FilesToDel2)])
-            end || Dir <- filelib:wildcard("/tmp/c/data*")],
+            end || Dir <- filelib:wildcard(TDir ++ "/data*")],
            io:format(user, "\n", []),
 
            timer:sleep(1250),
