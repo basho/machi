@@ -1789,23 +1789,33 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     Extra2 = [{react,get(react)}],
     P_latest2 = machi_projection:update_dbg2(P_latest, Extra1 ++ Extra2),
 
-    MyNamePid = proxy_pid(MyName, S),
+    MyStorePid = proxy_pid(MyName, S),
     Goo = P_latest2#projection_v1.epoch_number,
     %% This is the local projection store.  Use a larger timeout, so
     %% that things locally are pretty horrible if we're killed by a
     %% timeout exception.
     Goo = P_latest2#projection_v1.epoch_number,
-    %% ?V("HEE110 ~w ~w ~w\n", [S#ch_mgr.name, self(), lists:reverse(get(react))]),
 
-    case {?FLU_PC:write_projection(MyNamePid, private, P_latest2,?TO*30),Goo} of
+    %% Ha, yet another example of why distributed systems are so much fun and
+    %% hassle and frustration.
+    %%
+    %% The following write will be to our local private projection store.  But
+    %% there are several reasons why the write might fail: client library bug,
+    %% slow server (which triggers timeout), kernel decides it doesn't like
+    %% this TCP connection, projection server crashed (but our mutual
+    %% supervisor parent proc hasn't killed *us* quite yet), etc etc.  Even if
+    %% we didn't use TCP and made a gen_server:call() directly, we'd still
+    %% have a problem of not knowing 100% for sure if the write was successful
+    %% to the projection store ... to know for certain, we need to try to read
+    %% it back.
+    %%
+    %% In contrast to the public projection store writes, Humming Consensus
+    %% doesn't care about the status of writes to the public store: it's
+    %% always relying only on successful reads of the public store.
+    case {?FLU_PC:write_projection(MyStorePid, private, P_latest2,?TO*30),Goo} of
         {ok, Goo} ->
-            ?REACT({c120, [{write, ok}]}),
-            %% We very intentionally do *not* pass P_latest2 forward:
-            %% we must avoid bloating the dbg2 list!
-            P_latest2_perhaps_annotated =
-                machi_projection:update_dbg2(P_latest, Extra1),
-            perhaps_verbose_c110(P_latest2_perhaps_annotated, S),
-            react_to_env_C120(P_latest2_perhaps_annotated, [], S);
+            ?REACT({c110, [{write, ok}]}),
+            react_to_env_C111(P_latest, P_latest2, Extra1, MyStorePid, S);
         {{error, bad_arg}, _Goo} ->
             ?REACT({c120, [{write, bad_arg}]}),
 
@@ -1838,16 +1848,8 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
             react_to_env_A20(0, S);
         {{error, TO_or_part}=Else, _Goo} when TO_or_part == timeout;
                                               TO_or_part == partition ->
-            %% TODO: Hrm, I know that there's currently a bug in the
-            %% machi_flu1_client that causes use of 'undefined' instead of a
-            %% valid TCP socket port() that causes {error,partition} problems
-            %% when talking to remote projection stores.  However, I've now
-            %% twice witnessed (and also recognized ^_^) that this same error
-            %% can happen when talking to our local projection store.  Verrry
-            %% interesting.  Let's assume that this is a very rare
-            %% happenstance, and when it does happen, we just punt and go to
-            %% A50.
-            react_to_env_A50(P_latest, [{c110_error,Else}], S);
+            ?REACT({c110, [{write, Else}]}),
+            react_to_env_C111(P_latest, P_latest2, Extra1, MyStorePid, S);
         Else ->
             Summ = machi_projection:make_summary(P_latest2),
             io:format(user, "C110 error by ~w: ~w, ~w\n~p\n",
@@ -1855,6 +1857,40 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
             error_logger:error_msg("C110 error by ~w: ~w, ~w, ~w\n",
                                    [MyName, Else, Summ, get(react)]),
             exit({c110_failure, MyName, Else, Summ})
+    end.
+
+react_to_env_C111(#projection_v1{epoch_number=Epoch}=P_latest, P_latest2,
+                  Extra1, MyStorePid, #ch_mgr{name=MyName}=S) ->
+    case ?FLU_PC:read_projection(MyStorePid, private, Epoch) of
+        {ok, P_latest2} ->
+            ?REACT({c111, [{read, ok}]}),
+            %% We very intentionally do *not* pass P_latest2 forward:
+            %% we must avoid bloating the dbg2 list!
+            P_latest2_perhaps_annotated =
+                machi_projection:update_dbg2(P_latest, Extra1),
+            perhaps_verbose_c111(P_latest2_perhaps_annotated, S),
+            react_to_env_C120(P_latest2_perhaps_annotated, [], S);
+        {ok, P_wtf} ->
+            exit({c111_failure, MyName, Epoch, P_wtf});
+        {error, not_written} ->
+            ?REACT({c111, [{read, not_written}]}),
+            %% Well, we'd wanted to write a new private projection.  But an
+            %% timeout/partition/bug prevented the write at C110.  Let's
+            %% retry now, since we probably need to make a change.
+            react_to_env_A20(0, S);
+        {error, TO_or_part}=Else when TO_or_part == timeout;
+                                      TO_or_part == partition ->
+            ?REACT({c111, [{read, Else}]}),
+            %% Drat.  Well, let's retry in a while.
+            timer:sleep(100),
+            react_to_env_C111(P_latest, P_latest2, Extra1, MyStorePid, S);
+        Else ->
+            Summ = machi_projection:make_summary(P_latest),
+            io:format(user, "C111 error by ~w: ~w, ~w\n~p\n",
+                      [MyName, Else, Summ, get(react)]),
+            error_logger:error_msg("C111 error by ~w: ~w, ~w, ~w\n",
+                                   [MyName, Else, Summ, get(react)]),
+            exit({c111_failure, MyName, Else, Summ})
     end.
 
 react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H,
@@ -1947,7 +1983,7 @@ projection_transitions_are_sane([P1, P2|T], RelativeToServer, RetrospectiveP) ->
             projection_transitions_are_sane([P2|T], RelativeToServer,
                                            RetrospectiveP);
         Else ->
-            Else
+            {Else, from, P1#projection_v1.epoch_number, to, P2#projection_v1.epoch_number}
     end.
 
 -ifdef(TEST).
@@ -2761,7 +2797,7 @@ zerf_find_last_annotated(FLU, MajoritySize, S) ->
             []                                  % lists:flatten() will destroy
     end.
 
-perhaps_verbose_c110(P_latest2, S) ->
+perhaps_verbose_c111(P_latest2, S) ->
     case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
         true ->
             Dbg2X = lists:keydelete(react, 1,
