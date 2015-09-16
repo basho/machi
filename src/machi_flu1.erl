@@ -189,7 +189,8 @@ start_append_server(S, AckPid) ->
 run_listen_server(#state{flu_name=FluName, tcp_port=TcpPort}=S) ->
     register(make_listener_regname(FluName), self()),
     SockOpts = ?PB_PACKET_OPTS ++
-        [{reuseaddr, true}, {mode, binary}, {active, false}],
+        [{reuseaddr, true}, {mode, binary}, {active, false},
+         {backlog,8192}],
     case gen_tcp:listen(TcpPort, SockOpts) of
         {ok, LSock} ->
             listen_server_loop(LSock, S);
