@@ -1836,8 +1836,8 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
             %%
             %% React to newer public write by restarting the iteration.
             react_to_env_A20(0, S);
-        {error, TO_or_part}=Else when TO_or_part == timeout;
-                                      TO_or_part == partition ->
+        {{error, TO_or_part}=Else, _Goo} when TO_or_part == timeout;
+                                              TO_or_part == partition ->
             %% TODO: Hrm, I know that there's currently a bug in the
             %% machi_flu1_client that causes use of 'undefined' instead of a
             %% valid TCP socket port() that causes {error,partition} problems
