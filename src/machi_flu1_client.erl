@@ -687,7 +687,7 @@ filter_sock_error_result(Error) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-w_connect(#p_srvr{proto_mod=?MODULE, address=Host, port=Port, props=Props})->
+w_connect(#p_srvr{proto_mod=?MODULE, address=Host, port=Port, props=Props}=_P)->
     try
         case proplists:get_value(session_proto, Props, tcp) of
             tcp ->
@@ -705,7 +705,7 @@ w_connect(#p_srvr{proto_mod=?MODULE, address=Host, port=Port, props=Props})->
                 {w,ssl,SslSock}
         end
     catch
-        _:_ ->
+        _X:_Y ->
             undefined
     end.
 
