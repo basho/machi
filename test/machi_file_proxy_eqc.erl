@@ -82,31 +82,34 @@ data_with_csum() ->
     %?LET({B,T},{eqc_gen:binary(), csum_type()}, {B,T, csum(T, B)}).
 
 data_with_csum(Limit) ->
-    ?LET({B,T},{?LET(S, Limit, eqc_gen:largebinary(S)), csum_type()}, {B,T, csum(T, B)}).
-    %?LET({B,T},{?LET(S, Limit, eqc_gen:binary(S)), csum_type()}, {B,T, csum(T, B)}).
+    %?LET({B,T},{?LET(S, Limit, eqc_gen:largebinary(S)), csum_type()}, {B,T, csum(T, B)}).
+    ?LET({B,T},{?LET(S, Limit, eqc_gen:binary(S)), csum_type()}, {B,T, csum(T, B)}).
 
-maybe_gen_valid_write([{Off, L}]) ->
-    {default(Off+L, offset()), len()};
-maybe_gen_valid_write([{O1, L1}, {O2, L2}]) ->
-    Pos = O1 + L1, % end of previous write
-    case Pos == O2 of
-        true ->
-            %% The previous write ended where next write begins, so
-            %% we'll pick the end of the next write and a random length
-            {O2 + L2, len()};
-        false ->
-            {position(O2-Pos), len()}
-    end;
-maybe_gen_valid_write(_) ->
-    {big_offset(), len()}.
-    
-    
+intervals([]) ->
+    [];
+intervals([N]) ->
+    [{N, choose(1,150)}];
+intervals([A,B|T]) ->
+    [{A, choose(1, B-A)}|intervals([B|T])].
 
+interval_list() ->
+    ?LET(L, list(choose(1024, 4096)), intervals(lists:usort(L))).
+
+shuffle_interval() ->
+    ?LET(L, interval_list(), shuffle(L)).
+
+get_written_interval(L) ->
+    ?LET({O, Ln}, elements(L), {O+1, Ln-1}).
+ 
 %% INITIALIZATION
 
--record(state, {pid, file = 0, written=[]}).
+-record(state, {pid, prev_extra = 0, planned_writes=[], written=[]}).
 
 initial_state() -> #state{written=[{0,1024}]}.
+initial_state(I) -> #state{written=[{0,1024}], planned_writes=I}.
+
+weight(_S, rewrite) -> 1;
+weight(_S, _) -> 2.
 
 %% HELPERS
 
@@ -141,9 +144,9 @@ is_ok(Other) -> {expected_OK, Other}.
 get_offset({ok, _Filename, Offset}) -> Offset;
 get_offset(_) -> error(badarg).
 
-offset_valid(Offset, L) ->
+offset_valid(Offset, Extra, L) ->
     {Pos, Sz} = lists:last(L),
-    Offset == Pos + Sz.
+    Offset == Pos + Sz + Extra.
 
 -define(TESTDIR, "./eqc").
 
@@ -164,14 +167,15 @@ start_pre(S) ->
 start_command(S) ->
     {call, ?MODULE, start, [S]}.
 
-start(S) ->
-    File = test_server:temp_name("eqc_data") ++ "." ++ integer_to_list(S#state.file),
+start(_S) ->
+    {_, _, MS} = os:timestamp(),
+    File = test_server:temp_name("eqc_data") ++ "." ++ integer_to_list(MS),
     {ok, Pid} = machi_file_proxy:start_link(File, ?TESTDIR),
     unlink(Pid),
     Pid.
 
 start_next(S, Pid, _Args) ->
-    S#state{pid = Pid, file = S#state.file + 1}.
+    S#state{pid = Pid}.
 
 %% read
 
@@ -202,7 +206,7 @@ read(Pid, Offset, Length) ->
 %% write
 
 write_pre(S) ->
-    S#state.pid /= undefined.
+    S#state.pid /= undefined andalso S#state.planned_writes /= [].
 
 %% do not allow writes with empty data
 write_pre(_S, [_Pid, _Extra, {<<>>, _Tag, _Csum}]) ->
@@ -211,8 +215,8 @@ write_pre(_S, _Args) ->
     true.
 
 write_args(S) ->
-    %{Offset, Length} = maybe_gen_valid_write(S#state.written),
-    [S#state.pid, big_offset(), data_with_csum()].
+    {Off, Len} = hd(S#state.planned_writes),
+    [S#state.pid, Off, data_with_csum(Len)].
 
 write_ok(_S, [_Pid, Off, _Data]) when Off < 1024 -> false;
 write_ok(S, [_Pid, Off, {Bin, _Tag, _Csum}]) ->
@@ -239,12 +243,14 @@ write_post(S, Args, Res) ->
     end.
 
 write_next(S, Res, [_Pid, Offset, {Bin, _Tag, _Csum}]) ->
-    case is_ok(Res) of
+    S0 = case is_ok(Res) of
         true -> 
-            S#state{written = lists:sort(S#state.written ++ [{Offset, iolist_size(Bin)}])};
+            S#state{written = lists:sort(S#state.written ++ [{Offset, iolist_size(Bin)}]) };
         _ -> 
             S
-    end.
+    end,
+    S0#state{prev_extra = 0, planned_writes=tl(S0#state.planned_writes)}.
+    
 
 write(Pid, Offset, {Bin, Tag, Csum}) ->
     Meta = [{client_csum_tag, Tag},
@@ -270,12 +276,12 @@ append(Pid, Extra, {Bin, Tag, Csum}) ->
             {client_csum, Csum}],
     machi_file_proxy:append(Pid, Meta, Extra, Bin).
 
-append_next(S, Res, [_Pid, _Extra, {Bin, _Tag, _Csum}]) ->
+append_next(S, Res, [_Pid, Extra, {Bin, _Tag, _Csum}]) ->
     case is_ok(Res) of
         true -> 
             Offset = get_offset(Res),
-            true == offset_valid(Offset, S#state.written),
-            S#state{written = lists:sort(S#state.written ++ [{Offset, iolist_size(Bin)}])};
+            true = offset_valid(Offset, S#state.prev_extra, S#state.written),
+            S#state{prev_extra = Extra, written = lists:sort(S#state.written ++ [{Offset, iolist_size(Bin)}])};
         _ ->
             S
     end.
@@ -285,16 +291,38 @@ append_next(S, Res, [_Pid, _Extra, {Bin, _Tag, _Csum}]) ->
 append_post(_S, _Args, Res) ->
     true == is_ok(Res).
 
+%% rewrite
+
+rewrite_pre(S) ->
+    S#state.pid /= undefined andalso S#state.written /= [].
+
+rewrite_args(S) ->
+    ?LET({Off, Len}, get_written_interval(S#state.written),
+    [S#state.pid, Off, data_with_csum(Len)]).
+
+rewrite(Pid, Offset, {Bin, Tag, Csum}) ->
+    Meta = [{client_csum_tag, Tag},
+            {client_csum, Csum}],
+    machi_file_proxy:write(Pid, Offset, Meta, Bin).
+
+rewrite_post(_S, _Args, Res) ->
+    is_error(Res).
+
+rewrite_next(S, _Res, _Args) ->
+    S#state{prev_extra = 0}.
+
 %% Property
 
 prop_ok() ->
   cleanup(),
-  ?FORALL(Cmds, commands(?MODULE),
-  begin
-    {H, S, Res} = run_commands(?MODULE, Cmds),
-    pretty_commands(?MODULE, Cmds, {H, S, Res},
-      aggregate(command_names(Cmds), Res == ok))
-  end).
+  ?FORALL(I, shuffle_interval(),
+    ?FORALL(Cmds, parallel_commands(?MODULE, initial_state(I)),
+    begin
+      {H, S, Res} = run_parallel_commands(?MODULE, Cmds),
+        pretty_commands(?MODULE, Cmds, {H, S, Res},
+        aggregate(command_names(Cmds), Res == ok))
+    end)
+  ).
 
 -endif. % EQC
 -endif. % TEST
