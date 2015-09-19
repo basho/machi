@@ -567,6 +567,8 @@ rank_and_sort_projections_with_extra(All_queried_list, FLUsRs, ProjectionType,
     Ps = [Proj || {_FLU, Proj} <- FLUsRs, is_record(Proj, projection_v1)],
     BadAnswerFLUs = [FLU || {FLU, Answer} <- FLUsRs,
                             not is_record(Answer, projection_v1)],
+    BadAnswers = [Answer || {_FLU, Answer} <- FLUsRs,
+                            not is_record(Answer, projection_v1)],
 
     if All_queried_list == []
        orelse
@@ -580,6 +582,7 @@ rank_and_sort_projections_with_extra(All_queried_list, FLUsRs, ProjectionType,
                       {unanimous_flus,[]},
                       {not_unanimous_flus, []},
                       {bad_answer_flus, BadAnswerFLUs},
+                      {bad_answers, BadAnswers},
                       {not_unanimous_answers, []}],
             {not_unanimous, NoneProj, Extra2, S};
        ProjectionType == public, UnwrittenRs /= [] ->
@@ -615,6 +618,7 @@ rank_and_sort_projections_with_extra(All_queried_list, FLUsRs, ProjectionType,
                       {not_unanimous_flus, All_queried_list --
                                                  (Best_FLUs ++ BadAnswerFLUs)},
                       {bad_answer_flus, BadAnswerFLUs},
+                      {bad_answers, BadAnswers},
                       {not_best_ps, NotBestPs},
                       {not_best_ps_epoch_filt, NotBestPsEpochFilt}|Extra],
             {UnanimousTag, BestProj, Extra2, S}
@@ -1064,8 +1068,10 @@ do_react_to_env(S) ->
              end,
         %% Perhaps tell the fitness server to spam everyone.
         case random:uniform(100) of
-            42 -> machi_fitness:send_spam_to_everyone(S#ch_mgr.fitness_svr);
-            _  -> ok
+            N when N < 5 ->
+                machi_fitness:send_spam_to_everyone(S#ch_mgr.fitness_svr);
+            _ ->
+                ok
         end,
         %% NOTE: If we use the fitness server's unfit list at the start, then
         %% we would need to add some kind of poll/check for down members to
@@ -1162,12 +1168,14 @@ react_to_env_A20(Retries, #ch_mgr{name=MyName}=S) ->
                             P <- NotUnanimousPs,
                             is_record(P, projection_v1)],
     BadAnswerFLUs = lists:sort(proplists:get_value(bad_answer_flus, ReadExtra)),
+    BadAnswers = lists:sort(proplists:get_value(bad_answers, ReadExtra)),
     ?REACT({a20,?LINE,[{upi_repairing,UPI_Repairing_FLUs},
                        {unanimous_flus,UnanimousFLUs},
                        {all_upi_repairing_were_unanimous,All_UPI_Repairing_were_unanimous},
                        {not_unanimous_flus, NotUnanimousFLUs},
                        {not_unanimous_answers, NotUnanimousSumms},
-                       {bad_answer_flus, BadAnswerFLUs}
+                       {bad_answer_flus, BadAnswerFLUs},
+                       {bad_answers, BadAnswers}
                       ]}),
     LatestUnanimousP =
         if UnanimousTag == unanimous

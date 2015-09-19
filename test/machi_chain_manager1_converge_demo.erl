@@ -154,6 +154,8 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
     %% Faster test startup, commented: io:format(user, short_doc(), []),
     %% Faster test startup, commented: timer:sleep(3000),
 
+    application:start(sasl),
+
     MgrOpts = MgrOpts0 ++ ?DEFAULT_MGR_OPTS,
     TcpPort = proplists:get_value(port_base, MgrOpts, 62877),
     TDir = proplists:get_value(tmp_dir, MgrOpts, "/tmp/c"),
@@ -225,7 +227,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                                                     ?MGR:sleep_ranked_order(
                                                        S_min, S_max_rand,
                                                        M_name, All_list),
-                                                _ = ?MGR:trigger_react_to_env(MMM),
+                                                _ = (catch ?MGR:trigger_react_to_env(MMM)),
                                                 %% Be more unfair by not
                                                 %% sleeping here.
                                                 % timer:sleep(S_max - Elapsed),

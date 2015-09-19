@@ -89,7 +89,9 @@ init([{MyFluName}|Args]) ->
 timer:send_interval(1000, dump),
     UseSimulatorP = proplists:get_value(use_partition_simulator, Args, false),
     {ok, #state{my_flu_name=MyFluName, reg_name=RegName,
-                partition_simulator_p=UseSimulatorP}}.
+                partition_simulator_p=UseSimulatorP,
+                local_down=[complete_bogus_here_to_trigger_initial_spam]
+               }}.
 
 handle_call({get_unfit_list}, _From, #state{active_unfit=ActiveUnfit}=S) ->
     Reply = ActiveUnfit,
@@ -182,7 +184,7 @@ handle_info({adjust_down_list, FLU}, #state{active_unfit=ActiveUnfit}=S) ->
     end;
 handle_info(dump, #state{my_flu_name=MyFluName,active_unfit=ActiveUnfit,
                          pending_map=Map}=S) ->
-    io:format(user, "DUMP: ~w: ~p ~W\n", [MyFluName, ActiveUnfit, map_value(Map), 13]),
+    io:format(user, "DUMP: ~w/~w: ~p ~W\n", [MyFluName, self(), ActiveUnfit, map_value(Map), 13]),
     %% io:format(user, "DUMP ~w: ~w, ", [MyFluName, ActiveUnfit]),
     {noreply, S};
 handle_info(_Info, S) ->

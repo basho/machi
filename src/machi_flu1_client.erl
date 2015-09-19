@@ -676,7 +676,7 @@ do_pb_request_common(Sock, ReqID, Req, GetReply_p) ->
             %%       Whoa undefined: function_clause
             %% In theory this is harmless, because the client will retry
             %% with a new socket.  But, fix it anyway.
-            io:format(user, "DBG Whoa ~w: ~w\n", [Sock, Whoa]),
+            io:format(user, "DBG Whoa ~w: ~w at ~w ~P\n", [Sock, Whoa, time(), erlang:get_stacktrace(), 25]), timer:sleep(250),
             {error, {whoa, Whoa, erlang:get_stacktrace()}}
     end.
 
@@ -691,7 +691,9 @@ w_connect(#p_srvr{proto_mod=?MODULE, address=Host, port=Port, props=Props}=_P)->
     try
         case proplists:get_value(session_proto, Props, tcp) of
             tcp ->
+put(xxx, goofus),
                 Sock = machi_util:connect(Host, Port, ?HARD_TIMEOUT),
+put(xxx, Sock),
                 ok = inet:setopts(Sock, ?PB_PACKET_OPTS),
                 {w,tcp,Sock};
             %% sctp ->
@@ -706,6 +708,7 @@ w_connect(#p_srvr{proto_mod=?MODULE, address=Host, port=Port, props=Props}=_P)->
         end
     catch
         _X:_Y ->
+            io:format(user, "DBG Whoa ~w w_connect port ~w sock ~w err ~w ~w\n", [time(), Port, get(xxx), _X, _Y]),
             undefined
     end.
 
