@@ -216,7 +216,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
       DoIt = fun(Iters, S_min, S_max) ->
                      %% io:format(user, "\nDoIt: top\n\n", []),
                      io:format(user, "DoIt, ", []),
-                     Pids = [spawn(fun() ->
+                     Pids = [{spawn(fun() ->
                                            random:seed(now()),
                                            [begin
                                                 erlang:yield(),
@@ -233,14 +233,26 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                                                 % timer:sleep(S_max - Elapsed),
                                                 Elapsed
                                             end || _ <- lists:seq(1, Iters)],
-                                           Parent ! done
-                                   end) || {M_name, MMM} <- MgrNamez ],
+                                           Parent ! {done, self()}
+                                   end), M_name} || {M_name, MMM} <- MgrNamez ],
                      [receive
-                          done ->
+                          {done, ThePid} ->
                               ok
                       after 120*1000 ->
-                              exit(icky_timeout)
-                      end || _ <- Pids]
+                              [begin
+                                   case whereis(XX) of
+                                       undefined -> ok;
+                                       XXPid -> {_, XXbin} = process_info(XXPid, backtrace),
+                                                {_, XXdict} = process_info(XXPid, dictionary),
+                                                TTT = proplists:get_value(ttt, XXdict),
+                                                io:format(user, "BACK ~w: ttt=~w\n~s\n", [XX, TTT, XXbin])
+                                   end
+                               end || XX <- [file_server_2] ++
+                                          [a_chmgr,b_chmgr,c_chmgr,d_chmgr,e_chmgr,f_chmgr,g_chmgr,h_chmgr,i_chmgr,j_chmgr] ++
+                                          [a_pstore,b_pstore,c_pstore,d_pstore,e_pstore,f_pstore,g_pstore,h_pstore,i_pstore,j_pstore] ++
+                                          [a_fitness,b_fitness,c_fitness,d_fitness,e_fitness,f_fitness,g_fitness,h_fitness,i_fitness,j_fitness] ],
+                              exit({icky_timeout, M_name})
+                      end || {ThePid,M_name} <- Pids]
              end,
 
       %% machi_partition_simulator:reset_thresholds(10, 50),

@@ -81,7 +81,8 @@
 -define(TO, (2*1000)).                          % default timeout
 
 %% Keep a history of our flowchart execution in the process dictionary.
--define(REACT(T), put(react, [T|get(react)])).
+-define(REACT(T), begin put(ttt, [?LINE|get(ttt)]), put(react, [T|get(react)]) end).
+-define(TTT(), begin put(ttt, [?LINE|get(ttt)]) end).
 
 %% Define the period of private projection stability before we'll
 %% start repair.
@@ -224,6 +225,7 @@ test_read_latest_public_projection(Pid, ReadRepairP) ->
 %% local projection store.
 
 init({MyName, InitMembersDict, MgrOpts}) ->
+put(ttt, [?LINE]),
     random:seed(now()),
     init_remember_down_list(),
     Opt = fun(Key, Default) -> proplists:get_value(Key, MgrOpts, Default) end,
@@ -1017,6 +1019,7 @@ do_react_to_env(#ch_mgr{name=MyName,
                                 consistency_mode=CMode}, NewProj)}
     end;
 do_react_to_env(S) ->
+put(ttt, [?LINE]),
     %% The not_sanes manager counting dictionary is not strictly
     %% limited to flapping scenarios.  (Though the mechanism first
     %% started as a way to deal with rare flapping scenarios.)
@@ -1067,12 +1070,14 @@ do_react_to_env(S) ->
                      S
              end,
         %% Perhaps tell the fitness server to spam everyone.
+?TTT(),
         case random:uniform(100) of
             N when N < 5 ->
-                machi_fitness:send_spam_to_everyone(S#ch_mgr.fitness_svr);
+                machi_fitness:send_spam_to_everyone(S#ch_mgr.fitness_svr),?TTT();
             _ ->
                 ok
         end,
+?TTT(),
         %% NOTE: If we use the fitness server's unfit list at the start, then
         %% we would need to add some kind of poll/check for down members to
         %% check if they are now up.  Instead, our lazy attempt to read from
@@ -1084,10 +1089,14 @@ do_react_to_env(S) ->
         %% jitter smoother by only talking to servers that we believe are fit.
         %% But we will defer such work because it may never be necessary.
         {Res, S3} = react_to_env_A10(S2),
+?TTT(),
         S4 = manage_last_down_list(S3),
         %% When in CP mode, we call the poll function twice: once at the start
         %% of reacting (in state A10) & once after.  This call is the 2nd.
-        {Res, poll_private_proj_is_upi_unanimous(S4)}
+?TTT(),
+        Sx = poll_private_proj_is_upi_unanimous(S4),
+?TTT(),
+        {Res, Sx}
     catch
         throw:{zerf,_}=_Throw ->
             Proj = S#ch_mgr.proj,
