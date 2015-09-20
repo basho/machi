@@ -151,56 +151,62 @@ t(N, MgrOpts) ->
     convergence_demo_testfun(N, MgrOpts).
 
 convergence_demo_testfun(NumFLUs, MgrOpts0) ->
-    timer:sleep(100),
     %% Faster test startup, commented: io:format(user, short_doc(), []),
     %% Faster test startup, commented: timer:sleep(3000),
 
-    TcpPort = 62877,
-    ok = filelib:ensure_dir("/tmp/c/not-used"),
+    application:start(sasl),
+
+    MgrOpts = MgrOpts0 ++ ?DEFAULT_MGR_OPTS,
+    TcpPort = proplists:get_value(port_base, MgrOpts, 62877),
+    TDir = proplists:get_value(tmp_dir, MgrOpts, "/tmp/c"),
+    ok = filelib:ensure_dir(TDir ++ "/not-used"),
+    _ = os:cmd("rm -rf " ++ TDir ++ "/*"),
     FluInfo = [
-               {a,TcpPort+0,"/tmp/c/data.a"}, {b,TcpPort+1,"/tmp/c/data.b"},
-               {c,TcpPort+2,"/tmp/c/data.c"}, {d,TcpPort+3,"/tmp/c/data.d"},
-               {e,TcpPort+4,"/tmp/c/data.e"}, {f,TcpPort+5,"/tmp/c/data.f"},
-               {g,TcpPort+6,"/tmp/c/data.g"}, {h,TcpPort+7,"/tmp/c/data.h"},
-               {i,TcpPort+8,"/tmp/c/data.i"}, {j,TcpPort+9,"/tmp/c/data.j"},
-               {k,TcpPort+10,"/tmp/c/data.k"}, {l,TcpPort+11,"/tmp/c/data.l"},
-               {m,TcpPort+12,"/tmp/c/data.m"}, {n,TcpPort+13,"/tmp/c/data.n"},
-               {o,TcpPort+14,"/tmp/c/data.o"}, {p,TcpPort+15,"/tmp/c/data.p"},
-               {q,TcpPort+16,"/tmp/c/data.q"}, {r,TcpPort+17,"/tmp/c/data.r"}
+               {a,TcpPort+0,TDir++"/data.a"}, {b,TcpPort+1,TDir++"/data.b"},
+               {c,TcpPort+2,TDir++"/data.c"}, {d,TcpPort+3,TDir++"/data.d"},
+               {e,TcpPort+4,TDir++"/data.e"}, {f,TcpPort+5,TDir++"/data.f"},
+               {g,TcpPort+6,TDir++"/data.g"}, {h,TcpPort+7,TDir++"/data.h"},
+               {i,TcpPort+8,TDir++"/data.i"}, {j,TcpPort+9,TDir++"/data.j"},
+               {k,TcpPort+10,TDir++"/data.k"}, {l,TcpPort+11,TDir++"/data.l"},
+               {m,TcpPort+12,TDir++"/data.m"}, {n,TcpPort+13,TDir++"/data.n"},
+               {o,TcpPort+14,TDir++"/data.o"}, {p,TcpPort+15,TDir++"/data.p"},
+               {q,TcpPort+16,TDir++"/data.q"}, {r,TcpPort+17,TDir++"/data.r"}
               ],
     FLU_biglist = [X || {X,_,_} <- FluInfo],
     All_list = lists:sublist(FLU_biglist, NumFLUs),
     io:format(user, "\nSET # of FLUs = ~w members ~w).\n",
               [NumFLUs, All_list]),
+
     machi_partition_simulator:start_link({111,222,33}, 0, 100),
     _ = machi_partition_simulator:get(All_list),
 
-    Ps = [#p_srvr{name=Name,address="localhost",port=Port} ||
-             {Name,Port,_Dir} <- lists:sublist(FluInfo, NumFLUs)],
-    PsDirs = lists:zip(Ps,
-                       [Dir || {_,_,Dir} <- lists:sublist(FluInfo, NumFLUs)]),
-    FLU_pids = [machi_flu1_test:setup_test_flu(Name, Port, Dir) ||
-                   {#p_srvr{name=Name,port=Port}, Dir} <- PsDirs],
+    Ps = [#p_srvr{name=Name,address="localhost",port=Port,
+                  props=[{data_dir,Dir}|MgrOpts]} ||
+             {Name,Port,Dir} <- lists:sublist(FluInfo, NumFLUs)],
+    {ok, SupPid} = machi_flu_sup:start_link(),
+    [{ok, _} = machi_flu_psup:start_flu_package(P) || P <- Ps],
     Namez = [begin
                  {ok, PPid} = ?FLU_PC:start_link(P),
                  {Name, PPid}
-             end || {#p_srvr{name=Name}=P, _Dir} <- PsDirs],
+             end || #p_srvr{name=Name}=P <- Ps],
     MembersDict = machi_projection:make_members_dict(Ps),
-    MgrOpts = MgrOpts0 ++ ?DEFAULT_MGR_OPTS,
-    MgrNamez =
-        [begin
-             {ok, MPid} = ?MGR:start_link(P#p_srvr.name, MembersDict, MgrOpts),
-             {P#p_srvr.name, MPid}
-         end || P <- Ps],
-    CpApMode = case is_list(proplists:get_value(witnesses, MgrOpts)) of
+    Witnesses = proplists:get_value(witnesses, MgrOpts, []),
+    MgrNamez = [begin
+                    MgrName = machi_flu_psup:make_mgr_supname(Name),
+                    ok = ?MGR:set_chain_members(MgrName,MembersDict,Witnesses),
+                    {Name, MgrName}
+                end || #p_srvr{name=Name} <- Ps],
+    CpApMode = case Witnesses /= [] of
                    true  -> cp_mode;
                    false -> ap_mode
                end,
 
+    %% ets:insert(?TEST_ETS_TABLE, {projection_store_sleep_time, 25}),
+
     try
       [{_, Ma}|_] = MgrNamez,
       {ok, P1} = ?MGR:test_calc_projection(Ma, false),
-      [ok = ?FLU_PC:write_projection(FLUPid, public, P1) ||
+      [_ = ?FLU_PC:write_projection(FLUPid, public, P1) ||
           {_, FLUPid} <- Namez, FLUPid /= Ma],
 
       machi_partition_simulator:reset_thresholds(10, 50),
@@ -210,7 +216,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
       DoIt = fun(Iters, S_min, S_max) ->
                      %% io:format(user, "\nDoIt: top\n\n", []),
                      io:format(user, "DoIt, ", []),
-                     Pids = [spawn(fun() ->
+                     Pids = [{spawn(fun() ->
                                            random:seed(now()),
                                            [begin
                                                 erlang:yield(),
@@ -221,20 +227,40 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                                                     ?MGR:sleep_ranked_order(
                                                        S_min, S_max_rand,
                                                        M_name, All_list),
-                                                _ = ?MGR:trigger_react_to_env(MMM),
+                                                _ = (catch ?MGR:trigger_react_to_env(MMM)),
                                                 %% Be more unfair by not
                                                 %% sleeping here.
                                                 % timer:sleep(S_max - Elapsed),
                                                 Elapsed
                                             end || _ <- lists:seq(1, Iters)],
-                                           Parent ! done
-                                   end) || {M_name, MMM} <- MgrNamez ],
+                                           Parent ! {done, self()}
+                                   end), M_name} || {M_name, MMM} <- MgrNamez ],
                      [receive
-                          done ->
+                          {done, ThePid} ->
                               ok
                       after 120*1000 ->
-                              exit(icky_timeout)
-                      end || _ <- Pids]
+                              [begin
+                                   case whereis(XX) of
+                                       undefined -> ok;
+                                       XXPid -> {_, XXbin} = process_info(XXPid, backtrace),
+                                                {_, XXdict} = process_info(XXPid, dictionary),
+                                                TTT = proplists:get_value(ttt, XXdict),
+                                                io:format(user, "BACK ~w: ttt=~w\n~s\n", [XX, TTT, XXbin])
+                                   end
+                               end || XX <- [file_server_2] ++
+                                          [a_chmgr,b_chmgr,c_chmgr,d_chmgr,e_chmgr,f_chmgr,g_chmgr,h_chmgr,i_chmgr,j_chmgr] ++
+                                          [a_pstore,b_pstore,c_pstore,d_pstore,e_pstore,f_pstore,g_pstore,h_pstore,i_pstore,j_pstore] ++
+                                          [a_fitness,b_fitness,c_fitness,d_fitness,e_fitness,f_fitness,g_fitness,h_fitness,i_fitness,j_fitness] ],
+                              [begin
+                                   timer:sleep(2*1000),
+                                   case whereis(XX) of
+                                       undefined -> ok;
+                                       XXPid -> {_, XXbin} = process_info(XXPid, backtrace),
+                                                io:format(user, "BACK ~w: ~w\n~s\n", [XX, time(), XXbin])
+                                   end
+                               end || XX <- [a_pstore,b_pstore,c_pstore,d_pstore,e_pstore,f_pstore,g_pstore,h_pstore,i_pstore,j_pstore], _ <- lists:seq(1,5)],
+                              exit({icky_timeout, M_name})
+                      end || {ThePid,M_name} <- Pids]
              end,
 
       %% machi_partition_simulator:reset_thresholds(10, 50),
@@ -256,8 +282,8 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
       MaxIters = NumFLUs * (NumFLUs + 1) * 6,
       [begin
            machi_partition_simulator:always_these_partitions(Partition),
-           io:format(user, "\nSET partitions = ~w (~w of ~w) at ~w\n",
-                     [Partition, Count, length(AllPs), time()]),
+           io:format(user, "\n~s SET partitions = ~w (~w of ~w)\n",
+                     [machi_util:pretty_time(), Partition, Count, length(AllPs)]),
            true = lists:foldl(
                     fun(_, true) ->
                             true;
@@ -267,19 +293,13 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                             %% If stable, return true to short circuit remaining
                             private_projections_are_stable(Namez, DoIt)
                     end, false, lists:seq(0, MaxIters)),
-           io:format(user, "\nSweet, private projections are stable\n", []),
+           io:format(user, "\n~s Sweet, private projections are stable\n", [machi_util:pretty_time()]),
            io:format(user, "\t~P\n", [get(stable), 14]),
            io:format(user, "Rolling sanity check ... ", []),
-           MaxFiles = 800,
            PrivProjs = [{Name, begin
                                    {ok, Ps8} = ?FLU_PC:get_all_projections(
                                                   FLU, private, infinity),
-                                   Ps9 = if length(Ps8) < MaxFiles ->
-                                                 Ps8;
-                                            true ->
-                                                 lists:nthtail(MaxFiles, Ps8)
-                                         end,
-                                   [P || P <- Ps9,
+                                   [P || P <- Ps8,
                                          P#projection_v1.epoch_number /= 0]
                                end} || {Name, FLU} <- Namez],
            try
@@ -297,7 +317,11 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
            ReportXX = machi_chain_manager1_test:unanimous_report(Namez),
            true = machi_chain_manager1_test:all_reports_are_disjoint(ReportXX),
            io:format(user, "Yay for ReportXX!\n", []),
+timer:sleep(1234),
 
+           %% TODO: static count is not sufficient.  Must not delete the last
+           %%       private_proj_is_upi_unanimous projection!
+           MaxFiles = 123,
            [begin
                 Privs = filelib:wildcard(Dir ++ "/projection/private/*"),
                 FilesToDel1 = lists:sublist(Privs,
@@ -308,7 +332,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                                             max(0, length(Pubs)-MaxFiles)),
                 [_ = file:delete(File) || File <- FilesToDel2],
                 io:format(user, "Yay, now prune: ~w ~w, ", [length(FilesToDel1), length(FilesToDel2)])
-            end || Dir <- filelib:wildcard("/tmp/c/data*")],
+            end || Dir <- filelib:wildcard(TDir ++ "/data*")],
            io:format(user, "\n", []),
 
            timer:sleep(1250),
@@ -366,10 +390,10 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                       [XX, YY, erlang:get_stacktrace()]),
             exit({bummer,XX,YY})
     after
-        [ok = ?MGR:stop(MgrPid) || {_, MgrPid} <- MgrNamez],
+        exit(SupPid, normal),
+        ok = machi_partition_simulator:stop(),
         [ok = ?FLU_PC:quit(PPid) || {_, PPid} <- Namez],
-        [ok = machi_flu1:stop(FLUPid) || FLUPid <- FLU_pids],
-        ok = machi_partition_simulator:stop()
+        machi_util:wait_for_death(SupPid, 100)
     end.
 
 %% Many of the static partition lists below have been problematic at one
@@ -378,32 +402,70 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
 %% Uncomment *one* of the following make_partition_list() bodies.
 
 make_partition_list(All_list) ->
-    [
-     [{b,c}],
-     [{a,c},{b,c}]
-     %% [{b,c}],
-     %% [],
-     %% [{c,d}],
-     %% [],
-     %% [{d,e}],
-     %% [],
-     %% [{c,e}]
-    ].
+    %% [ [{a,c},{b,c}],
+    %%   [{a,b},{c,b}] ].
 
-    %% _X_Ys1 = [[{X,Y}] || X <- All_list, Y <- All_list, X /= Y],
-    %% _X_Ys2 = [[{X,Y}, {A,B}] || X <- All_list, Y <- All_list, X /= Y,
-    %%                             A <- All_list, B <- All_list, A /= B,
-    %%                             X /= A],
-    %% _X_Ys3 = [[{X,Y}, {A,B}, {C,D}] || X <- All_list, Y <- All_list, X /= Y,
-    %%                                    A <- All_list, B <- All_list, A /= B,
-    %%                                    C <- All_list, D <- All_list, C /= D,
-    %%                                    X /= A, X /= C, A /= C],
+    %% Island1 = [hd(All_list), lists:last(All_list)],
+    %% Island2 = All_list -- Island1,
+    %% [
+    %%  [{X,Y} || X <- Island1, Y <- Island2]
+    %%  ++
+    %%  [{X,Y} || X <- Island2, Y <- Island1]
+    %% ].
+
+    _X_Ys1 = [[{X,Y}] || X <- All_list, Y <- All_list, X /= Y],
+    _X_Ys2 = [[{X,Y}, {A,B}] || X <- All_list, Y <- All_list, X /= Y,
+                                A <- All_list, B <- All_list, A /= B,
+                                X /= A],
+    _X_Ys3 = [[{X,Y}, {A,B}, {C,D}] || X <- All_list, Y <- All_list, X /= Y,
+                                       A <- All_list, B <- All_list, A /= B,
+                                       C <- All_list, D <- All_list, C /= D,
+                                       X /= A, X /= C, A /= C],
+    _X_Ys4 = [[{X,Y}, {A,B}, {C,D}, {E,F}] ||
+                                       X <- All_list, Y <- All_list, X /= Y,
+                                       A <- All_list, B <- All_list, A /= B,
+                                       C <- All_list, D <- All_list, C /= D,
+                                       E <- All_list, F <- All_list, E /= F,
+                                       X /= A, X /= C, X /= E, A /= C, A /= E,
+                                       C /= E],
     %% Concat = _X_Ys1,
-    %% %% Concat = _X_Ys2,
-    %% %% Concat = _X_Ys1 ++ _X_Ys2,
-    %% %% %% Concat = _X_Ys3,
-    %% %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
-    %% random_sort(lists:usort([lists:sort(L) || L <- Concat])).
+    %% Concat = _X_Ys2,
+    %% Concat = _X_Ys1 ++ _X_Ys2,
+    %% %% Concat = _X_Ys3,
+    %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
+    Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3 ++ _X_Ys4,
+    NoPartitions = lists:duplicate(trunc(length(Concat) * 0.1), []),
+    uniq_reverse(random_sort(lists:usort([lists:sort(L) || L <- Concat])
+                             ++ NoPartitions)).
+
+   %% %% for len=5 and 2 witnesses
+   %%  [
+   %%   [{b,c}],
+   %%   [],
+   %%   [{b,c}],
+   %%   [{a,c},{b,c}],
+   %%   [{b,c}],
+   %%   [],
+   %%   [{c,d}],
+   %%   [],
+   %%   [{d,e}],
+   %%   [],
+   %%   [{d,c}],
+   %%   [{b,c}],
+   %%   [],
+   %%   [{c,e}]
+   %%  ].
+    %% [
+    %%  [{b,c}],
+    %%  [{a,c},{b,c}]
+    %%  %% [{b,c}],
+    %%  %% [],
+    %%  %% [{c,d}],
+    %%  %% [],
+    %%  %% [{d,e}],
+    %%  %% [],
+    %%  %% [{c,e}]
+    %% ].
 
     %% [
     %%  [{b,c}],
@@ -583,7 +645,7 @@ private_projections_are_stable(Namez, PollFunc) ->
     FLU_uses = [{Name, EpochID} ||
                    {Name,{EpochID,_UPI,Rep,_Dn,_W,InnerP}} <- Private2],
     Witnesses = hd([Ws ||
-                   {_Name,{_EpochID,_UPI,Rep,_Dn,Ws,InnerP}} <- Private2]),
+                   {_Name,{_EpochID,_UPI,Rep,_Dn,Ws,InnerP}} <- Private2x]),
     HaveWitnesses_p = Witnesses /= [],
     CMode = if HaveWitnesses_p -> cp_mode;
                true            -> ap_mode
@@ -644,6 +706,9 @@ private_projections_are_stable(Namez, PollFunc) ->
                         %% then we're OK.
                         Private2None = [X || {_,{_,[],[],_,_,_}}=X <- Private2],
                         length(Private2None) >= FullMajority;
+                    [] when Private2 == [], Private2x /= [] ->
+                        %% Everyone is using none proj, chain is unavailable.
+                        true;
                     Else ->
                         %% This is bad: we have a count that's less than
                         %% FullMajority but greater than 1.
@@ -675,15 +740,26 @@ get_latest_inner_proj_summ(FLU) ->
     {ok, Proj} = ?FLU_PC:read_latest_projection(FLU, private),
     #projection_v1{epoch_number=E, epoch_csum= <<CSum4:4/binary, _/binary>>,
                    upi=UPI, repairing=Repairing,
-                   witnesses=Witnesses, down=Down} =
-        machi_chain_manager1:inner_projection_or_self(Proj),
-    Inner_p = machi_chain_manager1:inner_projection_exists(Proj),
+                   witnesses=Witnesses, down=Down} = Proj,
+    Inner_p = false,
     EpochID = {E, CSum4},
     {EpochID, UPI, Repairing, Down, Witnesses, Inner_p}.
 
+uniq_reverse(L) ->
+    uniq_reverse(L, []).
+
+uniq_reverse([], Acc) ->
+    Acc;
+uniq_reverse([H|T], []) ->
+    uniq_reverse(T, [H]);
+uniq_reverse([Same|T], [Same|_]=Acc) ->
+    uniq_reverse(T, Acc);
+uniq_reverse([H|T], Acc) ->
+    uniq_reverse(T, [H|Acc]).
+
 random_sort(L) ->
     random:seed(now()),
-    L1 = [{random:uniform(99999), X} || X <- L],
+    L1 = [{random:uniform(), X} || X <- L],
     [X || {_, X} <- lists:sort(L1)].
 
 foo(NumFLUs, MgrOpts0) ->

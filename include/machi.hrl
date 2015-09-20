@@ -33,3 +33,5 @@
 %% Protocol Buffers goop
 -define(PB_MAX_MSG_SIZE, (33*1024*1024)).
 -define(PB_PACKET_OPTS, [{packet, 4}, {packet_size, ?PB_MAX_MSG_SIZE}]).
+
+-define(TEST_ETS_TABLE, test_ets_table).
