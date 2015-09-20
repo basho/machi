@@ -251,6 +251,14 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                                           [a_chmgr,b_chmgr,c_chmgr,d_chmgr,e_chmgr,f_chmgr,g_chmgr,h_chmgr,i_chmgr,j_chmgr] ++
                                           [a_pstore,b_pstore,c_pstore,d_pstore,e_pstore,f_pstore,g_pstore,h_pstore,i_pstore,j_pstore] ++
                                           [a_fitness,b_fitness,c_fitness,d_fitness,e_fitness,f_fitness,g_fitness,h_fitness,i_fitness,j_fitness] ],
+                              [begin
+                                   timer:sleep(2*1000),
+                                   case whereis(XX) of
+                                       undefined -> ok;
+                                       XXPid -> {_, XXbin} = process_info(XXPid, backtrace),
+                                                io:format(user, "BACK ~w: ~w\n~s\n", [XX, time(), XXbin])
+                                   end
+                               end || XX <- [a_pstore,b_pstore,c_pstore,d_pstore,e_pstore,f_pstore,g_pstore,h_pstore,i_pstore,j_pstore], _ <- lists:seq(1,5)],
                               exit({icky_timeout, M_name})
                       end || {ThePid,M_name} <- Pids]
              end,
