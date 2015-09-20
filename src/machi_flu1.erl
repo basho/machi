@@ -189,7 +189,8 @@ start_append_server(S, AckPid) ->
 run_listen_server(#state{flu_name=FluName, tcp_port=TcpPort}=S) ->
     register(make_listener_regname(FluName), self()),
     SockOpts = ?PB_PACKET_OPTS ++
-        [{reuseaddr, true}, {mode, binary}, {active, false}],
+        [{reuseaddr, true}, {mode, binary}, {active, false},
+         {backlog,8192}],
     case gen_tcp:listen(TcpPort, SockOpts) of
         {ok, LSock} ->
             listen_server_loop(LSock, S);
@@ -455,8 +456,16 @@ do_server_proj_request({read_projection, ProjType, Epoch},
                        #state{proj_store=ProjStore}) ->
     machi_projection_store:read(ProjStore, ProjType, Epoch);
 do_server_proj_request({write_projection, ProjType, Proj},
-                       #state{proj_store=ProjStore}) ->
-    catch machi_projection_store:write(ProjStore, ProjType, Proj);
+                       #state{flu_name=FluName, proj_store=ProjStore}) ->
+    if Proj#projection_v1.epoch_number == ?SPAM_PROJ_EPOCH ->
+            %% io:format(user, "DBG ~s ~w ~P\n", [?MODULE, ?LINE, Proj, 5]),
+            Chmgr = machi_flu_psup:make_fitness_regname(FluName),
+            [Map] = Proj#projection_v1.dbg,
+            catch machi_fitness:send_fitness_update_spam(
+                    Chmgr, Proj#projection_v1.author_server, Map);
+       true ->
+            catch machi_projection_store:write(ProjStore, ProjType, Proj)
+    end;
 do_server_proj_request({get_all_projections, ProjType},
                        #state{proj_store=ProjStore}) ->
     machi_projection_store:get_all_projections(ProjStore, ProjType);

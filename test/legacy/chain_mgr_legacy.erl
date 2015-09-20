@@ -353,7 +353,5 @@ find_common_prefix([H|L1], [H|L2]) ->
 find_common_prefix(_, _) ->
     [].
 
-inner_projection_exists(#projection_v1{inner=undefined}) ->
-    false;
-inner_projection_exists(#projection_v1{inner=_}) ->
-    true.
+inner_projection_exists(_) ->
+    false.

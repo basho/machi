@@ -28,6 +28,7 @@
 
 -behaviour(supervisor).
 
+-include("machi.hrl").
 -include("machi_verbose.hrl").
 
 -ifdef(PULSE).
@@ -54,6 +55,9 @@ init([]) ->
     MaxRestarts = 1000,
     MaxSecondsBetweenRestarts = 3600,
     SupFlags = {RestartStrategy, MaxRestarts, MaxSecondsBetweenRestarts},
+
+    Tab = ets:new(?TEST_ETS_TABLE, [named_table, public, ordered_set,
+                                    {read_concurrency,true}]),
 
     Ps = get_initial_flus(),
     FLU_specs = [machi_flu_psup:make_package_spec(FluName, TcpPort,

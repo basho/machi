@@ -396,8 +396,7 @@ make_req_fun({get_epoch_id},
     fun() -> case Mod:read_latest_projection(Sock, private) of
                  {ok, P} ->
                      #projection_v1{epoch_number=Epoch,
-                                    epoch_csum=CSum} =
-                         machi_chain_manager1:inner_projection_or_self(P),
+                                    epoch_csum=CSum} = P,
                      {ok, {Epoch, CSum}};
                  Error ->
                      Error

@@ -61,6 +61,7 @@
 
 -behaviour(supervisor).
 
+-include("machi_projection.hrl").
 -include("machi_verbose.hrl").
 
 -ifdef(PULSE).
@@ -72,10 +73,12 @@
 -endif.
 
 %% External API
--export([make_package_spec/4, start_flu_package/4, stop_flu_package/1]).
+-export([make_package_spec/4,
+         start_flu_package/1, start_flu_package/4, stop_flu_package/1]).
 %% Internal API
 -export([start_link/4,
-         make_p_regname/1, make_mgr_supname/1, make_proj_supname/1]).
+         make_flu_regname/1, make_p_regname/1, make_mgr_supname/1,
+         make_proj_supname/1, make_fitness_regname/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -84,6 +87,10 @@ make_package_spec(FluName, TcpPort, DataDir, Props) ->
     {FluName, {machi_flu_psup, start_link,
                [FluName, TcpPort, DataDir, Props]},
      permanent, ?SHUTDOWN, supervisor, []}.
+
+start_flu_package(#p_srvr{name=FluName, port=TcpPort, props=Props}) ->
+    DataDir = proplists:get_value(data_dir, Props),
+    start_flu_package(FluName, TcpPort, DataDir, Props).
 
 start_flu_package(FluName, TcpPort, DataDir, Props) ->
     Spec = make_package_spec(FluName, TcpPort, DataDir, Props),
@@ -114,6 +121,11 @@ init([FluName, TcpPort, DataDir, Props0]) ->
                {machi_projection_store, start_link,
                 [ProjRegName, DataDir, FluName]},
                permanent, ?SHUTDOWN, worker, []},
+    FitnessRegName = make_fitness_regname(FluName),
+    FitnessSpec = {FitnessRegName,
+               {machi_fitness, start_link,
+                [ [{FluName}|Props] ]},
+               permanent, ?SHUTDOWN, worker, []},
     MgrSpec = {make_mgr_supname(FluName),
                {machi_chain_manager1, start_link,
                 [FluName, [], Props]},
@@ -122,7 +134,10 @@ init([FluName, TcpPort, DataDir, Props0]) ->
                {machi_flu1, start_link,
                 [ [{FluName, TcpPort, DataDir}|Props] ]},
                permanent, ?SHUTDOWN, worker, []},
-    {ok, {SupFlags, [ProjSpec, MgrSpec, FluSpec]}}.
+    {ok, {SupFlags, [ProjSpec, FitnessSpec, MgrSpec, FluSpec]}}.
+
+make_flu_regname(FluName) when is_atom(FluName) ->
+    FluName.
 
 make_p_regname(FluName) when is_atom(FluName) ->
     list_to_atom("flusup_" ++ atom_to_list(FluName)).
@@ -132,3 +147,6 @@ make_mgr_supname(MgrName) when is_atom(MgrName) ->
 
 make_proj_supname(ProjName) when is_atom(ProjName) ->
     list_to_atom(atom_to_list(ProjName) ++ "_pstore").
+
+make_fitness_regname(FluName) when is_atom(FluName) ->
+    list_to_atom(atom_to_list(FluName) ++ "_fitness").
