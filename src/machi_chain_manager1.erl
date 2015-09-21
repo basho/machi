@@ -613,6 +613,9 @@ rank_and_sort_projections_with_extra(All_queried_list, FLUsRs, ProjectionType,
             NotBestPsEpochFilt =
                 [Proj || Proj <- Ps, Proj /= BestProj,
                          Proj#projection_v1.epoch_number == BestEpoch],
+            BadAnswers2 = [Answer || {_FLU, Answer} <- FLUsRs,
+                                     not is_record(Answer, projection_v1)
+                                         orelse Answer /= BestProj],
             %% Wow, I'm not sure how long this bug has been here, but it's
             %% likely 5 months old (April 2015).  I just now noticed a problem
             %% where BestProj was epoch 1194, but NotBestPs contained a
@@ -1732,10 +1735,38 @@ react_to_env_C100(P_newprop,
     ?REACT(c100),
 
     P_cur_for_sanity = if CMode == cp_mode ->
-                               P_current_calc;
+                               %% Assume E = P_latest's epoch #.  P_current
+                               %% may be at epoch E-delta but P_current_calc
+                               %% is at exactly E because E-delta is stale,
+                               %% and the CP world has changed while we were
+                               %% napping.  But the "exactly epoch E" will
+                               %% cause problems for the strictly monotonic
+                               %% epoch check in our sanity checking.  So we
+                               %% fake the epoch number here to work around
+                               %% the strictly-SI check.
+                               %%
+                               %% If we don't fake the epoch here, then (I
+                               %% have observed today) that we go through
+                               %% several insane projection attempts and then
+                               %% reset and eventually come to the right
+                               %% answer ... but this churn is avoidable, and
+                               %% for CP mode this is an ok safeguard to bend
+                               %% expressly because of the make_zerf() aspect
+                               %% of CP's chain processing.
+                               E_c = P_current#projection_v1.epoch_number,
+                               P_current_calc#projection_v1{epoch_number=E_c};
                           CMode == ap_mode ->
                                P_current
                        end,
+    ?REACT({c100, ?LINE,
+            [{current_epoch, P_cur_for_sanity#projection_v1.epoch_number},
+             {current_author, P_cur_for_sanity#projection_v1.author_server},
+             {current_upi, P_cur_for_sanity#projection_v1.upi},
+             {current_repairing, P_cur_for_sanity#projection_v1.repairing},
+             {latest_epoch, P_latest#projection_v1.epoch_number},
+             {latest_author, P_latest#projection_v1.author_server},
+             {latest_upi, P_latest#projection_v1.upi},
+             {latest_repairing, P_latest#projection_v1.repairing}]}),
     Sane = projection_transition_is_sane(P_cur_for_sanity, P_latest, MyName),
     if Sane == true ->
             ok;
