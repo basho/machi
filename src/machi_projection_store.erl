@@ -137,6 +137,7 @@ write(PidSpec, ProjType, Proj, Timeout)
        is_record(Proj, projection_v1),
        is_integer(Proj#projection_v1.epoch_number),
        Proj#projection_v1.epoch_number >= 0 ->
+    testing_sleep_perhaps(),
     g_call(PidSpec, {write, ProjType, Proj}, Timeout).
 
 %% @doc Fetch all projection records of type `ProjType'.
@@ -176,7 +177,6 @@ set_consistency_mode(PidSpec, CMode)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 g_call(PidSpec, Arg, Timeout) ->
-    testing_sleep_perhaps(),
     LC1 = lclock_get(),
     {Res, LC2} = gen_server:call(PidSpec, {Arg, LC1}, Timeout),
     lclock_update(LC2),
@@ -437,7 +437,9 @@ testing_sleep_perhaps() ->
     try
         [{_,Max}] = ets:lookup(?TEST_ETS_TABLE, projection_store_sleep_time),
         MSec = random:uniform(Max),
-        timer:sleep(MSec * 5),
+        io:format(user, "{", []),
+        timer:sleep(MSec),
+        io:format(user, "}", []),
         ok
     catch _X:_Y ->
             ok

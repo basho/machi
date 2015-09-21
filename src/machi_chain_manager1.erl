@@ -477,41 +477,58 @@ do_cl_write_public_proj(Proj, S) ->
 cl_write_public_proj(Epoch, Proj, S) ->
     cl_write_public_proj(Epoch, Proj, false, S).
 
-cl_write_public_proj_skip_local_error(Epoch, Proj, S) ->
+cl_write_public_proj_ignore_written_error(Epoch, Proj, S) ->
     cl_write_public_proj(Epoch, Proj, true, S).
 
-cl_write_public_proj(Epoch, Proj, SkipLocalWriteErrorP, S) ->
-    %% Write to local public projection store first, and if it succeeds,
+cl_write_public_proj(Epoch, Proj, IgnoreWrittenErrorP, S) ->
+    %% OLD: Write to local public projection store first, and if it succeeds,
     %% then write to all remote public projection stores.
-    cl_write_public_proj_local(Epoch, Proj, SkipLocalWriteErrorP, S).
-
-cl_write_public_proj_local(Epoch, Proj, SkipLocalWriteErrorP,
-                           #ch_mgr{name=MyName}=S) ->
+    %% NEW: Hypothesis: The OLD idea is a bad idea and causes needless retries
+    %% via racing with other wrier
+    %% NEW: Let's see what kind of trouble we can get ourselves into if
+    %%      we abort our writing efforts if we encounter an
+    %%      {error,written} status.
+    %%      Heh, that doesn't work too well: if we have random uniform write
+    %%      delays of 0-1,500 msec, then we end up abandoning this epoch
+    %%      number at the first sign of trouble and then re-iterate to suggest
+    %%      a new epoch number ... which causes *more* thrash, not less.
     {_UpNodes, Partitions, S2} = calc_up_nodes(S),
-    Res0 = perhaps_call_t(
-             S, Partitions, MyName,
-             fun(Pid) -> ?FLU_PC:write_projection(Pid, public, Proj, ?TO) end),
-    Continue = fun() ->
-                  FLUs = Proj#projection_v1.all_members -- [MyName],
-                  cl_write_public_proj_remote(FLUs, Partitions, Epoch, Proj, S)
-               end,
-    case Res0 of
-        ok ->
-            {XX, SS} = Continue(),
-            {{local_write_result, ok, XX}, SS};
-        Else when SkipLocalWriteErrorP ->
-            {XX, SS} = Continue(),
-            {{local_write_result, Else, XX}, SS};
-        Else ->
-            {Else, S2}
-    end.
+    FLUs = Proj#projection_v1.all_members,
+    cl_write_public_proj2(FLUs, Partitions, Epoch, Proj,
+                          IgnoreWrittenErrorP, S2).
 
-cl_write_public_proj_remote(FLUs, Partitions, _Epoch, Proj, S) ->
+cl_write_public_proj2(FLUs, Partitions, Epoch, Proj, IgnoreWrittenErrorP, S) ->
     %% We're going to be very care-free about this write because we'll rely
     %% on the read side to do any read repair.
     DoIt = fun(Pid) -> ?FLU_PC:write_projection(Pid, public, Proj, ?TO) end,
-    Rs = [{FLU, perhaps_call_t(S, Partitions, FLU, fun(Pid) -> DoIt(Pid) end)} ||
-             FLU <- FLUs],
+    %% Rs = [{FLU, perhaps_call_t(S, Partitions, FLU, fun(Pid) -> DoIt(Pid) end)} ||
+    %%          FLU <- FLUs],
+    Rs = lists:foldl(
+           fun(FLU, {false=_KeepGoingP, Acc}) ->
+                   {false, [{FLU,skipped}|Acc]};
+              (FLU, {true=_KeepGoingP, Acc}) ->
+                   case perhaps_call_t(S, Partitions, FLU, DoIt) of
+                       {error,written}=Written when IgnoreWrittenErrorP ->
+                           %% io:format(user, "\nTried but written and ignoring written\n", []),
+                           {true, [{FLU,Written}|Acc]};
+                       {error,written}=Written when not IgnoreWrittenErrorP ->
+                           %% Brute-force read-repair-like good enough.
+                           DoRead = fun(Pid) -> ?FLU_PC:read_projection(
+                                                   Pid, public, Epoch, ?TO)
+                                    end,
+                           {ok, Proj2} = perhaps_call_t(S, Partitions, FLU,
+                                                        DoRead),
+                           DoIt2 = fun(Pid) -> ?FLU_PC:write_projection(Pid, public, Proj2, ?TO) end,
+                           _Rs=[_ = perhaps_call_t(S, Partitions, Fl, DoIt2)||
+                                   Fl <- FLUs],
+                           %% io:format(user, "\nTried ~w ~W but repairing with ~w ~W: ~w\n", [Epoch, Proj#projection_v1.epoch_csum, 4, Epoch, Proj2#projection_v1.epoch_csum, 4, _Rs]),
+                           {false, [{FLU,Written}|Acc]};
+                       Else ->
+                           %% io:format(user, "\nTried but got an Else ~p\n", [Else]),
+                           {true, [{FLU,Else}|Acc]}
+                   end
+           end, {true, []}, FLUs),
+    %% io:format(user, "\nWrite public ~w by ~w: ~w\n", [Epoch, S#ch_mgr.name, Rs]),
     {{remote_write_results, Rs}, S}.
 
 do_cl_read_latest_public_projection(ReadRepairP,
@@ -641,7 +658,7 @@ do_read_repair(FLUsRs, _Extra, #ch_mgr{proj=CurrentProj} = S) ->
             %% We're doing repair, so use the flavor that will
             %% continue to all others even if there is an
             %% error_written on the local FLU.
-            {_DontCare, _S2}=Res = cl_write_public_proj_skip_local_error(
+            {_DontCare, _S2}=Res = cl_write_public_proj_ignore_written_error(
                                                            Epoch, BestProj, S),
             Res
     end.
@@ -1975,7 +1992,7 @@ react_to_env_C300(#projection_v1{epoch_number=_Epoch_newprop}=P_newprop,
 react_to_env_C310(P_newprop, S) ->
     ?REACT(c310),
     Epoch = P_newprop#projection_v1.epoch_number,
-    {WriteRes, S2} = cl_write_public_proj_skip_local_error(Epoch, P_newprop, S),
+    {WriteRes, S2} = cl_write_public_proj(Epoch, P_newprop, S),
     ?REACT({c310, ?LINE,
             [{newprop, machi_projection:make_summary(P_newprop)},
             {write_result, WriteRes}]}),

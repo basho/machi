@@ -86,7 +86,7 @@ send_spam_to_everyone(Pid) ->
 init([{MyFluName}|Args]) ->
     RegName = machi_flu_psup:make_fitness_regname(MyFluName),
     register(RegName, self()),
-timer:send_interval(1000, dump),
+timer:send_interval(5000, dump),
     UseSimulatorP = proplists:get_value(use_partition_simulator, Args, false),
     {ok, #state{my_flu_name=MyFluName, reg_name=RegName,
                 partition_simulator_p=UseSimulatorP,
@@ -184,8 +184,8 @@ handle_info({adjust_down_list, FLU}, #state{active_unfit=ActiveUnfit}=S) ->
     end;
 handle_info(dump, #state{my_flu_name=MyFluName,active_unfit=ActiveUnfit,
                          pending_map=Map}=S) ->
-    io:format(user, "DUMP: ~w/~w: ~p ~W\n", [MyFluName, self(), ActiveUnfit, map_value(Map), 13]),
-    %% io:format(user, "DUMP ~w: ~w, ", [MyFluName, ActiveUnfit]),
+    %% io:format(user, "DUMP: ~w/~w: ~p ~W\n", [MyFluName, self(), ActiveUnfit, map_value(Map), 13]),
+    io:format(user, "DUMP ~w: ~w, ", [MyFluName, ActiveUnfit]),
     {noreply, S};
 handle_info(_Info, S) ->
     {noreply, S}.

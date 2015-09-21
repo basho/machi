@@ -201,8 +201,6 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                    false -> ap_mode
                end,
 
-    %% ets:insert(?TEST_ETS_TABLE, {projection_store_sleep_time, 25}),
-
     try
       [{_, Ma}|_] = MgrNamez,
       {ok, P1} = ?MGR:test_calc_projection(Ma, false),
@@ -220,6 +218,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                                            random:seed(now()),
                                            [begin
                                                 erlang:yield(),
+                                                perhaps_adjust_pstore_sleep(),
                                                 S_max_rand = random:uniform(
                                                                S_max + 1),
                                                 %% io:format(user, "{t}", []),
@@ -251,14 +250,16 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                                           [a_chmgr,b_chmgr,c_chmgr,d_chmgr,e_chmgr,f_chmgr,g_chmgr,h_chmgr,i_chmgr,j_chmgr] ++
                                           [a_pstore,b_pstore,c_pstore,d_pstore,e_pstore,f_pstore,g_pstore,h_pstore,i_pstore,j_pstore] ++
                                           [a_fitness,b_fitness,c_fitness,d_fitness,e_fitness,f_fitness,g_fitness,h_fitness,i_fitness,j_fitness] ],
-                              [begin
-                                   timer:sleep(2*1000),
-                                   case whereis(XX) of
-                                       undefined -> ok;
-                                       XXPid -> {_, XXbin} = process_info(XXPid, backtrace),
-                                                io:format(user, "BACK ~w: ~w\n~s\n", [XX, time(), XXbin])
-                                   end
-                               end || XX <- [a_pstore,b_pstore,c_pstore,d_pstore,e_pstore,f_pstore,g_pstore,h_pstore,i_pstore,j_pstore], _ <- lists:seq(1,5)],
+                              [begin 
+                                   [begin
+                                        case whereis(XX) of
+                                            undefined -> ok;
+                                            XXPid -> {_, XXbin} = process_info(XXPid, backtrace),
+                                                     io:format(user, "BACK ~w: ~w\n~s\n", [XX, time(), XXbin])
+                                        end
+                                    end || XX <- [a_pstore,b_pstore,c_pstore,d_pstore,e_pstore,f_pstore,g_pstore,h_pstore,i_pstore,j_pstore] ],
+                                   timer:sleep(20)
+                               end || _ <- lists:seq(1,30)],
                               exit({icky_timeout, M_name})
                       end || {ThePid,M_name} <- Pids]
              end,
@@ -421,19 +422,19 @@ make_partition_list(All_list) ->
                                        A <- All_list, B <- All_list, A /= B,
                                        C <- All_list, D <- All_list, C /= D,
                                        X /= A, X /= C, A /= C],
-    _X_Ys4 = [[{X,Y}, {A,B}, {C,D}, {E,F}] ||
-                                       X <- All_list, Y <- All_list, X /= Y,
-                                       A <- All_list, B <- All_list, A /= B,
-                                       C <- All_list, D <- All_list, C /= D,
-                                       E <- All_list, F <- All_list, E /= F,
-                                       X /= A, X /= C, X /= E, A /= C, A /= E,
-                                       C /= E],
+    %% _X_Ys4 = [[{X,Y}, {A,B}, {C,D}, {E,F}] ||
+    %%                                    X <- All_list, Y <- All_list, X /= Y,
+    %%                                    A <- All_list, B <- All_list, A /= B,
+    %%                                    C <- All_list, D <- All_list, C /= D,
+    %%                                    E <- All_list, F <- All_list, E /= F,
+    %%                                    X /= A, X /= C, X /= E, A /= C, A /= E,
+    %%                                    C /= E],
     %% Concat = _X_Ys1,
     %% Concat = _X_Ys2,
     %% Concat = _X_Ys1 ++ _X_Ys2,
     %% %% Concat = _X_Ys3,
-    %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
-    Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3 ++ _X_Ys4,
+    Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3,
+    %% Concat = _X_Ys1 ++ _X_Ys2 ++ _X_Ys3 ++ _X_Ys4,
     NoPartitions = lists:duplicate(trunc(length(Concat) * 0.1), []),
     uniq_reverse(random_sort(lists:usort([lists:sort(L) || L <- Concat])
                              ++ NoPartitions)).
@@ -869,6 +870,15 @@ uniq_c([H|T], Count, H) ->
     uniq_c(T, Count+1, H);
 uniq_c([H|T], Count, Last) ->
     [{Count, Last}|uniq_c(T, 1, H)].
+
+perhaps_adjust_pstore_sleep() ->
+    try
+        {ok, Bin} = file:read_file("/tmp/pstore_sleep_msec"),
+        {MSec,_} = string:to_integer(binary_to_list(Bin)),
+        ets:insert(?TEST_ETS_TABLE, {projection_store_sleep_time, MSec})
+    catch _:_ ->
+            ok
+    end.
 
 
 %%       MaxIters = NumFLUs * (NumFLUs + 1) * 6,
