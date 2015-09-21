@@ -106,6 +106,10 @@
 %% Maximum length of the history of adopted projections (via C120).
 -define(MAX_HISTORY_LENGTH, 30).
 
+%% Number of retries in the react_to_env loop that we'll wait for a better
+%% author to write a unanimous projection.
+-define(RETRIES_FOR_BETTER_AUTHOR, 3).
+
 %% API
 -export([start_link/2, start_link/3, stop/1, ping/1,
          set_chain_members/2, set_chain_members/3, set_active/2,
@@ -1488,13 +1492,28 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                              Rank_newprop, Rank_latest, S);
 
         %% A40a (see flowchart)
-        Rank_newprop > Rank_latest ->
+        (Rank_newprop > Rank_latest) % clause1
+        orelse
+        (Rank_newprop > 0            % clause2 (multi-condition, keep reading!)
+         andalso
+         P_latest#projection_v1.author_server == MyName
+         andalso
+           (P_newprop#projection_v1.upi /= P_latest#projection_v1.upi
+            orelse
+            P_newprop#projection_v1.repairing /= P_latest#projection_v1.repairing)) ->
             ?REACT({a40, ?LINE,
-                    [{rank_latest, Rank_latest},
+                    [%% clause1 info
+                     {rank_latest, Rank_latest},
                      {rank_newprop, Rank_newprop},
-                     {latest_author, P_latest#projection_v1.author_server}]}),
+                     {latest_author, P_latest#projection_v1.author_server},
+                     %% clause2 info
+                     {latest_author, P_latest#projection_v1.author_server},
+                     {newprop_upi, P_newprop#projection_v1.upi},
+                     {latest_upi, P_latest#projection_v1.upi},
+                     {newprop_repairing, P_newprop#projection_v1.repairing},
+                     {latest_repairing, P_latest#projection_v1.repairing}]}),
 
-            %% TODO: There may be an "improvement" here.  If we're the
+            %% TODO: There may be an "improvement" for clause 1?  If we're the
             %% highest-ranking FLU in the all_members list, then if we make a
             %% projection where our UPI list is the same as P_latest's, and
             %% our repairing list is the same as P_latest's, then it may not
@@ -1502,24 +1521,39 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
             %% anything UPI-wise or repairing-wise.  But it isn't clear to me
             %% if it's 100% correct to "improve" here and skip writing
             %% P_newprop, yet.
-            react_to_env_C300(P_newprop, P_latest, S);
+            %%
+            %% clause2: A40b (see flowchart)
 
-        %% A40b (see flowchart)
-        Rank_newprop > 0
-        andalso
-        P_latest#projection_v1.author_server == MyName
-        andalso
-        (P_newprop#projection_v1.upi /= P_latest#projection_v1.upi
-         orelse
-         P_newprop#projection_v1.repairing /= P_latest#projection_v1.repairing) ->
-            ?REACT({a40, ?LINE,
-                   [{latest_author, P_latest#projection_v1.author_server},
-                   {newprop_upi, P_newprop#projection_v1.upi},
-                   {latest_upi, P_latest#projection_v1.upi},
-                   {newprop_repairing, P_newprop#projection_v1.repairing},
-                   {latest_repairing, P_latest#projection_v1.repairing}]}),
-
-            react_to_env_C300(P_newprop, P_latest, S);
+            %% "Optimization" to avoid too many cooks in the kitchen ... not
+            %% necessary for correctness.  Just trying to reduce churn a bit.
+            %%
+            %% If we're here, we believe that P_newprop is perhap better than
+            %% P_latest.  But let's not be too hasty.  If I believe that I am
+            %% the tail of the current proj, then consider my opinion to be
+            %% better and therefore I'll go to C300 right away; all others
+            %% ought to wait a while via C200.  But we won't defer C300
+            %% forever: that's why we check Retries.
+            P_current_upi = P_current#projection_v1.upi,
+            case (P_current_upi == []
+                  orelse
+                  lists:last(P_current_upi) == MyName)
+                 orelse
+                 (Retries > ?RETRIES_FOR_BETTER_AUTHOR) of
+                true ->
+                    ?REACT({a40,?LINE, []}),
+                    react_to_env_C300(P_newprop, P_latest, S);
+                false ->
+                    ?REACT({a40,?LINE, []}),
+                    %% Let's use the "kick" side-effect of C200 to encourage
+                    %% P_current's tail to take action.
+                    P_kick = if P_current_upi == [] ->
+                                     P_latest;  % shug, just pick this one
+                                true ->
+                                     Auth = lists:last(P_current_upi),
+                                     P_latest#projection_v1{author_server=Auth}
+                             end,
+                    react_to_env_C200(Retries, P_kick, S)
+            end;
 
         %% A40c (see flowchart)
         LatestAuthorDownP ->
@@ -1686,7 +1720,7 @@ react_to_env_B10(Retries, P_newprop, P_latest, LatestUnanimousP, P_current_calc,
 
             react_to_env_C100(P_newprop, P_latest, P_current_calc, S);
 
-        Retries > 2 ->
+        Retries > ?RETRIES_FOR_BETTER_AUTHOR ->
             ?REACT({b10, ?LINE, [{retries, Retries}]}),
 
             %% The author of P_latest is too slow or crashed.
@@ -2005,6 +2039,8 @@ react_to_env_C200(Retries, P_latest, S) ->
     ?REACT(c200),
     try
         AuthorProxyPid = proxy_pid(P_latest#projection_v1.author_server, S),
+        ?REACT({c200, ?LINE,
+                [{kick_server, P_latest#projection_v1.author_server}]}),
         ?FLU_PC:kick_projection_reaction(AuthorProxyPid, [])
     catch _Type:_Err ->
             %% ?V("TODO: tell_author_yo is broken: ~p ~p\n",
@@ -2015,7 +2051,7 @@ react_to_env_C200(Retries, P_latest, S) ->
 
 react_to_env_C210(Retries, #ch_mgr{name=MyName, proj=Proj} = S) ->
     ?REACT(c210),
-    sleep_ranked_order(10, 100, MyName, Proj#projection_v1.all_members),
+    sleep_ranked_order(250, 500, MyName, Proj#projection_v1.all_members),
     react_to_env_C220(Retries, S).
 
 react_to_env_C220(Retries, S) ->
