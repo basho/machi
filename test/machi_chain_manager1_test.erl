@@ -313,8 +313,7 @@ smoke1_test() ->
             {error, partition} -> timer:sleep(500);
             _                  -> ok
         end,
-        {local_write_result, ok,
-         {remote_write_results, [{b,ok},{c,ok}]}} =
+        {remote_write_results,{true,[{c,ok},{b,ok},{a,ok}]}} =
             ?MGR:test_write_public_projection(M0, P1),
         {unanimous, P1, Extra1} = ?MGR:test_read_latest_public_projection(M0, false),
 
