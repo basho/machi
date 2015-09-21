@@ -1759,7 +1759,9 @@ react_to_env_C100(P_newprop,
                                %% for CP mode this is an ok safeguard to bend
                                %% expressly because of the make_zerf() aspect
                                %% of CP's chain processing.
-                               E_c = P_current#projection_v1.epoch_number,
+                               E_c = erlang:min(
+                                     P_current#projection_v1.epoch_number,
+                                     P_current_calc#projection_v1.epoch_number),
                                P_current_calc#projection_v1{epoch_number=E_c};
                           CMode == ap_mode ->
                                P_current
