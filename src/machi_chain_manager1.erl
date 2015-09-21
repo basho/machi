@@ -640,7 +640,7 @@ rank_and_sort_projections_with_extra(All_queried_list, FLUsRs, ProjectionType,
                       {not_unanimous_flus, All_queried_list --
                                                  (Best_FLUs ++ BadAnswerFLUs)},
                       {bad_answer_flus, BadAnswerFLUs},
-                      {bad_answers, BadAnswers},
+                      {bad_answers, BadAnswers2},
                       {not_best_ps, NotBestPs},
                       {not_best_ps_epoch_filt, NotBestPsEpochFilt}|Extra],
             {UnanimousTag, BestProj, Extra2, S}
@@ -681,25 +681,29 @@ calc_projection(#ch_mgr{name=MyName, consistency_mode=CMode,
     if CMode == ap_mode ->
             calc_projection2(P_current, RelativeToServer, AllHosed, Dbg, S);
        CMode == cp_mode ->
-            #projection_v1{epoch_number=OldEpochNum,
-                           all_members=AllMembers,
-                           upi=OldUPI_list
-                          } = P_current,
-            UPI_length_ok_p =
-                length(OldUPI_list) >= full_majority_size(AllMembers),
-            case {OldEpochNum, UPI_length_ok_p} of
-                {0, _} ->
-                    calc_projection2(P_current, RelativeToServer, AllHosed,
-                                     Dbg, S);
-                {_, true} ->
-                    calc_projection2(P_current, RelativeToServer, AllHosed,
-                                     Dbg, S);
-                {_, false} ->
-                    {Up, _Partitions, RunEnv2} = calc_up_nodes(
-                                                  MyName, AllMembers, RunEnv),
-                    %% We can't improve on the current projection.
-                    {P_current, S#ch_mgr{runenv=RunEnv2}, Up}
-            end
+            calc_projection2(P_current, RelativeToServer, AllHosed, Dbg, S)
+            %% TODO EXPERIMENT 2015-09-21 DELETE-ME???
+            %% #projection_v1{epoch_number=OldEpochNum,
+            %%                all_members=AllMembers,
+            %%                upi=OldUPI_list,
+            %%                upi=OldRepairing_list
+            %%               } = P_current,
+            %% OldUPI_and_Repairing = OldUPI_list ++ OldRepairing_list,
+            %% UPI_and_Repairing_length_ok_p =
+            %%     length(OldUPI_and_Repairing) >= full_majority_size(AllMembers),
+            %% case {OldEpochNum, UPI_length_ok_p} of
+            %%     {0, _} ->
+            %%         calc_projection2(P_current, RelativeToServer, AllHosed,
+            %%                          Dbg, S);
+            %%     {_, true} ->
+            %%         calc_projection2(P_current, RelativeToServer, AllHosed,
+            %%                          Dbg, S);
+            %%     {_, false} ->
+            %%         {Up, _Partitions, RunEnv2} = calc_up_nodes(
+            %%                                       MyName, AllMembers, RunEnv),
+            %%         %% We can't improve on the current projection.
+            %%         {P_current, S#ch_mgr{runenv=RunEnv2}, Up}
+            %% end
     end.
 
 %% AllHosed: FLUs that we must treat as if they are down, e.g., we are
@@ -818,7 +822,9 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
     P2 = if CMode == cp_mode ->
                  UpWitnesses = [W || W <- Up, lists:member(W, OldWitness_list)],
                  Majority = full_majority_size(AllMembers),
-                 SoFar = length(NewUPI),
+                 %% A repairing node can also contribute to the quorum
+                 %% majority required to attest to the history of the UPI.
+                 SoFar = length(NewUPI ++ NewRepairing),
                  if SoFar >= Majority ->
                          ?REACT({calc,?LINE,[]}),
                          P;
@@ -2261,11 +2267,16 @@ projection_transition_is_sane_except_si_epoch(
     %% CP mode extra sanity checks
     if CMode1 == cp_mode ->
             Majority = full_majority_size(All_list2),
+            UPI2_and_Repairing2 = UPI_list2 ++ Repairing_list2,
             if length(UPI_list2) == 0 ->
                     ok;                         % none projection
-               length(UPI_list2) >= Majority ->
-                    %% We have at least one non-witness
-                    true = (length(UPI_list2 -- Witness_list2) > 0);
+               length(UPI2_and_Repairing2) >= Majority ->
+                    %% We are assuming here that the client side is smart
+                    %% enough to do the *safe* thing when the
+                    %% length(UPI_list2) < Majority ... the client must use
+                    %% the repairing nodes both as witnesses to check the
+                    %% current epoch.
+                    ok;
                true ->
                     error({majority_not_met, UPI_list2})
             end;
@@ -2786,7 +2797,9 @@ make_zerf2(OldEpochNum, Up, MajoritySize, MyName, AllMembers, OldWitness_list,
     try
         #projection_v1{epoch_number=Epoch} = Proj =
             zerf_find_last_common(MajoritySize, Up, S),
-        Proj2 = Proj#projection_v1{dbg2=[{make_zerf,Epoch}]},
+        Proj2 = Proj#projection_v1{dbg2=[{make_zerf,Epoch},
+                                         {yyy_hack, get(yyy_hack)},
+                                         {up,Up},{maj,MajoritySize}]},
         %% io:format(user, "ZERF ~w\n",[machi_projection:make_summary(Proj2)]),
         Proj2
     catch
@@ -2847,7 +2860,9 @@ zerf_find_last_annotated(FLU, MajoritySize, S) ->
                                        (catch put(yyy_hack, [{FLU, Epoch, ok2}|get(yyy_hack)])),
                                        Proj
                                end,
-                          if length(Px#projection_v1.upi) >= MajoritySize ->
+                          UPI_and_Repairing = Px#projection_v1.upi ++
+                                              Px#projection_v1.repairing,
+                          if length(UPI_and_Repairing) >= MajoritySize ->
                                   (catch put(yyy_hack, [{FLU, Epoch, yay}|get(yyy_hack)])),
                                   Px;
                              true ->
