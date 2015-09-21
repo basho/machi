@@ -1981,7 +1981,7 @@ react_to_env_C210(Retries, #ch_mgr{name=MyName, proj=Proj} = S) ->
 
 react_to_env_C220(Retries, S) ->
     ?REACT(c220),
-    react_to_env_A20(Retries + 1, S).
+    react_to_env_A20(Retries + 1, manage_last_down_list(S)).
 
 react_to_env_C300(#projection_v1{epoch_number=_Epoch_newprop}=P_newprop,
                   #projection_v1{epoch_number=_Epoch_latest}=_P_latest, S) ->
@@ -1996,7 +1996,7 @@ react_to_env_C310(P_newprop, S) ->
     ?REACT({c310, ?LINE,
             [{newprop, machi_projection:make_summary(P_newprop)},
             {write_result, WriteRes}]}),
-    react_to_env_A10(S2).
+    react_to_env_A10(manage_last_down_list(S2)).
 
 projection_transitions_are_sane(Ps, RelativeToServer) ->
     projection_transitions_are_sane(Ps, RelativeToServer, false).
