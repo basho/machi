@@ -71,7 +71,7 @@ func, and pattern match Erlang style in that func.
 *** DONE Any new errors are added to UpNodes/DownNodes tracking as used today
 *** DONE At end of react loop, if UpNodes list differs, inform hosed mgr.
 
-* TODO fitness_mon, the fitness monitor
+* DONE fitness_mon, the fitness monitor
 ** DONE Map key & val sketch
 
 Logical sketch:
@@ -91,24 +91,24 @@ Implementation sketch:
 
 ** DONE Investigate riak_dt data structure definition, manipulating, etc.
 ** DONE Add dependency on riak_dt
-** WORKING Update is an entire dict from Observer O
-*** TODO Merge my pending map + update map + my last mod time + my unfit list
-*** TODO if merged /= pending:
-**** TODO Schedule async tick (more)
+** DONE Update is an entire dict from Observer O
+*** DONE Merge my pending map + update map + my last mod time + my unfit list
+*** DONE if merged /= pending:
+**** DONE Schedule async tick (more)
 
 Tick message contains list of servers with differing state as of this
 instant in time... we want to avoid triggering decisions about
 fitness/unfitness for other servers where we might have received less
 than a full time period's worth of waiting.
 
-**** TODO Spam merged map to All_list -- [Me, O]
-**** TODO Set pending <- merged
+**** DONE Spam merged map to All_list -- [Me]
+**** DONE Set pending <- merged
 
-*** TODO When we receive an async tick
-**** TODO set active map <- pending map for all servers in ticks list
-**** TODO Send ch_mgr a react_to_env tick trigger
-*** TODO react_to_env tick trigger actions
-**** TODO Filter active map to remove stale entries (i.e. no update in 1 hour)
-**** TODO If time since last map spam is too long, spam our *pending* map
-**** TODO Proceed with normal react processing, using *active* map for AllHosed!
+*** DONE When we receive an async tick
+**** DONE set active map <- pending map for all servers in ticks list
+**** DONE Send ch_mgr a react_to_env tick trigger
+*** DONE react_to_env tick trigger actions
+**** DONE Filter active map to remove stale entries (i.e. no update in 1 hour)
+**** DONE If time since last map spam is too long, spam our *pending* map
+**** DONE Proceed with normal react processing, using *active* map for AllHosed!
 
