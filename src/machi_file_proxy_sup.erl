@@ -34,10 +34,10 @@
 ]).
 
 start_link() ->
-    supervisor:start_link(?MODULE, []).
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 start_proxy(Filename, DataDir) ->
-    supervisor:start_child([Filename, DataDir]).
+    supervisor:start_child(?MODULE, [Filename, DataDir]).
 
 init([]) ->
     SupFlags = {simple_one_for_one, 1000, 10},
