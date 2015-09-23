@@ -26,9 +26,9 @@
 
 %% Public API
 -export([
-    start_link/1
+    start_link/1,
     start/1,
-    stop/0
+    stop/1
 ]).
 
 %% gen_server callbacks
@@ -67,7 +67,7 @@ handle_call(Req, _From, S) ->
     lager:warning("Unexpected call ~p", [Req]),
     {reply, unexpected, S}.
 
-handle_info({wedge_myself, EpochId}, S = #state{wedged = true}) ->
+handle_info({wedge_myself, _EpochId}, S = #state{wedged = true}) ->
     lager:debug("Request to wedge myself, but I'm already wedged. Ignoring."),
     {noreply, S};
 handle_info({wedge_myself, EpochId}, S = #state{flu_name = N,
@@ -78,15 +78,16 @@ handle_info({wedge_myself, EpochId}, S = #state{flu_name = N,
     kick_chain_manager(N),
     {noreply, S#state{wedged=true}};
 
-handle_info({wedge_state_change, Bool, {NewEpoch, _}}, S = #state{epoch_id = undefined}) ->
+handle_info({wedge_state_change, Bool, {NewEpoch, _}}, 
+            S = #state{epoch_id = undefined, etstab=Tid}) ->
    true = ets:insert(Tid, {epoch, {Bool, NewEpoch}}),
    {noreply, S#state{wedged = Bool, epoch_id = NewEpoch}};
 handle_info({wedge_state_change, Bool, {NewEpoch, _}}, 
             S = #state{epoch_id = E, etstab = Tid}) when NewEpoch >= E ->
    true = ets:insert(Tid, {epoch, {Bool, NewEpoch}}),
    {noreply, S#state{wedged = Bool, epoch_id = NewEpoch}};
-handle_info(M = {wedge_state_change, Bool, {NewEpoch, _}}, 
-            S = #state{epoch_id = E, etstab = Tid}) when NewEpoch < E ->
+handle_info(M = {wedge_state_change, _Bool, {NewEpoch, _}}, 
+            S = #state{epoch_id = E}) when NewEpoch < E ->
     lager:debug("Wedge state change message ~p, but my epoch id is higher (~p). Ignoring.", 
                 [M, E]),
     {noreply, S};
@@ -134,12 +135,15 @@ dispatch_append(From, Prefix, Chunk, Csum, Extra) ->
     try
         {ok, Filename, Offset} = machi_flu_file_proxy:append(Pid, 
                                 [{client_csum_tag, Tag}, {client_csum, CS}], 
-                                Extra, Chunk)
+                                Extra, Chunk),
         From ! {assignment, Offset, Filename},
         exit(normal)
     catch
-        Type:Reason ->
+        _Type:Reason ->
             lager:error("Could not append chunk to prefix ~p because ~p",
-                        [Prefix, Reason])
+                        [Prefix, Reason]),
             exit(Reason)
     end.
+
+make_name(N, Suffix) ->
+    atom_to_list(N) ++ Suffix.

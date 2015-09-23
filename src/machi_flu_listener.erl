@@ -1,17 +1,23 @@
 % 1. start file proxy supervisor
 % 2. start projection store
 % 3. start listener
--module(machi_flu_protocol).
+-module(machi_flu_listener).
 -behaviour(ranch_protocol).
 
 -export([start_link/4]).
 -export([init/4]).
 
 -include("machi.hrl").
+-include("machi_pb.hrl").
+-include("machi_projection.hrl").
 
 -record(state, {
     pb_mode,
-    high_clnt
+    high_clnt,
+    proj_store,
+    etstab,
+    epoch_id,
+    flu_name
 }).
 
 -define(SERVER_CMD_READ_TIMEOUT, 600 * 1000).
@@ -28,7 +34,7 @@ init(Ref, Socket, Transport, _Opts = []) ->
     loop(Socket, Transport, #state{}).
 
 loop(Socket, Transport, S) ->
-    case Transport:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT) of
+    case Transport:recv(Socket, 0, ?SERVER_CMD_READ_TIMEOUT) of
         {ok, Bin} ->
             {RespBin, S2} = 
                 case machi_pb:decode_mpb_ll_request(Bin) of
@@ -49,7 +55,7 @@ loop(Socket, Transport, S) ->
             loop(Socket, Transport, S2);
         {error, SockError} ->
             lager:error("Socket error ~w", [SockError]),
-            (catch Transport:close(Socket)),
+            (catch Transport:close(Socket))
     end.
 
 make_high_clnt(#state{high_clnt=undefined}=S) ->
@@ -119,27 +125,31 @@ do_pb_ll_request3({low_echo, _BogusEpochID, Msg}, S) ->
     {Msg, S};
 do_pb_ll_request3({low_auth, _BogusEpochID, _User, _Pass}, S) ->
     {-6, S};
-do_pb_ll_request3({low_append_chunk, _EpochID, PKey, Prefix, Chunk, CSum_tag,
-                CSum, ChunkExtra}, S) ->
-    {do_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
-                            ChunkExtra, S), S};
-do_pb_ll_request3({low_write_chunk, _EpochID, File, Offset, Chunk, CSum_tag,
-                   CSum}, S) ->
-    {do_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum, S), S};
-do_pb_ll_request3({low_read_chunk, _EpochID, File, Offset, Size, Opts}, S) ->
-    {do_server_read_chunk(File, Offset, Size, Opts, S), S};
-do_pb_ll_request3({low_checksum_list, _EpochID, File}, S) ->
-    {do_server_checksum_listing(File, S), S};
-do_pb_ll_request3({low_list_files, _EpochID}, S) ->
-    {do_server_list_files(S), S};
-do_pb_ll_request3({low_wedge_status, _EpochID}, S) ->
-    {do_server_wedge_status(S), S};
-do_pb_ll_request3({low_delete_migration, _EpochID, File}, S) ->
-    {do_server_delete_migration(File, S), S};
-do_pb_ll_request3({low_trunc_hack, _EpochID, File}, S) ->
-    {do_server_trunc_hack(File, S), S};
-do_pb_ll_request3({low_proj, PCMD}, S) ->
-    {do_server_proj_request(PCMD, S), S}.
+do_pb_ll_request3(Cmd, S) ->
+    {execute_cmd(Cmd), S}.
+%do_pb_ll_request3({low_append_chunk, _EpochID, PKey, Prefix, Chunk, CSum_tag,
+%                CSum, ChunkExtra}, S) ->
+%    {do_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
+%                            ChunkExtra, S), S};
+%do_pb_ll_request3({low_write_chunk, _EpochID, File, Offset, Chunk, CSum_tag,
+%                   CSum}, S) ->
+%    {do_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum, S), S};
+%do_pb_ll_request3({low_read_chunk, _EpochID, File, Offset, Size, Opts}, S) ->
+%    {do_server_read_chunk(File, Offset, Size, Opts, S), S};
+%do_pb_ll_request3({low_checksum_list, _EpochID, File}, S) ->
+%    {do_server_checksum_listing(File, S), S};
+%do_pb_ll_request3({low_list_files, _EpochID}, S) ->
+%    {do_server_list_files(S), S};
+%do_pb_ll_request3({low_wedge_status, _EpochID}, S) ->
+%    {do_server_wedge_status(S), S};
+%do_pb_ll_request3({low_delete_migration, _EpochID, File}, S) ->
+%    {do_server_delete_migration(File, S), S};
+%do_pb_ll_request3({low_trunc_hack, _EpochID, File}, S) ->
+%    {do_server_trunc_hack(File, S), S};
+%do_pb_ll_request3({low_proj, PCMD}, S) ->
+%    {do_server_proj_request(PCMD, S), S}.
+execute_cmd(_Cmd) ->
+    ok.
 
 
 do_pb_hl_request(#mpb_request{req_id=ReqID}, #state{pb_mode=low}=S) ->
@@ -176,4 +186,5 @@ do_pb_hl_request2({high_list_files}, #state{high_clnt=Clnt}=S) ->
     Res = machi_cr_client:list_files(Clnt),
     {Res, S}.
 
+wedge_myself(_, _) -> ok.
 

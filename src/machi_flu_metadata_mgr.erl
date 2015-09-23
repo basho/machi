@@ -47,7 +47,7 @@
                }).
 
 %% This record goes in the ets table where prefix is the key
--record(md, {prefix            :: string(),
+-record(md, {prefix            :: string(), %% either a prefix or a filename
              file_proxy_pid    :: undefined|pid(),
              mref              :: undefined|reference(), %% monitor ref for file proxy
              current_file      :: undefined|string(),
@@ -186,32 +186,49 @@ compute_worker(Hash) ->
 build_metadata_mgr_name(N) when is_integer(N) ->
     list_to_atom("machi_flu_metadata_mgr_" ++ integer_to_list(N)).
 
-get_manager_atom(Prefix) ->
-    build_metadata_mgr_name(compute_worker(compute_hash(Prefix))).
+get_manager_atom(Data) ->
+    build_metadata_mgr_name(compute_worker(compute_hash(Data))).
 
-lookup_md(Tid, Prefix) ->
-    case ets:lookup(Tid, Prefix) of
+lookup_md(Tid, Data) ->
+    case ets:lookup(Tid, Data) of
          [] -> not_found;
         [R] -> R
     end.
 
-find_or_create_filename(D, Prefix) ->
-    N = machi_util:read_max_filenum(D, Prefix),
-    find_or_create_filename(D, Prefix, #md{ prefix = Prefix, next_file_num = N }).
+file_exists(D, F) ->
+    {_, Path} = machi_util:make_data_filename(D, F),
+    case file:read_file_info(Path) of
+        {ok, _Info} -> true;
+        {error, enoent} -> false;
+        {error, Reason} ->
+            lager:error("Probing file information for ~p resulted in ~p", [F, Reason]),
+            {error, Reason}
+    end.
+
+find_or_create_filename(D, Data) ->
+    case file_exists(D, Data) of
+        true ->
+            #md{current_file = Data};
+        false ->
+            N = machi_util:read_max_filenum(D, Data),
+            find_or_create_filename(D, Data, #md{ prefix = Data, next_file_num = N })
+    end.
 
 find_or_create_filename(D, Prefix, R = #md{ current_file = undefined, next_file_num = 0 }) ->
-    F = make_filename(Prefix, 0),
+    {F, _N} = make_filename(Prefix, 0),
     ok = machi_util:increment_max_filenum(D, Prefix),
     find_or_create_filename(D, Prefix, R#md{ current_file = F, next_file_num = 1});
 find_or_create_filename(D, Prefix, R = #md{ current_file = undefined, next_file_num = N }) ->
     File = find_file(D, Prefix, N),
-    File1 = case File of
+    {File1, _} = case File of
                 not_found -> make_filename(Prefix, N);
-                _ -> File
+                _ -> {File, 0}
     end,
     {_, Path} = machi_util:make_data_filename(D, File1),
-    F = maybe_make_new_file(File1, Prefix, N, file:read_file_info(Path)),
-    R#md{ current_file = F }.
+    {F, NewN} = maybe_make_new_file(D, File1, Prefix, N, file:read_file_info(Path)),
+    R#md{ current_file = F, next_file_num = NewN };
+find_or_create_filename(_D, _Prefix, R = #md{ current_file = _F }) ->
+    R.
 
 start_file_proxy(D, Prefix) ->
     start_file_proxy(D, Prefix, find_or_create_filename(D, Prefix)).
@@ -225,26 +242,29 @@ start_file_proxy(_D, _Prefix, R = #md{ file_proxy_pid = _Pid }) ->
 
 find_file(D, Prefix, N) ->
     {_, Path} = machi_util:make_data_filename(D, Prefix, "*", N),
+    lager:debug("Search path: ~p", [Path]),
     case filelib:wildcard(Path) of
         [] -> not_found;
         [F] -> F;
-        [F|_Fs] -> F %% XXX FIXME: What to do when there's more than one match? 
-                     %%            Arbitrarily pick the head for now, I guess.
+        L = [_|_] -> lists:last(L) %% XXX FIXME: What to do when there's more than one match? 
+                                   %%            Arbitrarily pick the last file for now, I guess.
     end.
 
-maybe_make_new_file(F, Prefix, N, {ok, #file_info{ size = S }}) when S >= ?MAX_FILE_SIZE ->
-    lager:info("~p is larger than ~p. Starting new file.", [F, ?MAX_FILE_SIZE]),
-    make_filename(Prefix, N);
-maybe_make_new_file(F, Prefix, N, Err = {error, _Reason}) ->
+maybe_make_new_file(D, F, Prefix, N, {ok, #file_info{ size = S }}) when S >= ?MAX_FILE_SIZE ->
+    lager:info("~p is larger than ~p (~p). Starting new file.", [F, ?MAX_FILE_SIZE, S]),
+    ok = machi_util:increment_max_filenum(D, Prefix),
+    make_filename(Prefix, N+1);
+maybe_make_new_file(D, F, Prefix, N, Err = {error, _Reason}) ->
     lager:error("When reading file information about ~p, got ~p! Going to use new file",
                 [F, Err]),
-    make_filename(Prefix, N);
-maybe_make_new_file(F, _Prefix, _N, _Info) ->
-    F.
+    ok = machi_util:increment_max_filenum(D, Prefix),
+    make_filename(Prefix, N+1);
+maybe_make_new_file(_D, F, _Prefix, N, _Info) ->
+    {F, N}.
     
 make_filename(Prefix, N) ->
     {F, _} = machi_util:make_data_filename("", Prefix, something(), N),
-    F.
+    {F, N+1}.
 
 %% XXX FIXME: Might just be time to generate UUIDs
 something() ->
