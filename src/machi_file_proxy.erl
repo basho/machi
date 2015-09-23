@@ -456,6 +456,8 @@ terminate(Reason, #state{filename = F,
     lager:info("  Reads:  ~p/~p", [RT, RE]),
     lager:info(" Writes:  ~p/~p", [WT, WE]),
     lager:info("Appends:  ~p/~p", [AT, AE]),
+    ok = file:sync(FHd),
+    ok = file:sync(FHc),
     ok = file:close(FHd),
     ok = file:close(FHc),
     ok.
