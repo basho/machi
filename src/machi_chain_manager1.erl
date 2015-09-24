@@ -2490,17 +2490,20 @@ do_repair(#ch_mgr{name=MyName,
                                       repairing=[_|_]=Repairing,
                                       members_dict=MembersDict}}=S,
           Opts, RepairMode) ->
+    do_repair(MyName, Witness_list, UPI0, [_|_]=Repairing,
+              MembersDict, proxy_pid(MyName, S), Opts, RepairMode).
+
+do_repair(MyName, Witness_list, UPI0, [_|_]=Repairing,
+          MembersDict, Proxy, Opts, RepairMode) ->
     ETS = ets:new(repair_stats, [private, set]),
     ETS_T_Keys = [t_in_files, t_in_chunks, t_in_bytes,
                   t_out_files, t_out_chunks, t_out_bytes,
                   t_bad_chunks, t_elapsed_seconds],
     [ets:insert(ETS, {K, 0}) || K <- ETS_T_Keys],
 
-    {ok, MyProj} = ?FLU_PC:read_latest_projection(proxy_pid(MyName, S),
-                                                  private),
+    {ok, MyProj} = ?FLU_PC:read_latest_projection(Proxy, private),
     MyEpochID = machi_projection:get_epoch_id(MyProj),
-    RepairEpochIDs = [case ?FLU_PC:read_latest_projection(proxy_pid(Rep, S),
-                                                          private) of
+    RepairEpochIDs = [case ?FLU_PC:read_latest_projection(Proxy, private) of
                           {ok, Proj} ->
                               machi_projection:get_epoch_id(Proj);
                           _ ->

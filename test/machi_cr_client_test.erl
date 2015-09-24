@@ -60,7 +60,9 @@ setup_smoke_test(Host, PortBase, Os, Witness_list) ->
     ok = machi_chain_manager1:set_chain_members(a_chmgr, D, Witness_list),
     ok = machi_chain_manager1:set_chain_members(b_chmgr, D, Witness_list),
     ok = machi_chain_manager1:set_chain_members(c_chmgr, D, Witness_list),
-    run_ticks([a_chmgr,b_chmgr,c_chmgr]),
+    ChMgrs = [a_chmgr,b_chmgr,c_chmgr],
+    Success = fun(_, [{_,[a,b,c]}]) -> done end,
+    run_ticks(ChMgrs, Success),
     %% Everyone is settled on the same damn epoch id.
     {ok, EpochID} = machi_flu1_client:get_latest_epochid(Host, PortBase+0,
                                                          private),
@@ -69,28 +71,32 @@ setup_smoke_test(Host, PortBase, Os, Witness_list) ->
     {ok, EpochID} = machi_flu1_client:get_latest_epochid(Host, PortBase+2,
                                                          private),
 
-    {D, EpochID}.
+    {D, ChMgrs, EpochID}.
 
-run_ticks(MgrList) ->
+run_ticks(MgrList, SuccessFun) ->
     TickAll = fun() -> [begin
                             Pid ! tick_check_environment,
                             timer:sleep(50)
                         end || Pid <- MgrList]
               end,
     _ = lists:foldl(
-          fun(_, [{_,[a,b,c]}]=Acc) -> Acc;
-             (_, [{_,[b,c]}]=Acc)   -> Acc;  %% Fragile, but for witness=[a]
-             (_, [{_,[a,c]},{yy,b_pstore}]=Acc) -> Acc;  %% Fragile, but for witness=[a]
-             (_, _Acc)  ->
-                  TickAll(),                % has some sleep time inside
-                  Xs = [try
-                            {ok, Prj} = machi_projection_store:read_latest_projection(PStore, private),
-                            {Prj#projection_v1.author_server,
-                             Prj#projection_v1.upi}
-                        catch _:_ ->
-                                {yy, PStore}
-                        end || PStore <- [a_pstore,b_pstore,c_pstore] ],
-                  lists:usort(Xs)
+          fun(X, done) ->
+                  done;
+             (X, Acc) ->
+                  try
+                      SuccessFun(X, Acc)
+                  catch
+                      error:function_clause ->
+                          TickAll(),      % has some sleep time inside
+                          Xs = [try
+                                    {ok, Prj} = machi_projection_store:read_latest_projection(PStore, private),
+                                    {Prj#projection_v1.author_server,
+                                     Prj#projection_v1.upi}
+                                catch _:_ ->
+                                        {yy_down, PStore}
+                                end || PStore <- [a_pstore,b_pstore,c_pstore] ],
+                          lists:usort(Xs)
+                  end
           end, undefined, lists:seq(1,10000)),
     ok.
 
@@ -103,7 +109,7 @@ smoke_test2() ->
         Host = "localhost",
         PortBase = 64454,
         Os = [{ignore_stability_time, true}, {active_mode, false}],
-        {D, EpochID} = setup_smoke_test(Host, PortBase, Os, []),
+        {D, ChMgrs, EpochID} = setup_smoke_test(Host, PortBase, Os, []),
 
         %% Whew ... ok, now start some damn tests.
         {ok, C1} = machi_cr_client:start_link([P || {_,P}<-orddict:to_list(D)]),
@@ -200,6 +206,20 @@ smoke_test2() ->
         %% Double-check that our reserved extra bytes were really honored!
         true = (Off11 > (Off10 + (Extra10 * Size10))),
 
+        %% Let's set up some data to repair.
+        {AP_style, CP_style} = write_repair_data(D),
+        ok = machi_flu_psup:stop_flu_package(b),
+        ok = machi_flu_psup:stop_flu_package(c),
+        Success = fun(_, [{_,[a]}, {yy_down,b_pstore}, {yy_down,c_pstore}]) ->
+                          done
+                  end,
+        run_ticks([hd(ChMgrs)], Success),
+
+        [begin
+             {ok, Chunk} = machi_cr_client:read_chunk(C1, File, Offset,
+                                                      Size)
+         end || {Chunk, {Offset, Size, File}} <- AP_style],
+
         ok
     after
         error_logger:tty(true),
@@ -220,7 +240,8 @@ witness_smoke_test2() ->
         Os = [{ignore_stability_time, true}, {active_mode, false},
               {consistency_mode, cp_mode}],
         OurWitness = a,
-        {D, EpochID} = setup_smoke_test(Host, PortBase, Os, [OurWitness]),
+        {D, _ChMgrs, EpochID} = setup_smoke_test(Host, PortBase, Os,
+                                                 [OurWitness]),
 
         %% Whew ... ok, now start some damn tests.
         {ok, C1} = machi_cr_client:start_link([P || {_,P}<-orddict:to_list(D)]),
@@ -237,7 +258,10 @@ witness_smoke_test2() ->
         %% ok = machi_fitness:add_admin_down(a_fitness, admin_down_bogus_flu, [{why,because}]),
         %% ok = machi_fitness:delete_admin_down(a_fitness, admin_down_bogus_flu),
         %% Run ticks enough times to force auto-unwedge of both a & c.
-        [run_ticks([a_chmgr,c_chmgr]) || _ <- [1,2,3,4] ],
+        Success = fun(_, [{_,[b,c]}])                    -> done; % fragile but.
+                     (_, [{_,[a,c]},{yy_down,b_pstore}]) -> done
+                  end,
+        [run_ticks([a_chmgr,c_chmgr], Success) || _ <- [1,2,3,4] ],
 
         %% The chain should now be [a,c].
         %% Let's wedge OurWitness and see what happens: timeout/partition.
@@ -268,6 +292,56 @@ witness_smoke_test2() ->
         catch application:stop(machi),
         exit(SupPid, normal)
     end.
+
+write_repair_data(D) ->
+    [{_,Pa}, {_,Pb}, {_,Pc}] = orddict:to_list(D),
+    P_all = <<"file-all-prefix">>,
+    F_a = <<"file-a-full-name-hack">>,
+    F_b = <<"file-b-full-name-hack">>,
+    F_c = <<"file-c-full-name-hack">>,
+    NumChunks = 3,
+    OffsetSkip = 16*?MINIMUM_OFFSET,
+    MkChunk = fun() -> list_to_binary(io_lib:format("~w",[os:timestamp()])) end,
+
+    {ok, Proxy} = machi_cr_client:start_link([P || {_,P}<-orddict:to_list(D)]),
+    Res_file_all1 = [begin
+                         Chunk = MkChunk(),
+                         {ok, FOS} = machi_cr_client:append_chunk(Proxy, P_all,
+                                                                  Chunk),
+                         {Chunk, FOS}
+                     end || _ <- lists:seq(1,NumChunks)],
+    [{_, {_Offset, _Size, F_all}}|_] = Res_file_all1,
+    ok = machi_cr_client:quit(Proxy),
+
+    EpochID = fun(Sock) -> {ok, {false, EpochID}} =
+                               machi_flu1_client:wedge_status(Sock),
+                           EpochID
+              end,
+    Write = fun(Sock, EpochIDx, File, I) ->
+                    Offset = OffsetSkip * I,
+                    Chunk = MkChunk(),
+                    ok = machi_flu1_client:write_chunk(
+                                  Sock, EpochIDx, File, Offset, Chunk),
+                    {Chunk, {Offset, byte_size(Chunk), File}}
+            end,
+    W = fun(P, File, Start, End) ->
+                Sock = machi_flu1_client:connect(P),
+                EID = EpochID(Sock),
+                X = [Write(Sock, EID, File, I) || I <- lists:seq(Start,End)],
+                ok = machi_flu1_client:disconnect(Sock),
+                X
+        end,
+    Res_file_all10 = W(Pa, F_all, 10, 10+NumChunks),
+    Res_file_all20 = W(Pb, F_all, 20, 20+NumChunks),
+    Res_file_all30 = W(Pc, F_all, 30, 30+NumChunks),
+    Res_file_a = W(Pa, F_a, 1, 1+NumChunks),
+    Res_file_b = W(Pb, F_b, 1, 1+NumChunks),
+    Res_file_c = W(Pc, F_c, 1, 1+NumChunks),
+
+    AP_style = Res_file_all1 ++ Res_file_all10 ++ Res_file_all20 ++
+        Res_file_all30 ++ Res_file_a ++ Res_file_b ++ Res_file_c,
+    CP_style = Res_file_all1 ++ Res_file_all10,
+    {AP_style, CP_style}.
 
 -endif. % !PULSE
 -endif. % TEST.
