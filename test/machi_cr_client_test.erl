@@ -207,17 +207,21 @@ smoke_test2() ->
         true = (Off11 > (Off10 + (Extra10 * Size10))),
 
         %% Let's set up some data to repair.
-        {AP_style, CP_style} = write_repair_data(D),
-        ok = machi_flu_psup:stop_flu_package(b),
+        {AP_style, _CP_style} = write_repair_data(D, ap_mode),
+        %% Stop & restart FLUs
+        ok = machi_flu_psup:stop_flu_package(a),
         ok = machi_flu_psup:stop_flu_package(c),
-        Success1 = fun(_, [{_,[a]}, {yy_down,b_pstore}, {yy_down,c_pstore}]) ->
+        Success1 = fun(_, [{_,[b]}, {yy_down,a_pstore}, {yy_down,c_pstore}]) ->
                            done
                    end,
-        run_ticks([hd(ChMgrs)], Success1),
-        {ok,_}=machi_flu_psup:start_flu_package(b, PortBase+1, "./data.b", Os),
+        run_ticks([lists:nth(2, ChMgrs)], Success1),
+        {ok,_}=machi_flu_psup:start_flu_package(a, PortBase+0, "./data.a", Os),
         {ok,_}=machi_flu_psup:start_flu_package(c, PortBase+2, "./data.c", Os),
-        Success2 = fun(_, [{_,[a,b,c]}]) ->
-                           done
+        Success2 = fun(_, [{_,[_,_,_]}]) -> % We don't care about order
+                           done;
+                      (_, Acc) ->
+                           io:format(user, "\nSuccess2: ~p\n", [Acc]),
+                           error(function_clause)
                    end,
         [run_ticks(ChMgrs, Success2) || _ <- lists:seq(1,2)],
         %% Repair should be done now.
@@ -305,7 +309,7 @@ witness_smoke_test2() ->
         exit(SupPid, normal)
     end.
 
-write_repair_data(D) ->
+write_repair_data(D, CMode) ->
     [{_,Pa}, {_,Pb}, {_,Pc}] = orddict:to_list(D),
     P_all = <<"file-all-prefix">>,
     F_a = <<"file-a-full-name-hack">>,
@@ -343,16 +347,19 @@ write_repair_data(D) ->
                 ok = machi_flu1_client:disconnect(Sock),
                 X
         end,
-    Res_file_all10 = W(Pa, F_all, 10, 10+NumChunks),
+    Res_file_all10 = if CMode == ap_mode -> W(Pa, F_all, 10, 10+NumChunks);
+                        CMode == cp_mode -> []                             end,
     Res_file_all20 = W(Pb, F_all, 20, 20+NumChunks),
     Res_file_all30 = W(Pc, F_all, 30, 30+NumChunks),
-    Res_file_a = W(Pa, F_a, 1, 1+NumChunks),
+    Res_file_a = if CMode == ap_mode -> W(Pa, F_a, 1, 1+NumChunks);
+                    CMode == cp_mode -> []                                 end,
     Res_file_b = W(Pb, F_b, 1, 1+NumChunks),
     Res_file_c = W(Pc, F_c, 1, 1+NumChunks),
 
-    AP_style = Res_file_all1 ++ Res_file_all10 ++ Res_file_all20 ++
-        Res_file_all30 ++ Res_file_a ++ Res_file_b ++ Res_file_c,
-    CP_style = Res_file_all1 ++ Res_file_all10,
+    AP_style = Res_file_all1 ++
+               Res_file_all10 ++ Res_file_all20 ++ Res_file_all30 ++
+               Res_file_a ++ Res_file_b ++ Res_file_c,
+    CP_style = Res_file_all1 ++ Res_file_all20,
     {AP_style, CP_style}.
 
 -endif. % !PULSE
