@@ -145,6 +145,25 @@ smoke_test2() ->
                                  Host, PortBase+X, EpochID,
                                  File1, FooOff2, Size2)} || X <- [0,1,2] ],
 
+        %% Test *disabling* read repair: Manually write to middle, then
+        %% same checking.
+        FooOff3 = Off1 + (3*1024*1024),
+        Chunk3 = <<"Middle repair chunk without repair">>,
+        Size3 = size(Chunk3),
+        ok = machi_flu1_client:write_chunk(Host, PortBase+1, EpochID,
+                                           File1, FooOff3, Chunk3),
+        Opts3 = [{do_read_repair,false}],
+        {error,not_written} = machi_cr_client:read_chunk(C1, File1, FooOff3,
+                                                         Size3, Opts3),
+        {error,not_written} = machi_cr_client:read_chunk(C1, File1, FooOff3,
+                                                         Size3, Opts3),
+        [{X,{ok, Chunk3}} = {X,machi_flu1_client:read_chunk(
+                                 Host, PortBase+X, EpochID,
+                                 File1, FooOff3, Size3)} || X <- [1] ],
+        [{X,{error, not_written}} = {X,machi_flu1_client:read_chunk(
+                                 Host, PortBase+X, EpochID,
+                                 File1, FooOff3, Size3)} || X <- [0,2] ],
+
         %% Misc API smoke & minor regression checks
         {error, not_written} = machi_cr_client:read_chunk(C1, <<"no">>,
                                                           999999999, 1),
