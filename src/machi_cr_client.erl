@@ -138,6 +138,7 @@
 -define(DEFAULT_TIMEOUT, 10*1000).
 -define(MAX_RUNTIME, 8*1000).
 -define(WORST_PROJ, #projection_v1{epoch_number=0,epoch_csum= <<>>,
+                                   upi=[], repairing=[],
                                    members_dict=[]}).
 
 -record(state, {
@@ -821,8 +822,21 @@ gather_worker_statuses([{Pid,Ref}|Rest], Timeout) ->
     end.
 
 choose_best_proj(Rs) ->
-    lists:foldl(fun({ok, NewProj}, BestProj)
-                      when NewProj > BestProj ->
+    lists:foldl(fun({ok, #projection_v1{upi=[]}}, BestProj) ->
+                        %% The none projection isn't useful to us, ignore it
+                        BestProj;
+                   ({ok, #projection_v1{epoch_number=SameEpoch,
+                                        upi=NewUPI}=NewProj},
+                    #projection_v1{epoch_number=SameEpoch,
+                                   upi=BestUPI}=BestProj) ->
+                        if length(NewUPI) > length(BestUPI) ->
+                                NewProj;
+                           true ->
+                                BestProj
+                        end;
+                   ({ok, #projection_v1{epoch_number=NewEpoch}=NewProj},
+                    #projection_v1{epoch_number=BestEpoch}=BestProj)
+                   when NewEpoch > BestEpoch ->
                         NewProj;
                    (_, BestProj) ->
                         BestProj
