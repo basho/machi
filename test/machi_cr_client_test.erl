@@ -80,7 +80,7 @@ run_ticks(MgrList, SuccessFun) ->
                         end || Pid <- MgrList]
               end,
     _ = lists:foldl(
-          fun(X, done) ->
+          fun(_X, done) ->
                   done;
              (X, Acc) ->
                   try
@@ -210,15 +210,27 @@ smoke_test2() ->
         {AP_style, CP_style} = write_repair_data(D),
         ok = machi_flu_psup:stop_flu_package(b),
         ok = machi_flu_psup:stop_flu_package(c),
-        Success = fun(_, [{_,[a]}, {yy_down,b_pstore}, {yy_down,c_pstore}]) ->
-                          done
-                  end,
-        run_ticks([hd(ChMgrs)], Success),
+        Success1 = fun(_, [{_,[a]}, {yy_down,b_pstore}, {yy_down,c_pstore}]) ->
+                           done
+                   end,
+        run_ticks([hd(ChMgrs)], Success1),
+        {ok,_}=machi_flu_psup:start_flu_package(b, PortBase+1, "./data.b", Os),
+        {ok,_}=machi_flu_psup:start_flu_package(c, PortBase+2, "./data.c", Os),
+        Success2 = fun(_, [{_,[a,b,c]}]) ->
+                           done
+                   end,
+        [run_ticks(ChMgrs, Success2) || _ <- lists:seq(1,2)],
+        %% Repair should be done now.
+        {ok, EpochID_post_repair} =
+            machi_flu1_client:get_latest_epochid("localhost",PortBase,private),
+        [io:format(user, "\nOK, let's try this: ~p ~P\n", [PORT, machi_flu1_client:read_latest_projection("localhost", PORT, private), 15]) || PORT <- lists:seq(PortBase, PortBase+2)],
 
         [begin
-             {ok, Chunk} = machi_cr_client:read_chunk(C1, File, Offset,
-                                                      Size)
-         end || {Chunk, {Offset, Size, File}} <- AP_style],
+             {File, Offset, Size, {ok, Chunk}} =
+                 {File,Offset,Size, machi_flu1_client:read_chunk("localhost",Port,EpochID_post_repair,File,Offset,Size)}
+                 %% {File,Offset,Size, machi_cr_client:read_chunk(C1,File,Offset,Size, [{do_read_repair,false}])}
+         end || {Chunk, {Offset, Size, File}} <- AP_style,
+                {_,#p_srvr{port=Port}} <- orddict:to_list(D) ],
 
         ok
     after
@@ -300,7 +312,7 @@ write_repair_data(D) ->
     F_b = <<"file-b-full-name-hack">>,
     F_c = <<"file-c-full-name-hack">>,
     NumChunks = 3,
-    OffsetSkip = 16*?MINIMUM_OFFSET,
+    OffsetSkip = trunc(12.3*?MINIMUM_OFFSET),
     MkChunk = fun() -> list_to_binary(io_lib:format("~w",[os:timestamp()])) end,
 
     {ok, Proxy} = machi_cr_client:start_link([P || {_,P}<-orddict:to_list(D)]),
