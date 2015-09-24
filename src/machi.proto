@@ -189,11 +189,15 @@ message Mpb_ReadChunkReq {
     required uint32 size = 3;
 
     // Use flag_checksum=non-zero to request the chunk's checksum also
-    optional uint32 flag_checksum = 4 [default=0];
+    optional uint32 flag_get_checksum = 4 [default=0];
 
     // Use flag_no_chunk=non-zero to skip returning the chunk (which
     // only makes sense if flag_checksum is set).
     optional uint32 flag_no_chunk = 5 [default=0];
+
+    // Use flag_do_read_repair=zero to skip read-repair of
+    // the chunk that we're reading.
+    optional uint32 flag_do_read_repair = 6 [default=1];
 }
 
 message Mpb_ReadChunkResp {

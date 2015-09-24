@@ -173,8 +173,14 @@ from_pb_request(#mpb_request{req_id=ReqID,
                              read_chunk=IR=#mpb_readchunkreq{}}) ->
     #mpb_readchunkreq{file=File,
                       offset=Offset,
-                      size=Size} = IR,
-    {ReqID, {high_read_chunk, File, Offset, Size}};
+                      size=Size,
+                      flag_get_checksum=PB_GetChecksum,
+                      flag_no_chunk=PB_GetNoChunk,
+                      flag_do_read_repair=PB_DoReadRepair} = IR,
+    Opts = [{get_checksum, conv_to_boolean(PB_GetChecksum)},
+            {no_chunk, conv_to_boolean(PB_GetNoChunk)},
+            {do_read_repair, conv_to_boolean(PB_DoReadRepair)}],
+    {ReqID, {high_read_chunk, File, Offset, Size, Opts}};
 from_pb_request(#mpb_request{req_id=ReqID,
                              checksum_list=IR=#mpb_checksumlistreq{}}) ->
     #mpb_checksumlistreq{file=File} = IR,
@@ -623,7 +629,7 @@ to_pb_response(ReqID, {high_write_chunk, _File, _Offset, _Chunk, _TaggedCSum}, R
         _Else ->
             make_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
-to_pb_response(ReqID, {high_read_chunk, _File, _Offset, _Size}, Resp) ->
+to_pb_response(ReqID, {high_read_chunk, _File, _Offset, _Size, _Opts}, Resp) ->
     case Resp of
         {ok, Chunk} ->
             #mpb_response{req_id=ReqID,

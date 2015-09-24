@@ -435,9 +435,9 @@ do_pb_hl_request2({high_write_chunk, File, Offset, ChunkBin, TaggedCSum},
     Chunk = {TaggedCSum, ChunkBin},
     Res = machi_cr_client:write_chunk(Clnt, File, Offset, Chunk),
     {Res, S};
-do_pb_hl_request2({high_read_chunk, File, Offset, Size},
+do_pb_hl_request2({high_read_chunk, File, Offset, Size, Opts},
                   #state{high_clnt=Clnt}=S) ->
-    Res = machi_cr_client:read_chunk(Clnt, File, Offset, Size),
+    Res = machi_cr_client:read_chunk(Clnt, File, Offset, Size, Opts),
     {Res, S};
 do_pb_hl_request2({high_checksum_list, File}, #state{high_clnt=Clnt}=S) ->
     Res = machi_cr_client:checksum_list(Clnt, File),

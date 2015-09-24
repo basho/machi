@@ -201,13 +201,20 @@ write_chunk(PidSpec, File, Offset, Chunk, Timeout0) ->
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
 read_chunk(PidSpec, File, Offset, Size) ->
-    read_chunk(PidSpec, File, Offset, Size, ?DEFAULT_TIMEOUT).
+    read_chunk(PidSpec, File, Offset, Size, [], ?DEFAULT_TIMEOUT).
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
-read_chunk(PidSpec, File, Offset, Size, Timeout0) ->
+read_chunk(PidSpec, File, Offset, Size, Timeout0) when Timeout0 == infinity;
+                                                       is_integer(Timeout0) ->
+    read_chunk(PidSpec, File, Offset, Size, [], Timeout0);
+read_chunk(PidSpec, File, Offset, Size, Opts0) when is_list(Opts0) ->
+    read_chunk(PidSpec, File, Offset, Size, Opts0, ?DEFAULT_TIMEOUT).
+
+read_chunk(PidSpec, File, Offset, Size, Opts0, Timeout0) ->
+    Opts = opts_read_chunk(Opts0),
     {TO, Timeout} = timeout(Timeout0),
-    gen_server:call(PidSpec, {req, {read_chunk, File, Offset, Size, TO}},
+    gen_server:call(PidSpec, {req, {read_chunk, File, Offset, Size, Opts, TO}},
                     Timeout).
 
 %% @doc Fetch the list of chunk checksums for `File'.
@@ -275,8 +282,8 @@ handle_call2({append_chunk_extra, Prefix, Chunk, ChunkExtra, TO}, _From, S) ->
     do_append_head(Prefix, Chunk, ChunkExtra, 0, os:timestamp(), TO, S);
 handle_call2({write_chunk, File, Offset, Chunk, TO}, _From, S) ->
     do_write_head(File, Offset, Chunk, 0, os:timestamp(), TO, S);
-handle_call2({read_chunk, File, Offset, Size, TO}, _From, S) ->
-    do_read_chunk(File, Offset, Size, 0, os:timestamp(), TO, S);
+handle_call2({read_chunk, File, Offset, Size, Opts, TO}, _From, S) ->
+    do_read_chunk(File, Offset, Size, 0, os:timestamp(), Opts, TO, S);
 handle_call2({checksum_list, File, TO}, _From, S) ->
     do_checksum_list(File, 0, os:timestamp(), TO, S);
 handle_call2({list_files, TO}, _From, S) ->
@@ -488,10 +495,10 @@ do_write_head2(File, Offset, Chunk, Depth, STime, TO,
                   iolist_size(Chunk)})
     end.
 
-do_read_chunk(File, Offset, Size, 0=Depth, STime, TO,
+do_read_chunk(File, Offset, Size, 0=Depth, STime, Opts, TO,
               #state{proj=#projection_v1{upi=[_|_]}}=S) -> % UPI is non-empty
-    do_read_chunk2(File, Offset, Size, Depth + 1, STime, TO, S);
-do_read_chunk(File, Offset, Size, Depth, STime, TO, #state{proj=P}=S) ->
+    do_read_chunk2(File, Offset, Size, Depth + 1, STime, Opts, TO, S);
+do_read_chunk(File, Offset, Size, Depth, STime, Opts, TO, #state{proj=P}=S) ->
     %% io:format(user, "read sleep1,", []),
     sleep_a_while(Depth),
     DiffMs = timer:now_diff(os:timestamp(), STime) div 1000,
@@ -502,17 +509,18 @@ do_read_chunk(File, Offset, Size, Depth, STime, TO, #state{proj=P}=S) ->
             case S2#state.proj of
                 P2 when P2 == undefined orelse
                         P2#projection_v1.upi == [] ->
-                    do_read_chunk(File, Offset, Size, Depth + 1, STime, TO, S2);
+                    do_read_chunk(File, Offset, Size, Depth + 1, STime,
+                                  Opts, TO, S2);
                 _ ->
-                    do_read_chunk2(File, Offset, Size, Depth + 1, STime, TO, S2)
+                    do_read_chunk2(File, Offset, Size, Depth + 1, STime,
+                                   Opts, TO, S2)
             end
     end.
 
-do_read_chunk2(File, Offset, Size, Depth, STime, TO,
+do_read_chunk2(File, Offset, Size, Depth, STime, Opts, TO,
                #state{proj=P, epoch_id=EpochID, proxies_dict=PD}=S) ->
     UPI = readonly_flus(P),
     Tail = lists:last(UPI),
-    ConsistencyMode = P#projection_v1.mode,
     case ?FLU_PC:read_chunk(orddict:fetch(Tail, PD), EpochID,
                             File, Offset, Size, ?TIMEOUT) of
         {ok, Chunk} when byte_size(Chunk) == Size ->
@@ -527,10 +535,16 @@ do_read_chunk2(File, Offset, Size, Depth, STime, TO,
             {reply, BadCS, S};
         {error, Retry}
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
-            do_read_chunk(File, Offset, Size, Depth, STime, TO, S);
-        {error, not_written} ->
-            read_repair(ConsistencyMode, read, File, Offset, Size, Depth, STime, S);
-            %% {reply, {error, not_written}, S};
+            do_read_chunk(File, Offset, Size, Depth, STime, Opts, TO, S);
+        {error, not_written}=NotWritten ->
+            case proplists:get_value(do_read_repair, Opts, true) of
+                true ->
+                    ConsistencyMode = P#projection_v1.mode,
+                    read_repair(ConsistencyMode, read, File, Offset, Size,
+                                Depth, STime, S);
+                false ->
+                    {reply, NotWritten, S}
+            end;
         {error, written} ->
             exit({todo_should_never_happen,?MODULE,?LINE,File,Offset,Size})
     end.
@@ -835,7 +849,7 @@ choose_best_proj(Rs) ->
                                 BestProj
                         end;
                    ({ok, #projection_v1{epoch_number=NewEpoch}=NewProj},
-                    #projection_v1{epoch_number=BestEpoch}=BestProj)
+                    #projection_v1{epoch_number=BestEpoch}=_BestProj)
                    when NewEpoch > BestEpoch ->
                         NewProj;
                    (_, BestProj) ->
@@ -912,3 +926,18 @@ timeout(infinity) ->
     timeout(15*60*1000);                        % close enough to infinity
 timeout(Timeout0) ->
     {Timeout0, Timeout0 + 30*1000}.
+
+opts_read_chunk([]) ->
+    [];
+opts_read_chunk([get_checksum=Opt|T]) ->
+    [{Opt,true}|opts_read_chunk(T)];
+opts_read_chunk([{get_checksum=Opt,B}|T]) when B == true; B == false ->
+    [Opt|opts_read_chunk(T)];
+opts_read_chunk([no_chunk=Opt|T]) ->
+    [{Opt,true}|opts_read_chunk(T)];
+opts_read_chunk([{no_chunk=Opt,B}|T]) when B == true; B == false ->
+    [Opt|opts_read_chunk(T)];
+opts_read_chunk([do_read_repair=Opt|T]) ->
+    [{Opt,true}|opts_read_chunk(T)];
+opts_read_chunk([{do_read_repair,B}=Opt|T]) when B == true; B == false ->
+    [Opt|opts_read_chunk(T)].
