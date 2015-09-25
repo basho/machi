@@ -61,7 +61,9 @@ setup_smoke_test(Host, PortBase, Os, Witness_list) ->
     ok = machi_chain_manager1:set_chain_members(b_chmgr, D, Witness_list),
     ok = machi_chain_manager1:set_chain_members(c_chmgr, D, Witness_list),
     ChMgrs = [a_chmgr,b_chmgr,c_chmgr],
-    Success = fun(_, [{_,[a,b,c]}]) -> done end,
+    Success = fun(_, [{_,[a,b,c]}]) -> done;
+                 (_, [{_,[b,c]}]) when Witness_list /= [] -> done
+              end,
     run_ticks(ChMgrs, Success),
     %% Everyone is settled on the same damn epoch id.
     {ok, EpochID} = machi_flu1_client:get_latest_epochid(Host, PortBase+0,
@@ -218,16 +220,12 @@ smoke_test2() ->
         {ok,_}=machi_flu_psup:start_flu_package(a, PortBase+0, "./data.a", Os),
         {ok,_}=machi_flu_psup:start_flu_package(c, PortBase+2, "./data.c", Os),
         Success2 = fun(_, [{_,[_,_,_]}]) -> % We don't care about order
-                           done;
-                      (_, Acc) ->
-                           io:format(user, "\nSuccess2: ~p\n", [Acc]),
-                           error(function_clause)
+                           done
                    end,
         [run_ticks(ChMgrs, Success2) || _ <- lists:seq(1,2)],
         %% Repair should be done now.
         {ok, EpochID_post_repair} =
             machi_flu1_client:get_latest_epochid("localhost",PortBase,private),
-        [io:format(user, "\nOK, let's try this: ~p ~P\n", [PORT, machi_flu1_client:read_latest_projection("localhost", PORT, private), 15]) || PORT <- lists:seq(PortBase, PortBase+2)],
 
         [begin
              {File, Offset, Size, {ok, Chunk}} =
@@ -333,33 +331,60 @@ write_repair_data(D, CMode) ->
                                machi_flu1_client:wedge_status(Sock),
                            EpochID
               end,
-    Write = fun(Sock, EpochIDx, File, I) ->
-                    Offset = OffsetSkip * I,
+    Write = fun(Sock, EpochIDx, File, I, IntervalBytes) ->
+                    Offset = IntervalBytes * I,
                     Chunk = MkChunk(),
                     ok = machi_flu1_client:write_chunk(
                                   Sock, EpochIDx, File, Offset, Chunk),
                     {Chunk, {Offset, byte_size(Chunk), File}}
             end,
-    W = fun(P, File, Start, End) ->
+    W = fun(P, File, Start, End, IntervalBytes) ->
                 Sock = machi_flu1_client:connect(P),
                 EID = EpochID(Sock),
-                X = [Write(Sock, EID, File, I) || I <- lists:seq(Start,End)],
+                X = [Write(Sock, EID, File, I, IntervalBytes) || I <- lists:seq(Start,End)],
                 ok = machi_flu1_client:disconnect(Sock),
                 X
         end,
-    Res_file_all10 = if CMode == ap_mode -> W(Pa, F_all, 10, 10+NumChunks);
+
+    %% CP style: We assume that B is doing the repair of C and that A
+    %% is a witness (and therefore doesn't store any data).
+
+    Res_file_all10 = if CMode == ap_mode -> W(Pa, F_all, 10, 10+NumChunks, OffsetSkip);
                         CMode == cp_mode -> []                             end,
-    Res_file_all20 = W(Pb, F_all, 20, 20+NumChunks),
-    Res_file_all30 = W(Pc, F_all, 30, 30+NumChunks),
-    Res_file_a = if CMode == ap_mode -> W(Pa, F_a, 1, 1+NumChunks);
+    Res_file_all20 = W(Pb, F_all, 20, 20+NumChunks, OffsetSkip),
+    Res_file_all30 = W(Pc, F_all, 30, 30+NumChunks, OffsetSkip),
+    Res_file_a = if CMode == ap_mode -> W(Pa, F_a, 1, 1+NumChunks, OffsetSkip);
                     CMode == cp_mode -> []                                 end,
-    Res_file_b = W(Pb, F_b, 1, 1+NumChunks),
-    Res_file_c = W(Pc, F_c, 1, 1+NumChunks),
+    Res_file_b = W(Pb, F_b, 1, 1+NumChunks, OffsetSkip),
+    Res_file_c = W(Pc, F_c, 1, 1+NumChunks, OffsetSkip),
+    %% All of the above writes are non-overlapping.  However, we are
+    %% going to want to test overlapping writes to simulate cases such as:
+    %% * partial write of regular data followed by junk fill
+    %% * partial write of junk fill followed by regular data
+    %%
+    %% We don't include these in the AP_style list of keys.
+    if CMode == ap_mode ->
+            Res_file_b_overlap = Res_file_c_overlap = [];
+       CMode == cp_mode ->
+            Res_file_b_overlap = W(Pb, F_b, 40, 40+NumChunks, OffsetSkip),
+            _ToBeDestroyed1    = W(Pc, F_b, 40, 40+NumChunks, OffsetSkip),
+            Res_file_c_overlap = W(Pb, F_c, 40, 40+NumChunks, OffsetSkip),
+            _ToBeDestroyed1    = W(Pc, F_c, 40, 40+NumChunks, OffsetSkip)
+       end,
 
     AP_style = Res_file_all1 ++
                Res_file_all10 ++ Res_file_all20 ++ Res_file_all30 ++
                Res_file_a ++ Res_file_b ++ Res_file_c,
-    CP_style = Res_file_all1 ++ Res_file_all20,
+    CP_style = Res_file_all1 ++ Res_file_all20 ++
+        %% Generate exceptions for machi_chain_repair.erl line 268
+        %% Wrong checksum for exact same offset & size
+        %% W(Pb, F_b, 5, 5+NumChunks, OffsetSkip) ++
+        %% W(Pc, F_b, 5, 5+NumChunks, OffsetSkip) ++
+        %% Generate exceptions for machi_chain_repair.erl line 279
+        %% Wrong checksum for different offset
+        %% W(Pb, F_b, 5, 5+NumChunks, OffsetSkip) ++
+        %% W(Pc, F_b, 5, 5+NumChunks, OffsetSkip-1) ++
+        Res_file_b_overlap ++ Res_file_c_overlap,
     {AP_style, CP_style}.
 
 -endif. % !PULSE

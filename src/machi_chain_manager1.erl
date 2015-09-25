@@ -2520,11 +2520,12 @@ do_repair(MyName, Witness_list, UPI0, [_|_]=Repairing,
             UPI = UPI0 -- Witness_list,
             Res = machi_chain_repair:repair(RepairMode, MyName, Repairing, UPI,
                                             MembersDict, ETS, Opts),
+            io:format(user, "\nDBG repair Res ~w\n", [Res]),
             T2 = os:timestamp(),
             Elapsed = (timer:now_diff(T2, T1) div 1000) / 1000,
             ets:insert(ETS, {t_elapsed_seconds, Elapsed}),
             Summary = case Res of ok -> "success";
-                          _  -> "FAILURE"
+                                  _  -> "FAILURE"
                       end,
             Stats = [{K, ets:lookup_element(ETS, K, 2)} || K <- ETS_T_Keys],
             error_logger:info_msg(
