@@ -117,7 +117,7 @@ than a full time period's worth of waiting.
 **** DONE Proceed with normal react processing, using *active* map for AllHosed!
 * WORKING CP repair work items
 
-** TODO Add new low-level PB API: unwrite
+** DONE Add new low-level PB API: unwrite
 
    File, Offset, Size, repair cookie?
 

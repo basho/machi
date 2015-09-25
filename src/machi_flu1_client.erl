@@ -426,7 +426,6 @@ echo(Host, TcpPort, String) when is_list(String) ->
 -spec quit(port_wrap()) ->
       ok.
 quit(Sock) ->
-    catch (_ = w_send(Sock, <<"QUIT\n">>)),
     disconnect(Sock),
     ok.
 
