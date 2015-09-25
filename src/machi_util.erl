@@ -231,6 +231,8 @@ make_tagged_csum(none) ->
 make_tagged_csum({Tag, CSum}) ->
     make_tagged_csum(Tag, CSum).
 
+make_tagged_csum(unwritten, _SHA) ->
+    <<?CSUM_TAG_UNWRITTEN:8, 0:(20*8)>>;
 make_tagged_csum(none, _SHA) ->
     <<?CSUM_TAG_NONE:8>>;
 make_tagged_csum(client_sha, SHA) ->

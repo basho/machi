@@ -338,6 +338,7 @@ message Mpb_ProjectionV1 {
 // wedge_status()
 // delete_migration()
 // trunc_hack()
+// repair_unwrite()
 //
 // Projection-related:
 //
@@ -463,6 +464,20 @@ message Mpb_LL_TruncHackResp {
     required Mpb_GeneralStatusCode status = 1;
 }
 
+// Low level API: repair_unwrite()
+
+message Mpb_LL_RepairUnwriteReq {
+    required Mpb_EpochID epoch_id = 1;
+    required string file = 2;
+    required uint64 offset = 3;
+    required uint32 size = 4;
+    required uint64 repair_cookie = 5;
+}
+
+message Mpb_LL_RepairUnwriteResp {
+    required Mpb_GeneralStatusCode status = 1;
+}
+
 // Low level API: get_latest_epochid() request & response
 
 message Mpb_LL_GetLatestEpochIDReq {
@@ -572,6 +587,7 @@ message Mpb_LL_Request {
     optional Mpb_LL_WedgeStatusReq wedge_status = 35;
     optional Mpb_LL_DeleteMigrationReq delete_migration = 36;
     optional Mpb_LL_TruncHackReq trunc_hack = 37;
+    optional Mpb_LL_RepairUnwriteReq repair_unwrite = 38;
 }
 
 message Mpb_LL_Response {
@@ -606,4 +622,5 @@ message Mpb_LL_Response {
     optional Mpb_LL_WedgeStatusResp wedge_status = 35;
     optional Mpb_LL_DeleteMigrationResp delete_migration = 36;
     optional Mpb_LL_TruncHackResp trunc_hack = 37;
+    optional Mpb_LL_RepairUnwriteResp repair_unwrite = 38;
 }

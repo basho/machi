@@ -81,7 +81,8 @@
 -export([
          write_chunk/5, write_chunk/6,
          delete_migration/3, delete_migration/4,
-         trunc_hack/3, trunc_hack/4
+         trunc_hack/3, trunc_hack/4,
+         repair_unwrite/6, repair_unwrite/7
         ]).
 
 -type port_wrap()   :: {w,atom(),term()}.
@@ -514,6 +515,25 @@ trunc_hack(Host, TcpPort, EpochID, File) when is_integer(TcpPort) ->
         disconnect(Sock)
     end.
 
+%% @doc Restricted API: Un-write a chunk of data of size `Size' from `File' at `Offset'.
+
+-spec repair_unwrite(port_wrap(), machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk_size(), integer()) ->
+      ok | {error, machi_dt:error_general() | 'no_such_file'} | {error, term()}.
+repair_unwrite(Sock, EpochID, File, Offset, Size, RepairCookie) ->
+    repair_unwrite2(Sock, EpochID, File, Offset, Size, RepairCookie).
+
+%% @doc Restricted API: Un-write a chunk of data of size `Size' from `File' at `Offset'.
+
+-spec repair_unwrite(machi_dt:inet_host(), machi_dt:inet_port(), machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk_size(), integer()) ->
+      ok | {error, machi_dt:error_general() | 'no_such_file'} | {error, term()}.
+repair_unwrite(Host, TcpPort, EpochID, File, Offset, Size, RepairCookie) when is_integer(TcpPort) ->
+    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
+    try
+            repair_unwrite2(Sock, EpochID, File, Offset, Size, RepairCookie)
+    after
+        disconnect(Sock)
+    end.
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 read_chunk2(Sock, EpochID, File0, Offset, Size) ->
@@ -593,6 +613,12 @@ trunc_hack2(Sock, EpochID, File) ->
     ReqID = <<"id-trunc">>,
     Req = machi_pb_translate:to_pb_request(
             ReqID, {low_trunc_hack, EpochID, File}),
+    do_pb_request_common(Sock, ReqID, Req).
+
+repair_unwrite2(Sock, EpochID, File, Offset, Size, RepairCookie) ->
+    ReqID = <<"id-repair-unwrite">>,
+    Req = machi_pb_translate:to_pb_request(
+            ReqID, {low_repair_unwrite, EpochID, File, Offset, Size, RepairCookie}),
     do_pb_request_common(Sock, ReqID, Req).
 
 get_latest_epochid2(Sock, ProjType) ->

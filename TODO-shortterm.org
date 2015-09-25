@@ -121,7 +121,7 @@ than a full time period's worth of waiting.
 
    File, Offset, Size, repair cookie?
 
-** TODO Add FLU gen_server debug call for local absolute pathname for Machi file
+** DONE Add FLU gen_server debug call for local absolute pathname for Machi file
 
    Use this for same machine tests to clobber file data for checksum &
    repair tests.
@@ -135,6 +135,8 @@ than a full time period's worth of waiting.
      - Choose UPI server's version as tie breaker, CP mode compatible choice
    - Add {unwrite,...} directive to all incorrect servers
    - Add {copy,...} directive to all incorrect servers
+
+** TODO Create repair test where abspath test func is used to corrupt file data
 
 ** ASSUME that repair uses the origial append chunk size at all replicas
 

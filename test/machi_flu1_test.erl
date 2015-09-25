@@ -155,9 +155,15 @@ flu_smoke_test() ->
         {error, bad_arg} = ?FLU_C:trunc_hack(Host, TcpPort,
                                              ?DUMMY_PV1_EPOCH, BadFile),
 
+        BadCookie = 88,
+        {error, no_such_file} = ?FLU_C:repair_unwrite(Host, TcpPort,
+                                                 ?DUMMY_PV1_EPOCH, <<"boo">>,
+                                                 55666, 777, BadCookie),
+
         ok = ?FLU_C:quit(?FLU_C:connect(#p_srvr{address=Host,
                                                 port=TcpPort}))
     after
+io:format(user, "\n\nSLEEPING......", []), timer:sleep(5555),
         ok = ?FLU:stop(FLU1)
     end.
 

@@ -72,6 +72,7 @@
 -export([encode_csum_file_entry/3, encode_csum_file_entry_bin/3,
          decode_csum_file_entry/1,
          split_checksum_list_blob/1, split_checksum_list_blob_decode/1]).
+-export([test_file_abspath/2]).
 
 -record(state, {
           flu_name        :: atom(),
@@ -108,6 +109,14 @@ update_wedge_state(PidSpec, Boolean, EpochId)
 wedge_myself(PidSpec, EpochId)
   when is_tuple(EpochId) ->
     PidSpec ! {wedge_myself, EpochId}.
+
+test_file_abspath(PidSpec, File) ->
+    Ref = make_ref(),
+    PidSpec ! {test_file_abspath, self(), Ref, File},
+    receive
+        {Ref, AbsPath} ->
+            AbsPath
+    end.    
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -267,6 +276,10 @@ append_server_loop(FluPid, #state{data_dir=DataDir, wedged=Wedged_p,
             #state{wedged=Wedged_p, epoch_id=EpochId} = S,
             FromPid ! {wedge_status_reply, Wedged_p, EpochId},
             append_server_loop(FluPid, S);
+        {test_file_abspath, FromPid, Ref, File} ->
+            {_, Path} = machi_util:make_data_filename(DataDir, File),
+            FromPid ! {Ref, Path},
+            append_server_loop(FluPid, S);
         Else ->
             io:format(user, "append_server_loop: WHA? ~p\n", [Else]),
             append_server_loop(FluPid, S)
@@ -409,6 +422,9 @@ do_pb_ll_request3({low_delete_migration, _EpochID, File},
 do_pb_ll_request3({low_trunc_hack, _EpochID, File},
                   #state{witness=false}=S) ->
     {do_server_trunc_hack(File, S), S};
+do_pb_ll_request3({low_repair_unwrite, _EpochID, File, Offset, Size, RepairCookie},
+                  #state{witness=false}=S) ->
+    {do_server_repair_unwrite(File, Offset, Size, RepairCookie, S), S};
 do_pb_ll_request3(_, #state{witness=true}=S) ->
     {{error, bad_arg}, S}.                       % TODO: new status code??
 
@@ -685,6 +701,38 @@ do_server_trunc_hack(File, #state{data_dir=DataDir}=_S) ->
                     end;
                 {error, enoent} ->
                     {error, no_such_file};
+                _ ->
+                    {error, bad_arg}
+            end;
+        _ ->
+            {error, bad_arg}
+    end.
+
+do_server_repair_unwrite(File, Offset, Size, RepairCookie,
+                         #state{data_dir=DataDir}=_S) ->
+    case sanitize_file_string(File) of
+        ok ->
+            %% TODO: This is not a production-worthy way of implementing this
+            %% feature, but because full enforcement of written/unwritten
+            %% bytes is not yet finished, we'll make do with a kludge here.
+            CSumPath = machi_util:make_checksum_filename(DataDir, File),
+            case file:read_file_info(CSumPath) of
+                {error, enoent} ->
+                    {error, no_such_file};
+                {ok, _} ->
+                    case file:open(CSumPath, [append, raw, binary]) of
+                        {ok, FHc} ->
+                            try
+                                TaggedCSum = machi_util:make_tagged_csum(unwritten,<<>>),
+                                CSum_info = encode_csum_file_entry(Offset, Size, TaggedCSum),
+                                ok = file:write(FHc, CSum_info),
+                                ok
+                            after
+                                file:close(FHc)
+                            end;
+                        _ ->
+                            {error, bad_arg}
+                    end;
                 _ ->
                     {error, bad_arg}
             end;

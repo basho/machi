@@ -234,6 +234,7 @@ smoke_test2() ->
          end || {Chunk, {Offset, Size, File}} <- AP_style,
                 {_,#p_srvr{port=Port}} <- orddict:to_list(D) ],
 
+        io:format(user, "\n abspath ~p\n", [machi_flu1:test_file_abspath(a, <<"foo">>)]),
         ok
     after
         error_logger:tty(true),

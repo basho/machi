@@ -115,6 +115,16 @@ from_pb_request(#mpb_ll_request{
     {ReqID, {low_trunc_hack, EpochID, File}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
+                   repair_unwrite=#mpb_ll_repairunwritereq{
+                     epoch_id=PB_EpochID,
+                     file=File,
+                     offset=Offset,
+                     size=Size,
+                     repair_cookie=RepairCookie}}) ->
+    EpochID = conv_to_epoch_id(PB_EpochID),
+    {ReqID, {low_repair_unwrite, EpochID, File, Offset, Size, RepairCookie}};
+from_pb_request(#mpb_ll_request{
+                   req_id=ReqID,
                    proj_gl=#mpb_ll_getlatestepochidreq{type=ProjType}}) ->
     {ReqID, {low_proj, {get_latest_epochid, conv_to_type(ProjType)}}};
 from_pb_request(#mpb_ll_request{
@@ -271,6 +281,11 @@ from_pb_response(#mpb_ll_response{
                     trunc_hack=#mpb_ll_trunchackresp{
                       status=Status}}) ->
     {ReqID, machi_pb_high_client:convert_general_status_code(Status)};
+from_pb_response(#mpb_ll_response{
+                    req_id=ReqID,
+                    repair_unwrite=#mpb_ll_repairunwriteresp{
+                      status=Status}}) ->
+    {ReqID, machi_pb_high_client:convert_general_status_code(Status)};
 %%qqq
 from_pb_response(#mpb_ll_response{
                     req_id=ReqID,
@@ -399,6 +414,15 @@ to_pb_request(ReqID, {low_trunc_hack, EpochID, File}) ->
                     trunc_hack=#mpb_ll_trunchackreq{
                      epoch_id=PB_EpochID,
                       file=File}};
+to_pb_request(ReqID, {low_repair_unwrite, EpochID, File, Offset, Size, RepairCookie}) ->
+    PB_EpochID = conv_from_epoch_id(EpochID),
+    #mpb_ll_request{req_id=ReqID, do_not_alter=2,
+                    repair_unwrite=#mpb_ll_repairunwritereq{
+                      epoch_id=PB_EpochID,
+                      file=File,
+                      offset=Offset,
+                      size=Size,
+                      repair_cookie=RepairCookie}};
 to_pb_request(ReqID, {low_proj, {get_latest_epochid, ProjType}}) ->
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     proj_gl=#mpb_ll_getlatestepochidreq{type=conv_from_type(ProjType)}};
@@ -523,6 +547,10 @@ to_pb_response(ReqID, {low_trunc_hack, _EID, _Fl}, Resp)->
     Status = conv_from_status(Resp),
     #mpb_ll_response{req_id=ReqID,
                      trunc_hack=#mpb_ll_trunchackresp{status=Status}};
+to_pb_response(ReqID, {low_repair_unwrite, _EID, _Fl, _Off, _Sz, _RC}, Resp)->
+    Status = conv_from_status(Resp),
+    #mpb_ll_response{req_id=ReqID,
+                     repair_unwrite=#mpb_ll_repairunwriteresp{status=Status}};
 to_pb_response(ReqID, {low_proj, {get_latest_epochid, _ProjType}}, Resp)->
     case Resp of
         {ok, {Epoch, CSum}} ->
