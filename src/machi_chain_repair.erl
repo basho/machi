@@ -109,7 +109,7 @@ repair(ap_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
     %% proxy pids.
     put(proxies_dict, orddict:new()),
     Add = fun(Name, Pid) -> put(proxies_dict, orddict:store(Name, Pid, get(proxies_dict))) end,
-    OurFLUs = lists:usort([Src] ++ Repairing ++ UPI), % AP assumption!
+    OurFLUs = lists:usort([Src] ++ Repairing),
     RepairMode = proplists:get_value(repair_mode, Opts, repair),
     Verb = proplists:get_value(verbose, Opts, true),
     Res = try
