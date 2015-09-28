@@ -102,6 +102,9 @@ repair_cp(_Src, _Dst, _MembersDict, _Opts) ->
     exit(todo_cp_mode).
 
 repair(ap_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
+    %% Sanity checking for our assumptions at lower levels
+    true = lists:member(Src, UPI),
+
     %% Use process dict so that 'after' clause can always quit all
     %% proxy pids.
     put(proxies_dict, orddict:new()),
@@ -131,9 +134,9 @@ repair(ap_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
               ?VERB("Make repair directives: "),
               Ds =
                   [{File, make_repair_directives(
-                            ConsistencyMode, RepairMode, File, Size, EpochID,
+                            ConsistencyMode, RepairMode, EpochID, File, Size,
                             Verb,
-                            Src, OurFLUs, ProxiesDict, ETS)} ||
+                            Src, OurFLUs, UPI, ProxiesDict, ETS)} ||
                       {File, {Size, _MissingList}} <- MissingFileSummary],
               ?VERB(" done\n"),
               [begin
@@ -203,8 +206,8 @@ make_repair_compare_fun(SrcFLU) ->
             T_a =< T_b
     end.
 
-make_repair_directives(ConsistencyMode, RepairMode, File, Size, EpochID,
-                       Verb, Src, FLUs0, ProxiesDict, ETS) ->
+make_repair_directives(ConsistencyMode, RepairMode, EpochID, File, Size,
+                       Verb, Src, FLUs0, UPI, ProxiesDict, ETS) ->
     true = (Size < ?MAX_OFFSET),
     FLUs = lists:usort(FLUs0),
     C0 = [begin
@@ -228,23 +231,24 @@ make_repair_directives(ConsistencyMode, RepairMode, File, Size, EpochID,
     %% erlang:garbage_collect(),
     C2 = lists:sort(make_repair_compare_fun(Src), C1),
     %% erlang:garbage_collect(),
-    Ds = make_repair_directives2(C2, ConsistencyMode, RepairMode,
-                                 File, Verb, Src, FLUs, ProxiesDict, ETS),
+    Ds = make_repair_directives2(C2, ConsistencyMode, RepairMode, EpochID,
+                                 File, Verb, Src, FLUs, UPI, ProxiesDict, ETS),
     Ds.
 
-make_repair_directives2(C2, ConsistencyMode, RepairMode,
-                       File, Verb, Src, FLUs, ProxiesDict, ETS) ->
+make_repair_directives2(C2, ConsistencyMode, RepairMode, EpochID,
+                       File, Verb, Src, FLUs, UPI, ProxiesDict, ETS) ->
     ?VERB("."),
-    make_repair_directives3(C2, ConsistencyMode, RepairMode,
-                            File, Verb, Src, FLUs, ProxiesDict, ETS, []).
+    make_repair_directives3(C2, ConsistencyMode, RepairMode, EpochID,
+                            File, Verb, Src, FLUs, UPI, ProxiesDict, ETS, []).
 
 make_repair_directives3([{?MAX_OFFSET, 0, <<>>, _FLU}|_Rest],
-                       _ConsistencyMode, _RepairMode,
-                       _File, _Verb, _Src, _FLUs, _ProxiesDict, _ETS, Acc) ->
+                       _ConsistencyMode, _RepairMode, _EpochID,
+                       _File, _Verb, _Src, _FLUs, _UPI, _ProxiesDict, _ETS,
+                        Acc) ->
     lists:reverse(Acc);
 make_repair_directives3([{Offset, Size, CSum, _FLU}=A|Rest0],
-                       ConsistencyMode, RepairMode,
-                       File, Verb, Src, FLUs, ProxiesDict, ETS, Acc) ->
+                        ConsistencyMode, RepairMode, EpochID,
+                        File, Verb, Src, FLUs, UPI, ProxiesDict, ETS, Acc) ->
     {As0, Rest1} = take_same_offset_size(Rest0, Offset, Size),
     As1 = [A|As0],
     %% Sanity checking time
@@ -254,7 +258,12 @@ make_repair_directives3([{Offset, Size, CSum, _FLU}=A|Rest0],
              true ->
                  As1;
              false ->
-                 %% TODO: Pathology: someone has the wrong checksum.
+                 %% TODO: Pathology: someone has the wrong checksum, or
+                 %%                  someone wrote different data to same
+                 %%                  file+offset but checksums are correct.
+                 %%
+                 %% NOTE: All in As1 list are same offset+size.
+
                  %% 1. Fetch Src's chunk.  If checksum is valid, use this chunk
                  %%    to repair any invalid value.
                  %% 2. If Src's chunk is invalid, then check for other copies
@@ -264,16 +273,16 @@ make_repair_directives3([{Offset, Size, CSum, _FLU}=A|Rest0],
                  %%     byte range from all FLUs
                  %% 3b. Log big warning about data loss.
                  %% 4. Log any other checksum discrepencies as they are found.
-                 case lists:all(fun({Off_x, Size_x, _, _})
-                                      when Off_x == Offset, Size_x == Size ->
-                                        true;
-                                   (_) ->
-                                        false
-                                end, As1) of
-                     true ->
+                 io:format(user, "Rep DBG Src ~w File ~s As1 ~w\n", [Src, File, As1]),
+                 {_,_,<<_Tag:1/binary,SrcCSum/binary>>,_} = lists:keyfind(Src, 4, As1),
+                 io:format(user, "Rep DBG src ~w SrcCSum ~w\n", [Src, SrcCSum]),
+                 SrcChunk = repair_read_chunk(Src, ProxiesDict, EpochID,
+                                              File, Offset, Size),
+                 case machi_util:checksum_chunk(SrcChunk) of
+                     SrcCSum_now when SrcCSum_now == SrcCSum ->
                          %% Intentionally return tuple here.
                          {checksum_discrepency, A};
-                     false ->
+                     _ ->
                          exit({todo_repair_sanity_check,?LINE,File,Offset,As1})
                  end
          end,
@@ -286,6 +295,12 @@ make_repair_directives3([{Offset, Size, CSum, _FLU}=A|Rest0],
     if Offset + Size =< Offset_next ->
             ok;
        true ->
+            %% We are assuming, because we're lazy, that all repair will be
+            %% done using the original writer's chunk size and checksum, and
+            %% that nobody else will do anything to change chunk size or
+            %% offset boundaries for those writes.  Similarly, any
+            %% repair_unwrite ops will also honor the original chunk size and
+            %% offset.
             exit({todo_repair_sanity_check, ?LINE, File, Offset, Size,
                   next_is, A_next})
     end,
@@ -312,8 +327,8 @@ make_repair_directives3([{Offset, Size, CSum, _FLU}=A|Rest0],
               true       -> [Do|Acc]
            end,
     make_repair_directives3(Rest1,
-                            ConsistencyMode, RepairMode,
-                            File, Verb, Src, FLUs, ProxiesDict, ETS, Acc2).
+                            ConsistencyMode, RepairMode, EpochID,
+                            File, Verb, Src, FLUs, UPI, ProxiesDict, ETS, Acc2).
 
 take_same_offset_size(L, Offset, Size) ->
     take_same_offset_size(L, Offset, Size, []).
@@ -365,7 +380,7 @@ execute_repair_directive({File, Cmds}, {ProxiesDict, EpochID, Verb, ETS}=Acc) ->
                         Acc2
                 end
         end,
-    ok = lists:foldl(F, ok, Cmds),
+    acc_unused = lists:foldl(F, acc_unused, Cmds),
     %% Copy this file's stats to the total counts.
     [ets:update_counter(ETS, T_K, ets:lookup_element(ETS, L_K, 2)) ||
         {L_K, T_K} <- EtsKeys],

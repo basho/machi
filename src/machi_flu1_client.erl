@@ -701,7 +701,7 @@ do_pb_request_common(Sock, ReqID, Req, GetReply_p) ->
             %%       Whoa undefined: function_clause
             %% In theory this is harmless, because the client will retry
             %% with a new socket.  But, fix it anyway.
-            io:format(user, "DBG Whoa ~w: ~w at ~w ~P\n", [Sock, Whoa, time(), erlang:get_stacktrace(), 25]), timer:sleep(250),
+            %% io:format(user, "DBG Whoa ~w: ~w at ~w ~P\n", [Sock, Whoa, time(), erlang:get_stacktrace(), 25]), timer:sleep(250),
             {error, {whoa, Whoa, erlang:get_stacktrace()}}
     end.
 
@@ -733,7 +733,7 @@ put(xxx, Sock),
         end
     catch
         _X:_Y ->
-            io:format(user, "DBG Whoa ~w w_connect port ~w sock ~w err ~w ~w\n", [time(), Port, get(xxx), _X, _Y]),
+            %% io:format(user, "DBG Whoa ~w w_connect port ~w sock ~w err ~w ~w\n", [time(), Port, get(xxx), _X, _Y]),
             undefined
     end.
 

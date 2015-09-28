@@ -60,7 +60,7 @@ setup_smoke_test(Host, PortBase, Os, Witness_list) ->
     ok = machi_chain_manager1:set_chain_members(a_chmgr, D, Witness_list),
     ok = machi_chain_manager1:set_chain_members(b_chmgr, D, Witness_list),
     ok = machi_chain_manager1:set_chain_members(c_chmgr, D, Witness_list),
-    ChMgrs = [a_chmgr,b_chmgr,c_chmgr],
+    ChMgrs = [b_chmgr,a_chmgr,c_chmgr],
     Success = fun(_, [{_,[a,b,c]}]) -> done;
                  (_, [{_,[b,c]}]) when Witness_list /= [] -> done
               end,
@@ -78,7 +78,7 @@ setup_smoke_test(Host, PortBase, Os, Witness_list) ->
 run_ticks(MgrList, SuccessFun) ->
     TickAll = fun() -> [begin
                             Pid ! tick_check_environment,
-                            timer:sleep(50)
+                            timer:sleep(200)
                         end || Pid <- MgrList]
               end,
     _ = lists:foldl(
@@ -110,7 +110,10 @@ smoke_test2() ->
         Chunk1 = <<"yochunk">>,
         Host = "localhost",
         PortBase = 64454,
-        Os = [{ignore_stability_time, true}, {active_mode, false}],
+        Os = [{ignore_stability_time, true}, {active_mode, false}, {private_write_verbose,true}],
+        %% setup_smoke_test is opinionated: it return b_chmgr as first
+        %% in its list of chain managers because it knows that we want
+        %% a b-oriented test.
         {D, ChMgrs, EpochID} = setup_smoke_test(Host, PortBase, Os, []),
 
         %% Whew ... ok, now start some damn tests.
@@ -216,13 +219,25 @@ smoke_test2() ->
         Success1 = fun(_, [{_,[b]}, {yy_down,a_pstore}, {yy_down,c_pstore}]) ->
                            done
                    end,
-        run_ticks([lists:nth(2, ChMgrs)], Success1),
+        run_ticks([hd(ChMgrs)], Success1),
+
         {ok,_}=machi_flu_psup:start_flu_package(a, PortBase+0, "./data.a", Os),
         {ok,_}=machi_flu_psup:start_flu_package(c, PortBase+2, "./data.c", Os),
-        Success2 = fun(_, [{_,[_,_,_]}]) -> % We don't care about order
-                           done
-                   end,
-        [run_ticks(ChMgrs, Success2) || _ <- lists:seq(1,2)],
+        %% We want to get b at head of our chain-to-be 100% of the time.
+        %% We start all in not-active mode, but must jump through hoops for
+        %% determinism (or at least very rare chance of a/c taking lead).
+        timer:sleep(1000),
+        Success2a = fun(_, _) ->
+                            done
+                    end,
+        [run_ticks([hd(ChMgrs)], Success2a) || _ <- lists:seq(1,10)],
+        Success2b = fun(_, [{_,[b,_,_]}]) -> % We want b first, then any order
+                            done;
+                       (_, Acc) ->
+                            io:format(user, "DBG: Waiting for b at head of length 3 chain, active Acc is ~w\n", [Acc]),
+                            error(function_clause)
+                    end,
+        [run_ticks(ChMgrs, Success2b) || _ <- lists:seq(1,2)],
         %% Repair should be done now.
         {ok, EpochID_post_repair} =
             machi_flu1_client:get_latest_epochid("localhost",PortBase,private),
@@ -379,8 +394,8 @@ write_repair_data(D, CMode) ->
     CP_style = Res_file_all1 ++ Res_file_all20 ++
         %% Generate exceptions for machi_chain_repair.erl line 268
         %% Wrong checksum for exact same offset & size
-        %% W(Pb, F_b, 5, 5+NumChunks, OffsetSkip) ++
-        %% W(Pc, F_b, 5, 5+NumChunks, OffsetSkip) ++
+        W(Pb, F_b, 5, 5+NumChunks, OffsetSkip) ++
+        W(Pc, F_b, 5, 5+NumChunks, OffsetSkip) ++
         %% Generate exceptions for machi_chain_repair.erl line 279
         %% Wrong checksum for different offset
         %% W(Pb, F_b, 5, 5+NumChunks, OffsetSkip) ++

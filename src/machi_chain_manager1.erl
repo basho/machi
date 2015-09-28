@@ -1982,9 +1982,19 @@ react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H,
                  io:format(user, "\nCONFIRM debug C120 ~w was annotated ~w\n", [S#ch_mgr.name, P_latest#projection_v1.epoch_number]),
                  S2#ch_mgr{proj_unanimous=ConfTime}
          end,
+    S4 = if S3#ch_mgr.repair_worker == undefined ->
+                 S3;
+            true ->
+                 unlink(S3#ch_mgr.repair_worker),
+                 Reason = interrupted_by_epoch_change,
+                 exit(S3#ch_mgr.repair_worker, Reason),
+                 S3#ch_mgr{ignore_timer=false,
+                           repair_worker=false,
+                           repair_final_status=Reason}
+         end,
     V = case file:read_file("/tmp/moomoo."++atom_to_list(S#ch_mgr.name)) of {ok,_} -> true; _ -> false end,
     if V -> io:format("C120: ~w: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
-    {{now_using, FinalProps, P_latest#projection_v1.epoch_number}, S3}.
+    {{now_using, FinalProps, P_latest#projection_v1.epoch_number}, S4}.
 
 add_and_trunc_history(P_latest, H, MaxLength) ->
     Latest_U_R = {P_latest#projection_v1.upi, P_latest#projection_v1.repairing},
