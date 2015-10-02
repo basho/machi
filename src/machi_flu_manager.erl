@@ -130,7 +130,8 @@ handle_append(From, Prefix, Chunk, Csum, Extra) ->
     end).
 
 dispatch_append(From, Prefix, Chunk, Csum, Extra) ->
-    {ok, Pid} = machi_flu_metadata_mgr:start_proxy_pid(Prefix),
+    F = machi_flu_filename_mgr:find_or_make_filename_from_prefix({prefix, Prefix}),
+    {ok, Pid} = machi_flu_metadata_mgr:start_proxy_pid(F),
     {Tag, CS} = machi_util:unmake_tagged_csum(Csum),
     try
         {ok, Filename, Offset} = machi_flu_file_proxy:append(Pid, 

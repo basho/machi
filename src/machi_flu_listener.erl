@@ -26,38 +26,34 @@ start_link(Ref, Socket, Transport, Opts) ->
     Pid = spawn_link(?MODULE, init, [Ref, Socket, Transport, Opts]),
     {ok, Pid}.
 
-init(Ref, Socket, Transport, _Opts = []) ->
+init(Ref, Socket, Transport, Opts) ->
     ok = ranch:accept_ack(Ref),
     %% By default, ranch sets sockets to
     %% {active, false}, {packet, raw}, {reuseaddr, true}
     ok = Transport:setopts(Socket, ?PB_PACKET_OPTS),
-    loop(Socket, Transport, #state{}).
+    loop(Socket, Transport, make_state(Opts)).
 
 loop(Socket, Transport, S) ->
     case Transport:recv(Socket, 0, ?SERVER_CMD_READ_TIMEOUT) of
         {ok, Bin} ->
-            {RespBin, S2} = 
-                case machi_pb:decode_mpb_ll_request(Bin) of
-                    LL_req when LL_req#mpb_ll_request.do_not_alter == 2 ->
-                        {R, NewS} = do_pb_ll_request(LL_req, S),
-                        {maybe_encode_response(R), mode(low, NewS)};
-                    _ ->
-                        HL_req = machi_pb:decode_mpb_request(Bin),
-                        1 = HL_req#mpb_request.do_not_alter,
-                        {R, NewS} = do_pb_hl_request(HL_req, make_high_clnt(S)),
-                        {machi_pb:encode_mpb_response(R), mode(high, NewS)}
-                end,
-            if RespBin == async_no_response ->
-                    ok;
-               true ->
-                    ok = Transport:send(Socket, RespBin)
+            {Resp, NewS} = handle_request(Bin, S),
+            case Resp of
+                async_no_response -> ok;
+                _ -> Transport:send(Socket, Resp)
             end,
-            loop(Socket, Transport, S2);
+            loop(Socket, Transport, NewS);
         {error, SockError} ->
             lager:error("Socket error ~w", [SockError]),
             (catch Transport:close(Socket))
     end.
 
+make_state(Opts) ->
+    #state{
+        proj_store = proplists:get_value(proj_store, Opts),
+        etstab     = proplists:get_value(etstab, Opts),
+        flu_name   = proplists:get_value(flu_name, Opts)
+    }.
+         
 make_high_clnt(#state{high_clnt=undefined}=S) ->
     {ok, Proj} = machi_projection_store:read_latest_projection(
                    S#state.proj_store, private),
@@ -77,6 +73,19 @@ mode(Mode, #state{pb_mode=undefined}=S) ->
     S#state{pb_mode=Mode};
 mode(_, S) ->
     S.
+
+handle_request(Bin, S) ->
+    case machi_pb:decode_mpb_ll_request(Bin) of
+        LL_req when LL_req#mpb_ll_request.do_not_alter == 2 ->
+            {R, NewS} = do_pb_ll_request(LL_req, S),
+            {maybe_encode_response(R), mode(low, NewS)};
+        _ ->
+            HL_req = machi_pb:decode_mpb_request(Bin),
+            1 = HL_req#mpb_request.do_not_alter,
+            {R, NewS} = do_pb_hl_request(HL_req, make_high_clnt(S)),
+            {machi_pb:encode_mpb_response(R), mode(high, NewS)}
+    end.
+
 
 do_pb_ll_request(#mpb_ll_request{req_id=ReqID}, #state{pb_mode=high}=S) ->
     Result = {high_error, 41, "Low protocol request while in high mode"},
