@@ -36,7 +36,7 @@
          make_projection_filename/2,
          read_max_filenum/2, increment_max_filenum/2,
          info_msg/2, verb/1, verb/2,
-         mbytes/1,
+         mbytes/1, parse_filename/1,
          %% TCP protocol helpers
          connect/2, connect/3,
          %% List twiddling
@@ -89,8 +89,7 @@ make_checksum_filename(DataDir, FileName) ->
 -spec make_data_filename(string(), string(), atom()|string()|binary(), integer()) ->
       {binary(), string()}.
 make_data_filename(DataDir, Prefix, SequencerName, FileNum) ->
-    File = erlang:iolist_to_binary(io_lib:format("~s.~s.~w",
-                                                 [Prefix, SequencerName, FileNum])),
+    File = erlang:iolist_to_binary(string:join([Prefix, SequencerName, integer_to_list(FileNum)], ?FN_DELIMITER)),
     FullPath = lists:flatten(io_lib:format("~s/data/~s",  [DataDir, File])),
     {File, FullPath}.
 
@@ -261,6 +260,10 @@ mbytes(0) ->
     "0.0";
 mbytes(Size) ->
     lists:flatten(io_lib:format("~.1.0f", [max(0.1, Size / (1024*1024))])).
+
+-spec parse_filename( Filename :: {file, string()} ) -> [ string() ].
+parse_filename({file, F}) ->
+    string:tokens(F, ?FN_DELIMITER).
 
 %% @doc Log an 'info' level message.
 

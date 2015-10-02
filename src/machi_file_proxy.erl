@@ -32,9 +32,13 @@
 %% itself.
 %%
 %% TODO:
-%% 1. Some way to transition the proxy into/out of a wedged state that 
+%% 1. Some way to transition the proxy into a wedged state that 
 %% doesn't rely on message delivery.
 %%
+%% 2. Check max file size on appends. Writes we take on faith we can 
+%% and should handle.
+%%
+%% 3. Async checksum reads on startup.
 
 -module(machi_file_proxy).
 -behaviour(gen_server).

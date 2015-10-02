@@ -23,6 +23,7 @@
 %% -define(DATA_DIR, "/Volumes/SAM1/seq-tests/data").
 -define(DATA_DIR, "./data").
 -define(MINIMUM_OFFSET, 1024).
+-define(FN_DELIMITER, "^").
 
 %% 0th draft of checksum typing with 1st byte.
 -define(CSUM_TAG_NONE, 0).                   % No csum provided by client

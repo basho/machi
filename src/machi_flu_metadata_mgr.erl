@@ -19,12 +19,12 @@
 %% -------------------------------------------------------------------
 
 %% @doc This is a metadata service for the machi FLU which currently
-%% tracks the mappings between prefixes, filenames and file proxies.
+%% tracks the mappings between filenames and file proxies.
 %%
 %% The service takes a given hash space and spreads it out over a
 %% pool of N processes which are responsible for 1/Nth the hash 
 %% space. When a user requests an operation on a particular file
-%% prefix, the prefix is hashed into the hash space and the request
+%% the filename is hashed into the hash space and the request
 %% forwarded to a particular manager responsible for that slice
 %% of the hash space.
 %%
@@ -34,8 +34,6 @@
 -module(machi_flu_metadata_mgr).
 -behaviour(gen_server).
 
--include("machi.hrl").
--include_lib("kernel/include/file.hrl").
 
 -define(MAX_MGRS, 10). %% number of managers to start by default.
 -define(HASH(X), erlang:phash2(X)). %% hash algorithm to use
@@ -47,11 +45,9 @@
                }).
 
 %% This record goes in the ets table where prefix is the key
--record(md, {prefix            :: string(), %% either a prefix or a filename
-             file_proxy_pid    :: undefined|pid(),
-             mref              :: undefined|reference(), %% monitor ref for file proxy
-             current_file      :: undefined|string(),
-             next_file_num = 0 :: non_neg_integer()
+-record(md, {filename          :: string(), 
+             proxy_pid         :: undefined|pid(),
+             mref              :: undefined|reference() %% monitor ref for file proxy
             }).
 
 %% public api
@@ -60,8 +56,7 @@
          lookup_manager_pid/1,
          lookup_proxy_pid/1,
          start_proxy_pid/1,
-         stop_proxy_pid/1,
-         lookup_files/1
+         stop_proxy_pid/1
         ]).
 
 %% gen_server callbacks
@@ -79,20 +74,17 @@
 start_link(Name, DataDir) when is_atom(Name) andalso is_list(DataDir) ->
     gen_server:start_link({local, Name}, ?MODULE, [Name, DataDir], []).
 
-lookup_manager_pid(Data) ->
-    whereis(get_manager_atom(Data)).
+lookup_manager_pid({file, Filename}) ->
+    whereis(get_manager_atom(Filename)).
 
-lookup_proxy_pid(Data) ->
-    gen_server:call(get_manager_atom(Data), {proxy_pid, Data}, ?TIMEOUT).
+lookup_proxy_pid({file, Filename}) ->
+    gen_server:call(get_manager_atom(Filename), {proxy_pid, Filename}, ?TIMEOUT).
 
-start_proxy_pid(Data) ->
-    gen_server:call(get_manager_atom(Data), {start_proxy_pid, Data}, ?TIMEOUT).
+start_proxy_pid({file, Filename}) ->
+    gen_server:call(get_manager_atom(Filename), {start_proxy_pid, Filename}, ?TIMEOUT).
 
-stop_proxy_pid(Data) ->
-    gen_server:call(get_manager_atom(Data), {stop_proxy_pid, Data}, ?TIMEOUT).
-
-lookup_files(Data) ->
-    gen_server:call(get_manager_atom(Data), {files, Data}, ?TIMEOUT).
+stop_proxy_pid({file, Filename}) ->
+    gen_server:call(get_manager_atom(Filename), {stop_proxy_pid, Filename}, ?TIMEOUT).
 
 %% gen_server callbacks
 init([Name, DataDir]) ->
@@ -103,40 +95,37 @@ handle_cast(Req, State) ->
     lager:warning("Got unknown cast ~p", [Req]),
     {noreply, State}.
 
-handle_call({proxy_pid, Prefix}, _From, State = #state{ tid = Tid }) ->
-    Reply = case lookup_md(Tid, Prefix) of
+handle_call({proxy_pid, Filename}, _From, State = #state{ tid = Tid }) ->
+    Reply = case lookup_md(Tid, Filename) of
                 not_found -> undefined;
-                R -> R#md.file_proxy_pid
+                R -> R#md.proxy_pid
     end,
     {reply, Reply, State};
-handle_call({start_proxy_pid, Prefix}, _From, State = #state{ tid = Tid, datadir = D }) ->
-    {Pid, NewR} = case lookup_md(Tid, Prefix) of
+
+handle_call({start_proxy_pid, Filename}, _From, State = #state{ tid = Tid, datadir = D }) ->
+    NewR = case lookup_md(Tid, Filename) of
         not_found ->
-            R0 = start_file_proxy(D, Prefix),
-            {R0#md.file_proxy_pid, R0};
-        #md{ file_proxy_pid = undefined } = R ->
-            R1 = start_file_proxy(D, Prefix, R),
-            {R1#md.file_proxy_pid, R1};
-        #md{ file_proxy_pid = Pid0 } ->
-            {Pid0, false}
+            start_file_proxy(D, Filename);
+        #md{ proxy_pid = undefined } = R0 ->
+            start_file_proxy(D, R0);
+        #md{ proxy_pid = _Pid } = R1 ->
+            R1
     end,
-    NewR1 = maybe_monitor_pid(Pid, NewR),
-    maybe_update_ets(Tid, NewR1),
-    {reply, {ok, Pid}, State};
-handle_call({stop_proxy_pid, Prefix}, _From, State = #state{ tid = Tid }) ->
-    case lookup_md(Tid, Prefix) of
+    update_ets(Tid, NewR),
+    {reply, {ok, NewR#md.proxy_pid}, State};
+handle_call({stop_proxy_pid, Filename}, _From, State = #state{ tid = Tid }) ->
+    case lookup_md(Tid, Filename) of
         not_found ->
             ok;
-        #md{ file_proxy_pid = undefined } ->
+        #md{ proxy_pid = undefined } ->
             ok;
-        #md{ file_proxy_pid = Pid, mref = M } = R ->
+        #md{ proxy_pid = Pid, mref = M } = R ->
             demonitor(M, [flush]),
             machi_file_proxy:stop(Pid),
-            maybe_update_ets(Tid, R#md{ file_proxy_pid = undefined, mref = undefined })
+            update_ets(Tid, R#md{ proxy_pid = undefined, mref = undefined })
     end,
     {reply, ok, State};
-handle_call({files, Prefix}, _From, State = #state{ datadir = D }) ->
-    {reply, list_files(D, Prefix), State};
+
 handle_call(Req, From, State) ->
     lager:warning("Got unknown call ~p from ~p", [Req, From]),
     {reply, hoge, State}.
@@ -145,15 +134,25 @@ handle_info({'DOWN', Mref, process, Pid, normal}, State = #state{ tid = Tid }) -
     lager:debug("file proxy ~p shutdown normally", [Pid]),
     clear_ets(Tid, Mref),
     {noreply, State};
-handle_info({'DOWN', Mref, process, Pid, file_rollover}, State = #state{ tid = Tid, datadir = D }) ->
+
+handle_info({'DOWN', Mref, process, Pid, file_rollover}, State = #state{ tid = Tid }) ->
     lager:info("file proxy ~p shutdown because of file rollover", [Pid]),
-    R = find_md_record(Tid, Mref),
-    NewR = start_file_proxy(D, R#md.prefix, R#md{ file_proxy_pid = undefined, 
-                                                  mref = undefined, 
-                                                  current_file = undefined }),
-    NewR1 = maybe_monitor_pid(NewR#md.file_proxy_pid, NewR),
-    maybe_update_ets(Tid, NewR1),
+    R = get_md_record_by_mref(Tid, Mref),
+    [Prefix | _Rest] = machi_util:parse_filename({file, R#md.filename}),
+
+    %% We only increment the counter here. The filename will be generated on the 
+    %% next append request to that prefix and since the filename will have a new
+    %% sequence number it probably will be associated with a different metadata
+    %% manager. That's why we don't want to generate a new file name immediately
+    %% and use it to start a new file proxy.
+    ok = machi_flu_filename_mgr:increment_prefix_sequence({prefix, Prefix}),
+
+    %% purge our ets table of this entry completely since it is likely the
+    %% new filename (whenever it comes) will be in a different manager than
+    %% us.
+    purge_ets(Tid, R),
     {noreply, State};
+
 handle_info({'DOWN', Mref, process, Pid, wedged}, State = #state{ tid = Tid }) ->
     lager:error("file proxy ~p shutdown because it's wedged", [Pid]),
     clear_ets(Tid, Mref),
@@ -195,101 +194,24 @@ lookup_md(Tid, Data) ->
         [R] -> R
     end.
 
-file_exists(D, F) ->
-    {_, Path} = machi_util:make_data_filename(D, F),
-    case file:read_file_info(Path) of
-        {ok, _Info} -> true;
-        {error, enoent} -> false;
-        {error, Reason} ->
-            lager:error("Probing file information for ~p resulted in ~p", [F, Reason]),
-            {error, Reason}
-    end.
-
-find_or_create_filename(D, Data) ->
-    case file_exists(D, Data) of
-        true ->
-            #md{current_file = Data};
-        false ->
-            N = machi_util:read_max_filenum(D, Data),
-            find_or_create_filename(D, Data, #md{ prefix = Data, next_file_num = N })
-    end.
-
-find_or_create_filename(D, Prefix, R = #md{ current_file = undefined, next_file_num = 0 }) ->
-    {F, _N} = make_filename(Prefix, 0),
-    ok = machi_util:increment_max_filenum(D, Prefix),
-    find_or_create_filename(D, Prefix, R#md{ current_file = F, next_file_num = 1});
-find_or_create_filename(D, Prefix, R = #md{ current_file = undefined, next_file_num = N }) ->
-    File = find_file(D, Prefix, N),
-    {File1, _} = case File of
-                not_found -> make_filename(Prefix, N);
-                _ -> {File, 0}
-    end,
-    {_, Path} = machi_util:make_data_filename(D, File1),
-    {F, NewN} = maybe_make_new_file(D, File1, Prefix, N, file:read_file_info(Path)),
-    R#md{ current_file = F, next_file_num = NewN };
-find_or_create_filename(_D, _Prefix, R = #md{ current_file = _F }) ->
-    R.
-
-start_file_proxy(D, Prefix) ->
-    start_file_proxy(D, Prefix, find_or_create_filename(D, Prefix)).
-start_file_proxy(D, Prefix, #md{ current_file = undefined }) ->
-    start_file_proxy(D, Prefix, find_or_create_filename(D, Prefix));
-start_file_proxy(D, _Prefix, R = #md{ file_proxy_pid = undefined, current_file = F } ) ->
+start_file_proxy(D, R = #md{filename = F} ) ->
     {ok, Pid} = machi_file_proxy_sup:start_proxy(D, F),
-    R#md{ file_proxy_pid = Pid };
-start_file_proxy(_D, _Prefix, R = #md{ file_proxy_pid = _Pid }) ->
-    R.
-
-find_file(D, Prefix, N) ->
-    {_, Path} = machi_util:make_data_filename(D, Prefix, "*", N),
-    lager:debug("Search path: ~p", [Path]),
-    case filelib:wildcard(Path) of
-        [] -> not_found;
-        [F] -> F;
-        L = [_|_] -> lists:last(L) %% XXX FIXME: What to do when there's more than one match? 
-                                   %%            Arbitrarily pick the last file for now, I guess.
-    end.
-
-maybe_make_new_file(D, F, Prefix, N, {ok, #file_info{ size = S }}) when S >= ?MAX_FILE_SIZE ->
-    lager:info("~p is larger than ~p (~p). Starting new file.", [F, ?MAX_FILE_SIZE, S]),
-    ok = machi_util:increment_max_filenum(D, Prefix),
-    make_filename(Prefix, N+1);
-maybe_make_new_file(D, F, Prefix, N, Err = {error, _Reason}) ->
-    lager:error("When reading file information about ~p, got ~p! Going to use new file",
-                [F, Err]),
-    ok = machi_util:increment_max_filenum(D, Prefix),
-    make_filename(Prefix, N+1);
-maybe_make_new_file(_D, F, _Prefix, N, _Info) ->
-    {F, N}.
-    
-make_filename(Prefix, N) ->
-    {F, _} = machi_util:make_data_filename("", Prefix, something(), N),
-    {F, N+1}.
-
-%% XXX FIXME: Might just be time to generate UUIDs
-something() ->
-    lists:flatten(io_lib:format("~.36B~.36B",                    
-                                [element(3,now()),
-                                list_to_integer(os:getpid())])).
-
-maybe_monitor_pid(_Pid, false) -> false;
-maybe_monitor_pid(Pid, R = #md{ mref = undefined }) ->
     Mref = monitor(process, Pid),
-    R#md{ mref = Mref };
-maybe_monitor_pid(_Pid, R) -> R.
+    R#md{ proxy_pid = Pid, mref = Mref };
 
-maybe_update_ets(_Tid, false) -> ok;
-maybe_update_ets(Tid, R) ->
+start_file_proxy(D, Filename) ->
+    start_file_proxy(D, #md{ filename = Filename }).
+
+update_ets(Tid, R) ->
     ets:insert(Tid, R).
 
-list_files(D, Prefix) ->
-    {F, Path} = machi_util:make_data_filename(D, Prefix, "*", "*"),
-    {ok, filelib:wildcard(F, filename:dirname(Path))}.
-
 clear_ets(Tid, Mref) ->
-    R = find_md_record(Tid, Mref),
-    maybe_update_ets(Tid, R#md{ file_proxy_pid = undefined, mref = undefined }).
+    R = get_md_record_by_mref(Tid, Mref),
+    update_ets(Tid, R#md{ proxy_pid = undefined, mref = undefined }).
 
-find_md_record(Tid, Mref) ->
-    [R] = ets:match(Tid, {md, '_', '_', Mref, '_', '_'}),
+purge_ets(Tid, R) ->
+    ok = ets:delete_object(Tid, R).
+
+get_md_record_by_mref(Tid, Mref) ->
+    [R] = ets:match_object(Tid, {md, '_', '_', Mref}),
     R.
