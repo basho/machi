@@ -672,38 +672,13 @@ calc_projection(S, RelativeToServer) ->
 calc_projection(#ch_mgr{proj=P_current}=S, RelativeToServer, AllHosed) ->
     calc_projection(S, RelativeToServer, AllHosed, P_current).
 
-calc_projection(#ch_mgr{name=MyName, consistency_mode=CMode,
-                        runenv=RunEnv}=S,
+calc_projection(#ch_mgr{consistency_mode=CMode}=S,
                 RelativeToServer, AllHosed, P_current) ->
     Dbg = [],
-    %% OldThreshold = proplists:get_value(old_threshold, RunEnv),
-    %% NoPartitionThreshold = proplists:get_value(no_partition_threshold, RunEnv),
     if CMode == ap_mode ->
             calc_projection2(P_current, RelativeToServer, AllHosed, Dbg, S);
        CMode == cp_mode ->
             calc_projection2(P_current, RelativeToServer, AllHosed, Dbg, S)
-            %% TODO EXPERIMENT 2015-09-21 DELETE-ME???
-            %% #projection_v1{epoch_number=OldEpochNum,
-            %%                all_members=AllMembers,
-            %%                upi=OldUPI_list,
-            %%                upi=OldRepairing_list
-            %%               } = P_current,
-            %% OldUPI_and_Repairing = OldUPI_list ++ OldRepairing_list,
-            %% UPI_and_Repairing_length_ok_p =
-            %%     length(OldUPI_and_Repairing) >= full_majority_size(AllMembers),
-            %% case {OldEpochNum, UPI_length_ok_p} of
-            %%     {0, _} ->
-            %%         calc_projection2(P_current, RelativeToServer, AllHosed,
-            %%                          Dbg, S);
-            %%     {_, true} ->
-            %%         calc_projection2(P_current, RelativeToServer, AllHosed,
-            %%                          Dbg, S);
-            %%     {_, false} ->
-            %%         {Up, _Partitions, RunEnv2} = calc_up_nodes(
-            %%                                       MyName, AllMembers, RunEnv),
-            %%         %% We can't improve on the current projection.
-            %%         {P_current, S#ch_mgr{runenv=RunEnv2}, Up}
-            %% end
     end.
 
 %% AllHosed: FLUs that we must treat as if they are down, e.g., we are
@@ -2444,6 +2419,8 @@ calc_sleep_ranked_order(MinSleep, MaxSleep, FLU, FLU_list) ->
     MinSleep + (SleepChunk * Index).
 
 proxy_pid(Name, #ch_mgr{proxies_dict=ProxiesDict}) ->
+    orddict:fetch(Name, ProxiesDict);
+proxy_pid(Name, ProxiesDict) ->
     orddict:fetch(Name, ProxiesDict).
 
 make_chmgr_regname(A) when is_atom(A) ->
@@ -2495,57 +2472,50 @@ perhaps_start_repair(S) ->
     S.
 
 do_repair(#ch_mgr{name=MyName,
+                  proxies_dict=ProxiesDict,
                   proj=#projection_v1{witnesses=Witness_list,
                                       upi=UPI0,
                                       repairing=[_|_]=Repairing,
                                       members_dict=MembersDict}}=S,
           Opts, RepairMode) ->
     do_repair(MyName, Witness_list, UPI0, [_|_]=Repairing,
-              MembersDict, proxy_pid(MyName, S), Opts, RepairMode).
+              MembersDict, ProxiesDict, proxy_pid(MyName, S), Opts, RepairMode).
 
 do_repair(MyName, Witness_list, UPI0, [_|_]=Repairing,
-          MembersDict, Proxy, Opts, RepairMode) ->
-    ETS = ets:new(repair_stats, [private, set]),
-    ETS_T_Keys = [t_in_files, t_in_chunks, t_in_bytes,
-                  t_out_files, t_out_chunks, t_out_bytes,
-                  t_bad_chunks, t_elapsed_seconds],
-    [ets:insert(ETS, {K, 0}) || K <- ETS_T_Keys],
-
+          MembersDict, ProxiesDict, Proxy, Opts, RepairMode) ->
     {ok, MyProj} = ?FLU_PC:read_latest_projection(Proxy, private),
     MyEpochID = machi_projection:get_epoch_id(MyProj),
-    RepairEpochIDs = [case ?FLU_PC:read_latest_projection(Proxy, private) of
-                          {ok, Proj} ->
-                              machi_projection:get_epoch_id(Proj);
-                          _ ->
-                              unknown
+    RepairEpochIDs = [begin
+                          Pxy = proxy_pid(Rep, ProxiesDict),
+                          case ?FLU_PC:read_latest_projection(Pxy, private) of
+                              {ok, Proj} ->
+                                  machi_projection:get_epoch_id(Proj);
+                              _ ->
+                                  unknown
+                          end
                       end || Rep <- Repairing],
     case lists:usort(RepairEpochIDs) of
         [MyEpochID] ->
-            T1 = os:timestamp(),
             RepairId = proplists:get_value(repair_id, Opts, id1),
             error_logger:info_msg(
               "Repair start: tail ~p of ~p -> ~p, ~p ID ~w\n",
               [MyName, UPI0, Repairing, RepairMode, RepairId]),
 
             UPI = UPI0 -- Witness_list,
-            Res = machi_chain_repair:repair(RepairMode, MyName, Repairing, UPI,
-                                            MembersDict, ETS, Opts),
+            {Res, Stats} = machi_chain_repair:repair(RepairMode, MyName,
+                                                     Repairing, UPI,
+                                                     MembersDict, Opts),
             io:format(user, "\nDBG repair Res ~w\n", [Res]),
-            T2 = os:timestamp(),
-            Elapsed = (timer:now_diff(T2, T1) div 1000) / 1000,
-            ets:insert(ETS, {t_elapsed_seconds, Elapsed}),
             Summary = case Res of ok -> "success";
                                   _  -> "FAILURE"
                       end,
-            Stats = [{K, ets:lookup_element(ETS, K, 2)} || K <- ETS_T_Keys],
             error_logger:info_msg(
               "Repair ~s: tail ~p of ~p finished ~p repair ID ~w: "
               "~p\nStats ~p\n",
               [Summary, MyName, UPI0, RepairMode, RepairId,
                Res, Stats]),
-            ets:delete(ETS),
             exit({repair_final_status, Res});
-        _ ->
+        _Else ->
             exit(not_all_in_same_epoch)
     end.
 

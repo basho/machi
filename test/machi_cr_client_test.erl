@@ -394,8 +394,8 @@ write_repair_data(D, CMode) ->
     CP_style = Res_file_all1 ++ Res_file_all20 ++
         %% Generate exceptions for machi_chain_repair.erl line 268
         %% Wrong checksum for exact same offset & size
-        W(Pb, F_b, 5, 5+NumChunks, OffsetSkip) ++
-        W(Pc, F_b, 5, 5+NumChunks, OffsetSkip) ++
+%        W(Pb, F_b, 5, 5+NumChunks, OffsetSkip) ++
+%        W(Pc, F_b, 5, 5+NumChunks, OffsetSkip) ++
         %% Generate exceptions for machi_chain_repair.erl line 279
         %% Wrong checksum for different offset
         %% W(Pb, F_b, 5, 5+NumChunks, OffsetSkip) ++

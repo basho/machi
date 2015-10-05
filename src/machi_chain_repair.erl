@@ -82,8 +82,8 @@
 
 -include("machi_projection.hrl").
 
--define(SHORT_TIMEOUT, 5*1000).
--define(LONG_TIMEOUT, 60*1000).
+-define(SHORT_TIMEOUT,  15*1000).
+-define(LONG_TIMEOUT, 2*60*1000).
 -define(MAX_OFFSET, 999*1024*1024*1024*1024*1024*1024*1024).
 
 %% These macros assume there's a bound variable called Verb.
@@ -94,31 +94,26 @@
 -compile(export_all).
 -endif. % TEST
 
--export([repair/7]).
+-export([repair/6]).
 
-repair_cp(_Src, _Dst, _MembersDict, _Opts) ->
-    %% TODO: add missing function: wipe away any trace of chunks
-    %% are present on Dst but missing on Src.
-    exit(todo_cp_mode).
-
-repair(ap_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
+repair(ap_mode=CMode, Src, Repairing, UPI, MembersDict, Opts) ->
     %% Sanity checking for our assumptions at lower levels
     true = lists:member(Src, UPI),
+    T1 = os:timestamp(),
 
-    %% Use process dict so that 'after' clause can always quit all
-    %% proxy pids.
-    put(proxies_dict, orddict:new()),
-    Add = fun(Name, Pid) -> put(proxies_dict, orddict:store(Name, Pid, get(proxies_dict))) end,
     OurFLUs = lists:usort([Src] ++ Repairing),
     RepairMode = proplists:get_value(repair_mode, Opts, repair),
     Verb = proplists:get_value(verbose, Opts, true),
-    Res = try
-              [begin
-                   {ok, Proxy} = machi_proxy_flu1_client:start_link(P),
-                   Add(FLU, Proxy)
-               end || {FLU,P} <- MembersDict, lists:member(FLU, OurFLUs)],
-              ProxiesDict = get(proxies_dict),
+    ProxiesDict = machi_proxy_flu1_client:start_proxies(MembersDict),
 
+    ETS = ets:new(repair_stats, [public, set, {write_concurrency,true}]),
+    ETS_T_Keys = [t_in_files, t_in_chunks, t_in_bytes,
+                  t_out_files, t_out_chunks, t_out_bytes,
+                  t_bad_chunks, t_very_very_bad, t_elapsed_seconds],
+    [ets:insert(ETS, {K, 0}) || K <- ETS_T_Keys],
+    [ets:insert(ETS, {{repair_bytes, FLU}, 0}) || FLU <- OurFLUs],
+
+    Res = try
               D = dict:new(),
               D2 = lists:foldl(fun({FLU, Proxy}, Dict) ->
                                        get_file_lists(Proxy, FLU, Dict)
@@ -126,42 +121,81 @@ repair(ap_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
               MissingFileSummary = make_missing_file_summary(D2, OurFLUs),
               ?VERB("MissingFileSummary ~p\n", [MissingFileSummary]),
 
-              [ets:insert(ETS, {{directive_bytes, FLU}, 0}) || FLU <- OurFLUs],
-              %% Repair files from perspective of Src, i.e. tail(UPI).
               SrcProxy = orddict:fetch(Src, ProxiesDict),
               {ok, EpochID} = machi_proxy_flu1_client:get_epoch_id(
                                 SrcProxy, ?SHORT_TIMEOUT),
-              ?VERB("Make repair directives: "),
+
+              %% My process is the repair coordinator and stage 1.
+              %%
+              %% Stage 1: Identify problem chunks.
+              %% Stage 2: Get a valid chunk from Src or other UPI member
+              %%          - If exists, yay
+              %%          - If !exists, complain, then fetch from other in UPI
+              %%            - ALSO, must force Src to be repaired!
+              %%          - If still !exists, complain mightily
+              %%          - Send in batches to Stage 3:
+              %%            - {GoodChunk, GoodCSum, Us, Fs}
+              %%            - Us = FLUs to unwrite
+              %%            - Fs = FLUs to write
+              %% Stage 3: Do unwrites and writes in serial
+              %%
+              %% For each stage, send to next stage *synchronously*.
+              %%
+              %% Use ETS table to keep track of errors.
+              %%
+              %% Do not crash on partition problems!  Retry a couple of times
+              %% more, then incr ETS error counter and continue.
+              %%
+              %% At finish, return 'ok' only if ETS counters are zero!
+
               Ds =
                   [{File, make_repair_directives(
-                            ConsistencyMode, RepairMode, EpochID, File, Size,
+                            CMode, RepairMode, EpochID, File, Size,
                             Verb,
                             Src, OurFLUs, UPI, ProxiesDict, ETS)} ||
                       {File, {Size, _MissingList}} <- MissingFileSummary],
               ?VERB(" done\n"),
               [begin
-                   [{_, Bytes}] = ets:lookup(ETS, {directive_bytes, FLU}),
+                   [{_, Bytes}] = ets:lookup(ETS, {repair_bytes, FLU}),
                    ?VERB("Out-of-sync data for FLU ~p: ~s MBytes\n",
                          [FLU, mbytes(Bytes)])
                end || FLU <- OurFLUs],
 
               ?VERB("Execute repair directives: "),
-              ok = execute_repair_directives(ConsistencyMode, Ds, Src, EpochID,
+              ok = execute_repair_directives(CMode, Ds, Src, EpochID,
                                              Verb, OurFLUs, ProxiesDict, ETS),
               ?VERB(" done\n"),
-              ok
+              BadChunks = ets:lookup_element(ETS, t_bad_chunks, 2),
+              VeryVeryBad = ets:lookup_element(ETS, t_very_very_bad, 2),
+              Rez = if BadChunks + VeryVeryBad == 0 ->
+                            ok;
+                       true ->
+                            {error, [{bad_chunks, BadChunks},
+                                     {very_very_bad, VeryVeryBad}]}
+                    end,
+              T2 = os:timestamp(),
+              Elapsed = (timer:now_diff(T2, T1) div 1000) / 1000,
+              ets:insert(ETS, {t_elapsed_seconds, Elapsed}),
+              Stats = [{K,ets:lookup_element(ETS,K,1)} || K <- ETS_T_Keys],
+              {Rez, Stats}
           catch
               What:Why ->
+                  T3 = os:timestamp(),
+                  Elapsed3 = (timer:now_diff(T3, T1) div 1000) / 1000,
+                  ets:insert(ETS, {t_elapsed_seconds, Elapsed3}),
+                  Stats3 = [{K,ets:lookup_element(ETS,K,2)} || K <- ETS_T_Keys],
                   Stack = erlang:get_stacktrace(),
-                  {error, {What, Why, Stack}}
+io:format(user, "WhatWhy ~p ~p at ~p\n", [What, Why, Stack]),
+                  {{error, {What, Why, Stack}}, Stats3}
           after
+              ets:delete(ETS),
               [(catch machi_proxy_flu1_client:quit(Pid)) ||
-                  Pid <- orddict:to_list(get(proxies_dict))]
+                  {_,Pid} <- orddict:to_list(ProxiesDict)]
           end,
     Res;
-repair(cp_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
+repair(cp_mode=_CMode, Src, Repairing, UPI, MembersDict, Opts) ->
     io:format(user, "\n\nTODO! cp_mode repair is not fully implemented!\n\n", []),
-    repair(ap_mode, Src, Repairing, UPI, MembersDict, ETS, Opts).
+    repair(ap_mode, Src, Repairing, UPI, MembersDict, Opts).
 
 %% Create a list of servers where the file is completely missing.
 %% In the "demo day" implementation and in an early integration WIP,
@@ -183,7 +217,7 @@ make_missing_file_summary(Dict, AllFLUs) ->
 
 get_file_lists(Proxy, FLU_name, D) ->
     {ok, Res} = machi_proxy_flu1_client:list_files(Proxy, ?DUMMY_PV1_EPOCH,
-                                                   ?SHORT_TIMEOUT),
+                                                   ?LONG_TIMEOUT),
     lists:foldl(fun({Size, File}, Dict) ->
                            dict:append(File, {FLU_name, Size}, Dict)
                 end, D, Res).
@@ -206,7 +240,7 @@ make_repair_compare_fun(SrcFLU) ->
             T_a =< T_b
     end.
 
-make_repair_directives(ConsistencyMode, RepairMode, EpochID, File, Size,
+make_repair_directives(CMode, RepairMode, EpochID, File, Size,
                        Verb, Src, FLUs0, UPI, ProxiesDict, ETS) ->
     true = (Size < ?MAX_OFFSET),
     FLUs = lists:usort(FLUs0),
@@ -231,59 +265,58 @@ make_repair_directives(ConsistencyMode, RepairMode, EpochID, File, Size,
     %% erlang:garbage_collect(),
     C2 = lists:sort(make_repair_compare_fun(Src), C1),
     %% erlang:garbage_collect(),
-    Ds = make_repair_directives2(C2, ConsistencyMode, RepairMode, EpochID,
+    Ds = make_repair_directives2(C2, CMode, RepairMode, EpochID,
                                  File, Verb, Src, FLUs, UPI, ProxiesDict, ETS),
     Ds.
 
-make_repair_directives2(C2, ConsistencyMode, RepairMode, EpochID,
+make_repair_directives2(C2, CMode, RepairMode, EpochID,
                        File, Verb, Src, FLUs, UPI, ProxiesDict, ETS) ->
     ?VERB("."),
-    make_repair_directives3(C2, ConsistencyMode, RepairMode, EpochID,
+    make_repair_directives3(C2, CMode, RepairMode, EpochID,
                             File, Verb, Src, FLUs, UPI, ProxiesDict, ETS, []).
 
 make_repair_directives3([{?MAX_OFFSET, 0, <<>>, _FLU}|_Rest],
-                       _ConsistencyMode, _RepairMode, _EpochID,
+                       _CMode, _RepairMode, _EpochID,
                        _File, _Verb, _Src, _FLUs, _UPI, _ProxiesDict, _ETS,
                         Acc) ->
     lists:reverse(Acc);
 make_repair_directives3([{Offset, Size, CSum, _FLU}=A|Rest0],
-                        ConsistencyMode, RepairMode, EpochID,
+                        CMode, RepairMode, EpochID,
                         File, Verb, Src, FLUs, UPI, ProxiesDict, ETS, Acc) ->
     {As0, Rest1} = take_same_offset_size(Rest0, Offset, Size),
     As1 = [A|As0],
     %% Sanity checking time
+    %% NOTE: All in As1 list are same offset+size.
+    SrcHasIt_p = lists:keyfind(Src, 4, As1) /= false,
     As = case lists:all(fun({_, _, Cs, _}) when Cs == CSum -> true;
                            (_)                             -> false
                         end, As1) of
              true ->
                  As1;
              false ->
-                 %% TODO: Pathology: someone has the wrong checksum, or
-                 %%                  someone wrote different data to same
-                 %%                  file+offset but checksums are correct.
-                 %%
-                 %% NOTE: All in As1 list are same offset+size.
+                 %% Pathology: someone has the wrong checksum, or
+                 %%            someone wrote different data to same
+                 %%            file+offset but checksums are correct.
 
-                 %% 1. Fetch Src's chunk.  If checksum is valid, use this chunk
-                 %%    to repair any invalid value.
-                 %% 2. If Src's chunk is invalid, then check for other copies
-                 %%    in the UPI.  If there is a valid chunk there, use it to
-                 %%    repair any invalid value.
-                 %% 3a. If there is no valid UPI chunk, then delete this
-                 %%     byte range from all FLUs
-                 %% 3b. Log big warning about data loss.
-                 %% 4. Log any other checksum discrepencies as they are found.
                  io:format(user, "Rep DBG Src ~w File ~s As1 ~w\n", [Src, File, As1]),
-                 {_,_,<<_Tag:1/binary,SrcCSum/binary>>,_} = lists:keyfind(Src, 4, As1),
-                 io:format(user, "Rep DBG src ~w SrcCSum ~w\n", [Src, SrcCSum]),
-                 SrcChunk = repair_read_chunk(Src, ProxiesDict, EpochID,
-                                              File, Offset, Size),
-                 case machi_util:checksum_chunk(SrcChunk) of
-                     SrcCSum_now when SrcCSum_now == SrcCSum ->
-                         %% Intentionally return tuple here.
-                         {checksum_discrepency, A};
-                     _ ->
-                         exit({todo_repair_sanity_check,?LINE,File,Offset,As1})
+                 case SrcHasIt_p of
+                     false when CMode == cp_mode ->
+                         todo_qqqqqqqqqqqqqqqqqq;
+                     true ->
+                         {_,_,<<_Tag:1/binary,SrcCSum/binary>>,_} =
+                             lists:keyfind(Src, 4, As1),
+                         io:format(user, "Rep DBG src ~w SrcCSum ~w\n",
+                                   [Src, SrcCSum]),
+                         SrcChunk = repair_read_chunk(Src, ProxiesDict, EpochID,
+                                                      File, Offset, Size),
+                         case machi_util:checksum_chunk(SrcChunk) of
+                             SrcCSum_now when SrcCSum_now == SrcCSum ->
+                                 %% Intentionally return tuple here.
+                                 {checksum_discrepency, A};
+                             _ ->
+                                 exit({todo_repair_sanity_check,?LINE,
+                                       File,Offset,As1})
+                         end
                  end
          end,
     %% List construction guarantees us that there's at least one ?MAX_OFFSET
@@ -304,30 +337,30 @@ make_repair_directives3([{Offset, Size, CSum, _FLU}=A|Rest0],
             exit({todo_repair_sanity_check, ?LINE, File, Offset, Size,
                   next_is, A_next})
     end,
-    Do = if ConsistencyMode == ap_mode, is_list(As) ->
+    Do = if CMode == ap_mode, is_list(As) ->
                  Gots = [FLU || {_Off, _Sz, _Cs, FLU} <- As],
                  Missing = FLUs -- Gots,
                  _ThisSrc = case lists:member(Src, Gots) of
                                true  -> Src;
                                false -> hd(Gots)
                            end,
-                 [ets:update_counter(ETS, {directive_bytes, FLU_m}, Size) ||
+                 [ets:update_counter(ETS, {repair_bytes, FLU_m}, Size) ||
                      FLU_m <- Missing],
                  if Missing == [] ->
                          noop;
                     true ->
                          {copy, A, Missing}
                  end;
-            ConsistencyMode == ap_mode, is_tuple(As) ->
+            CMode == ap_mode, is_tuple(As) ->
                  As;
-            ConsistencyMode == cp_mode ->
+            CMode == cp_mode ->
                  exit({todo_cp_mode, ?MODULE, ?LINE})
          end,
     Acc2 = if Do == noop -> Acc;
               true       -> [Do|Acc]
            end,
     make_repair_directives3(Rest1,
-                            ConsistencyMode, RepairMode, EpochID,
+                            CMode, RepairMode, EpochID,
                             File, Verb, Src, FLUs, UPI, ProxiesDict, ETS, Acc2).
 
 take_same_offset_size(L, Offset, Size) ->
@@ -338,7 +371,7 @@ take_same_offset_size([{Offset, Size, _CSum, _FLU}=A|Rest], Offset, Size, Acc) -
 take_same_offset_size(Rest, _Offset, _Size, Acc) ->
     {Acc, Rest}.
 
-execute_repair_directives(ap_mode=_ConsistencyMode, Ds, _Src, EpochID, Verb,
+execute_repair_directives(ap_mode=_CMode, Ds, _Src, EpochID, Verb,
                           _OurFLUs, ProxiesDict, ETS) ->
     {_,_,_,_} = lists:foldl(fun execute_repair_directive/2,
                             {ProxiesDict, EpochID, Verb, ETS}, Ds),
