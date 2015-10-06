@@ -185,7 +185,7 @@ handle_info({adjust_down_list, FLU}, #state{active_unfit=ActiveUnfit}=S) ->
 handle_info(dump, #state{my_flu_name=MyFluName,active_unfit=ActiveUnfit,
                          pending_map=Map}=S) ->
     %% io:format(user, "DUMP: ~w/~w: ~p ~W\n", [MyFluName, self(), ActiveUnfit, map_value(Map), 13]),
-    io:format(user, "DUMP ~w: ~w, ", [MyFluName, ActiveUnfit]),
+    %io:format(user, "DUMP ~w: ~w, ", [MyFluName, ActiveUnfit]),
     {noreply, S};
 handle_info(_Info, S) ->
     {noreply, S}.

@@ -39,12 +39,13 @@
 -define(HASH(X), erlang:phash2(X)). %% hash algorithm to use
 -define(TIMEOUT, 10 * 1000). %% 10 second timeout
 
--record(state, {name    :: atom(),
+-record(state, {fluname :: atom(),
                 datadir :: string(),
-                tid     :: ets:tid()
+                tid     :: ets:tid(),
+                cnt     :: non_neg_integer()
                }).
 
-%% This record goes in the ets table where prefix is the key
+%% This record goes in the ets table where filename is the key
 -record(md, {filename          :: string(), 
              proxy_pid         :: undefined|pid(),
              mref              :: undefined|reference() %% monitor ref for file proxy
@@ -52,11 +53,13 @@
 
 %% public api
 -export([
-         start_link/2,
-         lookup_manager_pid/1,
-         lookup_proxy_pid/1,
-         start_proxy_pid/1,
-         stop_proxy_pid/1
+         child_spec/4,
+         start_link/4,
+         lookup_manager_pid/2,
+         lookup_proxy_pid/2,
+         start_proxy_pid/2,
+         stop_proxy_pid/2,
+         build_metadata_mgr_name/2
         ]).
 
 %% gen_server callbacks
@@ -70,26 +73,34 @@
         ]).
 
 %% Public API
+build_metadata_mgr_name(FluName, N) when is_atom(FluName) andalso is_integer(N) ->
+    list_to_atom(atom_to_list(FluName) ++ "_metadata_mgr_" ++ integer_to_list(N)).
 
-start_link(Name, DataDir) when is_atom(Name) andalso is_list(DataDir) ->
-    gen_server:start_link({local, Name}, ?MODULE, [Name, DataDir], []).
+child_spec(FluName, C, DataDir, N) ->
+    Name = build_metadata_mgr_name(FluName, C),
+    {Name,
+     {?MODULE, start_link, [FluName, Name, DataDir, N]},
+     permanent, 5000, worker, [?MODULE]}.
 
-lookup_manager_pid({file, Filename}) ->
-    whereis(get_manager_atom(Filename)).
+start_link(FluName, Name, DataDir, Num) when is_atom(Name) andalso is_list(DataDir) ->
+    gen_server:start_link({local, Name}, ?MODULE, [FluName, Name, DataDir, Num], []).
 
-lookup_proxy_pid({file, Filename}) ->
-    gen_server:call(get_manager_atom(Filename), {proxy_pid, Filename}, ?TIMEOUT).
+lookup_manager_pid(FluName, {file, Filename}) ->
+    whereis(get_manager_atom(FluName, Filename)).
 
-start_proxy_pid({file, Filename}) ->
-    gen_server:call(get_manager_atom(Filename), {start_proxy_pid, Filename}, ?TIMEOUT).
+lookup_proxy_pid(FluName, {file, Filename}) ->
+    gen_server:call(get_manager_atom(FluName, Filename), {proxy_pid, Filename}, ?TIMEOUT).
 
-stop_proxy_pid({file, Filename}) ->
-    gen_server:call(get_manager_atom(Filename), {stop_proxy_pid, Filename}, ?TIMEOUT).
+start_proxy_pid(FluName, {file, Filename}) ->
+    gen_server:call(get_manager_atom(FluName, Filename), {start_proxy_pid, Filename}, ?TIMEOUT).
+
+stop_proxy_pid(FluName, {file, Filename}) ->
+    gen_server:call(get_manager_atom(FluName, Filename), {stop_proxy_pid, Filename}, ?TIMEOUT).
 
 %% gen_server callbacks
-init([Name, DataDir]) ->
+init([FluName, Name, DataDir, Num]) ->
     Tid = ets:new(Name, [{keypos, 2}, {read_concurrency, true}, {write_concurrency, true}]),
-    {ok, #state{ name = Name, datadir = DataDir, tid = Tid}}.
+    {ok, #state{ fluname = FluName, datadir = DataDir, tid = Tid, cnt = Num}}.
 
 handle_cast(Req, State) ->
     lager:warning("Got unknown cast ~p", [Req]),
@@ -102,12 +113,12 @@ handle_call({proxy_pid, Filename}, _From, State = #state{ tid = Tid }) ->
     end,
     {reply, Reply, State};
 
-handle_call({start_proxy_pid, Filename}, _From, State = #state{ tid = Tid, datadir = D }) ->
+handle_call({start_proxy_pid, Filename}, _From, State = #state{ fluname = N, tid = Tid, datadir = D }) ->
     NewR = case lookup_md(Tid, Filename) of
         not_found ->
-            start_file_proxy(D, Filename);
+            start_file_proxy(N, D, Filename);
         #md{ proxy_pid = undefined } = R0 ->
-            start_file_proxy(D, R0);
+            start_file_proxy(N, D, R0);
         #md{ proxy_pid = _Pid } = R1 ->
             R1
     end,
@@ -180,13 +191,11 @@ compute_hash(Data) ->
     ?HASH(Data).
 
 compute_worker(Hash) ->
-    Hash rem ?MAX_MGRS.
+    MgrCount = get_env(metadata_manager_count, ?MAX_MGRS),
+    Hash rem MgrCount.
 
-build_metadata_mgr_name(N) when is_integer(N) ->
-    list_to_atom("machi_flu_metadata_mgr_" ++ integer_to_list(N)).
-
-get_manager_atom(Data) ->
-    build_metadata_mgr_name(compute_worker(compute_hash(Data))).
+get_manager_atom(FluName, Data) ->
+    build_metadata_mgr_name(FluName, compute_worker(compute_hash(Data))).
 
 lookup_md(Tid, Data) ->
     case ets:lookup(Tid, Data) of
@@ -194,13 +203,13 @@ lookup_md(Tid, Data) ->
         [R] -> R
     end.
 
-start_file_proxy(D, R = #md{filename = F} ) ->
-    {ok, Pid} = machi_file_proxy_sup:start_proxy(D, F),
+start_file_proxy(FluName, D, R = #md{filename = F} ) ->
+    {ok, Pid} = machi_file_proxy_sup:start_proxy(FluName, D, F),
     Mref = monitor(process, Pid),
     R#md{ proxy_pid = Pid, mref = Mref };
 
-start_file_proxy(D, Filename) ->
-    start_file_proxy(D, #md{ filename = Filename }).
+start_file_proxy(FluName, D, Filename) ->
+    start_file_proxy(FluName, D, #md{ filename = Filename }).
 
 update_ets(Tid, R) ->
     ets:insert(Tid, R).
@@ -215,3 +224,9 @@ purge_ets(Tid, R) ->
 get_md_record_by_mref(Tid, Mref) ->
     [R] = ets:match_object(Tid, {md, '_', '_', Mref}),
     R.
+
+get_env(Setting, Default) ->
+    case application:get_env(machi, Setting) of
+        undefined -> Default;
+        {ok, V} -> V
+    end.

@@ -24,8 +24,9 @@
 
 %% public API
 -export([
-    start_link/0,
-    start_proxy/2
+    child_spec/1,
+    start_link/1,
+    start_proxy/3
 ]).
 
 %% supervisor callback
@@ -33,14 +34,23 @@
     init/1
 ]).
 
-start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+child_spec(FluName) ->
+    Name = make_proxy_name(FluName),
+    {Name,
+     {?MODULE, start_link, [FluName]},
+     permanent, 5000, supervisor, [?MODULE]}.
 
-start_proxy(Filename, DataDir) ->
-    supervisor:start_child(?MODULE, [Filename, DataDir]).
+start_link(FluName) ->
+    supervisor:start_link({local, make_proxy_name(FluName)}, ?MODULE, []).
+
+start_proxy(FluName, Filename, DataDir) ->
+    supervisor:start_child(make_proxy_name(FluName), [Filename, DataDir]).
 
 init([]) ->
     SupFlags = {simple_one_for_one, 1000, 10},
     ChildSpec = {unused, {machi_file_proxy, start_link, []}, 
                     temporary, 2000, worker, [machi_file_proxy]},
     {ok, {SupFlags, [ChildSpec]}}.
+
+make_proxy_name(FluName) when is_atom(FluName) ->
+    list_to_atom(atom_to_list(FluName) ++ "_file_proxy_sup").

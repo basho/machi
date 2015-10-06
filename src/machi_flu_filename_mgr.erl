@@ -19,7 +19,7 @@
 %% -------------------------------------------------------------------
 %% 
 %% @doc This process is responsible for managing filenames assigned to 
-%% prefixes.
+%% prefixes. It's started out of `machi_flu_psup'.
 %%
 %% Supported operations include finding the "current" filename assigned to
 %% a prefix. Incrementing the sequence number and returning a new file name
@@ -44,7 +44,8 @@
 -behavior(gen_server).
 
 -export([
-    start_link/1,
+    child_spec/2,
+    start_link/2,
     find_or_make_filename_from_prefix/1,
     increment_prefix_sequence/1,
     list_files_by_prefix/1
@@ -63,8 +64,15 @@
 -define(TIMEOUT, 10 * 1000).
 
 %% public API
-start_link(DataDir) when is_list(DataDir) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [DataDir], []).
+
+child_spec(FluName, DataDir) ->
+    Name = make_filename_mgr_name(FluName),
+    {Name, 
+        {?MODULE, start_link, [FluName, DataDir]},
+        permanent, 5000, worker, [?MODULE]}.
+
+start_link(FluName, DataDir) when is_atom(FluName) andalso is_list(DataDir) ->
+    gen_server:start_link({local, make_filename_mgr_name(FluName)}, ?MODULE, [DataDir], []).
 
 -spec find_or_make_filename_from_prefix( Prefix :: {prefix, string()} ) ->
         {file, Filename :: string()} | {error, Reason :: term() } | timeout.
@@ -165,3 +173,6 @@ find_file(DataDir, Prefix, N) ->
 list_files(DataDir, Prefix) ->
     {F, Path} = machi_util:make_data_filename(DataDir, Prefix, "*", "*"),
     filelib:wildcard(F, filename:dirname(Path)).
+
+make_filename_mgr_name(FluName) when is_atom(FluName) ->
+    list_to_atom(atom_to_list(FluName) ++ "_filename_mgr").

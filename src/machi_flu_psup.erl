@@ -130,11 +130,24 @@ init([FluName, TcpPort, DataDir, Props0]) ->
                {machi_chain_manager1, start_link,
                 [FluName, [], Props]},
                permanent, ?SHUTDOWN, worker, []},
+
+    FNameMgrSpec = machi_flu_filename_mgr:child_spec(FluName, DataDir),
+
+    MetaMgrCnt = get_env(metadata_manager_count, 10),
+    MetaSupSpec = machi_flu_metadata_mgr_sup:child_spec(FluName, DataDir, MetaMgrCnt),
+
+    FProxySupSpec = machi_file_proxy_sup:child_spec(FluName),
+
     FluSpec = {FluName,
                {machi_flu1, start_link,
                 [ [{FluName, TcpPort, DataDir}|Props] ]},
                permanent, ?SHUTDOWN, worker, []},
-    {ok, {SupFlags, [ProjSpec, FitnessSpec, MgrSpec, FluSpec]}}.
+
+
+    {ok, {SupFlags, [
+            ProjSpec, FitnessSpec, MgrSpec, 
+            FProxySupSpec, FNameMgrSpec, MetaSupSpec, 
+            FluSpec]}}.
 
 make_flu_regname(FluName) when is_atom(FluName) ->
     FluName.
@@ -150,3 +163,9 @@ make_proj_supname(ProjName) when is_atom(ProjName) ->
 
 make_fitness_regname(FluName) when is_atom(FluName) ->
     list_to_atom(atom_to_list(FluName) ++ "_fitness").
+
+get_env(Setting, Default) ->
+    case application:get_env(machi, Setting) of
+        undefined -> Default;
+        {ok, V} -> V
+    end.
