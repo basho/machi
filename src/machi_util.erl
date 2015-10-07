@@ -73,7 +73,7 @@ make_config_filename(DataDir, Prefix) ->
 -spec make_checksum_filename(string(), string(), atom()|string()|binary(), integer()) ->
       string().
 make_checksum_filename(DataDir, Prefix, SequencerName, FileNum) ->
-    lists:flatten(io_lib:format("~s/config/~s.~s.~w.csum",
+    lists:flatten(io_lib:format("~s/config/~s^~s^~w.csum",
                                 [DataDir, Prefix, SequencerName, FileNum])).
 
 %% @doc Calculate a checksum file path, by common convention.
@@ -90,7 +90,7 @@ make_checksum_filename(DataDir, FileName) ->
 -spec make_data_filename(string(), string(), atom()|string()|binary(), integer()) ->
       {binary(), string()}.
 make_data_filename(DataDir, Prefix, SequencerName, FileNum) ->
-    File = erlang:iolist_to_binary(io_lib:format("~s.~s.~w",
+    File = erlang:iolist_to_binary(io_lib:format("~s^~s^~w",
                                                  [Prefix, SequencerName, FileNum])),
     FullPath = lists:flatten(io_lib:format("~s/data/~s",  [DataDir, File])),
     {File, FullPath}.
