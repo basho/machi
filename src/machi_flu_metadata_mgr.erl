@@ -146,7 +146,8 @@ handle_info({'DOWN', Mref, process, Pid, normal}, State = #state{ tid = Tid }) -
     clear_ets(Tid, Mref),
     {noreply, State};
 
-handle_info({'DOWN', Mref, process, Pid, file_rollover}, State = #state{ tid = Tid }) ->
+handle_info({'DOWN', Mref, process, Pid, file_rollover}, State = #state{ fluname = FluName, 
+                                                                         tid = Tid }) ->
     lager:info("file proxy ~p shutdown because of file rollover", [Pid]),
     R = get_md_record_by_mref(Tid, Mref),
     [Prefix | _Rest] = machi_util:parse_filename({file, R#md.filename}),
@@ -156,7 +157,7 @@ handle_info({'DOWN', Mref, process, Pid, file_rollover}, State = #state{ tid = T
     %% sequence number it probably will be associated with a different metadata
     %% manager. That's why we don't want to generate a new file name immediately
     %% and use it to start a new file proxy.
-    ok = machi_flu_filename_mgr:increment_prefix_sequence({prefix, Prefix}),
+    ok = machi_flu_filename_mgr:increment_prefix_sequence(FluName, {prefix, Prefix}),
 
     %% purge our ets table of this entry completely since it is likely the
     %% new filename (whenever it comes) will be in a different manager than
