@@ -307,7 +307,7 @@ handle_call({write, Offset, ClientMeta, Data}, _From,
         {error, {bad_csum, Bad}} ->
             lager:error("Bad checksum on write; client sent ~p, we computed ~p",
                         [ClientCsum, Bad]),
-            {{error, bad_csum}, Err + 1, U};
+            {{error, bad_checksum}, Err + 1, U};
         TaggedCsum ->
             case handle_write(FHd, FHc, F, TaggedCsum, Offset, Data, U) of
                 {ok, NewU1} ->
