@@ -504,8 +504,8 @@ do_server_append_chunk2(_PKey, Prefix, Chunk, CSum_tag, Client_CSum,
     %% TODO: Do anything with PKey?
     try
         TaggedCSum = check_or_make_tagged_checksum(CSum_tag, Client_CSum,Chunk),
-        FluName ! {seq_append, self(), Prefix, Chunk, TaggedCSum,
-                   ChunkExtra, EpochID},
+        R = {seq_append, self(), Prefix, Chunk, TaggedCSum, ChunkExtra, EpochID},
+        FluName ! R,
         receive
             {assignment, Offset, File} ->
                 Size = iolist_size(Chunk),
@@ -540,7 +540,13 @@ do_server_read_chunk(File, Offset, Size, _Opts, #state{flu_name=FluName})->
     case sanitize_file_string(File) of
         ok ->
             {ok, Pid} = machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, File}),
-            machi_file_proxy:read(Pid, Offset, Size);
+            case machi_file_proxy:read(Pid, Offset, Size) of
+                %% XXX FIXME 
+                %% For now we are omiting the checksum data because it blows up
+                %% protobufs.
+                {ok, Data, _Csum} -> {ok, Data};
+                Other -> Other
+            end;
         _ ->
             {error, bad_arg}
     end.
@@ -643,11 +649,12 @@ append_server_dispatch(From, Prefix, Chunk, CSum, Extra, FluName) ->
 handle_append(_Prefix, <<>>, _Csum, _Extra, _FluName) ->
     {error, bad_arg};
 handle_append(Prefix, Chunk, Csum, Extra, FluName) ->
-    case machi_flu_filename_mgr:find_or_make_filename_from_prefix({prefix, Prefix}) of
+    Res = machi_flu_filename_mgr:find_or_make_filename_from_prefix(FluName, {prefix, Prefix}),
+    case Res of
         {file, F} ->
             {ok, Pid} = machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, F}),
-            {Tag, Csum} = machi_util:unmake_tagged_csum(Csum),
-            Meta = [{client_csum_tag, Tag}, {client_csum, Csum}],
+            {Tag, CS} = machi_util:unmake_tagged_csum(Csum),
+            Meta = [{client_csum_tag, Tag}, {client_csum, CS}],
             machi_file_proxy:append(Pid, Meta, Extra, Chunk);
         Error ->
             Error
@@ -663,7 +670,7 @@ sanitize_file_string(Str) ->
 
 sanitize_prefix(Prefix) ->
     %% We are using '^' as our component delimiter
-    case re:run(Prefix, "^|/") of
+    case re:run(Prefix, "/|\\^") of
         nomatch ->
             ok;
         _ ->
@@ -681,7 +688,7 @@ sync_checksum_file(FluName, File) ->
     case machi_flu_metadata_mgr:lookup_proxy_pid(FluName, {file, File}) of
         undefined ->
             ok;
-        {ok, Pid} ->
+        Pid ->
           machi_file_proxy:sync(Pid, csum)
     end.
 
