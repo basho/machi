@@ -8,6 +8,7 @@ erl_crash.dump
 .concrete/DEV_MODE
 .rebar
 edoc
+.local_dialyzer_plt
 
 # PB artifacts for Erlang
 include/machi_pb.hrl
