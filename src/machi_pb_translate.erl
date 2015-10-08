@@ -190,10 +190,17 @@ from_pb_request(_Else) ->
 
 from_pb_response(#mpb_ll_response{
                     req_id=ReqID,
+                    % There is no separate LL error response record
+                    generic=#mpb_errorresp{code=Code, msg=Msg}}) ->
+    {ReqID, {error, {Code, Msg}}};
+from_pb_response(#mpb_ll_response{
+                    req_id=ReqID,
+                    % There is no separate LL echo response record
                     echo=#mpb_echoresp{message=Msg}}) ->
     {ReqID, Msg};
 from_pb_response(#mpb_ll_response{
                     req_id=ReqID,
+                    % There is no separate LL auth response record
                     auth=#mpb_authresp{code=Code}}) ->
     {ReqID, Code};
 from_pb_response(#mpb_ll_response{
