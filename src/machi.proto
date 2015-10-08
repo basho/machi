@@ -40,6 +40,11 @@ enum Mpb_GeneralStatusCode {
      BAD_ARG = 1;
      WEDGED = 2;
      BAD_CHECKSUM = 3;
+     /*
+     ** There is no timout error code, only PARTITION.  If the client
+     ** wants to know if a lot of time has elapsed, then the client
+     ** can do its own timekeeping.
+     */
      PARTITION = 4;
      NOT_WRITTEN = 5;
      WRITTEN = 6;
@@ -188,11 +193,13 @@ message Mpb_ReadChunkReq {
     required uint64 offset = 2;
     required uint32 size = 3;
 
-    // Use flag_checksum=non-zero to request the chunk's checksum also
-    optional uint32 flag_checksum = 4 [default=0];
+    // Use flag_no_checksum=non-zero to skip returning the chunk's checksum.
+    // TODO: not implemented yet.
+    optional uint32 flag_no_checksum = 4 [default=0];
 
     // Use flag_no_chunk=non-zero to skip returning the chunk (which
-    // only makes sense if flag_checksum is set).
+    // only makes sense if flag_no_checksum is not set).
+    // TODO: not implemented yet.
     optional uint32 flag_no_chunk = 5 [default=0];
 }
 
@@ -385,11 +392,13 @@ message Mpb_LL_ReadChunkReq {
     required uint64 offset = 3;
     required uint32 size = 4;
 
-    // Use flag_checksum=non-zero to request the chunk's checksum also
-    optional uint32 flag_get_checksum = 5 [default=0];
+    // Use flag_no_checksum=non-zero to skip returning the chunk's checksum.
+    // TODO: not implemented yet.
+    optional uint32 flag_no_checksum = 5 [default=0];
 
     // Use flag_no_chunk=non-zero to skip returning the chunk (which
-    // only makes sense if flag_checksum is set).
+    // only makes sense if flag_checksum is not set).
+    // TODO: not implemented yet.
     optional uint32 flag_no_chunk = 6 [default=0];
 }
 
