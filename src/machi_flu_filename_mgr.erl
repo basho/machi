@@ -211,7 +211,7 @@ generate_filename(DataDir, Prefix, N) ->
 maybe_cleanup(_Tid, _Key, false) ->
     ok;
 maybe_cleanup(Tid, Key, true) ->
-    ok = ets:delete(Tid, Key).
+    true = ets:delete(Tid, Key).
 
 
 -ifdef(TEST).
