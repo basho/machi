@@ -29,12 +29,11 @@
 -include("machi_projection.hrl").
 
 smoke_test() ->
-    {ok, SupPid} = machi_flu_sup:start_link(),
     PortBase = 64820,
     Dir = "./data.a",
     Os = [{ignore_stability_time, true}, {active_mode, false}],
     os:cmd("rm -rf " ++ Dir),
-    {ok,Yo}=machi_flu_psup:start_flu_package(a, PortBase, "./data.a", Os),
+    machi_flu1_test:start_flu_package(a, PortBase, "./data.a", Os),
 
     try
         P1 = machi_projection:new(1, a, [], [], [], [], []),
@@ -59,9 +58,7 @@ smoke_test() ->
 
         ok
     after
-        machi_flu_psup:stop_flu_package(a),
-        exit(SupPid, normal),
-        timer:sleep(10)
+        machi_flu1_test:stop_flu_package(a)
     end.
 
 -endif. % !PULSE

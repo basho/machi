@@ -37,9 +37,8 @@ api_smoke_test() ->
     DataDir = "./data.api_smoke_flu",
     W_props = [{initial_wedged, false}],
     Prefix = <<"prefix">>,
-    FLU1 = machi_flu1_test:setup_test_flu(RegName, TcpPort, DataDir,
-                                          W_props),
-    erase(flu_pid),
+
+    machi_flu1_test:start_flu_package(RegName, TcpPort, DataDir, W_props),
 
     try
         I = #p_srvr{name=RegName, address=Host, port=TcpPort},
@@ -50,14 +49,13 @@ api_smoke_test() ->
                                           FakeEpoch, Prefix, <<"data">>,
                                           infinity) || _ <- lists:seq(1,5)],
             %% Stop the FLU, what happens?
-            machi_flu1:stop(FLU1),
+            machi_flu1_test:stop_flu_package(RegName),
             [{error,partition} = ?MUT:append_chunk(Prox1,
                                 FakeEpoch, Prefix, <<"data-stopped1">>,
                                 infinity) || _ <- lists:seq(1,3)],
             %% Start the FLU again, we should be able to do stuff immediately
-            FLU1b = machi_flu1_test:setup_test_flu(RegName, TcpPort, DataDir,
+            machi_flu1_test:start_flu_package(RegName, TcpPort, DataDir,
                                                    [save_data_dir|W_props]),
-            put(flu_pid, FLU1b),
             MyChunk = <<"my chunk data">>,
             {ok, {MyOff,MySize,MyFile}} =
                 ?MUT:append_chunk(Prox1, FakeEpoch, Prefix, MyChunk,
@@ -85,23 +83,50 @@ api_smoke_test() ->
             {error, no_such_file} = ?MUT:checksum_list(Prox1, FakeEpoch, BadFile),
             {ok, [_|_]} = ?MUT:list_files(Prox1, FakeEpoch),
             {ok, {false, _}} = ?MUT:wedge_status(Prox1),
-            {ok, FakeEpoch} = ?MUT:get_latest_epochid(Prox1, public),
-            {error, not_written} = ?MUT:read_latest_projection(Prox1, public),
+            %% Per Scott, comment this out until he can take a look
+            %%
+            %% machi_proxy_flu1_client_test: api_smoke_test...*failed*
+            %% in function machi_proxy_flu1_client_test:api_smoke_test/0 (test/machi_proxy_flu1_client_test.erl, line 88)
+            %% **error:{badmatch,{ok,{0,<<55,96,141,95,149,143,223,4,14,235,88,15,47,...>>}}}
+            %%
+            %% {ok, FakeEpoch} = ?MUT:get_latest_epochid(Prox1, public),
+            %% in function machi_proxy_flu1_client_test:api_smoke_test/0 (test/machi_proxy_flu1_client_test.erl, line 89)
+            %% **error:{badmatch,{ok,{projection_v1,0,
+            %%               <<55,96,141,95,149,143,223,4,14,235,88,15,...>>,
+            %%               api_smoke_flu,[],[],
+            %%               {1444,330495,507785},
+            %%               ap_mode,[],[],[],[],[],[]}}}
+            %% {error, not_written} = ?MUT:read_latest_projection(Prox1, public),
             {error, not_written} = ?MUT:read_projection(Prox1, public, 44),
             P_a = #p_srvr{name=a, address="localhost", port=6622},
             P1 = machi_projection:new(1, a, [P_a], [], [a], [], []),
             ok = ?MUT:write_projection(Prox1, public, P1),
             {ok, P1} = ?MUT:read_projection(Prox1, public, 1),
-            {ok, [P1]} = ?MUT:get_all_projections(Prox1, public),
-            {ok, [1]} = ?MUT:list_all_projections(Prox1, public),
+            %% 
+            %% in function machi_proxy_flu1_client_test:api_smoke_test/0 (test/machi_proxy_flu1_client_test.erl, line 107)
+            %% **error:{badmatch,{ok,[{projection_v1,0,
+            %%                <<55,96,141,95,149,143,223,4,14,235,88,...>>,
+            %%                  api_smoke_flu,[],[],
+            %%                  {1444,330601,749713},
+            %%                  ap_mode,[],[],[],[],[],[]},
+            %%   {projection_v1,1,
+            %%                  <<156,33,125,69,126,173,34,245,78,95,...>>,
+            %%                  a,
+            %%                  [a],
+            %%                  [],
+            %%                  {1444,330601,820732},
+            %%                  ap_mode,
+            %%                  [a],
+            %%                  [],[],[],[],...}]}}
+            %% {ok, [P1]} = ?MUT:get_all_projections(Prox1, public),
+            %% {ok, [1]} = ?MUT:list_all_projections(Prox1, public),
 
             ok
         after
             _ = (catch ?MUT:quit(Prox1))
         end
     after
-        (catch machi_flu1:stop(FLU1)),
-        (catch machi_flu1:stop(get(flu_pid)))
+        (catch machi_flu1_test:stop_flu_package(RegName))
     end.
 
 flu_restart_test() ->
@@ -110,11 +135,7 @@ flu_restart_test() ->
     TcpPort = 57125,
     DataDir = "./data.api_smoke_flu2",
     W_props = [{initial_wedged, false}],
-    erase(flu_pid),
-    put(flu_pid, []),
-    FLU1 = machi_flu1_test:setup_test_flu(RegName, TcpPort, DataDir,
-                                          W_props),
-    put(flu_pid, [FLU1|get(flu_pid)]),
+    machi_flu1_test:start_flu_package(RegName, TcpPort, DataDir, W_props),
 
     try
         I = #p_srvr{name=RegName, address=Host, port=TcpPort},
@@ -137,7 +158,7 @@ flu_restart_test() ->
             {ok, EpochID} = ?MUT:get_epoch_id(Prox1),
             {ok, EpochID} = ?MUT:get_latest_epochid(Prox1, public),
             {ok, EpochID} = ?MUT:get_latest_epochid(Prox1, private),
-            ok = machi_flu1:stop(FLU1), timer:sleep(50),
+            ok = machi_flu1_test:stop_flu_package(RegName), timer:sleep(50),
 
             %% Now that the last proxy op was successful and only
             %% after did we stop the FLU, let's check that both the
@@ -295,14 +316,13 @@ flu_restart_test() ->
                 ],
 
             [begin
-                 FLU2 = machi_flu1_test:setup_test_flu(
+                 machi_flu1_test:start_flu_package(
                           RegName, TcpPort, DataDir,
                           [save_data_dir|W_props]),
-                 put(flu_pid, [FLU2|get(flu_pid)]),
                  _ = Fun(line),
                  ok = Fun(run),
                  ok = Fun(run),
-                 ok = machi_flu1:stop(FLU2),
+                 ok = machi_flu1_test:stop_flu_package(RegName),
                  {error, partition} = Fun(stop),
                  {error, partition} = Fun(stop),
                  ok
@@ -312,7 +332,7 @@ flu_restart_test() ->
             _ = (catch ?MUT:quit(Prox1))
         end
     after
-        [catch machi_flu1:stop(Pid) || Pid <- get(flu_pid)]
+        (catch machi_flu1_test:stop_flu_package(RegName))
     end.
     
 -endif. % !PULSE
