@@ -76,10 +76,10 @@ from_pb_request(#mpb_ll_request{
                      file=File,
                      offset=Offset,
                      size=Size,
-                     flag_get_checksum=PB_GetChecksum,
+                     flag_no_checksum=PB_GetNoChecksum,
                      flag_no_chunk=PB_GetNoChunk}}) ->
     EpochID = conv_to_epoch_id(PB_EpochID),
-    Opts = [{get_checksum, conv_to_boolean(PB_GetChecksum)},
+    Opts = [{no_checksum, conv_to_boolean(PB_GetNoChecksum)},
             {no_chunk, conv_to_boolean(PB_GetNoChunk)}],
     {ReqID, {low_read_chunk, EpochID, File, Offset, Size, Opts}};
 from_pb_request(#mpb_ll_request{
