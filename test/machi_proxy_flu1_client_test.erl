@@ -130,11 +130,11 @@ api_smoke_test() ->
     end.
 
 flu_restart_test() ->
-    RegName = api_smoke_flu,
+    RegName = a,
     Host = "localhost",
     TcpPort = 57125,
     DataDir = "./data.api_smoke_flu2",
-    W_props = [{initial_wedged, false}],
+    W_props = [{initial_wedged, false}, {active_mode, false}],
     machi_flu1_test:start_flu_package(RegName, TcpPort, DataDir, W_props),
 
     try
@@ -148,7 +148,7 @@ flu_restart_test() ->
                                           FakeEpoch, <<"prefix">>, Data,
                                           infinity),
             P_a = #p_srvr{name=a, address="localhost", port=6622},
-            P1   = machi_projection:new(1, a, [P_a], [], [a], [], []),
+            P1   = machi_projection:new(1, RegName, [P_a], [], [RegName], [], []),
             P1xx = P1#projection_v1{dbg2=["dbg2 changes are ok"]},
             P1yy = P1#projection_v1{dbg=["not exactly the same as P1!!!"]},
             EpochID = {P1#projection_v1.epoch_number,
@@ -238,13 +238,13 @@ flu_restart_test() ->
                     (stop) -> ?MUT:write_projection(Prox1, private, P1yy)
                  end,
 
-                 fun(run) -> {ok, [_]} =
+                 fun(run) -> {ok, [#projection_v1{epoch_number=0}, #projection_v1{epoch_number=1}]} =
                                  ?MUT:get_all_projections(Prox1, public),
                              ok;
                     (line) -> io:format("line ~p, ", [?LINE]);
                     (stop) -> ?MUT:get_all_projections(Prox1, public)
                  end,
-                 fun(run) -> {ok, [_]} =
+                 fun(run) -> {ok, [#projection_v1{epoch_number=0}, #projection_v1{epoch_number=1}]} =
                                  ?MUT:get_all_projections(Prox1, private),
                              ok;
                     (line) -> io:format("line ~p, ", [?LINE]);
@@ -302,10 +302,8 @@ flu_restart_test() ->
                     (stop) -> ?MUT:write_chunk(Prox1, FakeEpoch, File1, Off1,
                                                Data, infinity)
                  end,
-                 %% NOTE: When write-once enforcement is enabled, this test
-                 %% will fail: change ok -> {error, written}
-                 fun(run) -> %% {error, written} =
-                             ok =
+                 fun(run) -> 
+                         {error, written} =
                                  ?MUT:write_chunk(Prox1, FakeEpoch, File1, Off1,
                                                   Dataxx, infinity),
                              ok;
