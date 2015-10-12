@@ -198,10 +198,11 @@ flu_projection_smoke_test() ->
 
 flu_projection_common(Host, TcpPort, T) ->
     {ok, {0,_}} = ?FLU_C:get_latest_epochid(Host, TcpPort, T),
-    {error, not_written} =
+    {ok, #projection_v1{epoch_number=0}} =
         ?FLU_C:read_latest_projection(Host, TcpPort, T),
-    {ok, []} = ?FLU_C:list_all_projections(Host, TcpPort, T),
-    {ok, []} = ?FLU_C:get_all_projections(Host, TcpPort, T),
+    {ok, [0]} = ?FLU_C:list_all_projections(Host, TcpPort, T),
+    {ok, [#projection_v1{epoch_number=0}]} =
+        ?FLU_C:get_all_projections(Host, TcpPort, T),
 
     P_a = #p_srvr{name=a, address="localhost", port=4321},
     P1 = machi_projection:new(1, a, [P_a], [], [a], [], []),
@@ -213,8 +214,8 @@ flu_projection_common(Host, TcpPort, T) ->
     {ok, P1} = ?FLU_C:read_projection(Host, TcpPort, T, 1),
     {ok, {1,_}} = ?FLU_C:get_latest_epochid(Host, TcpPort, T),
     {ok, P1} = ?FLU_C:read_latest_projection(Host, TcpPort, T),
-    {ok, [1]} = ?FLU_C:list_all_projections(Host, TcpPort, T),
-    {ok, [P1]} = ?FLU_C:get_all_projections(Host, TcpPort, T),
+    {ok, [0,1]} = ?FLU_C:list_all_projections(Host, TcpPort, T),
+    {ok, [_,P1]} = ?FLU_C:get_all_projections(Host, TcpPort, T),
     {error, not_written} = ?FLU_C:read_projection(Host, TcpPort, T, 2),
     ok.
 
