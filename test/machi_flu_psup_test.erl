@@ -159,6 +159,12 @@ partial_stop_restart2() ->
         true = (Epoch_n > Epoch_m),
         {ok, {false, EpochID3}} = WedgeStatus(hd(Ps)),
         %% The file we're assigned should be different with the epoch change.
+        %%
+        %% XXX FIXME: We need to validate this is a requirement. So far, the
+        %% filename manager has been EpochId agnostic. It always returns the
+        %% "current" filename assigned to a prefix unless the file is near
+        %% the pre-set maximum file size.
+        %% 
         {ok, {_,_,File3}} = Append(hd(Ps), EpochID3),
         true = (File1 /= File3),
 
