@@ -193,7 +193,15 @@ compute_hash(Data) ->
 
 compute_worker(Hash) ->
     MgrCount = get_env(metadata_manager_count, ?MAX_MGRS),
-    Hash rem MgrCount.
+    (Hash rem MgrCount) + 1.
+    %% TODO MARK: Hrm, the intermittent failures of both of the tests
+    %% in machi_cr_client_test.erl were due to this func returning 0.
+    %% But machi_flu_metadata_mgr_sup:init() doesn't make a child with N=0.
+    %%
+    %% The remaining puzzle for me, which I'm now punting to you, sorry,
+    %% is why those two tests would sometimes pass, which implies to me that
+    %% sometimes the code path used by those tests never chooses worker 0
+    %% and occasionally it does choose worker 0.
 
 get_manager_atom(FluName, Data) ->
     build_metadata_mgr_name(FluName, compute_worker(compute_hash(Data))).
