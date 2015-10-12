@@ -160,6 +160,11 @@ partial_stop_restart2() ->
         {ok, {false, EpochID3}} = WedgeStatus(hd(Ps)),
         %% The file we're assigned should be different with the epoch change.
         %%
+        %% TODO MARK: Yes, in AP mode especially (and perhaps CP, I
+        %% haven't thought about it enough), if the epoch changes,
+        %% file assignments for all requests that are received after
+        %% the epoch change must be different.
+        %%
         %% XXX FIXME: We need to validate this is a requirement. So far, the
         %% filename manager has been EpochId agnostic. It always returns the
         %% "current" filename assigned to a prefix unless the file is near
