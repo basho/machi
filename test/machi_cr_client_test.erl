@@ -148,7 +148,7 @@ smoke_test2() ->
         %% Misc API smoke & minor regression checks
         {error, not_written} = machi_cr_client:read_chunk(C1, <<"no">>,
                                                           999999999, 1),
-        {error, partial_read} = machi_cr_client:read_chunk(C1, File1,
+        {error, not_written} = machi_cr_client:read_chunk(C1, File1,
                                                            Off1, 88888888),
         %% Checksum list return value is a primitive binary().
         {ok, KludgeBin} = machi_cr_client:checksum_list(C1, File1),
