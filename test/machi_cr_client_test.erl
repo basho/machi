@@ -157,6 +157,13 @@ smoke_test2() ->
         {error, no_such_file} = machi_cr_client:checksum_list(C1, <<"!!!!">>),
         %% Exactly one file right now
         {ok, [_]} = machi_cr_client:list_files(C1),
+        %% TODO MARK: The read_chunk() call on line 149 appears to be
+        %% creating a zero-length file?  Thus the length=1 pattern
+        %% match above fails.  While not a critical error, I don't
+        %% believe it's behavior that we want.  The error message is:
+        %% in function machi_cr_client_test:smoke_test2/0 (test/machi_cr_client_test.erl, line 159)
+        %% **error:{badmatch,{ok,[{0,<<"no">>},
+        %%                       {2098202,<<"pre^e77dea39-ab3b-4f3f-aef7-1c7b85f0765d^0">>}]}}
 
         %% Go back and test append_chunk_extra() and write_chunk()
         Chunk10 = <<"It's a different chunk!">>,
