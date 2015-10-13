@@ -90,6 +90,7 @@ smoke_test2() ->
 
             [begin
                  %% ok = ?C:trim_chunk(Clnt, Fl, Off, Sz)
+                 %% This gets an error as trim API is still a stub
                  ?assertMatch({bummer,
                                {throw,
                                 {error, bad_joss_taipan_fixme},

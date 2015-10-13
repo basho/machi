@@ -289,6 +289,8 @@ handle_call2({write_chunk, File, Offset, Chunk, TO}, _From, S) ->
     do_write_head(File, Offset, Chunk, 0, os:timestamp(), TO, S);
 handle_call2({read_chunk, File, Offset, Size, TO}, _From, S) ->
     do_read_chunk(File, Offset, Size, 0, os:timestamp(), TO, S);
+handle_call2({trim_chunk, File, Offset, Size, TO}, _From, S) ->
+    do_trim_chunk(File, Offset, Size, 0, os:timestamp(), TO, S);
 handle_call2({checksum_list, File, TO}, _From, S) ->
     do_checksum_list(File, 0, os:timestamp(), TO, S);
 handle_call2({list_files, TO}, _From, S) ->
@@ -546,6 +548,10 @@ do_read_chunk2(File, Offset, Size, Depth, STime, TO,
         {error, written} ->
             exit({todo_should_never_happen,?MODULE,?LINE,File,Offset,Size})
     end.
+
+do_trim_chunk(_File, _Offset, _Size, _Depth, _STime, _TO, S) ->
+    %% This is just a stub to reach CR client from high level client
+    {reply, {error, bad_joss}, S}.
 
 %% Read repair: depends on the consistency mode that we're in:
 %%
