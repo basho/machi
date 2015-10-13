@@ -41,6 +41,7 @@
          append_chunk/6, append_chunk/7,
          write_chunk/5, write_chunk/6,
          read_chunk/4, read_chunk/5,
+         trim_chunk/4, trim_chunk/5,
          checksum_list/2, checksum_list/3,
          list_files/1, list_files/2
         ]).
@@ -98,6 +99,12 @@ read_chunk(PidSpec, File, Offset, Size) ->
 
 read_chunk(PidSpec, File, Offset, Size, Timeout) ->
     send_sync(PidSpec, {read_chunk, File, Offset, Size}, Timeout).
+
+trim_chunk(PidSpec, File, Offset, Size) ->
+    trim_chunk(PidSpec, File, Offset, Size, ?DEFAULT_TIMEOUT).
+
+trim_chunk(PidSpec, File, Offset, Size, Timeout) ->
+    send_sync(PidSpec, {trim_chunk, File, Offset, Size}, Timeout).
 
 checksum_list(PidSpec, File) ->
     checksum_list(PidSpec, File, ?DEFAULT_TIMEOUT).
@@ -298,6 +305,30 @@ do_send_sync2({read_chunk, File, Offset, Size},
             Res = {bummer, {X, Y, erlang:get_stacktrace()}},
             {Res, S#state{count=Count+1}}
     end;
+do_send_sync2({trim_chunk, File, Offset, Size},
+              #state{sock=Sock, sock_id=Index, count=Count}=S) ->
+    try
+        ReqID = <<Index:64/big, Count:64/big>>,
+        Req = #mpb_trimchunkreq{file=File,
+                                offset=Offset,
+                                size=Size},
+        R1a = #mpb_request{req_id=ReqID, do_not_alter=1,
+                           trim_chunk=Req},
+        Bin1a = machi_pb:encode_mpb_request(R1a),
+        ok = gen_tcp:send(Sock, Bin1a),
+        {ok, Bin1B} = gen_tcp:recv(Sock, 0),
+        case (catch machi_pb:decode_mpb_response(Bin1B)) of
+            #mpb_response{req_id=ReqID, trim_chunk=R} when R /= undefined ->
+                Result = convert_trim_chunk_resp(R),
+                {Result, S#state{count=Count+1}};
+            #mpb_response{req_id=ReqID, generic=G} when G /= undefined ->
+                #mpb_errorresp{code=Code, msg=Msg, extra=Extra} = G,
+                {{error, {Code, Msg, Extra}}, S#state{count=Count+1}}
+        end
+    catch X:Y ->
+            Res = {bummer, {X, Y, erlang:get_stacktrace()}},
+            {Res, S#state{count=Count+1}}
+    end;
 do_send_sync2({checksum_list, File},
              #state{sock=Sock, sock_id=Index, count=Count}=S) ->
     try
@@ -387,6 +418,11 @@ convert_write_chunk_resp(#mpb_writechunkresp{status=Status}) ->
 convert_read_chunk_resp(#mpb_readchunkresp{status='OK', chunk=Chunk}) ->
     {ok, Chunk};
 convert_read_chunk_resp(#mpb_readchunkresp{status=Status}) ->
+    convert_general_status_code(Status).
+
+convert_trim_chunk_resp(#mpb_trimchunkresp{status='OK'}) ->
+    ok;
+convert_trim_chunk_resp(#mpb_trimchunkresp{status=Status}) ->
     convert_general_status_code(Status).
 
 convert_checksum_list_resp(#mpb_checksumlistresp{status='OK', chunk=Chunk}) ->

@@ -130,6 +130,7 @@ message Mpb_ErrorResp {
 // append_chunk()  : Mpb_AppendChunkReq and Mpb_AppendChunkResp
 // write_chunk()   : Mpb_WriteChunkReq and Mpb_WriteChunkResp
 // read_chunk()    : Mpb_ReadChunkReq and Mpb_ReadChunkResp
+// trim_chunk()    : Mpb_TrimCHunkReq and Mpb_TrimChunkResp
 // checksum_list() : Mpb_ChecksumListReq and Mpb_ChecksumListResp
 // list_files()    : Mpb_ListFilesReq and Mpb_ListFilesResp
 //
@@ -209,6 +210,19 @@ message Mpb_ReadChunkResp {
     optional Mpb_ChunkCSum csum = 3;
 }
 
+
+// High level API: trim_chunk() request & response
+
+message Mpb_TrimChunkReq {
+    required string file = 1;
+    required uint64 offset = 2;
+    required uint32 size = 3;
+}
+
+message Mpb_TrimChunkResp {
+    required Mpb_GeneralStatusCode status = 1;
+}
+
 // High level API: checksum_list() request & response
 
 message Mpb_ChecksumListReq {
@@ -258,8 +272,9 @@ message Mpb_Request {
     optional Mpb_AppendChunkReq append_chunk = 112;
     optional Mpb_WriteChunkReq write_chunk = 113;
     optional Mpb_ReadChunkReq read_chunk = 114;
-    optional Mpb_ChecksumListReq checksum_list = 115;
-    optional Mpb_ListFilesReq list_files = 116;
+    optional Mpb_TrimChunkReq trim_chunk = 115;
+    optional Mpb_ChecksumListReq checksum_list = 116;
+    optional Mpb_ListFilesReq list_files = 117;
 }
 
 message Mpb_Response {
@@ -281,8 +296,9 @@ message Mpb_Response {
     optional Mpb_AppendChunkResp append_chunk = 12;
     optional Mpb_WriteChunkResp write_chunk = 13;
     optional Mpb_ReadChunkResp read_chunk = 14;
-    optional Mpb_ChecksumListResp checksum_list = 15;
-    optional Mpb_ListFilesResp list_files = 16;
+    optional Mpb_TrimChunkResp trim_chunk = 15;
+    optional Mpb_ChecksumListResp checksum_list = 16;
+    optional Mpb_ListFilesResp list_files = 17;
 }
 
 //////////////////////////////////////////

@@ -122,6 +122,7 @@
          append_chunk_extra/4, append_chunk_extra/5,
          write_chunk/4, write_chunk/5,
          read_chunk/4, read_chunk/5,
+         trim_chunk/4, trim_chunk/5,
          checksum_list/2, checksum_list/3,
          list_files/1, list_files/2,
 
@@ -207,6 +208,18 @@ read_chunk(PidSpec, File, Offset, Size) ->
 read_chunk(PidSpec, File, Offset, Size, Timeout0) ->
     {TO, Timeout} = timeout(Timeout0),
     gen_server:call(PidSpec, {req, {read_chunk, File, Offset, Size, TO}},
+                    Timeout).
+
+%% @doc Trim a chunk of data of size `Size' from `File' at `Offset'.
+
+trim_chunk(PidSpec, File, Offset, Size) ->
+    trim_chunk(PidSpec, File, Offset, Size, ?DEFAULT_TIMEOUT).
+
+%% @doc Trim a chunk of data of size `Size' from `File' at `Offset'.
+
+trim_chunk(PidSpec, File, Offset, Size, Timeout0) ->
+    {TO, Timeout} = timeout(Timeout0),
+    gen_server:call(PidSpec, {req, {trim_chunk, File, Offset, Size, TO}},
                     Timeout).
 
 %% @doc Fetch the list of chunk checksums for `File'.

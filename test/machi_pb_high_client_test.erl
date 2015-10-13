@@ -88,6 +88,16 @@ smoke_test2() ->
             {ok, [{File1Size,File1}]} = ?C:list_files(Clnt),
             true = is_integer(File1Size),
 
+            [begin
+                 %% ok = ?C:trim_chunk(Clnt, Fl, Off, Sz)
+                 ?assertMatch({bummer,
+                               {throw,
+                                {error, bad_joss_taipan_fixme},
+                                _Boring_stack_trace}},
+                              ?C:trim_chunk(Clnt, Fl, Off, Sz))
+             end || {Ch, Fl, Off, Sz} <- Reads],
+            ?debugVal(?C:list_files(Clnt)),
+
             ok
         after
             (catch ?C:quit(Clnt))
