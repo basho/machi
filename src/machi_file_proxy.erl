@@ -686,12 +686,11 @@ do_write(FHd, FHc, Filename, TaggedCsum, Offset, Size, Data, U) ->
 % @private Given an offset and a size, return `true' if a byte range has
 % <b>not</b> been written. Otherwise, return `false'.
 is_byte_range_unwritten(Offset, Size, Unwritten) ->
-    case length(Unwritten) of
-        0 ->
+    case Unwritten of
+        [] ->
             lager:critical("Unwritten byte list has 0 entries! This should never happen."),
             false;
-        1 ->
-            {Eof, infinity} = hd(Unwritten),
+        [{Eof, infinity}] ->
             Offset >= Eof;
         _ ->
             case lookup_unwritten(Offset, Size, Unwritten) of
