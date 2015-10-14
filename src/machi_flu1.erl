@@ -35,14 +35,6 @@
 %%
 %% === TODO items ===
 %%
-%% TODO There is a major missing feature in this FLU implementation:
-%% there is no "write-once" enforcement for any position in a Machi
-%% file.  At the moment, we rely on correct behavior of the client
-%% &amp; the sequencer to avoid overwriting data.  In the Real World,
-%% however, all Machi file data is supposed to be exactly write-once
-%% to avoid problems with bugs, wire protocol corruption, malicious
-%% clients, etc.
-%%
 %% TODO The per-file metadata tuple store is missing from this implementation.
 %%
 %% TODO Section 4.1 ("The FLU") of the Machi design doc suggests that
