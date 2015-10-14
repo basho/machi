@@ -36,12 +36,8 @@
 -export([start/2, stop/1]).
 
 start(_StartType, _StartArgs) ->
-    case machi_sup:start_link() of
-        {ok, Pid} ->
-            {ok, Pid};
-        Error ->
-            Error
-                end.
+    machi_cinfo:register(),
+    machi_sup:start_link().
 
 stop(_State) ->
     ok.

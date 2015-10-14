@@ -61,6 +61,8 @@
 -export([start_link/1, stop/1,
          update_wedge_state/3, wedge_myself/2]).
 -export([make_listener_regname/1, make_projection_server_regname/1]).
+%% TODO: remove or replace in OTP way after gen_*'ified
+-export([current_state/1, format_state/1]).
 
 -record(state, {
           flu_name        :: atom(),
@@ -97,6 +99,20 @@ update_wedge_state(PidSpec, Boolean, EpochId)
 wedge_myself(PidSpec, EpochId)
   when is_tuple(EpochId) ->
     PidSpec ! {wedge_myself, EpochId}.
+
+current_state(PidSpec) ->
+    PidSpec ! {current_state, self()},
+    %% TODO: Not so rubust f(^^;)
+    receive
+        Res -> Res
+    after
+        60*1000 -> {error, timeout}
+    end.
+
+format_state(State) ->
+    Fields = record_info(fields, state),
+    [_Name | Values] = tuple_to_list(State),
+    lists:zip(Fields, Values).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -262,6 +278,8 @@ append_server_loop(FluPid, #state{wedged=Wedged_p,
             #state{wedged=Wedged_p, epoch_id=EpochId} = S,
             FromPid ! {wedge_status_reply, Wedged_p, EpochId},
             append_server_loop(FluPid, S);
+        {current_state, FromPid} ->
+            FromPid ! S;
         Else ->
             io:format(user, "append_server_loop: WHA? ~p\n", [Else]),
             append_server_loop(FluPid, S)
