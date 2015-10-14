@@ -89,7 +89,7 @@
     eof_position = 0      :: non_neg_integer(),
     unwritten_bytes = []  :: [byte_sequence()],
     data_filehandle       :: file:filehandle(),
-    csum_filehandle       :: file:filehandle(),
+    csum_table            :: machi_csum_table:table(),
     tref                  :: reference(), %% timer ref
     ticks = 0             :: non_neg_integer(), %% ticks elapsed with no new operations
     ops = 0               :: non_neg_integer(), %% sum of all ops
@@ -196,10 +196,10 @@ init({Filename, DataDir}) ->
     {_, DPath} = machi_util:make_data_filename(DataDir, Filename),
     ok = filelib:ensure_dir(CsumFile),
     ok = filelib:ensure_dir(DPath),
-    UnwrittenBytes = parse_csum_file(CsumFile),
+    {ok, CsumTable} = machi_csum_table:open(CsumFile, []),
+    UnwrittenBytes = machi_csum_table:calc_unwritten_bytes(CsumTable),
     {Eof, infinity} = lists:last(UnwrittenBytes),
     {ok, FHd} = file:open(DPath, [read, write, binary, raw]),
-    {ok, FHc} = file:open(CsumFile, [append, binary, raw]),
     Tref = schedule_tick(),
     St = #state{
         filename        = Filename,
@@ -207,7 +207,7 @@ init({Filename, DataDir}) ->
         data_path       = DPath,
         csum_file       = CsumFile,
         data_filehandle = FHd,
-        csum_filehandle = FHc,
+        csum_table      = CsumTable,
         tref            = Tref,
         unwritten_bytes = UnwrittenBytes,
         eof_position    = Eof},
@@ -224,15 +224,15 @@ handle_call({sync, data}, _From, State = #state{ data_filehandle = FHd }) ->
     R = file:sync(FHd),
     {reply, R, State};
 
-handle_call({sync, csum}, _From, State = #state{ csum_filehandle = FHc }) ->
-    R = file:sync(FHc),
+handle_call({sync, csum}, _From, State = #state{ csum_table = T }) ->
+    R = machi_csum_table:sync(T),
     {reply, R, State};
 
 handle_call({sync, all}, _From, State = #state{filename = F,
                                                data_filehandle = FHd,
-                                               csum_filehandle = FHc
+                                               csum_table = T
                                               }) ->
-    R = file:sync(FHc),
+    R = machi_csum_table:sync(T),
     R1 = file:sync(FHd),
     Resp = case {R, R1} of
         {ok, ok} -> ok;
@@ -267,11 +267,17 @@ handle_call({read, Offset, Length}, _From,
 handle_call({read, Offset, Length}, _From,
             State = #state{filename = F,
                            data_filehandle = FH,
+                           csum_table = CsumTable,
                            unwritten_bytes = U,
                            reads = {T, Err}
                           }) ->
 
-    Checksum = get({Offset, Length}), %% N.B. Maybe be 'undefined'!
+    Checksum = case machi_csum_table:find(CsumTable, Offset, Length) of
+                   {ok, Checksum0} ->
+                       Checksum0;
+                   _ ->
+                       undefined
+               end,
 
     {Resp, NewErr} = case handle_read(FH, F, Checksum, Offset, Length, U) of
         {ok, Bytes, Csum} ->
@@ -296,7 +302,7 @@ handle_call({write, Offset, ClientMeta, Data}, _From,
                            filename = F,
                            writes = {T, Err},
                            data_filehandle = FHd,
-                           csum_filehandle = FHc
+                           csum_table = CsumTable
                           }) ->
 
     ClientCsumTag = proplists:get_value(client_csum_tag, ClientMeta, ?CSUM_TAG_NONE),
@@ -309,7 +315,7 @@ handle_call({write, Offset, ClientMeta, Data}, _From,
                         [ClientCsum, Bad]),
             {{error, bad_checksum}, Err + 1, U};
         TaggedCsum ->
-            case handle_write(FHd, FHc, F, TaggedCsum, Offset, Data, U) of
+            case handle_write(FHd, CsumTable, F, TaggedCsum, Offset, Data, U) of
                 {ok, NewU1} ->
                     {ok, Err, NewU1};
                 Error ->
@@ -336,7 +342,7 @@ handle_call({append, ClientMeta, Extra, Data}, _From,
                            filename = F,
                            appends = {T, Err},
                            data_filehandle = FHd,
-                           csum_filehandle = FHc
+                           csum_table = CsumTable
                           }) ->
 
     ClientCsumTag = proplists:get_value(client_csum_tag, ClientMeta, ?CSUM_TAG_NONE),
@@ -349,7 +355,7 @@ handle_call({append, ClientMeta, Extra, Data}, _From,
                         [ClientCsum, Bad]),
             {{error, bad_checksum}, Err + 1, U};
         TaggedCsum ->
-            case handle_write(FHd, FHc, F, TaggedCsum, EofP, Data, U) of
+            case handle_write(FHd, CsumTable, F, TaggedCsum, EofP, Data, U) of
                 {ok, NewU1} ->
                     {{ok, F, EofP}, Err, NewU1};
                 Error ->
@@ -450,7 +456,7 @@ handle_info(Req, State) ->
 % @private
 terminate(Reason, #state{filename = F,
                          data_filehandle = FHd,
-                         csum_filehandle = FHc,
+                         csum_table = T,
                          reads = {RT, RE},
                          writes = {WT, WE},
                          appends = {AT, AE}
@@ -461,9 +467,9 @@ terminate(Reason, #state{filename = F,
     lager:info(" Writes:  ~p/~p", [WT, WE]),
     lager:info("Appends:  ~p/~p", [AT, AE]),
     ok = file:sync(FHd),
-    ok = file:sync(FHc),
     ok = file:close(FHd),
-    ok = file:close(FHc),
+    ok = machi_csum_table:sync(T),
+    ok = machi_csum_table:close(T),
     ok.
 
 % @private
@@ -496,36 +502,6 @@ check_or_make_tagged_csum(Tag, InCsum, Data) when Tag == ?CSUM_TAG_CLIENT_SHA;
 check_or_make_tagged_csum(OtherTag, _ClientCsum, _Data) ->
     lager:warning("Unknown checksum tag ~p", [OtherTag]),
     {error, bad_checksum}.
-
-encode_csum_file_entry(Offset, Size, TaggedCSum) ->
-    Len = 8 + 4 + byte_size(TaggedCSum),
-    [<<Len:8/unsigned-big, Offset:64/unsigned-big, Size:32/unsigned-big>>,
-     TaggedCSum].
-
-map_offsets_to_csums(CsumList) ->
-    lists:foreach(fun insert_offsets/1, CsumList).
-
-insert_offsets({Offset, Length, Checksum}) ->
-    put({Offset, Length}, Checksum).
-
--spec parse_csum_file( Filename :: string() ) -> [byte_sequence()].
-parse_csum_file(Filename) ->
-    %% using file:read_file works as long as the files are "small"
-    try
-        {ok, CsumData} = file:read_file(Filename),
-        {DecodedCsums, _Junk} = machi_flu1:split_checksum_list_blob_decode(CsumData),
-        Sort = lists:sort(DecodedCsums),
-        case Sort of
-        [] -> [{?MINIMUM_OFFSET, infinity}];
-        _ ->
-            map_offsets_to_csums(DecodedCsums),
-            {First, _, _} = hd(Sort),
-            build_unwritten_bytes_list(Sort, First, [])
-        end
-    catch
-        _:{badmatch, {error, enoent}} ->
-            [{?MINIMUM_OFFSET, infinity}]
-    end.
    
 -spec handle_read(FHd        :: file:filehandle(),
                   Filename   :: string(),
@@ -593,7 +569,7 @@ do_read(FHd, Filename, TaggedCsum, Offset, Size) ->
     end.
 
 -spec handle_write( FHd        :: file:filehandle(),
-                    FHc        :: file:filehandle(),
+                    CsumTable  :: machi_csum_table:table(),
                     Filename   :: string(),
                     TaggedCsum :: binary(),
                     Offset     :: non_neg_integer(),
@@ -613,15 +589,19 @@ do_read(FHd, Filename, TaggedCsum, Offset, Size) ->
 % file, and the internal list of unwritten bytes is modified to reflect the
 % just-performed write.  This is then returned to the caller as 
 % `{ok, NewUnwritten}' where NewUnwritten is the revised unwritten byte list.
-handle_write(FHd, FHc, Filename, TaggedCsum, Offset, Data, U) ->
+handle_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Data, U) ->
     Size = iolist_size(Data),
 
     case is_byte_range_unwritten(Offset, Size, U) of
         false ->
-            case get({Offset, Size}) of
-                undefined ->
+            case machi_csum_table:find(CsumTable, Offset, Size) of
+                {error, trimmed} = Error ->
+                    Error;
+                {error, notfound} ->
+                    %% Just unknown pair of {offset, size}
+                    %% given. Trust U and return as it is used
                     {error, written};
-                TaggedCsum ->
+                {ok, TaggedCsum} ->
                     case do_read(FHd, Filename, TaggedCsum, Offset, Size) of
                         eof ->
                             lager:warning("This should never happen: got eof while reading at offset ~p in file ~p that's supposedly written",
@@ -632,7 +612,7 @@ handle_write(FHd, FHc, Filename, TaggedCsum, Offset, Data, U) ->
                         _ ->
                             {error, written}
                     end;
-                OtherCsum ->
+                {ok, OtherCsum} ->
                     %% Got a checksum, but it doesn't match the data block's
                     lager:error("During a potential write at offset ~p in file ~p, a check for unwritten bytes gave us checksum ~p but the data we were trying to trying to write has checksum ~p",
                                 [Offset, Filename, OtherCsum, TaggedCsum]),
@@ -640,7 +620,7 @@ handle_write(FHd, FHc, Filename, TaggedCsum, Offset, Data, U) ->
             end;
         true ->
             try
-                do_write(FHd, FHc, Filename, TaggedCsum, Offset, Size, Data, U)
+                do_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Size, Data, U)
             catch
                 %%% XXX FIXME: be more specific on badmatch that might
                 %%% occur around line 593 when we write the checksum
@@ -653,7 +633,7 @@ handle_write(FHd, FHc, Filename, TaggedCsum, Offset, Data, U) ->
 % @private Implements the disk writes for both the write and append
 % operation.
 -spec do_write( FHd        :: file:descriptor(),
-                FHc        :: file:descriptor(),
+                CsumTable  :: machi_csum_table:table(),
                 Filename   :: string(),
                 TaggedCsum :: binary(),
                 Offset     :: non_neg_integer(),
@@ -662,14 +642,12 @@ handle_write(FHd, FHc, Filename, TaggedCsum, Offset, Data, U) ->
                 Unwritten  :: [byte_sequence()]
               ) -> {ok, NewUnwritten :: [byte_sequence()]} |
                    {error, Reason :: term()}.
-do_write(FHd, FHc, Filename, TaggedCsum, Offset, Size, Data, U) ->
+do_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Size, Data, U) ->
     case file:pwrite(FHd, Offset, Data) of
         ok ->
             lager:debug("Successful write in file ~p at offset ~p, length ~p",
                         [Filename, Offset, Size]),
-            EncodedCsum = encode_csum_file_entry(Offset, Size, TaggedCsum),
-            ok = file:write(FHc, EncodedCsum),
-            put({Offset, Size}, TaggedCsum),
+            ok = machi_csum_table:write(CsumTable, Offset, Size, TaggedCsum),
             NewU = update_unwritten(Offset, Size, U),
             lager:debug("Successful write to checksum file for ~p; unwritten bytes are now: ~p",
                         [Filename, NewU]),
@@ -756,22 +734,3 @@ update_byte_range(Offset, Size, {Pos, Space}) when Offset > Pos ->
     [{Pos, Offset - Pos}, {Offset+Size, ( (Pos+Space) - (Offset + Size) )}].
 
 
--spec build_unwritten_bytes_list( CsumData   :: [{ Offset   :: non_neg_integer(),
-                                                   Size     :: pos_integer(),
-                                                   Checksum :: binary() }],
-                                  LastOffset :: non_neg_integer(),
-                                  Acc        :: list() ) -> [byte_sequence()].
-% @private Given a <b>sorted</b> list of checksum data tuples, return a sorted
-% list of unwritten byte ranges. The output list <b>always</b> has at least one
-% entry: the last tuple in the list is guaranteed to be the current end of
-% bytes written to a particular file with the special space moniker
-% `infinity'.
-build_unwritten_bytes_list([], Last, Acc) ->
-    NewAcc = [ {Last, infinity} | Acc ],
-    lists:reverse(NewAcc);
-build_unwritten_bytes_list([{CurrentOffset, CurrentSize, _Csum}|Rest], LastOffset, Acc) when
-      CurrentOffset /= LastOffset ->
-    Hole = CurrentOffset - LastOffset,
-    build_unwritten_bytes_list(Rest, (CurrentOffset+CurrentSize), [{LastOffset, Hole}|Acc]);
-build_unwritten_bytes_list([{CO, CS, _Ck}|Rest], _LastOffset, Acc) ->
-    build_unwritten_bytes_list(Rest, CO + CS, Acc).

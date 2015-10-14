@@ -61,9 +61,6 @@
 -export([start_link/1, stop/1,
          update_wedge_state/3, wedge_myself/2]).
 -export([make_listener_regname/1, make_projection_server_regname/1]).
--export([encode_csum_file_entry/3, encode_csum_file_entry_bin/3,
-         decode_csum_file_entry/1,
-         split_checksum_list_blob/1, split_checksum_list_blob_decode/1]).
 
 -record(state, {
           flu_name        :: atom(),
@@ -707,99 +704,6 @@ make_listener_regname(BaseName) ->
 make_projection_server_regname(BaseName) ->
     list_to_atom(atom_to_list(BaseName) ++ "_pstore").
 
-%% @doc Encode `Offset + Size + TaggedCSum' into an `iolist()' type for
-%% internal storage by the FLU.
-
--spec encode_csum_file_entry(
-        machi_dt:file_offset(), machi_dt:chunk_size(), machi_dt:chunk_s()) ->
-        iolist().
-encode_csum_file_entry(Offset, Size, TaggedCSum) ->
-    Len = 8 + 4 + byte_size(TaggedCSum),
-    [<<Len:8/unsigned-big, Offset:64/unsigned-big, Size:32/unsigned-big>>,
-     TaggedCSum].
-
-%% @doc Encode `Offset + Size + TaggedCSum' into an `binary()' type for
-%% internal storage by the FLU.
-
--spec encode_csum_file_entry_bin(
-        machi_dt:file_offset(), machi_dt:chunk_size(), machi_dt:chunk_s()) ->
-        binary().
-encode_csum_file_entry_bin(Offset, Size, TaggedCSum) ->
-    Len = 8 + 4 + byte_size(TaggedCSum),
-    <<Len:8/unsigned-big, Offset:64/unsigned-big, Size:32/unsigned-big,
-      TaggedCSum/binary>>.
-
-%% @doc Decode a single `binary()' blob into an
-%%      `{Offset,Size,TaggedCSum}' tuple.
-%%
-%% The internal encoding (which is currently exposed to the outside world
-%% via this function and related ones) is:
-%%
-%% <ul>
-%% <li> 1 byte: record length
-%% </li>
-%% <li> 8 bytes (unsigned big-endian): byte offset
-%% </li>
-%% <li> 4 bytes (unsigned big-endian): chunk size
-%% </li>
-%% <li> all remaining bytes: tagged checksum (1st byte = type tag)
-%% </li>
-%% </ul>
-%%
-%% See `machi.hrl' for the tagged checksum types, e.g.,
-%% `?CSUM_TAG_NONE'.
-
--spec decode_csum_file_entry(binary()) ->
-        error |
-        {machi_dt:file_offset(), machi_dt:chunk_size(), machi_dt:chunk_s()}.
-decode_csum_file_entry(<<_:8/unsigned-big, Offset:64/unsigned-big, Size:32/unsigned-big, TaggedCSum/binary>>) ->
-    {Offset, Size, TaggedCSum};
-decode_csum_file_entry(_Else) ->
-    error.
-
-%% @doc Split a `binary()' blob of `checksum_list' data into a list of
-%% unparsed `binary()' blobs, one per entry.
-%%
-%% Decode the unparsed blobs with {@link decode_csum_file_entry/1}, if
-%% desired.
-%%
-%% The return value `TrailingJunk' is unparseable bytes at the end of
-%% the checksum list blob.
-
--spec split_checksum_list_blob(binary()) ->
-          {list(binary()), TrailingJunk::binary()}.
-split_checksum_list_blob(Bin) ->
-    split_checksum_list_blob(Bin, []).
-
-split_checksum_list_blob(<<Len:8/unsigned-big, Part:Len/binary, Rest/binary>>, Acc)->
-    case get(hack_length) of
-        Len -> ok;
-        _   -> put(hack_different, true)
-    end,
-    split_checksum_list_blob(Rest, [<<Len:8/unsigned-big, Part/binary>>|Acc]);
-split_checksum_list_blob(Rest, Acc) ->
-    {lists:reverse(Acc), Rest}.
-
-%% @doc Split a `binary()' blob of `checksum_list' data into a list of
-%% `{Offset,Size,TaggedCSum}' tuples.
-
--spec split_checksum_list_blob_decode(binary()) ->
-  {list({machi_dt:file_offset(), machi_dt:chunk_size(), machi_dt:chunk_s()}),
-   TrailingJunk::binary()}.
-split_checksum_list_blob_decode(Bin) ->
-    split_checksum_list_blob_decode(Bin, []).
-
-split_checksum_list_blob_decode(<<Len:8/unsigned-big, Part:Len/binary, Rest/binary>>, Acc)->
-    One = <<Len:8/unsigned-big, Part/binary>>,
-    case decode_csum_file_entry(One) of
-        error ->
-            split_checksum_list_blob_decode(Rest, Acc);
-        DecOne ->
-            split_checksum_list_blob_decode(Rest, [DecOne|Acc])
-    end;
-split_checksum_list_blob_decode(Rest, Acc) ->
-    {lists:reverse(Acc), Rest}.
-
 check_or_make_tagged_checksum(?CSUM_TAG_NONE, _Client_CSum, Chunk) ->
     %% TODO: If the client was foolish enough to use
     %% this type of non-checksum, then the client gets
@@ -859,9 +763,9 @@ timing_demo_test2() ->
     {HexUSec, _} =
     timer:tc(fun() ->
                      lists:foldl(fun(X, _) ->
-                                         B = encode_csum_file_entry_hex(X, 100, CSum),
+                                         B = machi_checksums:encode_csum_file_entry_hex(X, 100, CSum),
                                          %% file:write(ZZZ, [B, 10]),
-                                         decode_csum_file_entry_hex(list_to_binary(B))
+                                         machi_checksums:decode_csum_file_entry_hex(list_to_binary(B))
                                  end, x, Xs)
              end),
     io:format(user, "~.3f sec\n", [HexUSec / 1000000]),
@@ -872,14 +776,14 @@ timing_demo_test2() ->
     {NotSortedUSec, _} =
     timer:tc(fun() ->
                      lists:foldl(fun(X, _) ->
-                                         B = encode_csum_file_entry(X, 100, CSum),
-                                         decode_csum_file_entry(list_to_binary(B))
+                                         B = machi_checksums:encode_csum_file_entry(X, 100, CSum),
+                                         machi_checksums:decode_csum_file_entry(list_to_binary(B))
                                  end, x, Xs)
              end),
     io:format(user, "~.3f sec\n", [NotSortedUSec / 1000000]),
 
     NotHexList = lists:foldl(fun(X, Acc) ->
-                                 B = encode_csum_file_entry(X, 100, CSum),
+                                     B = machi_checksums:encode_csum_file_entry(X, 100, CSum),
                                  [B|Acc]
                          end, [], Xs),
     NotHexBin = iolist_to_binary(NotHexList),
@@ -890,7 +794,7 @@ timing_demo_test2() ->
     timer:tc(fun() ->
                      put(hack_length, 29),
                      put(hack_different, false),
-                     {Sorted, _Leftover} = split_checksum_list_blob(NotHexBin),
+                     {Sorted, _Leftover} = machi_checksums:split_checksum_list_blob(NotHexBin),
                      io:format(user, " Leftover ~p (hack_different ~p) ", [_Leftover, get(hack_different)]),
                      Sorted
              end),
@@ -964,7 +868,7 @@ sort_input_fun(FH, PrevStuff) ->
                                   true ->
                                        <<PrevStuff/binary, NewStuff/binary>>
                                end,
-                    {SplitRes, Leftover} = split_checksum_list_blob(AllStuff),
+                    {SplitRes, Leftover} = machi_checksums:split_checksum_list_blob(AllStuff),
                     {SplitRes, sort_input_fun(FH, Leftover)};
                 eof ->
                     end_of_input
