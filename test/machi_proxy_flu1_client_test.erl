@@ -35,7 +35,7 @@ api_smoke_test() ->
     Host = "localhost",
     TcpPort = 57124,
     DataDir = "./data.api_smoke_flu",
-    W_props = [{initial_wedged, false}],
+    W_props = [{active_mode, false},{initial_wedged, false}],
     Prefix = <<"prefix">>,
 
     machi_flu1_test:start_flu_package(RegName, TcpPort, DataDir, W_props),
@@ -70,7 +70,7 @@ api_smoke_test() ->
             {error, bad_checksum} = ?MUT:append_chunk(Prox1, FakeEpoch,
                                                       Prefix, MyChunk_badcs),
             {error, bad_checksum} = ?MUT:write_chunk(Prox1, FakeEpoch,
-                                                     <<"foo-file">>, 99832,
+                                                     <<"foo-file^1^1">>, 99832,
                                                      MyChunk_badcs),
 
             %% Put kick_projection_reaction() in the middle of the test so
@@ -80,7 +80,7 @@ api_smoke_test() ->
 
             %% Alright, now for the rest of the API, whee
             BadFile = <<"no-such-file">>,
-            {error, no_such_file} = ?MUT:checksum_list(Prox1, FakeEpoch, BadFile),
+            {error, bad_arg} = ?MUT:checksum_list(Prox1, FakeEpoch, BadFile),
             {ok, [_|_]} = ?MUT:list_files(Prox1, FakeEpoch),
             {ok, {false, _}} = ?MUT:wedge_status(Prox1),
             %% Per Scott, comment this out until he can take a look
