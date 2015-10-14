@@ -554,7 +554,6 @@ write_chunk2(Sock, EpochID, File0, Offset, Chunk0) ->
                 {Tag, CS} = machi_util:unmake_tagged_csum(ChunkCSum),
                 {Chk, Tag, CS}
         end,
-    %% io:format(user, "\n~s LINE ~w eid ~w File ~w Offset ~w Chunk0 ~w\n", [?MODULE, ?LINE, EpochID, File, Offset, Chunk0]),
     Req = machi_pb_translate:to_pb_request(
             ReqID,
             {low_write_chunk, EpochID, File, Offset, Chunk, CSum_tag, CSum}),
