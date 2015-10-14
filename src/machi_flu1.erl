@@ -237,7 +237,7 @@ append_server_loop(FluPid, #state{wedged=Wedged_p,
             case OldEpochId == EpochID of
                 true ->
                     spawn(fun() -> 
-                        append_server_dispatch(From, Prefix, Chunk, CSum, Extra, FluName) 
+                        append_server_dispatch(From, Prefix, Chunk, CSum, Extra, FluName, EpochID) 
                     end);
                 false ->
                     From ! {error, bad_epoch}
@@ -636,8 +636,8 @@ do_server_trunc_hack(File, #state{data_dir=DataDir}=_S) ->
             {error, bad_arg}
     end.
 
-append_server_dispatch(From, Prefix, Chunk, CSum, Extra, FluName) ->
-    Result = case handle_append(Prefix, Chunk, CSum, Extra, FluName) of
+append_server_dispatch(From, Prefix, Chunk, CSum, Extra, FluName, EpochId) ->
+    Result = case handle_append(Prefix, Chunk, CSum, Extra, FluName, EpochId) of
         {ok, File, Offset} ->
             {assignment, Offset, File};
         Other ->
@@ -646,10 +646,10 @@ append_server_dispatch(From, Prefix, Chunk, CSum, Extra, FluName) ->
     From ! Result,
     exit(normal).
 
-handle_append(_Prefix, <<>>, _Csum, _Extra, _FluName) ->
+handle_append(_Prefix, <<>>, _Csum, _Extra, _FluName, _EpochId) ->
     {error, bad_arg};
-handle_append(Prefix, Chunk, Csum, Extra, FluName) ->
-    Res = machi_flu_filename_mgr:find_or_make_filename_from_prefix(FluName, {prefix, Prefix}),
+handle_append(Prefix, Chunk, Csum, Extra, FluName, EpochId) ->
+    Res = machi_flu_filename_mgr:find_or_make_filename_from_prefix(FluName, EpochId, {prefix, Prefix}),
     case Res of
         {file, F} ->
             {ok, Pid} = machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, F}),
@@ -661,11 +661,17 @@ handle_append(Prefix, Chunk, Csum, Extra, FluName) ->
     end.
 
 sanitize_file_string(Str) ->
+    case has_no_prohibited_chars(Str) andalso machi_util:is_valid_filename(Str) of
+        true -> ok;
+        false -> error
+    end.
+
+has_no_prohibited_chars(Str) ->
     case re:run(Str, "/") of
         nomatch ->
-            ok;
+            true;
         _ ->
-            error
+            true
     end.
 
 sanitize_prefix(Prefix) ->
