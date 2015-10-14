@@ -130,7 +130,7 @@ message Mpb_ErrorResp {
 // append_chunk()  : Mpb_AppendChunkReq and Mpb_AppendChunkResp
 // write_chunk()   : Mpb_WriteChunkReq and Mpb_WriteChunkResp
 // read_chunk()    : Mpb_ReadChunkReq and Mpb_ReadChunkResp
-// trim_chunk()    : Mpb_TrimCHunkReq and Mpb_TrimChunkResp
+// trim_chunk()    : Mpb_TrimChunkReq and Mpb_TrimChunkResp
 // checksum_list() : Mpb_ChecksumListReq and Mpb_ChecksumListResp
 // list_files()    : Mpb_ListFilesReq and Mpb_ListFilesResp
 //
