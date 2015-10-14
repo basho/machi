@@ -347,7 +347,7 @@ handle_call({append, ClientMeta, Extra, Data}, _From,
         {error, {bad_csum, Bad}} ->
             lager:error("Bad checksum; client sent ~p, we computed ~p",
                         [ClientCsum, Bad]),
-            {{error, bad_csum}, Err + 1, U};
+            {{error, bad_checksum}, Err + 1, U};
         TaggedCsum ->
             case handle_write(FHd, FHc, F, TaggedCsum, EofP, Data, U) of
                 {ok, NewU1} ->
@@ -495,7 +495,7 @@ check_or_make_tagged_csum(Tag, InCsum, Data) when Tag == ?CSUM_TAG_CLIENT_SHA;
     end;
 check_or_make_tagged_csum(OtherTag, _ClientCsum, _Data) ->
     lager:warning("Unknown checksum tag ~p", [OtherTag]),
-    {error, bad_csum}.
+    {error, bad_checksum}.
 
 encode_csum_file_entry(Offset, Size, TaggedCSum) ->
     Len = 8 + 4 + byte_size(TaggedCSum),
@@ -535,7 +535,7 @@ parse_csum_file(Filename) ->
                   Unwritten  :: [byte_sequence()]
              ) -> {ok, Bytes :: binary(), Csum :: binary()} |
                   eof | 
-                  {error, bad_csum} |
+                  {error, bad_checksum} |
                   {error, partial_read} |
                   {error, not_written} |
                   {error, Other :: term() }.
@@ -544,7 +544,7 @@ parse_csum_file(Filename) ->
 %   <ul> If the byte range is not yet written, `{error, not_written}' is
 %        returned.</ul>
 %   <ul> If the checksum given does not match what comes off the disk,
-%        `{error, bad_csum}' is returned.</ul>
+%        `{error, bad_checksum}' is returned.</ul>
 %   <ul> If the number of bytes that comes off the disk is not the requested length,
 %        `{error, partial_read}' is returned.</ul>
 %   <ul> If the offset is at or beyond the current file boundary, `eof' is returned.</ul>
@@ -574,7 +574,7 @@ do_read(FHd, Filename, TaggedCsum, Offset, Size) ->
                 {error, Bad} ->
                     lager:error("Bad checksum; got ~p, expected ~p",
                                 [Bad, Ck]),
-                    {error, bad_csum};
+                    {error, bad_checksum};
                 TaggedCsum ->
                     {ok, Bytes, TaggedCsum};
                 %% XXX FIXME: Should we return something other than
