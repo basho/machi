@@ -122,6 +122,7 @@
          append_chunk_extra/4, append_chunk_extra/5,
          write_chunk/4, write_chunk/5,
          read_chunk/4, read_chunk/5,
+         trim_chunk/4, trim_chunk/5,
          checksum_list/2, checksum_list/3,
          list_files/1, list_files/2,
 
@@ -209,6 +210,18 @@ read_chunk(PidSpec, File, Offset, Size, Timeout0) ->
     gen_server:call(PidSpec, {req, {read_chunk, File, Offset, Size, TO}},
                     Timeout).
 
+%% @doc Trim a chunk of data of size `Size' from `File' at `Offset'.
+
+trim_chunk(PidSpec, File, Offset, Size) ->
+    trim_chunk(PidSpec, File, Offset, Size, ?DEFAULT_TIMEOUT).
+
+%% @doc Trim a chunk of data of size `Size' from `File' at `Offset'.
+
+trim_chunk(PidSpec, File, Offset, Size, Timeout0) ->
+    {TO, Timeout} = timeout(Timeout0),
+    gen_server:call(PidSpec, {req, {trim_chunk, File, Offset, Size, TO}},
+                    Timeout).
+
 %% @doc Fetch the list of chunk checksums for `File'.
 
 checksum_list(PidSpec, File) ->
@@ -276,6 +289,8 @@ handle_call2({write_chunk, File, Offset, Chunk, TO}, _From, S) ->
     do_write_head(File, Offset, Chunk, 0, os:timestamp(), TO, S);
 handle_call2({read_chunk, File, Offset, Size, TO}, _From, S) ->
     do_read_chunk(File, Offset, Size, 0, os:timestamp(), TO, S);
+handle_call2({trim_chunk, File, Offset, Size, TO}, _From, S) ->
+    do_trim_chunk(File, Offset, Size, 0, os:timestamp(), TO, S);
 handle_call2({checksum_list, File, TO}, _From, S) ->
     do_checksum_list(File, 0, os:timestamp(), TO, S);
 handle_call2({list_files, TO}, _From, S) ->
@@ -533,6 +548,10 @@ do_read_chunk2(File, Offset, Size, Depth, STime, TO,
         {error, written} ->
             exit({todo_should_never_happen,?MODULE,?LINE,File,Offset,Size})
     end.
+
+do_trim_chunk(_File, _Offset, _Size, _Depth, _STime, _TO, S) ->
+    %% This is just a stub to reach CR client from high level client
+    {reply, {error, bad_joss}, S}.
 
 %% Read repair: depends on the consistency mode that we're in:
 %%

@@ -439,6 +439,10 @@ do_pb_hl_request2({high_read_chunk, File, Offset, Size},
                   #state{high_clnt=Clnt}=S) ->
     Res = machi_cr_client:read_chunk(Clnt, File, Offset, Size),
     {Res, S};
+do_pb_hl_request2({high_trim_chunk, File, Offset, Size},
+                  #state{high_clnt=Clnt}=S) ->
+    Res = machi_cr_client:trim_chunk(Clnt, File, Offset, Size),
+    {Res, S};
 do_pb_hl_request2({high_checksum_list, File}, #state{high_clnt=Clnt}=S) ->
     Res = machi_cr_client:checksum_list(Clnt, File),
     {Res, S};

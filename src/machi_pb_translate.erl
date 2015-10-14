@@ -176,6 +176,12 @@ from_pb_request(#mpb_request{req_id=ReqID,
                       size=Size} = IR,
     {ReqID, {high_read_chunk, File, Offset, Size}};
 from_pb_request(#mpb_request{req_id=ReqID,
+                             trim_chunk=IR=#mpb_trimchunkreq{}}) ->
+    #mpb_trimchunkreq{file=File,
+                      offset=Offset,
+                      size=Size} = IR,
+    {ReqID, {high_trim_chunk, File, Offset, Size}};
+from_pb_request(#mpb_request{req_id=ReqID,
                              checksum_list=IR=#mpb_checksumlistreq{}}) ->
     #mpb_checksumlistreq{file=File} = IR,
     {ReqID, {high_checksum_list, File}};
@@ -640,6 +646,18 @@ to_pb_response(ReqID, {high_read_chunk, _File, _Offset, _Size}, Resp) ->
             Status = conv_from_status(Error),
             #mpb_response{req_id=ReqID,
                           read_chunk=#mpb_readchunkresp{status=Status}};
+        _Else ->
+            make_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
+    end;
+to_pb_response(ReqID, {high_trim_chunk, _File, _Offset, _Size}, Resp) ->
+    case Resp of
+        ok ->
+            #mpb_response{req_id=ReqID,
+                          trim_chunk=#mpb_trimchunkresp{status='OK'}};
+        {error, _}=Error ->
+            Status = conv_from_status(Error),
+            #mpb_response{req_id=ReqID,
+                          trim_chunk=#mpb_trimchunkresp{status=Status}};
         _Else ->
             make_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
