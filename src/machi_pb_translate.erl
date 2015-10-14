@@ -896,6 +896,8 @@ conv_from_status({error, not_written}) ->
     'NOT_WRITTEN';
 conv_from_status({error, written}) ->
     'WRITTEN';
+conv_from_status({error, trimmed}) ->
+    'TRIMMED';
 conv_from_status({error, no_such_file}) ->
     'NO_SUCH_FILE';
 conv_from_status({error, partial_read}) ->

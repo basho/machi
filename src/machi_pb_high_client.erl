@@ -401,6 +401,8 @@ convert_general_status_code('NOT_WRITTEN') ->
     {error, not_written};
 convert_general_status_code('WRITTEN') ->
     {error, written};
+convert_general_status_code('TRIMMED') ->
+    {error, trimmed};
 convert_general_status_code('NO_SUCH_FILE') ->
     {error, no_such_file};
 convert_general_status_code('PARTIAL_READ') ->

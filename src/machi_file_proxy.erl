@@ -54,6 +54,7 @@
     read/3,
     write/3,
     write/4,
+    trim/4,
     append/2,
     append/4
 ]).
@@ -165,6 +166,12 @@ write(_Pid, Offset, ClientMeta, _Data) ->
     lager:warning("Bad arg to write: Offset ~p, ClientMeta: ~p", [Offset, ClientMeta]),
     {error, bad_arg}.
 
+trim(Pid, Offset, Size, TriggerGC) when is_pid(Pid),
+                                        is_integer(Offset) andalso Offset >= 0,
+                                        is_integer(Size) andalso Size > 0,
+                                        is_boolean(TriggerGC) ->
+    gen_server:call(Pid, {trim ,Offset, Size, TriggerGC}, ?TIMEOUT).
+
 % @doc Append data
 -spec append(Pid :: pid(), Data :: binary()) -> {ok, File :: string(), Offset :: non_neg_integer()}
                                                 |{error, term()}.
@@ -272,14 +279,7 @@ handle_call({read, Offset, Length}, _From,
                            reads = {T, Err}
                           }) ->
 
-    Checksum = case machi_csum_table:find(CsumTable, Offset, Length) of
-                   {ok, Checksum0} ->
-                       Checksum0;
-                   _ ->
-                       undefined
-               end,
-
-    {Resp, NewErr} = case handle_read(FH, F, Checksum, Offset, Length, U) of
+    {Resp, NewErr} = case handle_read(FH, F, CsumTable, Offset, Length, U) of
         {ok, Bytes, Csum} ->
             {{ok, Bytes, Csum}, Err};
         eof ->
@@ -327,6 +327,38 @@ handle_call({write, Offset, ClientMeta, Data}, _From,
                               eof_position = NewEof,
                               unwritten_bytes = NewU
                              }};
+
+
+%%% TRIMS
+
+handle_call({trim, _Offset, _ClientMeta, _Data}, _From,
+            State = #state{wedged = true,
+                           writes = {T, Err}
+                          }) ->
+    {reply, {error, wedged}, State#state{writes = {T + 1, Err + 1}}};
+
+handle_call({trim, Offset, Size, _TriggerGC}, _From,
+            State = #state{unwritten_bytes = U,
+                           %% filename = F,
+                           %% writes = {T, Err},
+                           csum_table = CsumTable
+                          }) ->
+    case is_byte_range_unwritten(Offset, Size, U) of
+        true ->
+            {reply, {error, unwritten}, State};
+        false ->
+            case machi_csum_table:find(CsumTable, Offset, Size) of
+                {error, trimmed} ->
+                    {reply, ok, State};
+                {error, notfound} ->
+                    %% TODO: Could be written?
+                    error({trim, notfound, Offset, Size});
+                {ok, _Csum} ->
+                    R = machi_csum_table:trim(CsumTable, Offset, Size),
+                    %% TODO: trigger GC here
+                    {reply, R, State}
+            end
+    end;
 
 %% APPENDS
 
@@ -505,7 +537,7 @@ check_or_make_tagged_csum(OtherTag, _ClientCsum, _Data) ->
    
 -spec handle_read(FHd        :: file:filehandle(),
                   Filename   :: string(),
-                  TaggedCsum :: undefined|binary(),
+                  CsumTable  :: machi_csum_table:table(),
                   Offset     :: non_neg_integer(),
                   Size       :: non_neg_integer(),
                   Unwritten  :: [byte_sequence()]
@@ -529,14 +561,21 @@ check_or_make_tagged_csum(OtherTag, _ClientCsum, _Data) ->
 % </li>
 %
 % On success, `{ok, Bytes, Checksum}' is returned.
-handle_read(FHd, Filename, undefined, Offset, Size, U) ->
-    handle_read(FHd, Filename, machi_util:make_tagged_csum(none), Offset, Size, U);
-
-handle_read(FHd, Filename, TaggedCsum, Offset, Size, U) ->
-    case is_byte_range_unwritten(Offset, Size, U) of
-        true ->
+handle_read(FHd, Filename, CsumTable, Offset, Size, U) ->
+    case {is_byte_range_unwritten(Offset, Size, U),
+          machi_csum_table:find(CsumTable, Offset, Size)} of
+        {true, _} ->
+            %% More close look might be needed to care result of csum
+            %% table, but for now this just works for known chunks
+            %% (TODO^^;).
             {error, not_written};
-        false ->
+        {false, {error, trimmed} = E} ->
+            E;
+        {false, {ok, TaggedCsum}} ->
+            %% Something is wrong :S
+            do_read(FHd, Filename, TaggedCsum, Offset, Size);
+        {false, {error, _}} ->
+            TaggedCsum = machi_util:make_tagged_csum(none),
             do_read(FHd, Filename, TaggedCsum, Offset, Size)
     end.
 

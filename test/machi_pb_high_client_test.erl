@@ -89,16 +89,14 @@ smoke_test2() ->
             true = is_integer(File1Size),
 
             [begin
-                 %% ok = ?C:trim_chunk(Clnt, Fl, Off, Sz)
-                 %% This gets an error as trim API is still a stub
-                 ?assertMatch({bummer,
-                               {throw,
-                                {error, bad_joss_taipan_fixme},
-                                _Boring_stack_trace}},
-                              ?C:trim_chunk(Clnt, Fl, Off, Sz))
+                 ok = ?C:trim_chunk(Clnt, Fl, Off, Sz)
+             end || {Ch, Fl, Off, Sz} <- Reads],
+            [begin
+                 io:format(user, "~p~n", [{Fl, Off, Sz}]),
+                 {error, trimmed} = ?C:read_chunk(Clnt, Fl, Off, Sz),
+                 io:format(user, "~p~n", [{Fl, Off, Sz}])
              end || {Ch, Fl, Off, Sz} <- Reads],
             ?debugVal(?C:list_files(Clnt)),
-
             ok
         after
             (catch ?C:quit(Clnt))

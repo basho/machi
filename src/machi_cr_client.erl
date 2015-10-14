@@ -548,7 +548,9 @@ do_read_chunk2(File, Offset, Size, Depth, STime, TO,
             read_repair(ConsistencyMode, read, File, Offset, Size, Depth, STime, S);
             %% {reply, {error, not_written}, S};
         {error, written} ->
-            exit({todo_should_never_happen,?MODULE,?LINE,File,Offset,Size})
+            exit({todo_should_never_happen,?MODULE,?LINE,File,Offset,Size});
+        {error, trimmed}=Err ->
+            {reply, Err, S}
     end.
 
 do_trim_chunk(File, Offset, Size, 0=Depth, STime, TO, S) ->
@@ -592,9 +594,7 @@ do_trim_chunk2(File, Offset, Size, Depth, STime, TO,
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
             do_trim_chunk(File, Offset, Size, Depth, STime, TO, S);
         {error, trimmed} ->
-            {reply, ok, S};
-        {error, bad_joss_taipan_fixme} ->
-            {reply, {error, bad_joss}, S}
+            {reply, ok, S}
     end.
 
 do_trim_midtail(RestFLUs, Prefix, File, Offset, Size,
