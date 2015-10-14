@@ -391,6 +391,9 @@ do_pb_ll_request3({low_write_chunk, _EpochID, File, Offset, Chunk, CSum_tag,
 do_pb_ll_request3({low_read_chunk, _EpochID, File, Offset, Size, Opts},
                   #state{witness=false}=S) ->
     {do_server_read_chunk(File, Offset, Size, Opts, S), S};
+do_pb_ll_request3({low_trim_chunk, _EpochID, File, Offset, Size, TriggerGC},
+                  #state{witness=false}=S) ->
+    {do_server_trim_chunk(File, Offset, Size, TriggerGC, S), S};
 do_pb_ll_request3({low_checksum_list, _EpochID, File},
                   #state{witness=false}=S) ->
     {do_server_checksum_listing(File, S), S};
@@ -544,7 +547,12 @@ do_server_read_chunk(File, Offset, Size, _Opts, #state{flu_name=FluName})->
             {error, bad_arg}
     end.
 
-do_server_checksum_listing(File, #state{flu_name=FluName, data_dir=DataDir}=_S) ->
+do_server_trim_chunk(File, Offset, Size, TriggerGC, _S) ->
+    io:format(user, "Hi there! I'm trimming this: ~s, (~p, ~p), ~p~n",
+              [File, Offset, Size, TriggerGC]),
+    {error, bad_joss}.
+
+do_server_checksum_listing(File, #state{data_dir=DataDir}=_S) ->
     case sanitize_file_string(File) of
         ok ->
             ok = sync_checksum_file(FluName, File),
