@@ -83,43 +83,17 @@ api_smoke_test() ->
             {error, bad_arg} = ?MUT:checksum_list(Prox1, FakeEpoch, BadFile),
             {ok, [_|_]} = ?MUT:list_files(Prox1, FakeEpoch),
             {ok, {false, _}} = ?MUT:wedge_status(Prox1),
-            %% Per Scott, comment this out until he can take a look
-            %%
-            %% machi_proxy_flu1_client_test: api_smoke_test...*failed*
-            %% in function machi_proxy_flu1_client_test:api_smoke_test/0 (test/machi_proxy_flu1_client_test.erl, line 88)
-            %% **error:{badmatch,{ok,{0,<<55,96,141,95,149,143,223,4,14,235,88,15,47,...>>}}}
-            %%
-            %% {ok, FakeEpoch} = ?MUT:get_latest_epochid(Prox1, public),
-            %% in function machi_proxy_flu1_client_test:api_smoke_test/0 (test/machi_proxy_flu1_client_test.erl, line 89)
-            %% **error:{badmatch,{ok,{projection_v1,0,
-            %%               <<55,96,141,95,149,143,223,4,14,235,88,15,...>>,
-            %%               api_smoke_flu,[],[],
-            %%               {1444,330495,507785},
-            %%               ap_mode,[],[],[],[],[],[]}}}
-            %% {error, not_written} = ?MUT:read_latest_projection(Prox1, public),
+            {ok, {0, _SomeCSum}} = ?MUT:get_latest_epochid(Prox1, public),
+            {ok, #projection_v1{epoch_number=0}} =
+                 ?MUT:read_latest_projection(Prox1, public),
             {error, not_written} = ?MUT:read_projection(Prox1, public, 44),
             P_a = #p_srvr{name=a, address="localhost", port=6622},
             P1 = machi_projection:new(1, a, [P_a], [], [a], [], []),
             ok = ?MUT:write_projection(Prox1, public, P1),
             {ok, P1} = ?MUT:read_projection(Prox1, public, 1),
-            %% 
-            %% in function machi_proxy_flu1_client_test:api_smoke_test/0 (test/machi_proxy_flu1_client_test.erl, line 107)
-            %% **error:{badmatch,{ok,[{projection_v1,0,
-            %%                <<55,96,141,95,149,143,223,4,14,235,88,...>>,
-            %%                  api_smoke_flu,[],[],
-            %%                  {1444,330601,749713},
-            %%                  ap_mode,[],[],[],[],[],[]},
-            %%   {projection_v1,1,
-            %%                  <<156,33,125,69,126,173,34,245,78,95,...>>,
-            %%                  a,
-            %%                  [a],
-            %%                  [],
-            %%                  {1444,330601,820732},
-            %%                  ap_mode,
-            %%                  [a],
-            %%                  [],[],[],[],...}]}}
-            %% {ok, [P1]} = ?MUT:get_all_projections(Prox1, public),
-            %% {ok, [1]} = ?MUT:list_all_projections(Prox1, public),
+            {ok, [#projection_v1{epoch_number=0},P1]} =
+                ?MUT:get_all_projections(Prox1, public),
+            {ok, [0,1]} = ?MUT:list_all_projections(Prox1, public),
 
             ok
         after
