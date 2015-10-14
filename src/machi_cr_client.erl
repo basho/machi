@@ -496,7 +496,7 @@ do_write_head2(File, Offset, Chunk, Depth, STime, TO,
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
             do_write_head(File, Offset, Chunk, Depth, STime, TO, S);
         {error, written}=Err ->
-            Err;
+            {reply, Err, S};
         {error, not_written} ->
             exit({todo_should_never_happen,?MODULE,?LINE,
                   iolist_size(Chunk)})
