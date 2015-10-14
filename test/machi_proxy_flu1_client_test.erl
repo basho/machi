@@ -35,11 +35,10 @@ api_smoke_test() ->
     Host = "localhost",
     TcpPort = 57124,
     DataDir = "./data.api_smoke_flu",
-    W_props = [{initial_wedged, false}],
+    W_props = [{active_mode, false},{initial_wedged, false}],
     Prefix = <<"prefix">>,
-    FLU1 = machi_flu1_test:setup_test_flu(RegName, TcpPort, DataDir,
-                                          W_props),
-    erase(flu_pid),
+
+    machi_flu1_test:start_flu_package(RegName, TcpPort, DataDir, W_props),
 
     try
         I = #p_srvr{name=RegName, address=Host, port=TcpPort},
@@ -50,14 +49,13 @@ api_smoke_test() ->
                                           FakeEpoch, Prefix, <<"data">>,
                                           infinity) || _ <- lists:seq(1,5)],
             %% Stop the FLU, what happens?
-            machi_flu1:stop(FLU1),
+            machi_flu1_test:stop_flu_package(RegName),
             [{error,partition} = ?MUT:append_chunk(Prox1,
                                 FakeEpoch, Prefix, <<"data-stopped1">>,
                                 infinity) || _ <- lists:seq(1,3)],
             %% Start the FLU again, we should be able to do stuff immediately
-            FLU1b = machi_flu1_test:setup_test_flu(RegName, TcpPort, DataDir,
+            machi_flu1_test:start_flu_package(RegName, TcpPort, DataDir,
                                                    [save_data_dir|W_props]),
-            put(flu_pid, FLU1b),
             MyChunk = <<"my chunk data">>,
             {ok, {MyOff,MySize,MyFile}} =
                 ?MUT:append_chunk(Prox1, FakeEpoch, Prefix, MyChunk,
@@ -72,7 +70,7 @@ api_smoke_test() ->
             {error, bad_checksum} = ?MUT:append_chunk(Prox1, FakeEpoch,
                                                       Prefix, MyChunk_badcs),
             {error, bad_checksum} = ?MUT:write_chunk(Prox1, FakeEpoch,
-                                                     <<"foo-file">>, 99832,
+                                                     <<"foo-file^1^1">>, 99832,
                                                      MyChunk_badcs),
 
             %% Put kick_projection_reaction() in the middle of the test so
@@ -82,39 +80,36 @@ api_smoke_test() ->
 
             %% Alright, now for the rest of the API, whee
             BadFile = <<"no-such-file">>,
-            {error, no_such_file} = ?MUT:checksum_list(Prox1, FakeEpoch, BadFile),
+            {error, bad_arg} = ?MUT:checksum_list(Prox1, FakeEpoch, BadFile),
             {ok, [_|_]} = ?MUT:list_files(Prox1, FakeEpoch),
             {ok, {false, _}} = ?MUT:wedge_status(Prox1),
-            {ok, FakeEpoch} = ?MUT:get_latest_epochid(Prox1, public),
-            {error, not_written} = ?MUT:read_latest_projection(Prox1, public),
+            {ok, {0, _SomeCSum}} = ?MUT:get_latest_epochid(Prox1, public),
+            {ok, #projection_v1{epoch_number=0}} =
+                 ?MUT:read_latest_projection(Prox1, public),
             {error, not_written} = ?MUT:read_projection(Prox1, public, 44),
             P_a = #p_srvr{name=a, address="localhost", port=6622},
             P1 = machi_projection:new(1, a, [P_a], [], [a], [], []),
             ok = ?MUT:write_projection(Prox1, public, P1),
             {ok, P1} = ?MUT:read_projection(Prox1, public, 1),
-            {ok, [P1]} = ?MUT:get_all_projections(Prox1, public),
-            {ok, [1]} = ?MUT:list_all_projections(Prox1, public),
+            {ok, [#projection_v1{epoch_number=0},P1]} =
+                ?MUT:get_all_projections(Prox1, public),
+            {ok, [0,1]} = ?MUT:list_all_projections(Prox1, public),
 
             ok
         after
             _ = (catch ?MUT:quit(Prox1))
         end
     after
-        (catch machi_flu1:stop(FLU1)),
-        (catch machi_flu1:stop(get(flu_pid)))
+        (catch machi_flu1_test:stop_flu_package(RegName))
     end.
 
 flu_restart_test() ->
-    RegName = api_smoke_flu,
+    RegName = a,
     Host = "localhost",
     TcpPort = 57125,
     DataDir = "./data.api_smoke_flu2",
-    W_props = [{initial_wedged, false}],
-    erase(flu_pid),
-    put(flu_pid, []),
-    FLU1 = machi_flu1_test:setup_test_flu(RegName, TcpPort, DataDir,
-                                          W_props),
-    put(flu_pid, [FLU1|get(flu_pid)]),
+    W_props = [{initial_wedged, false}, {active_mode, false}],
+    machi_flu1_test:start_flu_package(RegName, TcpPort, DataDir, W_props),
 
     try
         I = #p_srvr{name=RegName, address=Host, port=TcpPort},
@@ -127,7 +122,7 @@ flu_restart_test() ->
                                           FakeEpoch, <<"prefix">>, Data,
                                           infinity),
             P_a = #p_srvr{name=a, address="localhost", port=6622},
-            P1   = machi_projection:new(1, a, [P_a], [], [a], [], []),
+            P1   = machi_projection:new(1, RegName, [P_a], [], [RegName], [], []),
             P1xx = P1#projection_v1{dbg2=["dbg2 changes are ok"]},
             P1yy = P1#projection_v1{dbg=["not exactly the same as P1!!!"]},
             EpochID = {P1#projection_v1.epoch_number,
@@ -137,7 +132,7 @@ flu_restart_test() ->
             {ok, EpochID} = ?MUT:get_epoch_id(Prox1),
             {ok, EpochID} = ?MUT:get_latest_epochid(Prox1, public),
             {ok, EpochID} = ?MUT:get_latest_epochid(Prox1, private),
-            ok = machi_flu1:stop(FLU1), timer:sleep(50),
+            ok = machi_flu1_test:stop_flu_package(RegName), timer:sleep(50),
 
             %% Now that the last proxy op was successful and only
             %% after did we stop the FLU, let's check that both the
@@ -217,13 +212,13 @@ flu_restart_test() ->
                     (stop) -> ?MUT:write_projection(Prox1, private, P1yy)
                  end,
 
-                 fun(run) -> {ok, [_]} =
+                 fun(run) -> {ok, [#projection_v1{epoch_number=0}, #projection_v1{epoch_number=1}]} =
                                  ?MUT:get_all_projections(Prox1, public),
                              ok;
                     (line) -> io:format("line ~p, ", [?LINE]);
                     (stop) -> ?MUT:get_all_projections(Prox1, public)
                  end,
-                 fun(run) -> {ok, [_]} =
+                 fun(run) -> {ok, [#projection_v1{epoch_number=0}, #projection_v1{epoch_number=1}]} =
                                  ?MUT:get_all_projections(Prox1, private),
                              ok;
                     (line) -> io:format("line ~p, ", [?LINE]);
@@ -281,10 +276,8 @@ flu_restart_test() ->
                     (stop) -> ?MUT:write_chunk(Prox1, FakeEpoch, File1, Off1,
                                                Data, infinity)
                  end,
-                 %% NOTE: When write-once enforcement is enabled, this test
-                 %% will fail: change ok -> {error, written}
-                 fun(run) -> %% {error, written} =
-                             ok =
+                 fun(run) -> 
+                         {error, written} =
                                  ?MUT:write_chunk(Prox1, FakeEpoch, File1, Off1,
                                                   Dataxx, infinity),
                              ok;
@@ -295,14 +288,13 @@ flu_restart_test() ->
                 ],
 
             [begin
-                 FLU2 = machi_flu1_test:setup_test_flu(
+                 machi_flu1_test:start_flu_package(
                           RegName, TcpPort, DataDir,
                           [save_data_dir|W_props]),
-                 put(flu_pid, [FLU2|get(flu_pid)]),
                  _ = Fun(line),
                  ok = Fun(run),
                  ok = Fun(run),
-                 ok = machi_flu1:stop(FLU2),
+                 ok = machi_flu1_test:stop_flu_package(RegName),
                  {error, partition} = Fun(stop),
                  {error, partition} = Fun(stop),
                  ok
@@ -312,7 +304,7 @@ flu_restart_test() ->
             _ = (catch ?MUT:quit(Prox1))
         end
     after
-        [catch machi_flu1:stop(Pid) || Pid <- get(flu_pid)]
+        (catch machi_flu1_test:stop_flu_package(RegName))
     end.
     
 -endif. % !PULSE

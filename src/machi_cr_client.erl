@@ -534,6 +534,8 @@ do_read_chunk2(File, Offset, Size, Depth, STime, TO,
         {ok, BadChunk} ->
             exit({todo, bad_chunk_size, ?MODULE, ?LINE, File, Offset, Size,
                   got, byte_size(BadChunk)});
+        {error, bad_arg} = BadArg -> 
+            {reply, BadArg, S};
         {error, partial_read}=Err ->
             {reply, Err, S};
         {error, bad_checksum}=BadCS ->

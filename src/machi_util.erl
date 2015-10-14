@@ -33,10 +33,12 @@
          make_config_filename/2,
          make_checksum_filename/4, make_checksum_filename/2,
          make_data_filename/4, make_data_filename/2,
-         make_projection_filename/2,
+         make_projection_filename/2, 
+         is_valid_filename/1,
+         parse_filename/1,
          read_max_filenum/2, increment_max_filenum/2,
          info_msg/2, verb/1, verb/2,
-         mbytes/1,
+         mbytes/1, 
          pretty_time/0, pretty_time/2,
          %% TCP protocol helpers
          connect/2, connect/3,
@@ -45,6 +47,8 @@
          combinations/1, ordered_combinations/1,
          mk_order/2
         ]).
+
+%% TODO: Leave this in place?
 -compile(export_all).
 
 -include("machi.hrl").
@@ -73,7 +77,7 @@ make_config_filename(DataDir, Prefix) ->
 -spec make_checksum_filename(string(), string(), atom()|string()|binary(), integer()) ->
       string().
 make_checksum_filename(DataDir, Prefix, SequencerName, FileNum) ->
-    lists:flatten(io_lib:format("~s/config/~s.~s.~w.csum",
+    lists:flatten(io_lib:format("~s/config/~s^~s^~w.csum",
                                 [DataDir, Prefix, SequencerName, FileNum])).
 
 %% @doc Calculate a checksum file path, by common convention.
@@ -90,7 +94,7 @@ make_checksum_filename(DataDir, FileName) ->
 -spec make_data_filename(string(), string(), atom()|string()|binary(), integer()) ->
       {binary(), string()}.
 make_data_filename(DataDir, Prefix, SequencerName, FileNum) ->
-    File = erlang:iolist_to_binary(io_lib:format("~s.~s.~w",
+    File = erlang:iolist_to_binary(io_lib:format("~s^~s^~w",
                                                  [Prefix, SequencerName, FileNum])),
     FullPath = lists:flatten(io_lib:format("~s/data/~s",  [DataDir, File])),
     {File, FullPath}.
@@ -114,6 +118,32 @@ make_projection_filename(DataDir, "") ->
     lists:flatten(io_lib:format("~s/projection",  [DataDir]));
 make_projection_filename(DataDir, File) ->
     lists:flatten(io_lib:format("~s/projection/~s",  [DataDir, File])).
+
+%% @doc Given a filename, return true if it is a valid machi filename,
+%% false otherwise.
+-spec is_valid_filename( Filename :: string() ) -> true | false.
+is_valid_filename(Filename) ->
+    case parse_filename(Filename) of
+        [] -> false;
+        _ -> true
+    end.
+
+%% @doc Given a machi filename, return a set of components in a list.
+%% The components will be:
+%% <ul>
+%%      <li>Prefix</li>
+%%      <li>UUID</li>
+%%      <li>Sequence number</li>
+%% </ul>
+%%
+%% Invalid filenames will return an empty list.
+-spec parse_filename( Filename :: string() ) -> [ string() ].
+parse_filename(Filename) ->
+    case string:tokens(Filename, "^") of
+        [_Prefix, _UUID, _SeqNo] = L -> L;
+        _ -> []
+    end.
+
 
 %% @doc Read the file size of a config file, which is used as the
 %% basis for a minimum sequence number.

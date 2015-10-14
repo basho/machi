@@ -298,7 +298,8 @@ write_chunk(PidSpec, EpochID, File, Offset, Chunk, Timeout) ->
     case gen_server:call(PidSpec, {req, {write_chunk, EpochID, File, Offset, Chunk}},
                          Timeout) of
         {error, written}=Err ->
-            case read_chunk(PidSpec, EpochID, File, Offset, Chunk, Timeout) of
+            Size = byte_size(Chunk),
+            case read_chunk(PidSpec, EpochID, File, Offset, Size, Timeout) of
                 {ok, Chunk2} when Chunk2 == Chunk ->
                     %% See equivalent comment inside write_projection().
                     ok;

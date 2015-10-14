@@ -40,7 +40,7 @@ verify_file_checksums_test2() ->
     TcpPort = 32958,
     DataDir = "./data",
     W_props = [{initial_wedged, false}],
-    FLU1 = machi_flu1_test:setup_test_flu(verify1_flu, TcpPort, DataDir,
+    machi_flu1_test:start_flu_package(verify1_flu, TcpPort, DataDir,
                                           W_props),
     Sock1 = ?FLU_C:connect(#p_srvr{address=Host, port=TcpPort}),
     try
@@ -75,7 +75,7 @@ verify_file_checksums_test2() ->
         ok
     after
         catch ?FLU_C:quit(Sock1),
-        ok = ?FLU:stop(FLU1)
+        catch machi_flu1_test:stop_flu_package(verify1_flu)
     end.
 
 -endif. % !PULSE

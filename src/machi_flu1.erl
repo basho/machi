@@ -35,14 +35,6 @@
 %%
 %% === TODO items ===
 %%
-%% TODO There is a major missing feature in this FLU implementation:
-%% there is no "write-once" enforcement for any position in a Machi
-%% file.  At the moment, we rely on correct behavior of the client
-%% &amp; the sequencer to avoid overwriting data.  In the Real World,
-%% however, all Machi file data is supposed to be exactly write-once
-%% to avoid problems with bugs, wire protocol corruption, malicious
-%% clients, etc.
-%%
 %% TODO The per-file metadata tuple store is missing from this implementation.
 %%
 %% TODO Section 4.1 ("The FLU") of the Machi design doc suggests that
@@ -216,10 +208,9 @@ listen_server_loop(LSock, S) ->
     spawn_link(fun() -> net_server_loop(Sock, S) end),
     listen_server_loop(LSock, S).
 
-append_server_loop(FluPid, #state{data_dir=DataDir, wedged=Wedged_p,
+append_server_loop(FluPid, #state{wedged=Wedged_p,
                                   witness=Witness_p,
                                   epoch_id=OldEpochId, flu_name=FluName}=S) ->
-    AppendServerPid = self(),
     receive
         {seq_append, From, _Prefix, _Chunk, _CSum, _Extra, _EpochID}
           when Witness_p ->
@@ -233,9 +224,16 @@ append_server_loop(FluPid, #state{data_dir=DataDir, wedged=Wedged_p,
             From ! wedged,
             append_server_loop(FluPid, S);
         {seq_append, From, Prefix, Chunk, CSum, Extra, EpochID} ->
-            spawn(fun() -> append_server_dispatch(From, Prefix,
-                                                 Chunk, CSum, Extra, EpochID,
-                                                 DataDir, AppendServerPid) end),
+            %% Old is the one from our state, plain old 'EpochID' comes
+            %% from the client.
+            case OldEpochId == EpochID of
+                true ->
+                    spawn(fun() -> 
+                        append_server_dispatch(From, Prefix, Chunk, CSum, Extra, FluName, EpochID) 
+                    end);
+                false ->
+                    From ! {error, bad_epoch}
+            end,
             append_server_loop(FluPid, S);
         {wedge_myself, WedgeEpochId} ->
             if not Wedged_p andalso WedgeEpochId == OldEpochId ->
@@ -488,7 +486,7 @@ do_server_proj_request({kick_projection_reaction},
 
 do_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
                        ChunkExtra, S) ->
-    case sanitize_file_string(Prefix) of
+    case sanitize_prefix(Prefix) of
         ok ->
             do_server_append_chunk2(PKey, Prefix, Chunk, CSum_tag, CSum,
                                     ChunkExtra, S);
@@ -502,8 +500,8 @@ do_server_append_chunk2(_PKey, Prefix, Chunk, CSum_tag, Client_CSum,
     %% TODO: Do anything with PKey?
     try
         TaggedCSum = check_or_make_tagged_checksum(CSum_tag, Client_CSum,Chunk),
-        FluName ! {seq_append, self(), Prefix, Chunk, TaggedCSum,
-                   ChunkExtra, EpochID},
+        R = {seq_append, self(), Prefix, Chunk, TaggedCSum, ChunkExtra, EpochID},
+        FluName ! R,
         receive
             {assignment, Offset, File} ->
                 Size = iolist_size(Chunk),
@@ -523,98 +521,36 @@ do_server_append_chunk2(_PKey, Prefix, Chunk, CSum_tag, Client_CSum,
             {error, bad_arg}
     end.
 
-do_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum,
-                      #state{data_dir=DataDir}=S) ->
+do_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum, #state{flu_name=FluName}) ->
     case sanitize_file_string(File) of
         ok ->
-            CSumPath = machi_util:make_checksum_filename(DataDir, File),
-            case file:open(CSumPath, [append, raw, binary]) of
-                {ok, FHc} ->
-                    Path = DataDir ++ "/data/" ++
-                        machi_util:make_string(File),
-                    {ok, FHd} = file:open(Path, [read, write, raw, binary]),
-                    try
-                        do_server_write_chunk2(
-                          File, Offset, Chunk, CSum_tag, CSum, DataDir,
-                          FHc, FHd)
-                    after
-                        (catch file:close(FHc)),
-                        (catch file:close(FHd))
-                    end;
-                {error, enoent} ->
-                    ok = filelib:ensure_dir(CSumPath),
-                    do_server_write_chunk(File, Offset, Chunk, CSum_tag,
-                                          CSum, S)
-            end;
+            {ok, Pid} = machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, File}),
+            Meta = [{client_csum_tag, CSum_tag}, {client_csum, CSum}],
+            machi_file_proxy:write(Pid, Offset, Meta, Chunk);
         _ ->
             {error, bad_arg}
     end.
 
-do_server_write_chunk2(_File, Offset, Chunk, CSum_tag,
-                       Client_CSum, _DataDir, FHc, FHd) ->
-    try
-        TaggedCSum = check_or_make_tagged_checksum(CSum_tag, Client_CSum,Chunk),
-        Size = iolist_size(Chunk),
-        case file:pwrite(FHd, Offset, Chunk) of
-            ok ->
-                CSum_info = encode_csum_file_entry(Offset, Size, TaggedCSum),
-                ok = file:write(FHc, CSum_info),
-                ok;
-            _Else3 ->
-                machi_util:verb("Else3 ~p ~p ~p\n",
-                                [Offset, Size, _Else3]),
-                {error, bad_arg}
-        end
-    catch
-        throw:{bad_csum, _CS} ->
-            {error, bad_checksum};
-        error:badarg ->
-            error_logger:error_msg("Message send to ~p gave badarg, make certain server is running with correct registered name\n", [?MODULE]),
-            {error, bad_arg}
-    end.
-
-do_server_read_chunk(File, Offset, Size, _Opts, #state{data_dir=DataDir})->
+do_server_read_chunk(File, Offset, Size, _Opts, #state{flu_name=FluName})->
     %% TODO: Look inside Opts someday.
     case sanitize_file_string(File) of
         ok ->
-            {_, Path} = machi_util:make_data_filename(DataDir, File),
-            case file:open(Path, [read, binary, raw]) of
-                {ok, FH} ->
-                    try
-                        case file:pread(FH, Offset, Size) of
-                            {ok, Bytes} when byte_size(Bytes) == Size ->
-                                {ok, Bytes};
-                            {ok, Bytes} ->
-                                machi_util:verb("ok read but wanted ~p got ~p: ~p @ offset ~p\n",
-                                                [Size,size(Bytes),File,Offset]),
-                                io:format(user, "ok read but wanted ~p got ~p: ~p @ offset ~p\n",
-                                          [Size,size(Bytes),File,Offset]),
-                                {error, partial_read};
-                            eof ->
-                                {error, not_written}; %% TODO perhaps_do_net_server_ec_read(Sock, FH);
-                            _Else2 ->
-                                machi_util:verb("Else2 ~p ~p ~P\n",
-                                                [Offset, Size, _Else2, 20]),
-                                {error, bad_read}
-                        end
-                    after
-                        file:close(FH)
-                    end;
-                {error, enoent} ->
-                    {error, not_written};
-                {error, _Else} ->
-                    io:format(user, "Unexpected ~p at ~p ~p\n",
-                              [_Else, ?MODULE, ?LINE]),
-                    {error, bad_arg}
+            {ok, Pid} = machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, File}),
+            case machi_file_proxy:read(Pid, Offset, Size) of
+                %% XXX FIXME 
+                %% For now we are omiting the checksum data because it blows up
+                %% protobufs.
+                {ok, Data, _Csum} -> {ok, Data};
+                Other -> Other
             end;
         _ ->
             {error, bad_arg}
     end.
 
-do_server_checksum_listing(File, #state{data_dir=DataDir}=_S) ->
+do_server_checksum_listing(File, #state{flu_name=FluName, data_dir=DataDir}=_S) ->
     case sanitize_file_string(File) of
         ok ->
-            ok = sync_checksum_file(File),
+            ok = sync_checksum_file(FluName, File),
             CSumPath = machi_util:make_checksum_filename(DataDir, File),
             %% TODO: If this file is legitimately bigger than our
             %% {packet_size,N} limit, then we'll have a difficult time, eh?
@@ -696,147 +632,66 @@ do_server_trunc_hack(File, #state{data_dir=DataDir}=_S) ->
             {error, bad_arg}
     end.
 
-append_server_dispatch(From, Prefix, Chunk, CSum, Extra, EpochID,
-                       DataDir, LinkPid) ->
-    Pid = write_server_get_pid(Prefix, EpochID, DataDir, LinkPid),
-    Pid ! {seq_append, From, Prefix, Chunk, CSum, Extra, EpochID},
+append_server_dispatch(From, Prefix, Chunk, CSum, Extra, FluName, EpochId) ->
+    Result = case handle_append(Prefix, Chunk, CSum, Extra, FluName, EpochId) of
+        {ok, File, Offset} ->
+            {assignment, Offset, File};
+        Other ->
+            Other
+    end,
+    From ! Result,
     exit(normal).
 
+handle_append(_Prefix, <<>>, _Csum, _Extra, _FluName, _EpochId) ->
+    {error, bad_arg};
+handle_append(Prefix, Chunk, Csum, Extra, FluName, EpochId) ->
+    Res = machi_flu_filename_mgr:find_or_make_filename_from_prefix(FluName, EpochId, {prefix, Prefix}),
+    case Res of
+        {file, F} ->
+            {ok, Pid} = machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, F}),
+            {Tag, CS} = machi_util:unmake_tagged_csum(Csum),
+            Meta = [{client_csum_tag, Tag}, {client_csum, CS}],
+            machi_file_proxy:append(Pid, Meta, Extra, Chunk);
+        Error ->
+            Error
+    end.
+
 sanitize_file_string(Str) ->
+    case has_no_prohibited_chars(Str) andalso machi_util:is_valid_filename(Str) of
+        true -> ok;
+        false -> error
+    end.
+
+has_no_prohibited_chars(Str) ->
     case re:run(Str, "/") of
+        nomatch ->
+            true;
+        _ ->
+            true
+    end.
+
+sanitize_prefix(Prefix) ->
+    %% We are using '^' as our component delimiter
+    case re:run(Prefix, "/|\\^") of
         nomatch ->
             ok;
         _ ->
             error
     end.
 
-sync_checksum_file(File) ->
-    Prefix = re:replace(File, "\\..*", "", [{return, binary}]),
-    case write_server_find_pid(Prefix) of
+sync_checksum_file(FluName, File) ->
+    %% We just lookup the pid here - we don't start a proxy server. If
+    %% there isn't a pid for this file, then we just return ok. The
+    %% csum file was synced when the proxy was shutdown.
+    %%
+    %% If there *is* a pid, we call the sync function to ensure the
+    %% csum file is sync'd before we return. (Or an error if we get
+    %% an error).
+    case machi_flu_metadata_mgr:lookup_proxy_pid(FluName, {file, File}) of
         undefined ->
             ok;
         Pid ->
-            Ref = make_ref(),
-            Pid ! {sync_stuff, self(), Ref},
-            receive
-                {sync_finished, Ref} ->
-                    ok
-            after 5000 ->
-                    case write_server_find_pid(Prefix) of
-                        undefined ->
-                            ok;
-                        Pid2 when Pid2 /= Pid ->
-                            ok;
-                        _Pid2 ->
-                            error
-                    end
-            end
-    end.
-
-write_server_get_pid(Prefix, EpochID, DataDir, LinkPid) ->
-    case write_server_find_pid(Prefix) of
-        undefined ->
-            start_seq_append_server(Prefix, EpochID, DataDir, LinkPid),
-            timer:sleep(1),
-            write_server_get_pid(Prefix, EpochID, DataDir, LinkPid);
-        Pid ->
-            Pid
-    end.
-
-write_server_find_pid(Prefix) ->
-    FluName = machi_util:make_regname(Prefix),
-    whereis(FluName).
-
-start_seq_append_server(Prefix, EpochID, DataDir, AppendServerPid) ->
-    proc_lib:spawn_link(fun() ->
-                                %% The following is only necessary to
-                                %% make nice process relationships in
-                                %% 'appmon' and related tools.
-                                put('$ancestors', [AppendServerPid]),
-                                put('$initial_call', {x,y,3}),
-                                link(AppendServerPid),
-                                run_seq_append_server(Prefix, EpochID, DataDir)
-                        end).
-
-run_seq_append_server(Prefix, EpochID, DataDir) ->
-    true = register(machi_util:make_regname(Prefix), self()),
-    run_seq_append_server2(Prefix, EpochID, DataDir).
-
-run_seq_append_server2(Prefix, EpochID, DataDir) ->
-    FileNum = machi_util:read_max_filenum(DataDir, Prefix) + 1,
-    case machi_util:increment_max_filenum(DataDir, Prefix) of
-        ok ->
-            machi_util:info_msg("start: ~p server at file ~w\n",
-                                [Prefix, FileNum]),
-            seq_append_server_loop(DataDir, Prefix, EpochID, FileNum);
-        Else ->
-            error_logger:error_msg("start: ~p server at file ~w: ~p\n",
-                                   [Prefix, FileNum, Else]),
-            exit(Else)
-
-    end.
-
--spec seq_name_hack() -> string().
-seq_name_hack() ->
-    lists:flatten(io_lib:format("~.36B~.36B",
-                                [element(3,now()),
-                                 list_to_integer(os:getpid())])).
-
-seq_append_server_loop(DataDir, Prefix, EpochID, FileNum) ->
-    SequencerNameHack = seq_name_hack(),
-    {File, FullPath} = machi_util:make_data_filename(
-                         DataDir, Prefix, SequencerNameHack, FileNum),
-    {ok, FHd} = file:open(FullPath,
-                          [read, write, raw, binary]),
-    CSumPath = machi_util:make_checksum_filename(
-                 DataDir, Prefix, SequencerNameHack, FileNum),
-    {ok, FHc} = file:open(CSumPath, [append, raw, binary]),
-    seq_append_server_loop(DataDir, Prefix, File, {FHd,FHc}, EpochID, FileNum,
-                           ?MINIMUM_OFFSET).
-
-seq_append_server_loop(DataDir, Prefix, _File, {FHd,FHc}, EpochID,
-                       FileNum, Offset)
-  when Offset > ?MAX_FILE_SIZE ->
-    ok = file:close(FHd),
-    ok = file:close(FHc),
-    machi_util:info_msg("rollover: ~p server at file ~w offset ~w\n",
-                        [Prefix, FileNum, Offset]),
-    run_seq_append_server2(Prefix, EpochID, DataDir);    
-seq_append_server_loop(DataDir, Prefix, File, {FHd,FHc}=FH_, EpochID,
-                       FileNum, Offset) ->
-    receive
-        {seq_append, From, Prefix, Chunk, TaggedCSum, Extra, R_EpochID}
-          when R_EpochID == EpochID ->
-            if Chunk /= <<>> ->
-                    ok = file:pwrite(FHd, Offset, Chunk);
-               true ->
-                    ok
-            end,
-            From ! {assignment, Offset, File},
-            Size = iolist_size(Chunk),
-            CSum_info = encode_csum_file_entry(Offset, Size, TaggedCSum),
-            ok = file:write(FHc, CSum_info),
-            seq_append_server_loop(DataDir, Prefix, File, FH_, EpochID,
-                                   FileNum, Offset + Size + Extra);
-        {seq_append, _From, _Prefix, _Chunk, _TCSum, _Extra, R_EpochID}=MSG ->
-            %% Rare'ish event: send MSG to myself so it doesn't get lost
-            %% while we recurse around to pick up a new FileNum.
-            self() ! MSG,
-            machi_util:info_msg("rollover: ~p server at file ~w offset ~w "
-                                "by new epoch_id ~W\n",
-                                [Prefix, FileNum, Offset, R_EpochID, 8]),
-            run_seq_append_server2(Prefix, R_EpochID, DataDir);    
-        {sync_stuff, FromPid, Ref} ->
-            file:sync(FHc),
-            FromPid ! {sync_finished, Ref},
-            seq_append_server_loop(DataDir, Prefix, File, FH_, EpochID,
-                                   FileNum, Offset)
-    after 30*1000 ->
-            ok = file:close(FHd),
-            ok = file:close(FHc),
-            machi_util:info_msg("stop: ~p server ~p at file ~w offset ~w\n",
-                                [Prefix, self(), FileNum, Offset]),
-            exit(normal)
+          machi_file_proxy:sync(Pid, csum)
     end.
 
 make_listener_regname(BaseName) ->

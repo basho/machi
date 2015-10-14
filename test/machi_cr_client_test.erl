@@ -146,15 +146,15 @@ smoke_test2() ->
                                  File1, FooOff2, Size2)} || X <- [0,1,2] ],
 
         %% Misc API smoke & minor regression checks
-        {error, not_written} = machi_cr_client:read_chunk(C1, <<"no">>,
+        {error, bad_arg} = machi_cr_client:read_chunk(C1, <<"no">>,
                                                           999999999, 1),
-        {error, partial_read} = machi_cr_client:read_chunk(C1, File1,
+        {error, not_written} = machi_cr_client:read_chunk(C1, File1,
                                                            Off1, 88888888),
         %% Checksum list return value is a primitive binary().
         {ok, KludgeBin} = machi_cr_client:checksum_list(C1, File1),
         true = is_binary(KludgeBin),
 
-        {error, no_such_file} = machi_cr_client:checksum_list(C1, <<"!!!!">>),
+        {error, bad_arg} = machi_cr_client:checksum_list(C1, <<"!!!!">>),
         %% Exactly one file right now
         {ok, [_]} = machi_cr_client:list_files(C1),
 
@@ -191,7 +191,11 @@ smoke_test2() ->
 witness_smoke_test_() -> {timeout, 1*60, fun() -> witness_smoke_test2() end}.
 
 witness_smoke_test2() ->
-    {ok, SupPid} = machi_flu_sup:start_link(),
+    SupPid = case machi_flu_sup:start_link() of 
+                {ok, P} -> P;
+                {error, {already_started, P1}} -> P1;
+                Other -> error(Other)
+    end,
     error_logger:tty(false),
     try
         Prefix = <<"pre">>,
@@ -226,7 +230,15 @@ witness_smoke_test2() ->
             orddict:fetch(OurWitness, D),
         {ok, {false, EpochID2}} = machi_flu1_client:wedge_status(WitA, WitP),
         machi_flu1:wedge_myself(WitName, EpochID2),
-        {ok, {true,  EpochID2}} = machi_flu1_client:wedge_status(WitA, WitP),
+        case machi_flu1_client:wedge_status(WitA, WitP) of
+            {ok, {true,  EpochID2}} ->
+                ok;
+            {ok, {false,  EpochID2}} ->
+                %% This is racy.  Work around it by sleeping a while.
+                timer:sleep(6*1000),
+                {ok, {true,  EpochID2}} =
+                    machi_flu1_client:wedge_status(WitA, WitP)
+        end,
 
         %% Chunk1 is still readable: not affected by wedged witness head.
         {ok, Chunk1} = machi_cr_client:read_chunk(C1, File1, Off1, Size1),

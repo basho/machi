@@ -708,7 +708,7 @@ put(xxx, Sock),
         end
     catch
         _X:_Y ->
-            io:format(user, "DBG Whoa ~w w_connect port ~w sock ~w err ~w ~w\n", [time(), Port, get(xxx), _X, _Y]),
+            %% io:format(user, "DBG Whoa ~w w_connect port ~w sock ~w err ~w ~w\n", [time(), Port, get(xxx), _X, _Y]),
             undefined
     end.
 
