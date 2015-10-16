@@ -56,8 +56,8 @@ init([]) ->
     MaxSecondsBetweenRestarts = 3600,
     SupFlags = {RestartStrategy, MaxRestarts, MaxSecondsBetweenRestarts},
 
-    Tab = ets:new(?TEST_ETS_TABLE, [named_table, public, ordered_set,
-                                    {read_concurrency,true}]),
+    _Tab = ets:new(?TEST_ETS_TABLE, [named_table, public, ordered_set,
+                                     {read_concurrency,true}]),
 
     Ps = get_initial_flus(),
     FLU_specs = [machi_flu_psup:make_package_spec(FluName, TcpPort,

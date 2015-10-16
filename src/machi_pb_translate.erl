@@ -747,16 +747,6 @@ enc_sexp(T) ->
 dec_sexp(Bin) when is_binary(Bin) ->
     binary_to_term(Bin).
 
-enc_optional_sexp(undefined) ->
-    undefined;
-enc_optional_sexp(T) ->
-    enc_sexp(T).
-
-dec_optional_sexp(undefined) ->
-    undefined;
-dec_optional_sexp(T) ->
-    dec_sexp(T).
-
 conv_from_members_dict(D) ->
     %% Use list_to_binary() here to "flatten" the serialized #p_srvr{}
     [#mpb_membersdictentry{key=to_list(K), val=conv_from_p_srvr(V)} ||

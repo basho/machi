@@ -97,7 +97,6 @@ smoke_test2() ->
                                 _Boring_stack_trace}},
                               ?C:trim_chunk(Clnt, Fl, Off, Sz))
              end || {Ch, Fl, Off, Sz} <- Reads],
-            ?debugVal(?C:list_files(Clnt)),
 
             ok
         after
