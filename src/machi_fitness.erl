@@ -86,7 +86,7 @@ send_spam_to_everyone(Pid) ->
 init([{MyFluName}|Args]) ->
     RegName = machi_flu_psup:make_fitness_regname(MyFluName),
     register(RegName, self()),
-timer:send_interval(5000, dump),
+    timer:send_interval(5000, debug_dump),
     UseSimulatorP = proplists:get_value(use_partition_simulator, Args, false),
     {ok, #state{my_flu_name=MyFluName, reg_name=RegName,
                 partition_simulator_p=UseSimulatorP,
@@ -139,7 +139,7 @@ handle_info({adjust_down_list, FLU}, #state{active_unfit=ActiveUnfit}=S) ->
     NewUnfit = make_unfit_list(S),
     Added_to_new     = NewUnfit -- ActiveUnfit,
     Dropped_from_new = ActiveUnfit -- NewUnfit,
-    io:format(user, "adjust_down_list: ~w: adjust ~w: add ~p drop ~p\n", [S#state.my_flu_name, FLU, Added_to_new, Dropped_from_new]),
+    %% io:format(user, "adjust_down_list: ~w: adjust ~w: add ~p drop ~p\n", [S#state.my_flu_name, FLU, Added_to_new, Dropped_from_new]),
     %% We need to schedule a new round of adjustment messages.  They might
     %% be redundant, or they might not.  Here's a case where the current
     %% code needs the extra:
@@ -182,9 +182,9 @@ handle_info({adjust_down_list, FLU}, #state{active_unfit=ActiveUnfit}=S) ->
         {false, false} ->
             {noreply, S}
     end;
-handle_info(dump, #state{my_flu_name=MyFluName,active_unfit=ActiveUnfit,
-                         pending_map=Map}=S) ->
-    %% io:format(user, "DUMP: ~w/~w: ~p ~W\n", [MyFluName, self(), ActiveUnfit, map_value(Map), 13]),
+handle_info(debug_dump, #state{my_flu_name=_MyFluName,active_unfit=_ActiveUnfit,
+                               pending_map=_Map}=S) ->
+    %% io:format(user, "DUMP: ~w/~w: ~p ~W\n", [_MyFluName, self(), _ActiveUnfit, map_value(_Map), 13]),
     %% io:format(user, "DUMP ~w: ~w, ", [MyFluName, ActiveUnfit]),
     {noreply, S};
 handle_info(_Info, S) ->
@@ -390,6 +390,7 @@ map_set(Actor, Map, Key, ValTerm) ->
                              Actor, Map),
     Map2.
 
+-ifdef(TEST).
 map_get(Map, Key) ->
     Field = {Key, ?LWWREG},
     case lists:keyfind(Field, 1, ?MAP:value(Map)) of
@@ -398,6 +399,7 @@ map_get(Map, Key) ->
         {Field, ValBin} ->
             {ok, binary_to_term(ValBin)}
     end.
+-endif. % TEST
 
 map_fold(Fun, Acc, Map) ->
     Vs = map_value(Map),
@@ -408,24 +410,6 @@ map_value(Map) ->
 
 map_merge(Map1, Map2) ->
     ?MAP:merge(Map1, Map2).
-
--ifdef(TEST).
-
-testing_sleep_perhaps() ->
-    try
-        [{_,Max}] = ets:lookup(?TEST_ETS_TABLE, projection_store_sleep_time),
-        MSec = random:uniform(Max),
-        timer:sleep(MSec),
-        ok
-    catch _X:_Y ->
-            ok
-    end.
--else. % TEST
-
-testing_sleep_perhaps() ->
-    ok.
-
--endif. % TEST
 
 -ifdef(TEST).
 

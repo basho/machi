@@ -1,5 +1,6 @@
 language: erlang
 notifications:
   email: scott@basho.com
+script: "make test"
 otp_release:
   - 17.5

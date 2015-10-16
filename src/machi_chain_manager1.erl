@@ -672,12 +672,12 @@ calc_projection(S, RelativeToServer) ->
 calc_projection(#ch_mgr{proj=P_current}=S, RelativeToServer, AllHosed) ->
     calc_projection(S, RelativeToServer, AllHosed, P_current).
 
-calc_projection(#ch_mgr{name=MyName, consistency_mode=CMode,
-                        runenv=RunEnv}=S,
+calc_projection(#ch_mgr{name=_MyName, consistency_mode=CMode,
+                        runenv=_RunEnv}=S,
                 RelativeToServer, AllHosed, P_current) ->
     Dbg = [],
-    %% OldThreshold = proplists:get_value(old_threshold, RunEnv),
-    %% NoPartitionThreshold = proplists:get_value(no_partition_threshold, RunEnv),
+    %% OldThreshold = proplists:get_value(old_threshold, _RunEnv),
+    %% NoPartitionThreshold = proplists:get_value(no_partition_threshold, _RunEnv),
     if CMode == ap_mode ->
             calc_projection2(P_current, RelativeToServer, AllHosed, Dbg, S);
        CMode == cp_mode ->
@@ -700,7 +700,7 @@ calc_projection(#ch_mgr{name=MyName, consistency_mode=CMode,
             %%                          Dbg, S);
             %%     {_, false} ->
             %%         {Up, _Partitions, RunEnv2} = calc_up_nodes(
-            %%                                       MyName, AllMembers, RunEnv),
+            %%                                       _MyName, AllMembers, _RunEnv),
             %%         %% We can't improve on the current projection.
             %%         {P_current, S#ch_mgr{runenv=RunEnv2}, Up}
             %% end
@@ -1779,9 +1779,10 @@ react_to_env_C100(P_newprop,
     if Sane == true ->
             ok;
        true ->
-            QQ_current = lists:flatten(io_lib:format("cur=~w:~w,~w/calc=~w:~w,~w", [P_current#projection_v1.epoch_number, P_current#projection_v1.upi, P_current#projection_v1.repairing, P_current_calc#projection_v1.epoch_number, P_current_calc#projection_v1.upi, P_current_calc#projection_v1.repairing])),
-            QQ_latest = lists:flatten(io_lib:format("~w:~w,~w", [P_latest#projection_v1.epoch_number, P_latest#projection_v1.upi, P_latest#projection_v1.repairing])),
-            ?V("\n~w-insane-~w-auth=~w ~s -> ~s ~w\n    ~p\n    ~p\n", [?LINE, MyName, P_newprop#projection_v1.author_server, QQ_current, QQ_latest, Sane, get(why2), get(react)])
+            %% QQ_current = lists:flatten(io_lib:format("cur=~w:~w,~w/calc=~w:~w,~w", [P_current#projection_v1.epoch_number, P_current#projection_v1.upi, P_current#projection_v1.repairing, P_current_calc#projection_v1.epoch_number, P_current_calc#projection_v1.upi, P_current_calc#projection_v1.repairing])),
+            %% QQ_latest = lists:flatten(io_lib:format("~w:~w,~w", [P_latest#projection_v1.epoch_number, P_latest#projection_v1.upi, P_latest#projection_v1.repairing])),
+            %% ?V("\n~w-insane-~w-auth=~w ~s -> ~s ~w\n    ~p\n    ~p\n", [?LINE, MyName, P_newprop#projection_v1.author_server, QQ_current, QQ_latest, Sane, get(why2), get(react)]),
+            ok
     end,
     ?REACT({c100, ?LINE, [zoo, {me,MyName},
                           {author_latest,Author_latest},
@@ -1797,11 +1798,11 @@ react_to_env_C100(P_newprop,
             %% or for when we got stuck in an insane projection transition
             %% and were forced to the none projection to recover.
             ?REACT({c100, ?LINE, [first_write]}),
-            if Sane == true -> ok;  true -> ?V("~w-insane-~w-~w:~w:~w,", [?LINE, MyName, P_newprop#projection_v1.epoch_number, P_newprop#projection_v1.upi, P_newprop#projection_v1.repairing]) end, %%% DELME!!!
+            %% if Sane == true -> ok;  true -> ?V("~w-insane-~w-~w:~w:~w,", [?LINE, MyName, P_newprop#projection_v1.epoch_number, P_newprop#projection_v1.upi, P_newprop#projection_v1.repairing]) end, %%% DELME!!!
             react_to_env_C110(P_latest, S);
         true ->
             ?REACT({c100, ?LINE, []}),
-            if Sane == true -> ok;  true -> ?V("~w-insane-~w-~w:~w:~w@~w,", [?LINE, MyName, P_newprop#projection_v1.epoch_number, P_newprop#projection_v1.upi, P_newprop#projection_v1.repairing, ?LINE]) end, %%% DELME!!!
+            %% if Sane == true -> ok;  true -> ?V("~w-insane-~w-~w:~w:~w@~w,", [?LINE, MyName, P_newprop#projection_v1.epoch_number, P_newprop#projection_v1.upi, P_newprop#projection_v1.repairing, ?LINE]) end, %%% DELME!!!
 
     V = case file:read_file("/tmp/bugbug."++atom_to_list(S#ch_mgr.name)) of {ok,_} -> true; _ -> false end,
     if V -> 
@@ -1816,17 +1817,17 @@ react_to_env_C100(P_newprop,
                                     P_newprop, P_latest, P_current_calc, S)
     end.
 
-react_to_env_C100_inner(Author_latest, NotSanesDict0, MyName,
+react_to_env_C100_inner(Author_latest, NotSanesDict0, _MyName,
                         P_newprop, P_latest, P_current_calc, S) ->
     NotSanesDict = orddict:update_counter(Author_latest, 1, NotSanesDict0),
     S2 = S#ch_mgr{not_sanes=NotSanesDict, sane_transitions=0},
     case orddict:fetch(Author_latest, NotSanesDict) of
         N when N > ?TOO_FREQUENT_BREAKER ->
-            ?V("\n\nYOYO ~w breaking the cycle of:\n  current: ~w\n  new    : ~w\n", [MyName, machi_projection:make_summary(S#ch_mgr.proj), machi_projection:make_summary(P_latest)]),
+            %% ?V("\n\nYOYO ~w breaking the cycle of:\n  current: ~w\n  new    : ~w\n", [_MyName, machi_projection:make_summary(S#ch_mgr.proj), machi_projection:make_summary(P_latest)]),
             ?REACT({c100, ?LINE, [{not_sanes_author_count, N}]}),
             react_to_env_C103(P_newprop, P_latest, P_current_calc, S2);
         N ->
-           ?V("YOYO,~w,~w,~w,",[MyName, P_latest#projection_v1.epoch_number,N]),
+           %% ?V("YOYO,~w,~w,~w,",[_MyName, P_latest#projection_v1.epoch_number,N]),
             ?REACT({c100, ?LINE, [{not_sanes_author_count, N}]}),
             %% P_latest is not sane.
             %% By process of elimination, P_newprop is best,

@@ -314,7 +314,7 @@ timing_pb_encoding_test2() ->
     RUN2 = timer:tc(fun() -> begin [_ = DoIt2() || _ <- XX], ok end end),
     erlang:garbage_collect(),
     Factor = (element(1, RUN1) / element(1, RUN2)),
-    io:format(user, " speed factor=~.2f ", [Factor]),
+    io:format(" speed factor=~.2f ", [Factor]),
     ok.
 
 -endif. % !PULSE

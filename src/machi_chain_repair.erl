@@ -96,11 +96,6 @@
 
 -export([repair/7]).
 
-repair_cp(_Src, _Dst, _MembersDict, _Opts) ->
-    %% TODO: add missing function: wipe away any trace of chunks
-    %% are present on Dst but missing on Src.
-    exit(todo_cp_mode).
-
 repair(ap_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
     %% Use process dict so that 'after' clause can always quit all
     %% proxy pids.
@@ -156,7 +151,7 @@ repair(ap_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
                   Pid <- orddict:to_list(get(proxies_dict))]
           end,
     Res;
-repair(cp_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
+repair(cp_mode=_ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
     io:format(user, "\n\nTODO! cp_mode repair is not fully implemented!\n\n", []),
     repair(ap_mode, Src, Repairing, UPI, MembersDict, ETS, Opts).
 
