@@ -60,9 +60,7 @@ init([]) ->
                                     {read_concurrency,true}]),
 
     Ps = get_initial_flus(),
-    FLU_specs = [machi_flu_psup:make_package_spec(FluName, TcpPort,
-                                                  DataDir, Props) ||
-                    {FluName, TcpPort, DataDir, Props} <- Ps],
+    FLU_specs = [machi_flu_psup:make_package_spec(P) || P <- Ps],
 
     {ok, {SupFlags, FLU_specs}}.
 
