@@ -84,6 +84,17 @@ from_pb_request(#mpb_ll_request{
     {ReqID, {low_read_chunk, EpochID, File, Offset, Size, Opts}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
+                   trim_chunk=#mpb_ll_trimchunkreq{
+                     epoch_id=PB_EpochID,
+                     file=File,
+                     offset=Offset,
+                     size=Size,
+                                 trigger_gc=PB_TriggerGC}}) ->
+    EpochID = conv_to_epoch_id(PB_EpochID),
+    TriggerGC = conv_to_boolean(PB_TriggerGC),
+    {ReqID, {low_trim_chunk, EpochID, File, Offset, Size, TriggerGC}};
+from_pb_request(#mpb_ll_request{
+                   req_id=ReqID,
                    checksum_list=#mpb_ll_checksumlistreq{
                      epoch_id=PB_EpochID,
                      file=File}}) ->
@@ -238,6 +249,10 @@ from_pb_response(#mpb_ll_response{
     end;
 from_pb_response(#mpb_ll_response{
                     req_id=ReqID,
+                    trim_chunk=#mpb_ll_trimchunkresp{status=Status}}) ->
+    {ReqID, machi_pb_high_client:convert_general_status_code(Status)};
+from_pb_response(#mpb_ll_response{
+                    req_id=ReqID,
                     checksum_list=#mpb_ll_checksumlistresp{
                       status=Status, chunk=Chunk}}) ->
     case Status of
@@ -381,6 +396,15 @@ to_pb_request(ReqID, {low_read_chunk, EpochID, File, Offset, Size, _Opts}) ->
                  file=File,
                  offset=Offset,
                  size=Size}};
+to_pb_request(ReqID, {low_trim_chunk, EpochID, File, Offset, Size, TriggerGC}) ->
+    PB_EpochID = conv_from_epoch_id(EpochID),
+    #mpb_ll_request{req_id=ReqID, do_not_alter=2,
+                    trim_chunk=#mpb_ll_trimchunkreq{
+                                  epoch_id=PB_EpochID,
+                                  file=File,
+                                  offset=Offset,
+                                  size=Size,
+                                  trigger_gc=TriggerGC}};
 to_pb_request(ReqID, {low_checksum_list, EpochID, File}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
@@ -476,6 +500,18 @@ to_pb_response(ReqID, {low_read_chunk, _EID, _Fl, _Off, _Sz, _Opts}, Resp)->
             Status = conv_from_status(Error),
             #mpb_ll_response{req_id=ReqID,
                              read_chunk=#mpb_ll_readchunkresp{status=Status}};
+        _Else ->
+            make_ll_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
+    end;
+to_pb_response(ReqID, {low_trim_chunk, _, _, _, _, _}, Resp) ->
+    case Resp of
+        ok ->
+            #mpb_ll_response{req_id=ReqID,
+                             trim_chunk=#mpb_ll_trimchunkresp{status='OK'}};
+        {error, _}=Error ->
+            Status = conv_from_status(Error),
+            #mpb_ll_response{req_id=ReqID,
+                             read_chunk=#mpb_ll_trimchunkresp{status=Status}};
         _Else ->
             make_ll_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
@@ -860,6 +896,8 @@ conv_from_status({error, not_written}) ->
     'NOT_WRITTEN';
 conv_from_status({error, written}) ->
     'WRITTEN';
+conv_from_status({error, trimmed}) ->
+    'TRIMMED';
 conv_from_status({error, no_such_file}) ->
     'NO_SUCH_FILE';
 conv_from_status({error, partial_read}) ->

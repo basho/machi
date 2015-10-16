@@ -548,12 +548,119 @@ do_read_chunk2(File, Offset, Size, Depth, STime, TO,
             read_repair(ConsistencyMode, read, File, Offset, Size, Depth, STime, S);
             %% {reply, {error, not_written}, S};
         {error, written} ->
-            exit({todo_should_never_happen,?MODULE,?LINE,File,Offset,Size})
+            exit({todo_should_never_happen,?MODULE,?LINE,File,Offset,Size});
+        {error, trimmed}=Err ->
+            {reply, Err, S}
     end.
 
-do_trim_chunk(_File, _Offset, _Size, _Depth, _STime, _TO, S) ->
-    %% This is just a stub to reach CR client from high level client
-    {reply, {error, bad_joss}, S}.
+do_trim_chunk(File, Offset, Size, 0=Depth, STime, TO, S) ->
+    do_trim_chunk(File, Offset, Size, Depth+1, STime, TO, S);
+    
+do_trim_chunk(File, Offset, Size, Depth, STime, TO, #state{proj=P}=S) ->
+    sleep_a_while(Depth),
+    DiffMs = timer:now_diff(os:timestamp(), STime) div 1000,
+    if DiffMs > TO ->
+            {reply, {error, partition}, S};
+       true ->
+            %% This is suboptimal for performance: there are some paths
+            %% through this point where our current projection is good
+            %% enough.  But we're going to try to keep the code as simple
+            %% as we can for now.
+            S2 = update_proj(S#state{proj=undefined, bad_proj=P}),
+            case S2#state.proj of
+                P2 when P2 == undefined orelse
+                        P2#projection_v1.upi == [] ->
+                    do_trim_chunk(File, Offset, Size, Depth + 1,
+                                  STime, TO, S2);
+                _ ->
+                    do_trim_chunk2(File, Offset, Size, Depth + 1,
+                                   STime, TO, S2)
+            end
+    end.
+
+do_trim_chunk2(File, Offset, Size, Depth, STime, TO,
+               #state{epoch_id=EpochID, proj=P, proxies_dict=PD}=S) ->
+    [HeadFLU|RestFLUs] = mutation_flus(P),
+    Proxy = orddict:fetch(HeadFLU, PD),
+    case ?FLU_PC:trim_chunk(Proxy, EpochID, File, Offset, Size, ?TIMEOUT) of
+        ok ->
+            %% From this point onward, we use the same code & logic path as
+            %% append does.
+            do_trim_midtail(RestFLUs, undefined, File, Offset, Size,
+                            [HeadFLU], 0, STime, TO, S);
+        {error, bad_checksum}=BadCS ->
+            {reply, BadCS, S};
+        {error, Retry}
+          when Retry == partition; Retry == bad_epoch; Retry == wedged ->
+            do_trim_chunk(File, Offset, Size, Depth, STime, TO, S);
+        {error, trimmed} ->
+            {reply, ok, S}
+    end.
+
+do_trim_midtail(RestFLUs, Prefix, File, Offset, Size,
+                Ws, Depth, STime, TO, S)
+  when RestFLUs == [] orelse Depth == 0 ->
+       do_trim_midtail2(RestFLUs, Prefix, File, Offset, Size,
+                        Ws, Depth + 1, STime, TO, S);
+do_trim_midtail(_RestFLUs, Prefix, File, Offset, Size,
+                Ws, Depth, STime, TO, #state{proj=P}=S) ->
+    %% io:format(user, "midtail sleep2,", []),
+    sleep_a_while(Depth),
+    DiffMs = timer:now_diff(os:timestamp(), STime) div 1000,
+    if DiffMs > TO ->
+            {reply, {error, partition}, S};
+       true ->
+            S2 = update_proj(S#state{proj=undefined, bad_proj=P}),
+            case S2#state.proj of
+                undefined ->
+                    {reply, {error, partition}, S};
+                P2 ->
+                    RestFLUs2 = mutation_flus(P2),
+                    case RestFLUs2 -- Ws of
+                        RestFLUs2 ->
+                            %% None of the writes that we have done so far
+                            %% are to FLUs that are in the RestFLUs2 list.
+                            %% We are pessimistic here and assume that
+                            %% those FLUs are permanently dead.  Start
+                            %% over with a new sequencer assignment, at
+                            %% the 2nd have of the impl (we have already
+                            %% slept & refreshed the projection).
+
+                            if Prefix == undefined -> % atom! not binary()!!
+                                    {error, partition};
+                               true ->
+                                    do_trim_chunk(Prefix, Offset, Size,
+                                                  Depth, STime, TO, S2)
+                            end;
+                        RestFLUs3 ->
+                            do_trim_midtail2(RestFLUs3, Prefix, File, Offset, Size,
+                                             Ws, Depth + 1, STime, TO, S2)
+                    end
+            end
+    end.            
+
+do_trim_midtail2([], _Prefix, _File, _Offset, _Size,
+                   _Ws, _Depth, _STime, _TO, S) ->
+    %% io:format(user, "ok!\n", []),
+    {reply, ok, S};
+do_trim_midtail2([FLU|RestFLUs]=FLUs, Prefix, File, Offset, Size,
+                   Ws, Depth, STime, TO,
+                   #state{epoch_id=EpochID, proxies_dict=PD}=S) ->
+    Proxy = orddict:fetch(FLU, PD),
+    case ?FLU_PC:trim_chunk(Proxy, EpochID, File, Offset, Size, ?TIMEOUT) of
+        ok ->
+            %% io:format(user, "write ~w,", [FLU]),
+            do_trim_midtail2(RestFLUs, Prefix, File, Offset, Size,
+                             [FLU|Ws], Depth, STime, TO, S);
+        {error, bad_checksum}=BadCS ->
+            %% TODO: alternate strategy?
+            {reply, BadCS, S};
+        {error, Retry}
+          when Retry == partition; Retry == bad_epoch; Retry == wedged ->
+            do_trim_midtail(FLUs, Prefix, File, Offset, Size,
+                            Ws, Depth, STime, TO, S)
+    end.
+
 
 %% Read repair: depends on the consistency mode that we're in:
 %%

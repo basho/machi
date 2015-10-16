@@ -74,6 +74,7 @@
           epoch_id        :: 'undefined' | machi_dt:epoch_id(),
           pb_mode = undefined  :: 'undefined' | 'high' | 'low',
           high_clnt       :: 'undefined' | pid(),
+          trim_table      :: ets:tid(),
           props = []      :: list()  % proplist
          }).
 
@@ -129,6 +130,7 @@ main2(FluName, TcpPort, DataDir, Props) ->
                 {true, undefined}
         end,
     Witness_p = proplists:get_value(witness_mode, Props, false),
+    
     S0 = #state{flu_name=FluName,
                 proj_store=ProjectionPid,
                 tcp_port=TcpPort,
@@ -148,7 +150,26 @@ main2(FluName, TcpPort, DataDir, Props) ->
        true ->
             ok
     end,
-    S1 = S0#state{append_pid=AppendPid},
+
+    %% TODO: on trimming, flu server is going to keep a table of
+    %% trimmed chunks. Although the original data is written in
+    %% checksum file, but it's too big to read and parse at each read
+    %% request. So hereby it should be recovered here before starting
+    %% any external service. All such live data is kept in trim_table.
+    %%
+    %% Q. How large checksum file could be? Does it pay to open and
+    %%    to cache by reading through every time flu server started over?
+    %%
+    %% 1. get all existing checksum files
+    %% 2. read through and find all trim entries, ignoring all checksums
+    %% But it's still TODO, just leave as it's empty
+    TrimTableName = list_to_atom(lists:flatten(["machi_flu1_trim_table_", 
+                                                atom_to_list(FluName)])),
+    TrimTable = ets:new(TrimTableName, [public, bag, named_table,
+                                        {read_concurrency, true}]),
+
+    S1 = S0#state{append_pid=AppendPid, trim_table=TrimTable},
+
     ListenPid = start_listen_server(S1),
 
     Config_e = machi_util:make_config_filename(DataDir, "unused"),
@@ -389,8 +410,11 @@ do_pb_ll_request3({low_write_chunk, _EpochID, File, Offset, Chunk, CSum_tag,
                   #state{witness=false}=S) ->
     {do_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum, S), S};
 do_pb_ll_request3({low_read_chunk, _EpochID, File, Offset, Size, Opts},
-                  #state{witness=false}=S) ->
+                  #state{witness=false} = S) ->
     {do_server_read_chunk(File, Offset, Size, Opts, S), S};
+do_pb_ll_request3({low_trim_chunk, _EpochID, File, Offset, Size, TriggerGC},
+                  #state{witness=false}=S) ->
+    {do_server_trim_chunk(File, Offset, Size, TriggerGC, S), S};
 do_pb_ll_request3({low_checksum_list, _EpochID, File},
                   #state{witness=false}=S) ->
     {do_server_checksum_listing(File, S), S};
@@ -540,6 +564,17 @@ do_server_read_chunk(File, Offset, Size, _Opts, #state{flu_name=FluName})->
                 {ok, Data, _Csum} -> {ok, Data};
                 Other -> Other
             end;
+        _ ->
+            {error, bad_arg}
+    end.
+
+do_server_trim_chunk(File, Offset, Size, TriggerGC, #state{flu_name=FluName}) ->
+    io:format(user, "Hi there! I'm trimming this: ~s, (~p, ~p), ~p~n",
+              [File, Offset, Size, TriggerGC]),
+    case sanitize_file_string(File) of
+        ok ->
+            {ok, Pid} = machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, File}),
+            machi_file_proxy:trim(Pid, Offset, Size, TriggerGC);
         _ ->
             {error, bad_arg}
     end.
