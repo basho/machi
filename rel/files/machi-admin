@@ -26,9 +26,7 @@ usage() {
     echo "                    top }"
 }
 
-stat_admin()
-{
-    case "$1" in
+case "$1" in
     test)
         # Make sure the local node IS running
         node_up_check
