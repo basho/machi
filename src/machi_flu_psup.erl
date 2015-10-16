@@ -73,7 +73,7 @@
 -endif.
 
 %% External API
--export([make_package_spec/4,
+-export([make_package_spec/1, make_package_spec/4,
          start_flu_package/1, start_flu_package/4, stop_flu_package/1]).
 %% Internal API
 -export([start_link/4,
@@ -83,13 +83,18 @@
 %% Supervisor callbacks
 -export([init/1]).
 
+make_package_spec({FluName, TcpPort, Props}) when is_list(Props) ->
+    FluDataDir = get_env(flu_data_dir, undefined_is_invalid),
+    MyDataDir = filename:join(FluDataDir, atom_to_list(FluName)),
+    make_package_spec(FluName, TcpPort, MyDataDir, Props).
+
 make_package_spec(FluName, TcpPort, DataDir, Props) ->
     {FluName, {machi_flu_psup, start_link,
                [FluName, TcpPort, DataDir, Props]},
      permanent, ?SHUTDOWN, supervisor, []}.
 
 start_flu_package(#p_srvr{name=FluName, port=TcpPort, props=Props}) ->
-    DataDir = proplists:get_value(data_dir, Props),
+    DataDir = get_data_dir(Props),
     start_flu_package(FluName, TcpPort, DataDir, Props).
 
 start_flu_package(FluName, TcpPort, DataDir, Props) ->
@@ -168,4 +173,10 @@ get_env(Setting, Default) ->
     case application:get_env(machi, Setting) of
         undefined -> Default;
         {ok, V} -> V
+    end.
+
+get_data_dir(Props) ->
+    case proplists:get_value(data_dir, Props) of
+        Path when is_list(Path) ->
+            Path
     end.
