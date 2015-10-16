@@ -1,0 +1,5 @@
+language: erlang
+notifications:
+  email: scott@basho.com
+otp_release:
+  - 17.5
