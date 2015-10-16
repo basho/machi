@@ -16,7 +16,16 @@ all: deps compile
 compile:
 	$(REBAR) compile
 
+## Make reltool happy by creating a fake entry in the deps dir for
+## machi, because reltool really wants to have a path with
+## "machi/ebin" at the end, but we also don't want infinite recursion
+## if we just symlink "deps/machi" -> ".."
+
 generate:
+	rm -rf deps/machi
+	mkdir deps/machi
+	ln -s ../../ebin deps/machi
+	ln -s ../../src deps/machi
 	$(REBAR) generate $(OVERLAY_VARS) 2>&1 | grep -v 'command does not apply to directory'
 
 deps:
