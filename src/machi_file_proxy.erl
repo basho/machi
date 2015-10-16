@@ -22,20 +22,20 @@
 %% controlled files.  In particular, it manages the "write-once register"
 %% conceit at the heart of Machi's design.
 %%
-%% Read, write and append requests for a single file will be managed 
+%% Read, write and append requests for a single file will be managed
 %% through this proxy.  Clients can also request syncs for specific
 %% types of filehandles.
 %%
 %% As operations are requested, the proxy keeps track of how many
 %% operations it has performed (and how many errors were generated.)
-%% After a sufficient number of inactivity, the server terminates 
+%% After a sufficient number of inactivity, the server terminates
 %% itself.
 %%
 %% TODO:
-%% 1. Some way to transition the proxy into a wedged state that 
+%% 1. Some way to transition the proxy into a wedged state that
 %% doesn't rely on message delivery.
 %%
-%% 2. Check max file size on appends. Writes we take on faith we can 
+%% 2. Check max file size on appends. Writes we take on faith we can
 %% and should handle.
 %%
 %% 3. Async checksum reads on startup.
@@ -74,7 +74,7 @@
 -define(TIMEOUT, 10*1000).
 -define(TOO_MANY_ERRORS_RATIO, 50).
 
--type op_stats()      :: { Total  :: non_neg_integer(), 
+-type op_stats()      :: { Total  :: non_neg_integer(),
                            Errors :: non_neg_integer() }.
 
 -type byte_sequence() :: { Offset :: non_neg_integer(),
@@ -96,12 +96,13 @@
     ops = 0               :: non_neg_integer(), %% sum of all ops
     reads = {0, 0}        :: op_stats(),
     writes = {0, 0}       :: op_stats(),
-    appends = {0, 0}      :: op_stats()
+    appends = {0, 0}      :: op_stats(),
+    trims = {0, 0}        :: op_stats()
 }).
 
 %% Public API
 
-% @doc Start a new instance of the file proxy service. Takes the filename 
+% @doc Start a new instance of the file proxy service. Takes the filename
 % and data directory as arguments. This function is typically called by the
 % `machi_file_proxy_sup:start_proxy/2' function.
 -spec start_link(Filename :: string(), DataDir :: string()) -> any().
@@ -123,7 +124,7 @@ sync(_Pid) ->
 
 % @doc Force a sync of a specific filehandle type. Valid types are `all', `csum' and `data'.
 -spec sync(Pid :: pid(), Type :: all|data|csum) -> ok|{error, term()}.
-sync(Pid, Type) when is_pid(Pid) andalso 
+sync(Pid, Type) when is_pid(Pid) andalso
                      ( Type =:= all orelse Type =:= csum orelse Type =:= data ) ->
     gen_server:call(Pid, {sync, Type}, ?TIMEOUT);
 sync(_Pid, Type) ->
@@ -135,7 +136,7 @@ sync(_Pid, Type) ->
            Offset :: non_neg_integer(),
            Length :: non_neg_integer()) -> {ok, Data :: binary(), Checksum :: binary()} |
                                            {error, Reason :: term()}.
-read(Pid, Offset, Length) when is_pid(Pid) andalso is_integer(Offset) andalso Offset >= 0 
+read(Pid, Offset, Length) when is_pid(Pid) andalso is_integer(Offset) andalso Offset >= 0
                                andalso is_integer(Length) andalso Length > 0 ->
     gen_server:call(Pid, {read, Offset, Length}, ?TIMEOUT);
 read(_Pid, Offset, Length) ->
@@ -187,8 +188,8 @@ append(_Pid, _Data) ->
 -spec append(Pid :: pid(), ClientMeta :: proplists:proplist(),
              Extra :: non_neg_integer(), Data :: binary()) -> {ok, File :: string(), Offset :: non_neg_integer()}
                                                               |{error, term()}.
-append(Pid, ClientMeta, Extra, Data) when is_pid(Pid) andalso is_list(ClientMeta) 
-                                          andalso is_integer(Extra) andalso Extra >= 0 
+append(Pid, ClientMeta, Extra, Data) when is_pid(Pid) andalso is_list(ClientMeta)
+                                          andalso is_integer(Extra) andalso Extra >= 0
                                           andalso is_binary(Data) ->
     gen_server:call(Pid, {append, ClientMeta, Extra, Data}, ?TIMEOUT);
 append(_Pid, ClientMeta, Extra, _Data) ->
@@ -243,13 +244,13 @@ handle_call({sync, all}, _From, State = #state{filename = F,
     R1 = file:sync(FHd),
     Resp = case {R, R1} of
         {ok, ok} -> ok;
-        {ok, O1} -> 
-                   lager:error("Got ~p during a data file sync on file ~p", [O1, F]), 
+        {ok, O1} ->
+                   lager:error("Got ~p during a data file sync on file ~p", [O1, F]),
                    O1;
-        {O2, ok} -> 
-                   lager:error("Got ~p during a csum file sync on file ~p", [O2, F]), 
+        {O2, ok} ->
+                   lager:error("Got ~p during a csum file sync on file ~p", [O2, F]),
                    O2;
-        {O3, O4} -> 
+        {O3, O4} ->
                    lager:error("Got ~p ~p syncing all files for file ~p", [O3, O4, F]),
                    {O3, O4}
     end,
@@ -339,24 +340,40 @@ handle_call({trim, _Offset, _ClientMeta, _Data}, _From,
 
 handle_call({trim, Offset, Size, _TriggerGC}, _From,
             State = #state{unwritten_bytes = U,
-                           %% filename = F,
-                           %% writes = {T, Err},
+                           ops = Ops,
+                           trims = {T, Err},
                            csum_table = CsumTable
                           }) ->
     case is_byte_range_unwritten(Offset, Size, U) of
         true ->
-            {reply, {error, unwritten}, State};
+            case machi_csum_table:trim(CsumTable, Offset, Size) of
+                ok ->
+                    %% TODO: maybe trigger GC here?
+                    {reply, ok, State#state{ops=Ops+1, trims={T+1, Err}}};
+                Error ->
+                    {reply, Error, State#state{ops=Ops+1, trims={T, Err+1}}}
+            end;
+
         false ->
             case machi_csum_table:find(CsumTable, Offset, Size) of
                 {error, trimmed} ->
                     {reply, ok, State};
-                {error, notfound} ->
-                    %% TODO: Could be written?
-                    error({trim, notfound, Offset, Size});
+                {error, unknown_chunk} ->
+                    %% TODO: Here's discussion point; whether to allow
+                    %% trim command at arbitrary offset and
+                    %% sizes. This gives flexibility but introduces
+                    %% complexity which is not needed for
+                    %% now. Currently this assumes any trim should be
+                    %% commanded to a **known chunks**.
+                    error({trim, unknown_chunk, Offset, Size});
                 {ok, _Csum} ->
-                    R = machi_csum_table:trim(CsumTable, Offset, Size),
-                    %% TODO: trigger GC here
-                    {reply, R, State}
+                    case machi_csum_table:trim(CsumTable, Offset, Size) of
+                        ok ->
+                            %% TODO: maybe trigger GC here?
+                            {reply, ok, State#state{ops=Ops+1, trims={T+1, Err}}};
+                        Error ->
+                            {reply, Error, State#state{ops=Ops+1, trims={T, Err+1}}}
+                    end
             end
     end;
 
@@ -534,7 +551,7 @@ check_or_make_tagged_csum(Tag, InCsum, Data) when Tag == ?CSUM_TAG_CLIENT_SHA;
 check_or_make_tagged_csum(OtherTag, _ClientCsum, _Data) ->
     lager:warning("Unknown checksum tag ~p", [OtherTag]),
     {error, bad_checksum}.
-   
+
 -spec handle_read(FHd        :: file:filehandle(),
                   Filename   :: string(),
                   CsumTable  :: machi_csum_table:table(),
@@ -542,7 +559,7 @@ check_or_make_tagged_csum(OtherTag, _ClientCsum, _Data) ->
                   Size       :: non_neg_integer(),
                   Unwritten  :: [byte_sequence()]
              ) -> {ok, Bytes :: binary(), Csum :: binary()} |
-                  eof | 
+                  eof |
                   {error, bad_checksum} |
                   {error, partial_read} |
                   {error, not_written} |
@@ -581,7 +598,7 @@ handle_read(FHd, Filename, CsumTable, Offset, Size, U) ->
 
 do_read(FHd, Filename, TaggedCsum, Offset, Size) ->
     case file:pread(FHd, Offset, Size) of
-        eof -> 
+        eof ->
             eof;
         {ok, Bytes} when byte_size(Bytes) == Size ->
             {Tag, Ck} = machi_util:unmake_tagged_csum(TaggedCsum),
@@ -598,11 +615,11 @@ do_read(FHd, Filename, TaggedCsum, Offset, Size) ->
                     {ok, Bytes, OtherCsum}
             end;
         {ok, Partial} ->
-            lager:error("In file ~p, offset ~p, wanted to read ~p bytes, but got ~p", 
+            lager:error("In file ~p, offset ~p, wanted to read ~p bytes, but got ~p",
                         [Filename, Offset, Size, byte_size(Partial)]),
             {error, partial_read};
         Other ->
-            lager:error("While reading file ~p, offset ~p, length ~p, got ~p", 
+            lager:error("While reading file ~p, offset ~p, length ~p, got ~p",
                         [Filename, Offset, Size, Other]),
             {error, Other}
     end.
@@ -626,7 +643,7 @@ do_read(FHd, Filename, TaggedCsum, Offset, Size) ->
 %
 % If a write proceeds, the offset, size and checksum are written to a metadata
 % file, and the internal list of unwritten bytes is modified to reflect the
-% just-performed write.  This is then returned to the caller as 
+% just-performed write.  This is then returned to the caller as
 % `{ok, NewUnwritten}' where NewUnwritten is the revised unwritten byte list.
 handle_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Data, U) ->
     Size = iolist_size(Data),
@@ -730,8 +747,8 @@ lookup_unwritten(_Offset, _Size, []) ->
     not_found;
 lookup_unwritten(Offset, _Size, [H={Pos, infinity}|_Rest]) when Offset >= Pos ->
     {ok, H};
-lookup_unwritten(Offset, Size, [H={Pos, Space}|_Rest]) 
-                when Offset >= Pos andalso Offset < Pos+Space 
+lookup_unwritten(Offset, Size, [H={Pos, Space}|_Rest])
+                when Offset >= Pos andalso Offset < Pos+Space
                      andalso Size =< (Space - (Offset - Pos)) ->
     {ok, H};
 lookup_unwritten(Offset, Size, [_H|Rest]) ->
@@ -772,5 +789,3 @@ update_byte_range(Offset, Size, {Pos, Space}) when Offset == Pos andalso Size < 
     [{Offset + Size, Space - Size}];
 update_byte_range(Offset, Size, {Pos, Space}) when Offset > Pos ->
     [{Pos, Offset - Pos}, {Offset+Size, ( (Pos+Space) - (Offset + Size) )}].
-
-
