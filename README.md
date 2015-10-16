@@ -1,5 +1,7 @@
 # Machi
 
+  [Travis-CI](http://travis-ci.org/basho/machi) :: ![Travis-CI](https://secure.travis-ci.org/basho/machi.png)
+
 Our goal is a robust & reliable, distributed, highly available(*),
 large file store based upon write-once registers, append-only files,
 Chain Replication, and client-server style architecture.  All members
