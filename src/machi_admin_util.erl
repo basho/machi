@@ -95,7 +95,7 @@ verify_file_checksums_common(Sock1, EpochID, File, ReadChunk) ->
     try
         case ?FLU_C:checksum_list(Sock1, EpochID, File) of
             {ok, InfoBin} ->
-                {Info, _} = machi_checksums:split_checksum_list_blob_decode(InfoBin),
+                {Info, _} = machi_csum_table:split_checksum_list_blob_decode(InfoBin),
                 Res = lists:foldl(verify_chunk_checksum(File, ReadChunk),
                                   [], Info),
                 {ok, Res};

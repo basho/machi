@@ -59,11 +59,12 @@ open(CSumFilename, _Opts) ->
 -spec find(table(), machi_dt:chunk_pos(), machi_dt:chunk_size()) ->
                   {ok, machi_dt:chunk_csum()} | {error, trimmed|notfound}.
 find(#machi_csum_table{table=T}, Offset, Size) ->
+    %% TODO: Check whether all bytes here are written or not
     case ets:lookup(T, Offset) of
         [{Offset, Size, trimmed}] -> {error, trimmed};
         [{Offset, Size, Checksum}] -> {ok, Checksum};
-        [{Offset, _, Checksum}] -> {ok, Checksum};
-        [] -> {error, notfound}
+        [{Offset, _, _}] -> {error, unknown_chunk};
+        [] -> {error, unknown_chunk}
     end.
 
 -spec write(table(), machi_dt:chunk_pos(), machi_dt:chunk_size(),

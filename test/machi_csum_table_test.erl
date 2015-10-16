@@ -3,27 +3,29 @@
 
 smoke_test() ->
     Filename = "./temp-checksum-dumb-file",
-    {ok, MC} = machi_checksums:new(Filename),
+    _ = file:delete(Filename),
+    {ok, MC} = machi_csum_table:open(Filename, []),
     {Offset, Size, Checksum} = {64, 34, <<"deadbeef">>},
-    {error, unwritten} = machi_checksums:find(MC, Offset, Size),
-    ok = machi_checksums:write(MC, Offset, Size, Checksum),
-    {ok, Checksum} = machi_checksums:find(MC, Offset, Size),
-    ok = machi_checksums:trim(MC, Offset, Size),
-    {error, trimmed} = machi_checksums:find(MC, Offset, Size),
-    ok = machi_checksums:destroy(MC),
-    ok = machi_checksums:delete_file(MC).
+    {error, unknown_chunk} = machi_csum_table:find(MC, Offset, Size),
+    ok = machi_csum_table:write(MC, Offset, Size, Checksum),
+    {ok, Checksum} = machi_csum_table:find(MC, Offset, Size),
+    ok = machi_csum_table:trim(MC, Offset, Size),
+    {error, trimmed} = machi_csum_table:find(MC, Offset, Size),
+    ok = machi_csum_table:close(MC),
+    ok = machi_csum_table:delete(MC).
 
 close_test() ->
     Filename = "./temp-checksum-dumb-file-2",
-    {ok, MC} = machi_checksums:new(Filename),
+    _ = file:delete(Filename),
+    {ok, MC} = machi_csum_table:open(Filename, []),
     {Offset, Size, Checksum} = {64, 34, <<"deadbeef">>},
-    {error, unwritten} = machi_checksums:find(MC, Offset, Size),
-    ok = machi_checksums:write(MC, Offset, Size, Checksum),
-    {ok, Checksum} = machi_checksums:find(MC, Offset, Size),
-    ok = machi_checksums:destroy(MC),
+    {error, unknown_chunk} = machi_csum_table:find(MC, Offset, Size),
+    ok = machi_csum_table:write(MC, Offset, Size, Checksum),
+    {ok, Checksum} = machi_csum_table:find(MC, Offset, Size),
+    ok = machi_csum_table:close(MC),
 
-    {ok, MC2} = machi_checksums:new(Filename),
-    {ok, Checksum} = machi_checksums:find(MC2, Offset, Size),
-    ok = machi_checksums:trim(MC2, Offset, Size),
-    {error, trimmed} = machi_checksums:find(MC2, Offset, Size),
-    ok = machi_checksums:delete_file(MC2).
+    {ok, MC2} = machi_csum_table:open(Filename, []),
+    {ok, Checksum} = machi_csum_table:find(MC2, Offset, Size),
+    ok = machi_csum_table:trim(MC2, Offset, Size),
+    {error, trimmed} = machi_csum_table:find(MC2, Offset, Size),
+    ok = machi_csum_table:delete(MC2).

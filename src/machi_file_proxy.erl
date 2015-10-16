@@ -597,9 +597,10 @@ handle_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Data, U) ->
             case machi_csum_table:find(CsumTable, Offset, Size) of
                 {error, trimmed} = Error ->
                     Error;
-                {error, notfound} ->
-                    %% Just unknown pair of {offset, size}
-                    %% given. Trust U and return as it is used
+                {error, unknown_chunk} ->
+                    %% The specified has some bytes written, while
+                    %% it's not in the checksum table. Trust U and
+                    %% return as it is used.
                     {error, written};
                 {ok, TaggedCsum} ->
                     case do_read(FHd, Filename, TaggedCsum, Offset, Size) of
