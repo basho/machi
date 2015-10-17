@@ -167,42 +167,19 @@ client) knows the current utilization across the participating Machi
 clusters, then it may be very helpful to send new append() requests to
 under-utilized clusters.
 
-* 5. Proposal: Break the opacity of Machi file names
-
-Assuming that Machi keeps the scheme of creating file names (in
-response to ~append()~ and ~sequencer_new_range()~ calls) based on a
-predictable client-supplied prefix and an opaque suffix, e.g.,
-
-~append("foo",CoolData) -> {ok,"foo^s923^z47",ByteOffset}.~
-
-Machi assigns file names based on:
-
-~ClientSuppliedPrefix ++ "^" ++ SomeOpaqueFileNameSuffix~
-
-What if the CoC client could peek inside of the opaque file name
-suffix in order to remove (or add) the CoC location information that
-we need?
-
-** The notation we use
-
-- ~p~   = file prefix, chosen by the CoC client.
-- ~T~   = the target CoC member/Cluster ID chosen by the CoC client at the time of ~append()~
-- ~u~ = the Machi file server unique opaque file name suffix, e.g. a GUID string
-- ~K~   = the CoC placement key
-- ~N~   = the CoC namespace
-
-*** Use of the CoC namespace: name separation plus chain type
+* 5. Use of the CoC namespace: name separation plus chain type
 
 Let us assume that the CoC framework provides several different types
 of chains:
 
-| Chain length | CoC namespace | Comment                          |
-|--------------+---------------+----------------------------------|
-|            3 | normal        | Normal storage redundancy & cost |
-|            2 | cheap         | Reduced cost storage             |
-|            1 | risky         | Really cheap storage             |
-|            9 | paranoid      | Safety-critical storage          |
-|--------------+---------------+----------------------------------|
+| Chain length | CoC namespace | Mode | Comment                          |
+|--------------+---------------+------+----------------------------------|
+|            3 | normal        | AP   | Normal storage redundancy & cost |
+|            2 | cheap         | AP   | Reduced cost storage             |
+|            1 | risky         | AP   | Really cheap storage             |
+|            9 | paranoid      | AP   | Safety-critical storage          |
+|            3 | sequential    | CP   | Strong consistency               |
+|--------------+---------------+------+----------------------------------|
 
 The client may want to choose the amount of redundancy that its
 application requires: normal, reduced cost, or perhaps even a single
@@ -212,10 +189,10 @@ intention.
 Further, the CoC administrators may wish to use the namespace to
 provide separate storage for different applications.  Jane's
 application may use the namespace "jane-normal" and Bob's app uses
-"bob-normal".  The CoC administrators may definite separate groups of
+"bob-cheap".  The CoC administrators may definite separate groups of
 chains on separate servers to serve these two applications.
 
-*** Floating point is not required ... it is merely convenient for explanation
+* 6. Floating point is not required ... it is merely convenient for explanation
 
 NOTE: Use of floating point terms is not required.  For example,
 integer arithmetic could be used, if using a sufficiently large
@@ -233,6 +210,25 @@ these constraints.
 
 It is likely that Machi's final implementation will choose a 24 bit
 integer to represent the CoC locator.
+
+* 7. Proposal: Break the opacity of Machi file names
+
+Machi assigns file names based on:
+
+~ClientSuppliedPrefix ++ "^" ++ SomeOpaqueFileNameSuffix~
+
+What if the CoC client could peek inside of the opaque file name
+suffix in order to remove (or add) the CoC location information that
+we need?
+
+** The notation we use
+
+- ~p~   = file prefix, chosen by the CoC client.
+- ~T~   = the target CoC member/Cluster ID chosen by the CoC client at the time of ~append()~
+- ~u~ = the Machi file server unique opaque file name suffix, e.g. a GUID string
+- ~K~   = the CoC placement key
+- ~N~   = the CoC namespace
+- ~F~   = a Machi file name
 
 ** The details: CoC file write
 
@@ -267,7 +263,7 @@ integer to represent the CoC locator.
    if ~r=0.5~, then ~K = 0.33 + 0.5*(0.58-0.33) = 0.455~, which is
    exactly in the middle of the ~(0.33,0.58]~ interval.
 
-* 6. File migration (a.k.a. rebalancing/reparitioning/resharding/redistribution)
+* 8. File migration (a.k.a. rebalancing/reparitioning/resharding/redistribution)
 
 ** What is "migration"?
 
@@ -396,7 +392,7 @@ Fortunately for Machi, its file data is immutable and therefore can
 easily manage many migrations in parallel, i.e., its submap list may
 be several maps long, each one for an in-progress file migration.
 
-* Acknowledgments
+* 9. Acknowledgments
 
 The source for the "migration-4.png" and "migration-3to4.png" images
 come from the [[http://hibari.github.io/hibari-doc/images/migration-3to4.png][HibariDB documentation]].
