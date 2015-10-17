@@ -18,15 +18,22 @@ Machi clusters (hereafter called a "cluster of clusters" or "CoC").
 The [[https://github.com/basho/machi/blob/master/doc/high-level-machi.pdf][Machi high level design document]] contains all of the basic
 background assumed by the rest of this document.
 
+** Analogy: "neighborhood : city :: Machi : cluster-of-clusters"
+
+Analogy: The word "machi" in Japanese means small town or
+neighborhood.  As the Tokyo Metropolitan Area is built from many
+machis and smaller cities, therefore a big, partitioned file store can
+be built out of many small Machi clusters.
+
 ** Familiarity with the Machi cluster-of-clusters/CoC concept
 
-This isn't yet well-defined (April 2015).  However, it's clear from
+It's clear (I hope!) from
 the [[https://github.com/basho/machi/blob/master/doc/high-level-machi.pdf][Machi high level design document]] that Machi alone does not support
 any kind of file partitioning/distribution/sharding across multiple
 small Machi clusters.  There must be another layer above a Machi cluster to
 provide such partitioning services.
 
-The name "cluster of clusters" orignated within Basho to avoid
+The name "cluster of clusters" originated within Basho to avoid
 conflicting use of the word "cluster".  A Machi cluster is usually
 synonymous with a single Chain Replication chain and a single set of
 machines (e.g. 2-5 machines).  However, in the not-so-far future, we
@@ -38,10 +45,18 @@ substitute yet.  If you have a good suggestion, please contact us!
 ~^_^~
 
 Using the [[https://github.com/basho/machi/tree/master/prototype/demo-day-hack][cluster-of-clusters quick-and-dirty prototype]] as an
-architecture sketch, let's now assume that we have ~N~ independent Machi
-clusters.  We wish to provide partitioned/distributed file storage
-across all ~N~ clusters.  We call the entire collection of ~N~ Machi
+architecture sketch, let's now assume that we have ~n~ independent Machi
+clusters.  We assume that each of these clusters has roughly the same
+chain length in the nominal case, e.g. chain length of 3.
+We wish to provide partitioned/distributed file storage
+across all ~n~ clusters.  We call the entire collection of ~n~ Machi
 clusters a "cluster of clusters", or abbreviated "CoC".
+
+We may wish to have several types of Machi clusters, e.g. chain length
+of 3 for normal data, longer for cannot-afford-data-loss files, and
+shorter for don't-care-if-it-gets-lost files.  Each of these types of
+chains will have a name ~N~ in the CoC namespace.  The role of the CoC
+namespace will be demonstrated in Section 3 below.
 
 ** Continue CoC prototype's assumption: a Machi cluster is unaware of CoC
 
@@ -49,15 +64,7 @@ Let's continue with an assumption that an individual Machi cluster
 inside of the cluster-of-clusters is completely unaware of the
 cluster-of-clusters layer.
 
-We may need to break this assumption sometime in the future?  It isn't
-quite clear yet, sorry.
-
-** Analogy: "neighborhood : city :: Machi : cluster-of-clusters"
-
-Analogy: The word "machi" in Japanese means small town or
-neighborhood.  As the Tokyo Metropolitan Area is built from many
-machis and smaller cities, therefore a big, partitioned file store can
-be built out of many small Machi clusters.
+TODO: We may need to break this assumption sometime in the future?
 
 ** The reader is familiar with the random slicing technique
 
@@ -91,24 +98,22 @@ technique to fit our use case.
 In general, random slicing says:
 
 - Hash a string onto the unit interval [0.0, 1.0)
-- Assign the "bin" that is assigned to that point.
+- Calculate h(unit interval point, Map) -> bin, where ~Map~ partitions
+  the unit interval into bins.
 
 Our adaptation is in step 1: we do not hash any strings.  Instead, we
-store & use a number as-is, without using a hash function in this
-step.  This number is called the "CoC locator".
+store & use the unit interval point as-is, without using a hash
+function in this step.  This number is called the "CoC locator".
 
 As described later in this doc, Machi file names are structured into
 several components.  One component of the file name contains the "CoC
-locator"; we use the number as-is for step 2.
+locator"; we use the number as-is for step 2 above.
 
 * 3. A simple illustration
 
 We use a variation of the Random Slicing hash that we will call
-~rs_hash_with_float()~.
-
-Traditional random slicing usually hashes a string and a map.  Machi's
-variation, ~rs_hash_with_float()~, uses a floating point number
-instead of a string.  The Erlang-style function type is shown below.
+~rs_hash_with_float()~.  The Erlang-style function type is shown
+below.
 
 #+BEGIN_SRC erlang
 %% type specs, Erlang-style
@@ -116,8 +121,8 @@ instead of a string.  The Erlang-style function type is shown below.
 #+END_SRC
 
 I'm borrowing an illustration from the HibariDB documentation here,
-but it fits my purposes quite well.  (And I originally created that
-image, and the use license is OK.)
+but it fits my purposes quite well.  (I am the original creator of that
+image, and also the use license is compatible.)
 
 #+CAPTION: Illustration of 'Map', using four Machi clusters
 
@@ -138,6 +143,7 @@ Assume that we have a random slicing map called ~Map~.  This particular
 Assume that the system chooses a CoC locator of 0.05.
 According to ~Map~, the value of
 ~rs_hash_with_float(0.05,Map) = Cluster1~.
+Similarly, ~rs_hash_with_float(0.26,Map) = Cluster4~.
 
 * 4. An additional assumption: clients will want some control over file placement
 
@@ -149,7 +155,7 @@ section.
 The CoC management scheme may decide that files need to migrate to
 other clusters.  The reason could be for storage load or I/O load
 balancing reasons.  It could be because a cluster is being
-decomissioned by its owners.  There are many legitimate reasons why a
+decommissioned by its owners.  There are many legitimate reasons why a
 file that is initially created on cluster ID X has been moved to
 cluster ID Y.
 
@@ -169,25 +175,19 @@ predictable client-supplied prefix and an opaque suffix, e.g.,
 
 ~append("foo",CoolData) -> {ok,"foo^s923^z47",ByteOffset}.~
 
-... then we propose that all CoC and Machi parties be aware of this
-naming scheme, i.e. that Machi assigns file names based on:
+Machi assigns file names based on:
 
 ~ClientSuppliedPrefix ++ "^" ++ SomeOpaqueFileNameSuffix~
-
-The Machi system doesn't care about the file name -- a Machi server
-will treat the entire file name as an opaque thing.  But this document
-is called the "Name Game" for a reason!
 
 What if the CoC client could peek inside of the opaque file name
 suffix in order to remove (or add) the CoC location information that
 we need?
 
-** The details: legend
+** The notation we use
 
-- ~T~   = the target CoC member/Cluster ID chosen at the time of ~append()~
-- ~p~   = file prefix, chosen by the CoC client (This is exactly the Machi client-chosen file prefix).
-- ~u~ = the Machi file server unique opaque file name suffix.
-  At the moment, the implementation uses a standard GUID string.
+- ~p~   = file prefix, chosen by the CoC client.
+- ~T~   = the target CoC member/Cluster ID chosen by the CoC client at the time of ~append()~
+- ~u~ = the Machi file server unique opaque file name suffix, e.g. a GUID string
 - ~K~   = the CoC placement key
 - ~N~   = the CoC namespace
 
@@ -213,7 +213,7 @@ Further, the CoC administrators may wish to use the namespace to
 provide separate storage for different applications.  Jane's
 application may use the namespace "jane-normal" and Bob's app uses
 "bob-normal".  The CoC administrators may definite separate groups of
-chains on seprate servers to serve these two applications.
+chains on separate servers to serve these two applications.
 
 *** Floating point is not required ... it is merely convenient for explanation
 
@@ -228,7 +228,7 @@ to assign one integer per Machi cluster.  However, for load balancing
 purposes, a finer grain of (for example) 100 integers per Machi
 cluster would permit file migration to move increments of
 approximately 1% of single Machi cluster's storage capacity.  A
-minimum of 12+7=19 bits of hash space would be necessary to accomodate
+minimum of 12+7=19 bits of hash space would be necessary to accommodate
 these constraints.
 
 It is likely that Machi's final implementation will choose a 24 bit
@@ -241,7 +241,7 @@ integer to represent the CoC locator.
 2. CoC client knows the CoC ~Map~ for namespace ~N~.
 3. CoC client choose some value ~K~ such that
    ~rs_hash_with_float(K,Map) = T~ (see below).
-4. CoC client requests @ cluster
+4. CoC client sends its request to cluster
    ~T~: ~append_chunk(p,K,N,...) -> {ok,p.K.N.u,ByteOffset}~
 5. CoC stores/uses the file name ~F = p.K.N.u~.
 
@@ -250,10 +250,10 @@ integer to represent the CoC locator.
 1. CoC client knows the file name ~F = p.K.N.u~ and parses it to find
    the values of ~K~ and ~N~.
 2. CoC client knows the CoC ~Map~ for type ~N~.
-3. Coc calculates ~rs_hash_with_float(K,Map) = T~
-4. CoC client requests @ cluster ~T~: ~read_chunk(F,...) ->~ ... success!
+3. CoC calculates ~rs_hash_with_float(K,Map) = T~
+4. CoC client sends request to cluster ~T~: ~read_chunk(F,...) ->~ ... success!
 
-** The details: calculating 'K', the CoC placement key
+** The details: calculating 'K' (the CoC placement key) to match a desired target cluster
 
 1. We know ~Map~, the current CoC mapping for a CoC namespace ~N~.
 2. We look inside of ~Map~, and we find all of the unit interval ranges
@@ -290,7 +290,7 @@ This document uses the word "migration" to describe moving data from
 one Machi chain to another within a CoC system.
 
 A simple variation of the Random Slicing hash algorithm can easily
-accomodate Machi's need to migrate files without interfering with
+accommodate Machi's need to migrate files without interfering with
 availability.  Machi's migration task is much simpler due to the
 immutable nature of Machi file data.
 
@@ -303,7 +303,7 @@ changes to make file migration straightforward.
   a Machi cluster's "epoch number") that reflects the history of
   changes made to the Random Slicing map
 - Use a list of Random Slicing maps instead of a single map, one map
-  per possibility that files may not have been migrated yet out of
+  per chance that files may not have been migrated yet out of
   that map.
 
 As an example:
@@ -349,7 +349,7 @@ contains multiple submaps, then the access rules change a bit:
   - If not found in any submap, search a second time (to handle races
     with file copying between submaps).
   - If the requested data is found, optionally copy it directly to the
-    newest submap (as a variation of read repair which really simply
+    newest submap.   (This is a variation of read repair (RR). RR here
     accelerates the migration process and can reduce the number of
     operations required to query servers in multiple submaps).
 
@@ -389,13 +389,14 @@ manner.  However, one important
 limitation of HibariDB is not being able to
 perform more than one migration at a time.  HibariDB's data is
 mutable, and mutation causes many problems already when migrating data
-across two submaps; three or more submaps grows even more complicated.
+across two submaps; three or more submaps was too complex to implement
+quickly.
 
 Fortunately for Machi, its file data is immutable and therefore can
 easily manage many migrations in parallel, i.e., its submap list may
 be several maps long, each one for an in-progress file migration.
 
-* Acknowledgements
+* Acknowledgments
 
 The source for the "migration-4.png" and "migration-3to4.png" images
 come from the [[http://hibari.github.io/hibari-doc/images/migration-3to4.png][HibariDB documentation]].
