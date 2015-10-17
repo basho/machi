@@ -145,12 +145,12 @@ According to ~Map~, the value of
 ~rs_hash_with_float(0.05,Map) = Cluster1~.
 Similarly, ~rs_hash_with_float(0.26,Map) = Cluster4~.
 
-* 4. An additional assumption: clients will want some control over file placement
+* 4. An additional assumption: clients will want some control over file location
 
 We will continue to use the 4-cluster diagram from the previous
 section.
 
-** Our new assumption: client control over initial file placement
+** Our new assumption: client control over initial file location
 
 The CoC management scheme may decide that files need to migrate to
 other clusters.  The reason could be for storage load or I/O load
@@ -226,7 +226,7 @@ we need?
 - ~p~   = file prefix, chosen by the CoC client.
 - ~T~   = the target CoC member/Cluster ID chosen by the CoC client at the time of ~append()~
 - ~u~ = the Machi file server unique opaque file name suffix, e.g. a GUID string
-- ~K~   = the CoC placement key
+- ~L~   = the CoC locator
 - ~N~   = the CoC namespace
 - ~F~   = a Machi file name
 
@@ -235,21 +235,21 @@ we need?
 1. CoC client chooses ~p~, ~T~, and ~N~ (i.e., the file prefix, target
    cluster, and target cluster namespace)
 2. CoC client knows the CoC ~Map~ for namespace ~N~.
-3. CoC client choose some value ~K~ such that
-   ~rs_hash_with_float(K,Map) = T~ (see below).
+3. CoC client choose some CoC locator value ~L~ such that
+   ~rs_hash_with_float(L,Map) = T~ (see below).
 4. CoC client sends its request to cluster
-   ~T~: ~append_chunk(p,K,N,...) -> {ok,p.K.N.u,ByteOffset}~
-5. CoC stores/uses the file name ~F = p.K.N.u~.
+   ~T~: ~append_chunk(p,L,N,...) -> {ok,p.L.N.u,ByteOffset}~
+5. CoC stores/uses the file name ~F = p.L.N.u~.
 
 ** The details: CoC file read
 
-1. CoC client knows the file name ~F = p.K.N.u~ and parses it to find
-   the values of ~K~ and ~N~.
+1. CoC client knows the file name ~F = p.L.N.u~ and parses it to find
+   the values of ~L~ and ~N~.
 2. CoC client knows the CoC ~Map~ for type ~N~.
-3. CoC calculates ~rs_hash_with_float(K,Map) = T~
+3. CoC calculates ~rs_hash_with_float(L,Map) = T~
 4. CoC client sends request to cluster ~T~: ~read_chunk(F,...) ->~ ... success!
 
-** The details: calculating 'K' (the CoC placement key) to match a desired target cluster
+** The details: calculating 'L' (the CoC locator) to match a desired target cluster
 
 1. We know ~Map~, the current CoC mapping for a CoC namespace ~N~.
 2. We look inside of ~Map~, and we find all of the unit interval ranges
@@ -258,9 +258,9 @@ we need?
 3. In our example, ~T=Cluster2~.  The example ~Map~ contains a single
    unit interval range for ~Cluster2~, ~[(0.33,0.58]]~.
 4. Choose a uniformly random number ~r~ on the unit interval.
-5. Calculate placement key ~K~ by mapping ~r~ onto the concatenation
+5. Calculate locator ~L~ by mapping ~r~ onto the concatenation
    of the CoC hash space range intervals in ~MapList~.  For example,
-   if ~r=0.5~, then ~K = 0.33 + 0.5*(0.58-0.33) = 0.455~, which is
+   if ~r=0.5~, then ~L = 0.33 + 0.5*(0.58-0.33) = 0.455~, which is
    exactly in the middle of the ~(0.33,0.58]~ interval.
 
 * 8. File migration (a.k.a. rebalancing/reparitioning/resharding/redistribution)
