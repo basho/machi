@@ -170,11 +170,12 @@ message Mpb_AuthResp {
 // High level API: append_chunk() request & response
 
 message Mpb_AppendChunkReq {
-    optional bytes placement_key = 1;
-    required string prefix = 2;
-    required bytes chunk = 3;
-    required Mpb_ChunkCSum csum = 4;
-    optional uint32 chunk_extra = 5;
+    required string coc_namespace = 1;
+    required uint32 coc_locator = 2;
+    required string prefix = 3;
+    required bytes chunk = 4;
+    required Mpb_ChunkCSum csum = 5;
+    optional uint32 chunk_extra = 6;
 }
 
 message Mpb_AppendChunkResp {
@@ -378,11 +379,13 @@ message Mpb_ProjectionV1 {
 
 message Mpb_LL_AppendChunkReq {
     required Mpb_EpochID epoch_id = 1;
-    optional bytes placement_key = 2;
-    required string prefix = 3;
-    required bytes chunk = 4;
-    required Mpb_ChunkCSum csum = 5;
-    optional uint32 chunk_extra = 6;
+    /* To avoid CoC use, use coc_namespace="" and coc_locator=0 */
+    required string coc_namespace = 2;
+    required uint32 coc_locator = 3;
+    required string prefix = 4;
+    required bytes chunk = 5;
+    required Mpb_ChunkCSum csum = 6;
+    optional uint32 chunk_extra = 7;
 }
 
 message Mpb_LL_AppendChunkResp {

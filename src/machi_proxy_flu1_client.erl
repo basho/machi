@@ -58,7 +58,9 @@
 -export([
          %% File API
          append_chunk/4, append_chunk/5,
+         append_chunk/6, append_chunk/7,
          append_chunk_extra/5, append_chunk_extra/6,
+         append_chunk_extra/7, append_chunk_extra/8,
          read_chunk/6, read_chunk/7,
          checksum_list/3, checksum_list/4,
          list_files/2, list_files/3,
@@ -111,22 +113,51 @@ append_chunk(PidSpec, EpochID, Prefix, Chunk) ->
 %% with `Prefix'.
 
 append_chunk(PidSpec, EpochID, Prefix, Chunk, Timeout) ->
-    gen_server:call(PidSpec, {req, {append_chunk, EpochID, Prefix, Chunk}},
-                    Timeout).
+    append_chunk_extra(PidSpec, EpochID,
+                       ?DEFAULT_COC_NAMESPACE, ?DEFAULT_COC_LOCATOR,
+                       Prefix, Chunk, 0, Timeout).
+
+%% @doc Append a chunk (binary- or iolist-style) of data to a file
+%% with `Prefix'.
+
+append_chunk(PidSpec, EpochID, CoC_Namespace, CoC_Locator, Prefix, Chunk) ->
+    append_chunk(PidSpec, EpochID, CoC_Namespace, CoC_Locator, Prefix, Chunk, infinity).
+
+%% @doc Append a chunk (binary- or iolist-style) of data to a file
+%% with `Prefix'.
+
+append_chunk(PidSpec, EpochID, CoC_Namespace, CoC_Locator, Prefix, Chunk, Timeout) ->
+    append_chunk_extra(PidSpec, EpochID,
+                       CoC_Namespace, CoC_Locator,
+                       Prefix, Chunk, 0, Timeout).
 
 %% @doc Append a chunk (binary- or iolist-style) of data to a file
 %% with `Prefix'.
 
 append_chunk_extra(PidSpec, EpochID, Prefix, Chunk, ChunkExtra)
   when is_integer(ChunkExtra), ChunkExtra >= 0 ->
-    append_chunk_extra(PidSpec, EpochID, Prefix, Chunk, ChunkExtra, infinity).
+    append_chunk_extra(PidSpec, EpochID,
+                       ?DEFAULT_COC_NAMESPACE, ?DEFAULT_COC_LOCATOR,
+                       Prefix, Chunk, ChunkExtra, infinity).
 
 %% @doc Append a chunk (binary- or iolist-style) of data to a file
 %% with `Prefix'.
 
 append_chunk_extra(PidSpec, EpochID, Prefix, Chunk, ChunkExtra, Timeout) ->
-    gen_server:call(PidSpec, {req, {append_chunk_extra, EpochID, Prefix,
-                                    Chunk, ChunkExtra}},
+    append_chunk_extra(PidSpec, EpochID,
+                       ?DEFAULT_COC_NAMESPACE, ?DEFAULT_COC_LOCATOR,
+                       Prefix, Chunk, ChunkExtra, Timeout).
+
+append_chunk_extra(PidSpec, EpochID, CoC_Namespace, CoC_Locator,
+                   Prefix, Chunk, ChunkExtra) ->
+    append_chunk_extra(PidSpec, EpochID, CoC_Namespace, CoC_Locator,
+                       Prefix, Chunk, ChunkExtra, infinity).
+
+append_chunk_extra(PidSpec, EpochID, CoC_Namespace, CoC_Locator,
+                   Prefix, Chunk, ChunkExtra, Timeout) ->
+    gen_server:call(PidSpec, {req, {append_chunk_extra, EpochID,
+                                    CoC_Namespace, CoC_Locator,
+                                    Prefix, Chunk, ChunkExtra}},
                     Timeout).
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
@@ -384,12 +415,12 @@ do_req_retry(_Req, 2, Err, S) ->
 do_req_retry(Req, Depth, _Err, S) ->
     do_req(Req, Depth + 1, try_connect(disconnect(S))).
 
-make_req_fun({append_chunk, EpochID, Prefix, Chunk},
+make_req_fun({append_chunk_extra, EpochID, CoC_Namespace, CoC_Locator,
+              Prefix, Chunk, ChunkExtra},
              #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
-    fun() -> Mod:append_chunk(Sock, EpochID, Prefix, Chunk) end;
-make_req_fun({append_chunk_extra, EpochID, Prefix, Chunk, ChunkExtra},
-             #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
-    fun() -> Mod:append_chunk_extra(Sock, EpochID, Prefix, Chunk, ChunkExtra) end;
+    fun() -> Mod:append_chunk_extra(Sock, EpochID, CoC_Namespace, CoC_Locator,
+                                    Prefix, Chunk, ChunkExtra)
+    end;
 make_req_fun({read_chunk, EpochID, File, Offset, Size, Opts},
              #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
     fun() -> Mod:read_chunk(Sock, EpochID, File, Offset, Size, Opts) end;
