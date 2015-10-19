@@ -111,7 +111,7 @@
          set_chain_members/2, set_chain_members/3, set_active/2,
          trigger_react_to_env/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
+         terminate/2, format_status/2, code_change/3]).
 
 -export([make_chmgr_regname/1, projection_transitions_are_sane/2,
          simple_chain_state_transition_is_sane/3,
@@ -399,6 +399,11 @@ handle_info(Msg, #ch_mgr{name=MyName}=S) ->
 
 terminate(_Reason, _S) ->
     ok.
+
+format_status(_Opt, [_PDict, Status]) ->
+    Fields = record_info(fields, ch_mgr),
+    [_Name | Values] = tuple_to_list(Status),
+    lists:zip(Fields, Values).
 
 code_change(_OldVsn, S, _Extra) ->
     {ok, S}.

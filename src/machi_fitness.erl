@@ -43,7 +43,7 @@
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
+         terminate/2, code_change/3, format_status/2]).
 
 -record(state, {
           my_flu_name                :: atom() | binary(),
@@ -192,6 +192,11 @@ handle_info(_Info, S) ->
 
 terminate(_Reason, _S) ->
     ok.
+
+format_status(_Opt, [_PDict, Status]) ->
+    Fields = record_info(fields, state),
+    [_Name | Values] = tuple_to_list(Status),
+    lists:zip(Fields, Values).
 
 code_change(_OldVsn, S, _Extra) ->
     {ok, S}.
