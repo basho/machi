@@ -51,7 +51,7 @@
 -export([
     child_spec/2,
     start_link/2,
-    find_or_make_filename_from_prefix/3,
+    find_or_make_filename_from_prefix/4,
     increment_prefix_sequence/2,
     list_files_by_prefix/2
     ]).
@@ -87,18 +87,23 @@ start_link(FluName, DataDir) when is_atom(FluName) andalso is_list(DataDir) ->
     N = make_filename_mgr_name(FluName),
     gen_server:start_link({local, N}, ?MODULE, [FluName, DataDir], []).
 
--spec find_or_make_filename_from_prefix( FluName :: atom(),
-                                         EpochId :: pv1_epoch_n(),
-                                         Prefix :: {prefix, string()} ) ->
+-spec find_or_make_filename_from_prefix( FluName :: atom(), 
+                                         EpochId :: pv1_epoch_n(), 
+                                         Prefix :: {prefix, string()},
+                                         {coc, riak_dt:coc_namespace(), riak_dt:coc_locator()}) ->
         {file, Filename :: string()} | {error, Reason :: term() } | timeout.
 % @doc Find the latest available or make a filename from a prefix. A prefix
 % should be in the form of a tagged tuple `{prefix, P}'. Returns a tagged
 % tuple in the form of `{file, F}' or an `{error, Reason}'
-find_or_make_filename_from_prefix(FluName, EpochId, {prefix, Prefix}) when is_atom(FluName) ->
+find_or_make_filename_from_prefix(FluName, EpochId,
+                                  {prefix, Prefix},
+                                  {coc, CoC_Namespace, CoC_Locator})
+  when is_atom(FluName) ->
+    io:format(user, "TODO: CoC_Namespace, CoC_Locator ~p ~p\n", [CoC_Namespace, CoC_Locator]),
     N = make_filename_mgr_name(FluName),
-    gen_server:call(N, {find_filename, EpochId, Prefix}, ?TIMEOUT);
-find_or_make_filename_from_prefix(_FluName, _EpochId, Other) ->
-    lager:error("~p is not a valid prefix.", [Other]),
+    gen_server:call(N, {find_filename, EpochId, Prefix}, ?TIMEOUT); 
+find_or_make_filename_from_prefix(_FluName, _EpochId, Other, Other2) ->
+    lager:error("~p is not a valid prefix/CoC ~p", [Other, Other2]),
     error(badarg).
 
 -spec increment_prefix_sequence( FluName :: atom(), Prefix :: {prefix, string()} ) ->

@@ -449,11 +449,11 @@ do_pb_hl_request2({high_echo, Msg}, S) ->
     {Msg, S};
 do_pb_hl_request2({high_auth, _User, _Pass}, S) ->
     {-77, S};
-do_pb_hl_request2({high_append_chunk, CoC_namespace, CoC_locator,
+do_pb_hl_request2({high_append_chunk, CoC_Namespace, CoC_Locator,
                    Prefix, ChunkBin, TaggedCSum,
                    ChunkExtra}, #state{high_clnt=Clnt}=S) ->
     Chunk = {TaggedCSum, ChunkBin},
-    Res = machi_cr_client:append_chunk_extra(Clnt, CoC_namespace, CoC_locator,
+    Res = machi_cr_client:append_chunk_extra(Clnt, CoC_Namespace, CoC_Locator,
                                              Prefix, Chunk,
                                              ChunkExtra),
     {Res, S};
@@ -704,8 +704,9 @@ handle_append(_N, _L, _Prefix, <<>>, _Csum, _Extra, _FluName, _EpochId) ->
     {error, bad_arg};
 handle_append(CoC_Namespace, CoC_Locator,
               Prefix, Chunk, Csum, Extra, FluName, EpochId) ->
-    io:format(user, "TODO: CoC_Namespace, CoC_Locator ~p ~p\n", [CoC_Namespace, CoC_Locator]),
-    Res = machi_flu_filename_mgr:find_or_make_filename_from_prefix(FluName, EpochId, {prefix, Prefix}),
+    CoC = {coc, CoC_Namespace, CoC_Locator},
+    Res = machi_flu_filename_mgr:find_or_make_filename_from_prefix(
+            FluName, EpochId, {prefix, Prefix}, CoC),
     case Res of
         {file, F} ->
             case machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, F}) of

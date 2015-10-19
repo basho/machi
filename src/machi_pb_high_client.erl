@@ -281,14 +281,14 @@ do_send_sync2({auth, User, Pass}, #state{sock=Sock}=S) ->
             Res = {bummer, {X, Y, erlang:get_stacktrace()}},
             {Res, S}
     end;
-do_send_sync2({append_chunk, CoC_namespace, CoC_locator,
+do_send_sync2({append_chunk, CoC_Namespace, CoC_Locator,
                Prefix, Chunk, CSum, ChunkExtra},
              #state{sock=Sock, sock_id=Index, count=Count}=S) ->
     try
         ReqID = <<Index:64/big, Count:64/big>>,
         CSumT = convert_csum_req(CSum, Chunk),
-        Req = #mpb_appendchunkreq{coc_namespace=CoC_namespace,
-                                  coc_locator=CoC_locator,
+        Req = #mpb_appendchunkreq{coc_namespace=CoC_Namespace,
+                                  coc_locator=CoC_Locator,
                                   prefix=Prefix,
                                   chunk=Chunk,
                                   csum=CSumT,
