@@ -175,8 +175,8 @@ of chains:
 | Chain length | CoC namespace | Mode | Comment                          |
 |--------------+---------------+------+----------------------------------|
 |            3 | normal        | AP   | Normal storage redundancy & cost |
-|            2 | cheap         | AP   | Reduced cost storage             |
-|            1 | risky         | AP   | Really cheap storage             |
+|            2 | reduced       | AP   | Reduced cost storage             |
+|            1 | risky         | AP   | Really, really cheap storage     |
 |            9 | paranoid      | AP   | Safety-critical storage          |
 |            3 | sequential    | CP   | Strong consistency               |
 |--------------+---------------+------+----------------------------------|
@@ -189,7 +189,7 @@ intention.
 Further, the CoC administrators may wish to use the namespace to
 provide separate storage for different applications.  Jane's
 application may use the namespace "jane-normal" and Bob's app uses
-"bob-cheap".  The CoC administrators may definite separate groups of
+"bob-reduced".  The CoC administrators may definite separate groups of
 chains on separate servers to serve these two applications.
 
 * 6. Floating point is not required ... it is merely convenient for explanation
@@ -218,8 +218,8 @@ Machi assigns file names based on:
 ~ClientSuppliedPrefix ++ "^" ++ SomeOpaqueFileNameSuffix~
 
 What if the CoC client could peek inside of the opaque file name
-suffix in order to remove (or add) the CoC location information that
-we need?
+suffix in order to look at the CoC location information that we might
+code in the filename suffix?
 
 ** The notation we use
 
@@ -262,6 +262,58 @@ we need?
    of the CoC hash space range intervals in ~MapList~.  For example,
    if ~r=0.5~, then ~L = 0.33 + 0.5*(0.58-0.33) = 0.455~, which is
    exactly in the middle of the ~(0.33,0.58]~ interval.
+
+** A bit more about the CoC locator's meaning and use
+
+- If two files were written using exactly the same CoC locator and the
+  same CoC namespace, then the client is indicating that it wishes
+  that the two files be stored in the same chain.
+- If two files have a different CoC locator, then the client has
+  absolutely no expectation of where the two files will be stored
+  relative to each other.
+
+Given the items above, then some consequences are:
+
+- If the client doesn't care about CoC placement, then picking a
+  random number is fine.  Always choosing a different locator ~L~ for
+  each append will scatter data across the CoC as widely as possible.
+- If the client believes that some physical locality is good, then the
+  client should reuse the same locator ~L~ for a batch of appends to
+  the same prefix ~p~ and namespace ~N~.  We have no recommendations
+  for the batch size, yet; perhaps 10-1,000 might be a good start for
+  experiments?
+
+When the client choose CoC namespace ~N~ and CoC locator ~L~ (using
+random number or target cluster technique), the client uses ~N~'s CoC
+map to find the CoC target cluster, ~T~.  The client has also chosen
+the file prefix ~p~.  The append op sent to cluster ~T~ would look
+like:
+
+~append_chunk(N="reduced",L=0.25,p="myprefix",<<900-data-bytes>>,<<checksum>>,...)~
+
+A successful result would yield a chunk position:
+
+~{offset=883293,size=900,file="myprefix^reduced^0.25^OpaqueSuffix"}~
+
+** A bit more about the CoC namespaces's meaning and use
+
+- The CoC framework will provide means of creating and managing
+  chains of different types, e.g., chain length, consistency mode.
+- The CoC framework will manage the mapping of CoC namespace names to
+  the chains in the system.
+- The CoC framework will provide a query service to map a CoC
+  namespace name to a Coc map,
+  e.g. ~coc_latest_map("reduced") -> Map{generation=7,...}~.
+
+For use by Riak CS, for example, we'd likely start with the following
+namespaces ... working our way down the list as we add new features
+and/or re-implement existing CS features.
+
+- "standard" = Chain length = 3, eventually consistency mode
+- "reduced" = Chain length = 2, eventually consistency mode.
+- "stanchion7" = Chain length = 7, strong consistency mode.  Perhaps
+  use this namespace for the metadata required to re-implement the
+  operations that are performed by today's Stanchion application.
 
 * 8. File migration (a.k.a. rebalancing/reparitioning/resharding/redistribution)
 
@@ -311,26 +363,26 @@ As an example:
 And the new Random Slicing map for some CoC namespace ~N~ might look
 like this:
 
-| Generation number / Namespace | 7 / cheap  |
-|-------------------------------+------------|
-| SubMap                        | 1          |
-|-------------------------------+------------|
-| Hash range                    | Cluster ID |
-|-------------------------------+------------|
-| 0.00 - 0.33                   | Cluster1   |
-| 0.33 - 0.66                   | Cluster2   |
-| 0.66 - 1.00                   | Cluster3   |
-|-------------------------------+------------|
-| SubMap                        | 2          |
-|-------------------------------+------------|
-| Hash range                    | Cluster ID |
-|-------------------------------+------------|
-| 0.00 - 0.25                   | Cluster1   |
-| 0.25 - 0.33                   | Cluster4   |
-| 0.33 - 0.58                   | Cluster2   |
-| 0.58 - 0.66                   | Cluster4   |
-| 0.66 - 0.91                   | Cluster3   |
-| 0.91 - 1.00                   | Cluster4   |
+| Generation number / Namespace | 7 / reduced |
+|-------------------------------+-------------|
+| SubMap                        | 1           |
+|-------------------------------+-------------|
+| Hash range                    | Cluster ID  |
+|-------------------------------+-------------|
+| 0.00 - 0.33                   | Cluster1    |
+| 0.33 - 0.66                   | Cluster2    |
+| 0.66 - 1.00                   | Cluster3    |
+|-------------------------------+-------------|
+| SubMap                        | 2           |
+|-------------------------------+-------------|
+| Hash range                    | Cluster ID  |
+|-------------------------------+-------------|
+| 0.00 - 0.25                   | Cluster1    |
+| 0.25 - 0.33                   | Cluster4    |
+| 0.33 - 0.58                   | Cluster2    |
+| 0.58 - 0.66                   | Cluster4    |
+| 0.66 - 0.91                   | Cluster3    |
+| 0.91 - 1.00                   | Cluster4    |
 
 When a new Random Slicing map contains a single submap, then its use
 is identical to the original Random Slicing algorithm.  If the map
@@ -367,18 +419,18 @@ Cluster4.  When the CoC manager is satisfied that all such files have
 been copied to Cluster4, then the CoC manager can create and
 distribute a new map, such as:
 
-| Generation number / Namespace | 8 / cheap  |
-|-------------------------------+------------|
-| SubMap                        | 1          |
-|-------------------------------+------------|
-| Hash range                    | Cluster ID |
-|-------------------------------+------------|
-| 0.00 - 0.25                   | Cluster1   |
-| 0.25 - 0.33                   | Cluster4   |
-| 0.33 - 0.58                   | Cluster2   |
-| 0.58 - 0.66                   | Cluster4   |
-| 0.66 - 0.91                   | Cluster3   |
-| 0.91 - 1.00                   | Cluster4   |
+| Generation number / Namespace | 8 / reduced |
+|-------------------------------+-------------|
+| SubMap                        | 1           |
+|-------------------------------+-------------|
+| Hash range                    | Cluster ID  |
+|-------------------------------+-------------|
+| 0.00 - 0.25                   | Cluster1    |
+| 0.25 - 0.33                   | Cluster4    |
+| 0.33 - 0.58                   | Cluster2    |
+| 0.58 - 0.66                   | Cluster4    |
+| 0.66 - 0.91                   | Cluster3    |
+| 0.91 - 1.00                   | Cluster4    |
 
 The HibariDB system performs data migrations in almost exactly this
 manner.  However, one important
