@@ -32,7 +32,7 @@ deps:
 	$(REBAR) get-deps
 
 clean:
-	$(REBAR) -r clean
+	$(REBAR) clean
 
 test: deps compile eunit
 
