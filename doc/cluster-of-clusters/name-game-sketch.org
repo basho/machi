@@ -223,12 +223,12 @@ we need?
 
 ** The notation we use
 
-- ~p~   = file prefix, chosen by the CoC client.
 - ~T~   = the target CoC member/Cluster ID chosen by the CoC client at the time of ~append()~
-- ~u~ = the Machi file server unique opaque file name suffix, e.g. a GUID string
+- ~p~   = file prefix, chosen by the CoC client.
 - ~L~   = the CoC locator
 - ~N~   = the CoC namespace
-- ~F~   = a Machi file name
+- ~u~ = the Machi file server unique opaque file name suffix, e.g. a GUID string
+- ~F~   = a Machi file name, i.e., ~p^L^N^u~
 
 ** The details: CoC file write
 
@@ -238,13 +238,13 @@ we need?
 3. CoC client choose some CoC locator value ~L~ such that
    ~rs_hash_with_float(L,Map) = T~ (see below).
 4. CoC client sends its request to cluster
-   ~T~: ~append_chunk(p,L,N,...) -> {ok,p.L.N.u,ByteOffset}~
-5. CoC stores/uses the file name ~F = p.L.N.u~.
+   ~T~: ~append_chunk(p,L,N,...) -> {ok,p^L^N^u,ByteOffset}~
+5. CoC stores/uses the file name ~F = p^L^N^u~.
 
 ** The details: CoC file read
 
-1. CoC client knows the file name ~F = p.L.N.u~ and parses it to find
-   the values of ~L~ and ~N~.
+1. CoC client knows the file name ~F~ and parses it to find
+   the values of ~L~ and ~N~ (recall, ~F = p^L^N^u~).
 2. CoC client knows the CoC ~Map~ for type ~N~.
 3. CoC calculates ~rs_hash_with_float(L,Map) = T~
 4. CoC client sends request to cluster ~T~: ~read_chunk(F,...) ->~ ... success!
