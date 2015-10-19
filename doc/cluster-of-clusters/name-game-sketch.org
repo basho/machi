@@ -392,7 +392,35 @@ Fortunately for Machi, its file data is immutable and therefore can
 easily manage many migrations in parallel, i.e., its submap list may
 be several maps long, each one for an in-progress file migration.
 
-* 9. Acknowledgments
+* 9. Other considerations for FLU/sequencer implementations
+
+** Append to existing file when possible
+
+In the earliest Machi FLU implementation, it was impossible to append
+to the same file after ~30 seconds.  For example:
+
+- Client: ~append(prefix="foo",...) -> {ok,"foo^suffix1",Offset1}~
+- Client: ~append(prefix="foo",...) -> {ok,"foo^suffix1",Offset2}~
+- Client: ~append(prefix="foo",...) -> {ok,"foo^suffix1",Offset3}~
+- Client: sleep 40 seconds
+- Server: after 30 seconds idle time, stop Erlang server process for
+  the ~"foo^suffix1"~ file
+- Client: ...wakes up...
+- Client: ~append(prefix="foo",...) -> {ok,"foo^suffix2",Offset4}~
+
+Our ideal append behavior is to always append to the same file.  Why?
+It would be nice if Machi didn't create zillions of tiny files if the
+client appends to some prefix very infrequently.  In general, it is
+better to create fewer & bigger files by re-using a Machi file name
+when possible.
+
+The sequencer should always assign new offsets to the latest/newest
+file for any prefix, as long as all prerequisites are also true,
+
+- The epoch has not changed.  (In AP mode, epoch change -> mandatory file name suffix change.)
+- The latest file for prefix ~p~ is smaller than maximum file size for a FLU's configuration.
+
+* 10. Acknowledgments
 
 The source for the "migration-4.png" and "migration-3to4.png" images
 come from the [[http://hibari.github.io/hibari-doc/images/migration-3to4.png][HibariDB documentation]].
