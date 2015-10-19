@@ -92,7 +92,7 @@ machi_file_proxy_test_() ->
 	?_assertMatch({ok, "test", _}, machi_file_proxy:append(Pid, random_binary(0, 1024))), 
 	?_assertEqual({error, written}, machi_file_proxy:write(Pid, 1024, <<"fail">>)), 
 	?_assertEqual({error, written}, machi_file_proxy:write(Pid, 1, <<"fail">>)),
-	?_assertMatch({ok, _, _}, machi_file_proxy:read(Pid, 1025, 1000)),
+	?_assertMatch({ok, [{_, _, _, _}]}, machi_file_proxy:read(Pid, 1025, 1000)),
 	?_assertMatch({ok, "test", _}, machi_file_proxy:append(Pid, [], 1024, <<"mind the gap">>)),
 	?_assertEqual(ok, machi_file_proxy:write(Pid, 2060, [], random_binary(0, 1024))),
         ?_assertException(exit, {normal, _}, machi_file_proxy:stop(Pid))

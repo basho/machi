@@ -132,8 +132,10 @@ sync(_Pid, Type) ->
 % @doc Read file at offset for length
 -spec read(Pid :: pid(),
            Offset :: non_neg_integer(),
-           Length :: non_neg_integer()) -> {ok, Data :: binary(), Checksum :: binary()} |
-                                           {error, Reason :: term()}.
+           Length :: non_neg_integer()) ->
+                  {ok, [{Filename::string(), Offset :: non_neg_integer(),
+                         Data :: binary(), Checksum :: binary()}]} |
+                  {error, Reason :: term()}.
 read(Pid, Offset, Length) when is_pid(Pid) andalso is_integer(Offset) andalso Offset >= 0 
                                andalso is_integer(Length) andalso Length > 0 ->
     gen_server:call(Pid, {read, Offset, Length}, ?TIMEOUT);
@@ -279,14 +281,19 @@ handle_call({read, Offset, Length}, _From,
                        undefined
                end,
 
-    {Resp, NewErr} = case handle_read(FH, F, Checksum, Offset, Length, U) of
-        {ok, Bytes, Csum} ->
-            {{ok, Bytes, Csum}, Err};
-        eof ->
-            {{error, not_written}, Err + 1};
-        Error ->
-            {Error, Err + 1}
-    end,
+    {Resp, NewErr} =
+        case handle_read(FH, F, Checksum, Offset, Length, U) of
+            {ok, Chunks} ->
+            %% Kludge to wrap read result in tuples, to support fragmented read
+            %% XXX FIXME 
+            %% For now we are omiting the checksum data because it blows up
+            %% protobufs.
+                {{ok, Chunks}, Err};
+            eof ->
+                {{error, not_written}, Err + 1};
+            Error ->
+                {Error, Err + 1}
+        end,
     {reply, Resp, State#state{reads = {T+1, NewErr}}};
 
 %%% WRITES
@@ -542,7 +549,7 @@ handle_read(FHd, Filename, TaggedCsum, Offset, Size, U) ->
 
 do_read(FHd, Filename, TaggedCsum, Offset, Size) ->
     case file:pread(FHd, Offset, Size) of
-        eof -> 
+        eof ->
             eof;
         {ok, Bytes} when byte_size(Bytes) == Size ->
             {Tag, Ck} = machi_util:unmake_tagged_csum(TaggedCsum),
@@ -552,11 +559,11 @@ do_read(FHd, Filename, TaggedCsum, Offset, Size) ->
                                 [Bad, Ck]),
                     {error, bad_checksum};
                 TaggedCsum ->
-                    {ok, Bytes, TaggedCsum};
-                %% XXX FIXME: Should we return something other than
-                %% {ok, ....} in this case?
+                    {ok, [{Filename, Offset, Bytes, TaggedCsum}]};
                 OtherCsum when Tag =:= ?CSUM_TAG_NONE ->
-                    {ok, Bytes, OtherCsum}
+                    %% XXX FIXME: Should we return something other than
+                    %% {ok, ....} in this case?
+                    {ok, [{Filename, Offset, Bytes, OtherCsum}]}
             end;
         {ok, Partial} ->
             lager:error("In file ~p, offset ~p, wanted to read ~p bytes, but got ~p", 
@@ -608,7 +615,7 @@ handle_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Data, U) ->
                             lager:warning("This should never happen: got eof while reading at offset ~p in file ~p that's supposedly written",
                                           [Offset, Filename]),
                             {error, server_insanity};
-                        {ok, _, _} ->
+                        {ok, _} ->
                             {ok, U};
                         _ ->
                             {error, written}

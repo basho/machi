@@ -260,10 +260,11 @@ do_send_sync2({write_chunk, File, Offset, Chunk, CSum},
     try
         ReqID = <<Index:64/big, Count:64/big>>,
         CSumT = convert_csum_req(CSum, Chunk),
-        Req = #mpb_writechunkreq{file=File,
-                                 offset=Offset,
-                                 chunk=Chunk,
-                                 csum=CSumT},
+        Req = #mpb_writechunkreq{chunk=
+                                     #mpb_chunk{chunk=Chunk,
+                                                file_name=File,
+                                                offset=Offset,
+                                                csum=CSumT}},
         R1a = #mpb_request{req_id=ReqID, do_not_alter=1,
                            write_chunk=Req},
         Bin1a = machi_pb:encode_mpb_request(R1a),
@@ -285,9 +286,9 @@ do_send_sync2({read_chunk, File, Offset, Size},
              #state{sock=Sock, sock_id=Index, count=Count}=S) ->
     try
         ReqID = <<Index:64/big, Count:64/big>>,
-        Req = #mpb_readchunkreq{file=File,
-                                offset=Offset,
-                                size=Size},
+        Req = #mpb_readchunkreq{chunk_pos=#mpb_chunkpos{file_name=File,
+                                                        offset=Offset,
+                                                        chunk_size=Size}},
         R1a = #mpb_request{req_id=ReqID, do_not_alter=1,
                            read_chunk=Req},
         Bin1a = machi_pb:encode_mpb_request(R1a),
@@ -309,9 +310,9 @@ do_send_sync2({trim_chunk, File, Offset, Size},
               #state{sock=Sock, sock_id=Index, count=Count}=S) ->
     try
         ReqID = <<Index:64/big, Count:64/big>>,
-        Req = #mpb_trimchunkreq{file=File,
-                                offset=Offset,
-                                size=Size},
+        Req = #mpb_trimchunkreq{chunk_pos=#mpb_chunkpos{file_name=File,
+                                                        offset=Offset,
+                                                        chunk_size=Size}},
         R1a = #mpb_request{req_id=ReqID, do_not_alter=1,
                            trim_chunk=Req},
         Bin1a = machi_pb:encode_mpb_request(R1a),
@@ -415,8 +416,16 @@ convert_write_chunk_resp(#mpb_writechunkresp{status='OK'}) ->
 convert_write_chunk_resp(#mpb_writechunkresp{status=Status}) ->
     convert_general_status_code(Status).
 
-convert_read_chunk_resp(#mpb_readchunkresp{status='OK', chunk=Chunk}) ->
-    {ok, Chunk};
+convert_read_chunk_resp(#mpb_readchunkresp{status='OK', chunks=PB_Chunks}) ->
+    Chunks = lists:map(fun(#mpb_chunk{offset=Offset,
+                                      file_name=File,
+                                      chunk=Chunk,
+                                      csum=#mpb_chunkcsum{type=T, csum=Ck}}) ->
+                               %% TODO: cleanup export
+                               Csum = <<(machi_pb_translate:conv_to_csum_tag(T)):8, Ck/binary>>,
+                               {File, Offset, Chunk, Csum}
+                       end, PB_Chunks),
+    {ok, Chunks};
 convert_read_chunk_resp(#mpb_readchunkresp{status=Status}) ->
     convert_general_status_code(Status).
 

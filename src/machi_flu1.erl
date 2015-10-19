@@ -534,10 +534,7 @@ do_server_read_chunk(File, Offset, Size, _Opts, #state{flu_name=FluName})->
         ok ->
             {ok, Pid} = machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, File}),
             case machi_file_proxy:read(Pid, Offset, Size) of
-                %% XXX FIXME 
-                %% For now we are omiting the checksum data because it blows up
-                %% protobufs.
-                {ok, Data, _Csum} -> {ok, Data};
+                {ok, Chunks} -> {ok, Chunks};
                 Other -> Other
             end;
         _ ->

@@ -15,8 +15,8 @@
 %% KIND, either express or implied.  See the License for the
 %% specific language governing permissions and limitations
 %% under the License.
-%%
 %% -------------------------------------------------------------------
+%%
 
 -module(machi_pb_translate).
 
@@ -36,6 +36,9 @@
          to_pb_request/2,
          to_pb_response/3
         ]).
+
+%% TODO: fixme cleanup
+-export([conv_to_csum_tag/1]).
 
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
@@ -62,10 +65,10 @@ from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    write_chunk=#mpb_ll_writechunkreq{
                      epoch_id=PB_EpochID,
-                     file=File,
-                     offset=Offset,
-                     chunk=Chunk,
-                     csum=#mpb_chunkcsum{type=CSum_type, csum=CSum}}}) ->
+                     chunk=#mpb_chunk{file_name=File,
+                                      offset=Offset,
+                                      chunk=Chunk,
+                                      csum=#mpb_chunkcsum{type=CSum_type, csum=CSum}}}}) ->
     EpochID = conv_to_epoch_id(PB_EpochID),
     CSum_tag = conv_to_csum_tag(CSum_type),
     {ReqID, {low_write_chunk, EpochID, File, Offset, Chunk, CSum_tag, CSum}};
@@ -73,14 +76,15 @@ from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    read_chunk=#mpb_ll_readchunkreq{
                      epoch_id=PB_EpochID,
-                     file=File,
-                     offset=Offset,
-                     size=Size,
+                     chunk_pos=ChunkPos,
                      flag_no_checksum=PB_GetNoChecksum,
                      flag_no_chunk=PB_GetNoChunk}}) ->
     EpochID = conv_to_epoch_id(PB_EpochID),
     Opts = [{no_checksum, conv_to_boolean(PB_GetNoChecksum)},
             {no_chunk, conv_to_boolean(PB_GetNoChunk)}],
+    #mpb_chunkpos{file_name=File,
+                  offset=Offset,
+                  chunk_size=Size} = ChunkPos,
     {ReqID, {low_read_chunk, EpochID, File, Offset, Size, Opts}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
@@ -163,23 +167,23 @@ from_pb_request(#mpb_request{req_id=ReqID,
              ChunkExtra}};
 from_pb_request(#mpb_request{req_id=ReqID,
                              write_chunk=IR=#mpb_writechunkreq{}}) ->
-    #mpb_writechunkreq{file=File,
-                       offset=Offset,
-                       chunk=Chunk,
-                       csum=CSum} = IR,
+    #mpb_writechunkreq{chunk=#mpb_chunk{file_name=File,
+                                        offset=Offset,
+                                        chunk=Chunk,
+                                        csum=CSum}} = IR,
     TaggedCSum = make_tagged_csum(CSum, Chunk),
     {ReqID, {high_write_chunk, File, Offset, Chunk, TaggedCSum}};
 from_pb_request(#mpb_request{req_id=ReqID,
                              read_chunk=IR=#mpb_readchunkreq{}}) ->
-    #mpb_readchunkreq{file=File,
-                      offset=Offset,
-                      size=Size} = IR,
+    #mpb_readchunkreq{chunk_pos=#mpb_chunkpos{file_name=File,
+                                              offset=Offset,
+                                              chunk_size=Size}} = IR,
     {ReqID, {high_read_chunk, File, Offset, Size}};
 from_pb_request(#mpb_request{req_id=ReqID,
                              trim_chunk=IR=#mpb_trimchunkreq{}}) ->
-    #mpb_trimchunkreq{file=File,
-                      offset=Offset,
-                      size=Size} = IR,
+    #mpb_trimchunkreq{chunk_pos=#mpb_chunkpos{file_name=File,
+                                              offset=Offset,
+                                              chunk_size=Size}} = IR,
     {ReqID, {high_trim_chunk, File, Offset, Size}};
 from_pb_request(#mpb_request{req_id=ReqID,
                              checksum_list=IR=#mpb_checksumlistreq{}}) ->
@@ -229,10 +233,17 @@ from_pb_response(#mpb_ll_response{
 from_pb_response(#mpb_ll_response{
                     req_id=ReqID,
                     read_chunk=#mpb_ll_readchunkresp{status=Status,
-                                                     chunk=Chunk}}) ->
+                                                     chunks=PB_Chunks}}) ->
     case Status of
         'OK' ->
-            {ReqID, {ok, Chunk}};
+            Chunks = lists:map(fun(#mpb_chunk{file_name=File,
+                                          offset=Offset,
+                                          chunk=Bytes,
+                                          csum=#mpb_chunkcsum{type=T,csum=Ck}}) ->
+                                       Csum = <<(conv_to_csum_tag(T)):8, Ck/binary>>,
+                                      {File, Offset, Bytes, Csum}
+                              end, PB_Chunks),
+            {ReqID, {ok, Chunks}};
         _ ->
             {ReqID, machi_pb_high_client:convert_general_status_code(Status)}
     end;
@@ -367,10 +378,10 @@ to_pb_request(ReqID, {low_write_chunk, EpochID, File, Offset, Chunk, CSum_tag, C
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     write_chunk=#mpb_ll_writechunkreq{
                       epoch_id=PB_EpochID,
-                      file=File,
-                      offset=Offset,
-                      chunk=Chunk,
-                      csum=PB_CSum}};
+                                   chunk=#mpb_chunk{file_name=File,
+                                                    offset=Offset,
+                                                    chunk=Chunk,
+                                                    csum=PB_CSum}}};
 to_pb_request(ReqID, {low_read_chunk, EpochID, File, Offset, Size, _Opts}) ->
     %% TODO: stop ignoring Opts ^_^
     PB_EpochID = conv_from_epoch_id(EpochID),
@@ -378,9 +389,10 @@ to_pb_request(ReqID, {low_read_chunk, EpochID, File, Offset, Size, _Opts}) ->
                req_id=ReqID, do_not_alter=2,
                read_chunk=#mpb_ll_readchunkreq{
                  epoch_id=PB_EpochID,
-                 file=File,
-                 offset=Offset,
-                 size=Size}};
+                 chunk_pos=#mpb_chunkpos{
+                              file_name=File,
+                              offset=Offset,
+                              chunk_size=Size}}};
 to_pb_request(ReqID, {low_checksum_list, EpochID, File}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
@@ -466,12 +478,18 @@ to_pb_response(ReqID, {low_write_chunk, _EID, _Fl, _Off, _Ch, _CST, _CS},Resp)->
                      write_chunk=#mpb_ll_writechunkresp{status=Status}};
 to_pb_response(ReqID, {low_read_chunk, _EID, _Fl, _Off, _Sz, _Opts}, Resp)->
     case Resp of
-        {ok, Chunk} ->
-            CSum = undefined,                   % TODO not implemented
+        {ok, Chunks} ->
+            PB_Chunks = lists:map(fun({File, Offset, Bytes, Csum}) ->
+                                          {Tag, Ck} = machi_util:unmake_tagged_csum(Csum),
+                                          #mpb_chunk{file_name=File,
+                                                     offset=Offset,
+                                                     chunk=Bytes,
+                                                     csum=#mpb_chunkcsum{type=conv_from_csum_tag(Tag),
+                                                                         csum=Ck}}
+                                  end, Chunks),
             #mpb_ll_response{req_id=ReqID,
                              read_chunk=#mpb_ll_readchunkresp{status='OK',
-                                                              chunk=Chunk,
-                                                              csum=CSum}};
+                                                              chunks=PB_Chunks}};
         {error, _}=Error ->
             Status = conv_from_status(Error),
             #mpb_ll_response{req_id=ReqID,
@@ -638,10 +656,19 @@ to_pb_response(ReqID, {high_write_chunk, _File, _Offset, _Chunk, _TaggedCSum}, R
     end;
 to_pb_response(ReqID, {high_read_chunk, _File, _Offset, _Size}, Resp) ->
     case Resp of
-        {ok, Chunk} ->
+        {ok, Chunks} ->
+            MpbChunks = lists:map(fun({File, Offset, Bytes, Csum}) ->
+                                          {Tag, Ck} = machi_util:unmake_tagged_csum(Csum),
+                                          io:format(user, "~p oom~n", [Csum]),
+                                          #mpb_chunk{
+                                             offset=Offset,
+                                             file_name=File,
+                                             chunk=Bytes,
+                                             csum=#mpb_chunkcsum{type=conv_from_csum_tag(Tag), csum=Ck}}
+                                  end, Chunks),
             #mpb_response{req_id=ReqID,
                           read_chunk=#mpb_readchunkresp{status='OK',
-                                                        chunk=Chunk}};
+                                                        chunks=MpbChunks}};
         {error, _}=Error ->
             Status = conv_from_status(Error),
             #mpb_response{req_id=ReqID,

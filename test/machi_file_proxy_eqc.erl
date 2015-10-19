@@ -201,7 +201,12 @@ read_post(S, [_Pid, Off, L], Res) ->
 read_next(S, _Res, _Args) -> S.
 
 read(Pid, Offset, Length) ->
-    machi_file_proxy:read(Pid, Offset, Length).
+    case machi_file_proxy:read(Pid, Offset, Length) of
+        {ok, [{_, Offset, Data, Csum}]} ->
+            {ok, Data, Csum};
+        E ->
+            E
+    end.
 
 %% write
 
