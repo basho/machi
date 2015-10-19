@@ -323,9 +323,10 @@ execute_repair_directive({File, Cmds}, {ProxiesDict, EpochID, Verb, ETS}=Acc) ->
                     _ -> ok
                 end,
                 _T1 = os:timestamp(),
-                {ok, Chunk} = machi_proxy_flu1_client:read_chunk(
-                                SrcP, EpochID, File, Offset, Size,
-                                ?SHORT_TIMEOUT),
+                {ok, [{_, Offset, Chunk, _}]} =
+                    machi_proxy_flu1_client:read_chunk(
+                      SrcP, EpochID, File, Offset, Size,
+                      ?SHORT_TIMEOUT),
                 _T2 = os:timestamp(),
                 <<_Tag:1/binary, CSum/binary>> = TaggedCSum,
                 case machi_util:checksum_chunk(Chunk) of

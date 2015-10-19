@@ -86,6 +86,14 @@ message Mpb_ChunkCSum {
     optional bytes csum = 2;
 }
 
+message Mpb_Chunk {
+    required uint64 offset = 1;
+    required string file_name = 2;
+    required bytes chunk = 3;
+    // TODO: must be required, in future?
+    optional Mpb_ChunkCSum csum = 4;
+}
+
 // epoch_id() type
 message Mpb_EpochID {
     required uint32 epoch_number = 1;
@@ -177,10 +185,7 @@ message Mpb_AppendChunkResp {
 // High level API: write_chunk() request & response
 
 message Mpb_WriteChunkReq {
-    required string file = 1;
-    required uint64 offset = 2;
-    required bytes chunk = 3;
-    required Mpb_ChunkCSum csum = 4;
+    required Mpb_Chunk chunk = 1;
 }
 
 message Mpb_WriteChunkResp {
@@ -190,33 +195,27 @@ message Mpb_WriteChunkResp {
 // High level API: read_chunk() request & response
 
 message Mpb_ReadChunkReq {
-    required string file = 1;
-    required uint64 offset = 2;
-    required uint32 size = 3;
+    required Mpb_ChunkPos chunk_pos = 1;
 
     // Use flag_no_checksum=non-zero to skip returning the chunk's checksum.
     // TODO: not implemented yet.
-    optional uint32 flag_no_checksum = 4 [default=0];
+    optional uint32 flag_no_checksum = 2 [default=0];
 
     // Use flag_no_chunk=non-zero to skip returning the chunk (which
     // only makes sense if flag_no_checksum is not set).
     // TODO: not implemented yet.
-    optional uint32 flag_no_chunk = 5 [default=0];
+    optional uint32 flag_no_chunk = 3 [default=0];
 }
 
 message Mpb_ReadChunkResp {
     required Mpb_GeneralStatusCode status = 1;
-    optional bytes chunk = 2;
-    optional Mpb_ChunkCSum csum = 3;
+    repeated Mpb_Chunk chunks = 2;
 }
-
 
 // High level API: trim_chunk() request & response
 
 message Mpb_TrimChunkReq {
-    required string file = 1;
-    required uint64 offset = 2;
-    required uint32 size = 3;
+    required Mpb_ChunkPos chunk_pos = 1;
 }
 
 message Mpb_TrimChunkResp {
@@ -390,10 +389,7 @@ message Mpb_LL_AppendChunkResp {
 
 message Mpb_LL_WriteChunkReq {
     required Mpb_EpochID epoch_id = 1;
-    required string file = 2;
-    required uint64 offset = 3;
-    required bytes chunk = 4;
-    required Mpb_ChunkCSum csum = 5;
+    required Mpb_Chunk chunk = 2;
 }
 
 message Mpb_LL_WriteChunkResp {
@@ -404,24 +400,21 @@ message Mpb_LL_WriteChunkResp {
 
 message Mpb_LL_ReadChunkReq {
     required Mpb_EpochID epoch_id = 1;
-    required string file = 2;
-    required uint64 offset = 3;
-    required uint32 size = 4;
+    required Mpb_ChunkPos chunk_pos = 2;
 
     // Use flag_no_checksum=non-zero to skip returning the chunk's checksum.
     // TODO: not implemented yet.
-    optional uint32 flag_no_checksum = 5 [default=0];
+    optional uint32 flag_no_checksum = 3 [default=0];
 
     // Use flag_no_chunk=non-zero to skip returning the chunk (which
     // only makes sense if flag_checksum is not set).
     // TODO: not implemented yet.
-    optional uint32 flag_no_chunk = 6 [default=0];
+    optional uint32 flag_no_chunk = 4 [default=0];
 }
 
 message Mpb_LL_ReadChunkResp {
     required Mpb_GeneralStatusCode status = 1;
-    optional bytes chunk = 2;
-    optional Mpb_ChunkCSum csum = 3;
+    repeated Mpb_Chunk chunks = 2;
 }
 
 // Low level API: checksum_list()

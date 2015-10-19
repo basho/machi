@@ -60,12 +60,14 @@ api_smoke_test() ->
             {ok, {MyOff,MySize,MyFile}} =
                 ?MUT:append_chunk(Prox1, FakeEpoch, Prefix, MyChunk,
                                   infinity),
-            {ok, MyChunk} = ?MUT:read_chunk(Prox1, FakeEpoch, MyFile, MyOff, MySize),
+            {ok, [{_, MyOff, MyChunk, _}]} =
+                ?MUT:read_chunk(Prox1, FakeEpoch, MyFile, MyOff, MySize),
             MyChunk2 = <<"my chunk data, yeah, again">>,
             {ok, {MyOff2,MySize2,MyFile2}} =
                 ?MUT:append_chunk_extra(Prox1, FakeEpoch, Prefix,
                                         MyChunk2, 4242, infinity),
-            {ok, MyChunk2} = ?MUT:read_chunk(Prox1, FakeEpoch, MyFile2, MyOff2, MySize2),
+            {ok, [{_, MyOff2, MyChunk2, _}]} =
+                ?MUT:read_chunk(Prox1, FakeEpoch, MyFile2, MyOff2, MySize2),
             MyChunk_badcs = {<<?CSUM_TAG_CLIENT_SHA:8, 0:(8*20)>>, MyChunk},
             {error, bad_checksum} = ?MUT:append_chunk(Prox1, FakeEpoch,
                                                       Prefix, MyChunk_badcs),
@@ -240,7 +242,7 @@ flu_restart_test() ->
                     (stop) -> ?MUT:append_chunk_extra(Prox1, FakeEpoch,
                                              <<"prefix">>, Data, 42, infinity)
                  end,
-                 fun(run) -> {ok, Data} =
+                 fun(run) -> {ok, [{_, Off1, Data, _}]} =
                                  ?MUT:read_chunk(Prox1, FakeEpoch,
                                                  File1, Off1, Size1),
                              ok;

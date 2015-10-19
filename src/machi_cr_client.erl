@@ -529,9 +529,12 @@ do_read_chunk2(File, Offset, Size, Depth, STime, TO,
     ConsistencyMode = P#projection_v1.mode,
     case ?FLU_PC:read_chunk(orddict:fetch(Tail, PD), EpochID,
                             File, Offset, Size, ?TIMEOUT) of
-        {ok, Chunk} when byte_size(Chunk) == Size ->
-            {reply, {ok, Chunk}, S};
+        {ok, [{_, _, Chunk, _Csum}] = Chunks} when byte_size(Chunk) == Size ->
+            {reply, {ok, Chunks}, S};
+        {ok, Chunks} when is_list(Chunks) ->
+            {reply, {ok, Chunks}, S};
         {ok, BadChunk} ->
+            %% TODO cleaner handling of bad chunks
             exit({todo, bad_chunk_size, ?MODULE, ?LINE, File, Offset, Size,
                   got, byte_size(BadChunk)});
         {error, bad_arg} = BadArg -> 
@@ -596,7 +599,7 @@ read_repair2(cp_mode=ConsistencyMode,
     Tail = lists:last(readonly_flus(P)),
     case ?FLU_PC:read_chunk(orddict:fetch(Tail, PD), EpochID,
                             File, Offset, Size, ?TIMEOUT) of
-        {ok, Chunk} when byte_size(Chunk) == Size ->
+        {ok, [{_, Offset, Chunk, _}]} when byte_size(Chunk) == Size ->
             ToRepair = mutation_flus(P) -- [Tail],
             read_repair3(ToRepair, ReturnMode, Chunk, [Tail], File, Offset,
                          Size, Depth, STime, S);
@@ -620,10 +623,23 @@ read_repair2(ap_mode=ConsistencyMode,
              #state{proj=P}=S) ->
     Eligible = mutation_flus(P),
     case try_to_find_chunk(Eligible, File, Offset, Size, S) of
-        {ok, Chunk, GotItFrom} when byte_size(Chunk) == Size ->
+        {ok, [{File0,Offset0,Chunk0,Csum}], GotItFrom} when byte_size(Chunk0) == Size ->
             ToRepair = mutation_flus(P) -- [GotItFrom],
-            read_repair3(ToRepair, ReturnMode, Chunk, [GotItFrom], File,
-                         Offset, Size, Depth, STime, S);
+            %% TODO: stop matching single-size list
+            %% {RepairedChunks, S2} =
+            %%     lists:foldl(fun({_, Offset0, Chunk0, Csum}, {Chunks0, S0}) ->
+            %%                         Size0 = byte_size(Chunk0),
+            %%                         {reply, {ok, Chunk1}, S1} =
+            %%                             read_repair3(ToRepair, ReturnMode, Chunk0, [GotItFrom], File,
+            %%                                          Offset0, Size0, Depth, STime, S0),
+            %%                         {[{File, Offset0, Chunk1, Csum}|Chunks0], S1}
+            %%                 end,
+            %%                 {[], S}, Chunks),
+            %% {reply, {ok, RepairedChunks}, S2};
+            {reply, {ok, RepairedChunk}, S2}
+                = read_repair3(ToRepair, ReturnMode, Chunk0, [GotItFrom], File0,
+                               Offset0, Size, Depth, STime, S),
+            {reply, {ok, [{File0, Offset0, RepairedChunk, Csum}]}, S2};
         {ok, BadChunk, _GotItFrom} ->
             exit({todo, bad_chunk_size, ?MODULE, ?LINE, File,
                   Offset, Size, got, byte_size(BadChunk)});
@@ -856,14 +872,14 @@ try_to_find_chunk(Eligible, File, Offset, Size,
                    Proxy = orddict:fetch(FLU, PD),
                    case ?FLU_PC:read_chunk(Proxy, EpochID,
                                            File, Offset, Size) of
-                       {ok, Chunk} when byte_size(Chunk) == Size ->
-                           {FLU, {ok, Chunk}};
+                       {ok, [{_, Offset, Chunk, _}] = Chunks} when byte_size(Chunk) == Size ->
+                           {FLU, {ok, Chunks}};
                        Else ->
                            {FLU, Else}
                    end
            end,
     Rs = run_middleworker_job(Work, Eligible, Timeout),
-    case [X || {_, {ok, B}}=X <- Rs, is_binary(B)] of
+    case [X || {_, {ok, [{_,_,B,_}]}}=X <- Rs, is_binary(B)] of
         [{FoundFLU, {ok, Chunk}}|_] ->
             {ok, Chunk, FoundFLU};
         [] ->
