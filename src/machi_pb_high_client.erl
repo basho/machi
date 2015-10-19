@@ -38,7 +38,7 @@
          connected_p/1,
          echo/2, echo/3,
          auth/3, auth/4,
-         append_chunk/6, append_chunk/7,
+         append_chunk/7, append_chunk/8,
          write_chunk/5, write_chunk/6,
          read_chunk/5, read_chunk/6,
          trim_chunk/4, trim_chunk/5,
@@ -96,21 +96,21 @@ auth(PidSpec, User, Pass) ->
 auth(PidSpec, User, Pass, Timeout) ->
     send_sync(PidSpec, {auth, User, Pass}, Timeout).
 
--spec append_chunk(pid(), PlacementKey::binary(), Prefix::binary(), Chunk::binary(),
+-spec append_chunk(pid(), CoC_namespace::binary(), CoC_locator::integer(), Prefix::binary(), Chunk::binary(),
                    CSum::binary(), ChunkExtra::non_neg_integer()) ->
                           {ok, Filename::string(), Offset::machi_dt:file_offset()} |
                           {error, machi_client_error_reason()}.
-append_chunk(PidSpec, PlacementKey, Prefix, Chunk, CSum, ChunkExtra) ->
-    append_chunk(PidSpec, PlacementKey, Prefix, Chunk, CSum, ChunkExtra, ?DEFAULT_TIMEOUT).
+append_chunk(PidSpec, CoC_namespace, CoC_locator, Prefix, Chunk, CSum, ChunkExtra) ->
+    append_chunk(PidSpec, CoC_namespace, CoC_locator, Prefix, Chunk, CSum, ChunkExtra, ?DEFAULT_TIMEOUT).
 
--spec append_chunk(pid(), PlacementKey::binary(), Prefix::binary(),
+-spec append_chunk(pid(), CoC_namespace::binary(), CoC_locator::integer(), Prefix::binary(),
                    Chunk::binary(), CSum::binary(),
                    ChunkExtra::non_neg_integer(),
                    Timeout::non_neg_integer()) ->
                           {ok, Filename::string(), Offset::machi_dt:file_offset()} |
                           {error, machi_client_error_reason()}.
-append_chunk(PidSpec, PlacementKey, Prefix, Chunk, CSum, ChunkExtra, Timeout) ->
-    send_sync(PidSpec, {append_chunk, PlacementKey, Prefix, Chunk, CSum, ChunkExtra}, Timeout).
+append_chunk(PidSpec, CoC_namespace, CoC_locator, Prefix, Chunk, CSum, ChunkExtra, Timeout) ->
+    send_sync(PidSpec, {append_chunk, CoC_namespace, CoC_locator, Prefix, Chunk, CSum, ChunkExtra}, Timeout).
 
 -spec write_chunk(pid(), File::string(), machi_dt:file_offset(),
                   Chunk::binary(), CSum::binary()) ->
@@ -281,15 +281,14 @@ do_send_sync2({auth, User, Pass}, #state{sock=Sock}=S) ->
             Res = {bummer, {X, Y, erlang:get_stacktrace()}},
             {Res, S}
     end;
-do_send_sync2({append_chunk, PlacementKey, Prefix, Chunk, CSum, ChunkExtra},
+do_send_sync2({append_chunk, CoC_namespace, CoC_locator,
+               Prefix, Chunk, CSum, ChunkExtra},
              #state{sock=Sock, sock_id=Index, count=Count}=S) ->
     try
         ReqID = <<Index:64/big, Count:64/big>>,
-        PK = if PlacementKey == <<>> -> undefined;
-                true                 -> PlacementKey
-             end,
         CSumT = convert_csum_req(CSum, Chunk),
-        Req = #mpb_appendchunkreq{placement_key=PK,
+        Req = #mpb_appendchunkreq{coc_namespace=CoC_namespace,
+                                  coc_locator=CoC_locator,
                                   prefix=Prefix,
                                   chunk=Chunk,
                                   csum=CSumT,
