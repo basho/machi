@@ -20,24 +20,23 @@ well as better-known open source software such as Kafka's file
 replication.  (See the bibliography of the [Machi high level design
 doc](./doc/high-level-machi.pdf) for further references.)
 
-(*) Capable of operating in "AP mode" or "CP mode" relative to the
-  CAP Theorem.
+    (*) When operating in strong consistency mode (supporting
+    sequential or linearizable semantics), the availability of the
+    system is restricted to quorum majority availability.  When in
+    eventual consistency mode, service can be provided by any
+    available server.
 
-## Status: mid-June 2015: work is underway
+## Status: mid-October 2015: work is underway
 
-The two major design documents for Machi are now ready or nearly ready
-for internal Basho and external party review.  Please see the
-[doc](./doc) directory's [README](./doc) for details
-
-* Machi high level design
-* Machi chain self-management design
-
-The work of implementing first draft of Machi is now underway.  The
-code from the [prototype/demo-day-hack](prototype/demo-day-hack/) directory is
-being used as the initial scaffolding.
-
-* The chain manager is ready for "AP mode" use in eventual
-  consistency use cases.
+* The chain manager is ready for both eventual consistency use ("AP
+  mode") and strong constency use ("CP mode").  Both modes use a new
+  consensus technique, Humming Consensus.
+    * Scott will be
+      [http://ricon.io/agenda/#managing-chain-replication-metadata-with-humming-consensus](speaking about Humming Consensus)
+      at the [http://ricon.io](Ricon 2015 conference) in San Francisco,
+      CA, USA on Thursday, November 5th, 2015.
+    * Implementation of the file repair process for strong consistency
+      is still in progress.
 
 * All Machi client/server protocols are based on
   [Protocol Buffers](https://developers.google.com/protocol-buffers/docs/overview).
@@ -45,15 +44,14 @@ being used as the initial scaffolding.
       [https://github.com/basho/machi/blob/master/src/machi.proto](https://github.com/basho/machi/blob/master/src/machi.proto).
     * The Machi PB protocol is not yet stable.  Expect change!
     * The Erlang language client implementation of the high-level
-      protocol flavor is very brittle (e.g., very little error
-      handling yet).
-    * The Erlang language client implementation of the low-level
-      protocol flavor are still a work-in-progress ... but they are
-      more robust than the high-level library's implementation.
+      protocol flavor is brittle (e.g., little error handling yet).
 
 If you'd like to work on a protocol such as Thrift, UBF,
 msgpack over UDP, or some other protocol, let us know by
-[opening an issue](./issues/new) to discuss it.
+[opening an issue to discuss it](./issues/new).
+
+The two major design documents for Machi are now mostly stable.
+Please see the [doc](./doc) directory's [README](./doc) for details.
 
 ## Contributing to Machi: source code, documentation, etc.
 
