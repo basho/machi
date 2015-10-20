@@ -76,9 +76,6 @@
 -type op_stats()      :: { Total  :: non_neg_integer(), 
                            Errors :: non_neg_integer() }.
 
--type byte_sequence() :: { Offset :: non_neg_integer(),
-                           Size   :: pos_integer()|infinity }.
-
 -record(state, {
     data_dir              :: string() | undefined,
     filename              :: string() | undefined,
@@ -87,7 +84,6 @@
     csum_file             :: string()|undefined,
     csum_path             :: string()|undefined,
     eof_position = 0      :: non_neg_integer(),
-    unwritten_bytes = []  :: [byte_sequence()],
     data_filehandle       :: file:filehandle(),
     csum_table            :: machi_csum_table:table(),
     tref                  :: reference(), %% timer ref
@@ -129,7 +125,10 @@ sync(_Pid, Type) ->
     lager:warning("Bad arg to sync: Type ~p", [Type]),
     {error, bad_arg}.
 
-% @doc Read file at offset for length
+% @doc Read file at offset for length. This returns a sequence of all
+% chunks that overlaps with requested offset and length. Note that
+% borders are not alinged, not to mess up repair at cr_client with
+% checksums. They should be cut at cr_client.
 -spec read(Pid :: pid(),
            Offset :: non_neg_integer(),
            Length :: non_neg_integer()) ->
@@ -211,7 +210,6 @@ init({Filename, DataDir}) ->
         data_filehandle = FHd,
         csum_table      = CsumTable,
         tref            = Tref,
-        unwritten_bytes = UnwrittenBytes,
         eof_position    = Eof},
     lager:debug("Starting file proxy ~p for filename ~p, state = ~p",
                 [self(), Filename, St]),
@@ -261,7 +259,8 @@ handle_call({read, _Offset, _Length}, _From,
 handle_call({read, Offset, Length}, _From,
                 State = #state{eof_position = Eof,
                                reads = {T, Err}
-                              }) when Offset + Length > Eof ->
+                              }) when Offset > Eof ->
+    %% make sure [Offset, Offset+Length) has an overlap with file range
     lager:error("Read request at offset ~p for ~p bytes is past the last write offset of ~p",
                 [Offset, Length, Eof]),
     {reply, {error, not_written}, State#state{reads = {T + 1, Err + 1}}};
@@ -270,19 +269,12 @@ handle_call({read, Offset, Length}, _From,
             State = #state{filename = F,
                            data_filehandle = FH,
                            csum_table = CsumTable,
-                           unwritten_bytes = U,
                            reads = {T, Err}
                           }) ->
-
-    Checksum = case machi_csum_table:find(CsumTable, Offset, Length) of
-                   {ok, Checksum0} ->
-                       Checksum0;
-                   _ ->
-                       undefined
-               end,
-
     {Resp, NewErr} =
-        case handle_read(FH, F, Checksum, Offset, Length, U) of
+        case do_read(FH, F, CsumTable, Offset, Length) of
+            {ok, []} ->
+                {{error, not_written}, Err + 1};
             {ok, Chunks} ->
             %% Kludge to wrap read result in tuples, to support fragmented read
             %% XXX FIXME 
@@ -305,35 +297,31 @@ handle_call({write, _Offset, _ClientMeta, _Data}, _From,
     {reply, {error, wedged}, State#state{writes = {T + 1, Err + 1}}};
 
 handle_call({write, Offset, ClientMeta, Data}, _From,
-            State = #state{unwritten_bytes = U,
-                           filename = F,
+            State = #state{filename = F,
                            writes = {T, Err},
                            data_filehandle = FHd,
-                           csum_table = CsumTable
-                          }) ->
+                           csum_table = CsumTable}) ->
 
     ClientCsumTag = proplists:get_value(client_csum_tag, ClientMeta, ?CSUM_TAG_NONE),
     ClientCsum = proplists:get_value(client_csum, ClientMeta, <<>>),
 
-    {Resp, NewErr, NewU} =
+    {Resp, NewErr} =
     case check_or_make_tagged_csum(ClientCsumTag, ClientCsum, Data) of
         {error, {bad_csum, Bad}} ->
             lager:error("Bad checksum on write; client sent ~p, we computed ~p",
                         [ClientCsum, Bad]),
-            {{error, bad_checksum}, Err + 1, U};
+            {{error, bad_checksum}, Err + 1};
         TaggedCsum ->
-            case handle_write(FHd, CsumTable, F, TaggedCsum, Offset, Data, U) of
-                {ok, NewU1} ->
-                    {ok, Err, NewU1};
+            case handle_write(FHd, CsumTable, F, TaggedCsum, Offset, Data) of
+                ok ->
+                    {ok, Err};
                 Error ->
-                    {Error, Err + 1, U}
+                    {Error, Err + 1}
             end
     end,
-    {NewEof, infinity} = lists:last(NewU),
+    {NewEof, infinity} = lists:last(machi_csum_table:calc_unwritten_bytes(CsumTable)),
     {reply, Resp, State#state{writes = {T+1, NewErr},
-                              eof_position = NewEof,
-                              unwritten_bytes = NewU
-                             }};
+                              eof_position = NewEof}};
 
 %% APPENDS
 
@@ -345,7 +333,6 @@ handle_call({append, _ClientMeta, _Extra, _Data}, _From,
 
 handle_call({append, ClientMeta, Extra, Data}, _From,
             State = #state{eof_position = EofP,
-                           unwritten_bytes = U,
                            filename = F,
                            appends = {T, Err},
                            data_filehandle = FHd,
@@ -355,24 +342,25 @@ handle_call({append, ClientMeta, Extra, Data}, _From,
     ClientCsumTag = proplists:get_value(client_csum_tag, ClientMeta, ?CSUM_TAG_NONE),
     ClientCsum = proplists:get_value(client_csum, ClientMeta, <<>>),
 
-    {Resp, NewErr, NewU} =
+    {Resp, NewErr} =
     case check_or_make_tagged_csum(ClientCsumTag, ClientCsum, Data) of
         {error, {bad_csum, Bad}} ->
             lager:error("Bad checksum; client sent ~p, we computed ~p",
                         [ClientCsum, Bad]),
-            {{error, bad_checksum}, Err + 1, U};
+            {{error, bad_checksum}, Err + 1};
         TaggedCsum ->
-            case handle_write(FHd, CsumTable, F, TaggedCsum, EofP, Data, U) of
-                {ok, NewU1} ->
-                    {{ok, F, EofP}, Err, NewU1};
+            case handle_write(FHd, CsumTable, F, TaggedCsum, EofP, Data) of
+                ok ->
+                    {{ok, F, EofP}, Err};
                 Error ->
-                    {Error, Err + 1, EofP, U}
+                    {Error, Err + 1, EofP}
             end
     end,
-    {NewEof, infinity} = lists:last(NewU),
+    %% TODO: do we check this with calling
+    %% machi_csum_table:calc_unwritten_bytes/1?
+    NewEof = EofP + byte_size(Data) + Extra,
     {reply, Resp, State#state{appends = {T+1, NewErr},
-                              eof_position = NewEof + Extra,
-                              unwritten_bytes = NewU
+                              eof_position = NewEof
                              }};
 
 handle_call(Req, _From, State) ->
@@ -510,17 +498,15 @@ check_or_make_tagged_csum(OtherTag, _ClientCsum, _Data) ->
     lager:warning("Unknown checksum tag ~p", [OtherTag]),
     {error, bad_checksum}.
    
--spec handle_read(FHd        :: file:filehandle(),
-                  Filename   :: string(),
-                  TaggedCsum :: undefined|binary(),
-                  Offset     :: non_neg_integer(),
-                  Size       :: non_neg_integer(),
-                  Unwritten  :: [byte_sequence()]
-             ) -> {ok, Bytes :: binary(), Csum :: binary()} |
-                  eof | 
+-spec do_read(FHd        :: file:filehandle(),
+              Filename   :: string(),
+              CsumTable  :: machi_csum_table:table(),
+              Offset     :: non_neg_integer(),
+              Size       :: non_neg_integer()
+             ) -> {ok, Chunks :: [{string(), Offset::non_neg_integer(), binary(), Csum :: binary()}]} |
                   {error, bad_checksum} |
                   {error, partial_read} |
-                  {error, not_written} |
+                  {error, file:posix()} |
                   {error, Other :: term() }.
 % @private Attempt a read operation on the given offset and length.
 % <li>
@@ -535,22 +521,19 @@ check_or_make_tagged_csum(OtherTag, _ClientCsum, _Data) ->
 %        tuple is returned.</ul>
 % </li>
 %
-% On success, `{ok, Bytes, Checksum}' is returned.
-handle_read(FHd, Filename, undefined, Offset, Size, U) ->
-    handle_read(FHd, Filename, machi_util:make_tagged_csum(none), Offset, Size, U);
+do_read(FHd, Filename, CsumTable, Offset, Size) ->
+    %% Note that find/3 only returns overlapping chunks, both borders
+    %% are not aligned to original Offset and Size.
+    ChunkCsums = machi_csum_table:find(CsumTable, Offset, Size),
+    read_all_ranges(FHd, Filename, ChunkCsums, []).
 
-handle_read(FHd, Filename, TaggedCsum, Offset, Size, U) ->
-    case is_byte_range_unwritten(Offset, Size, U) of
-        true ->
-            {error, not_written};
-        false ->
-            do_read(FHd, Filename, TaggedCsum, Offset, Size)
-    end.
+read_all_ranges(_, _, [], ReadChunks) ->
+    {ok, lists:reverse(ReadChunks)};
 
-do_read(FHd, Filename, TaggedCsum, Offset, Size) ->
+read_all_ranges(FHd, Filename, [{Offset, Size, TaggedCsum}|T], ReadChunks) ->
     case file:pread(FHd, Offset, Size) of
         eof ->
-            eof;
+            read_all_ranges(FHd, Filename, T, ReadChunks);
         {ok, Bytes} when byte_size(Bytes) == Size ->
             {Tag, Ck} = machi_util:unmake_tagged_csum(TaggedCsum),
             case check_or_make_tagged_csum(Tag, Ck, Bytes) of
@@ -559,11 +542,13 @@ do_read(FHd, Filename, TaggedCsum, Offset, Size) ->
                                 [Bad, Ck]),
                     {error, bad_checksum};
                 TaggedCsum ->
-                    {ok, [{Filename, Offset, Bytes, TaggedCsum}]};
+                    read_all_ranges(FHd, Filename, T,
+                                    [{Filename, Offset, Bytes, TaggedCsum}|ReadChunks]);
                 OtherCsum when Tag =:= ?CSUM_TAG_NONE ->
                     %% XXX FIXME: Should we return something other than
                     %% {ok, ....} in this case?
-                    {ok, [{Filename, Offset, Bytes, OtherCsum}]}
+                    read_all_ranges(FHd, Filename, T,
+                                    [{Filename, Offset, Bytes, OtherCsum}|ReadChunks])
             end;
         {ok, Partial} ->
             lager:error("In file ~p, offset ~p, wanted to read ~p bytes, but got ~p", 
@@ -580,9 +565,8 @@ do_read(FHd, Filename, TaggedCsum, Offset, Size) ->
                     Filename   :: string(),
                     TaggedCsum :: binary(),
                     Offset     :: non_neg_integer(),
-                    Data       :: binary(),
-                    Unwritten  :: [byte_sequence()]
-                  ) -> {ok, NewU :: [byte_sequence()]} |
+                    Data       :: binary()
+                   ) -> ok |
                        {error, written} |
                        {error, Reason :: term()}.
 % @private Implements the write and append operation. The first task is to
@@ -592,50 +576,44 @@ do_read(FHd, Filename, TaggedCsum, Offset, Size) ->
 % checksum and return a "fake" ok response as if the write had been performed
 % when it hasn't really.
 %
-% If a write proceeds, the offset, size and checksum are written to a metadata
-% file, and the internal list of unwritten bytes is modified to reflect the
-% just-performed write.  This is then returned to the caller as 
-% `{ok, NewUnwritten}' where NewUnwritten is the revised unwritten byte list.
-handle_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Data, U) ->
+% If a write proceeds, the offset, size and checksum are written to a
+% metadata file, and the internal list of unwritten bytes is modified
+% to reflect the just-performed write.  This is then returned to the
+% caller as `ok'
+handle_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Data) ->
     Size = iolist_size(Data),
-
-    case is_byte_range_unwritten(Offset, Size, U) of
-        false ->
-            case machi_csum_table:find(CsumTable, Offset, Size) of
-                {error, trimmed} = Error ->
-                    Error;
-                {error, unknown_chunk} ->
-                    %% The specified has some bytes written, while
-                    %% it's not in the checksum table. Trust U and
-                    %% return as it is used.
-                    {error, written};
-                {ok, TaggedCsum} ->
-                    case do_read(FHd, Filename, TaggedCsum, Offset, Size) of
-                        eof ->
-                            lager:warning("This should never happen: got eof while reading at offset ~p in file ~p that's supposedly written",
-                                          [Offset, Filename]),
-                            {error, server_insanity};
-                        {ok, _} ->
-                            {ok, U};
-                        _ ->
-                            {error, written}
-                    end;
-                {ok, OtherCsum} ->
-                    %% Got a checksum, but it doesn't match the data block's
-                    lager:error("During a potential write at offset ~p in file ~p, a check for unwritten bytes gave us checksum ~p but the data we were trying to trying to write has checksum ~p",
-                                [Offset, Filename, OtherCsum, TaggedCsum]),
-                    {error, written}
-            end;
-        true ->
+    case machi_csum_table:find(CsumTable, Offset, Size) of
+        [] ->
             try
-                do_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Size, Data, U)
+                do_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Size, Data)
             catch
-                %%% XXX FIXME: be more specific on badmatch that might
-                %%% occur around line 593 when we write the checksum
-                %%% file entry for the data blob we just put on the disk
+                %% XXX FIXME: be more specific on badmatch that might
+                %% occur around line 593 when we write the checksum
+                %% file entry for the data blob we just put on the disk
                 error:Reason ->
                     {error, Reason}
-            end
+            end;
+        [{Offset, Size, TaggedCsum}] ->
+            case do_read(FHd, Filename, CsumTable, Offset, Size) of
+                {error, _} = E ->
+                    lager:warning("This should never happen: got ~p while reading at offset ~p in file ~p that's supposedly written",
+                                  [E, Offset, Filename]),
+                    {error, server_insanity};
+                {ok, [{_, Offset, Data, TaggedCsum}]} ->
+                    %% TODO: what if different checksum got from do_read()?
+                    ok;
+                {ok, _Other} ->
+                    %% TODO: leave some debug/warning message here?
+                    {error, written}
+            end;
+        [{Offset, Size, OtherCsum}] ->
+            %% Got a checksum, but it doesn't match the data block's
+            lager:error("During a potential write at offset ~p in file ~p, a check for unwritten bytes gave us checksum ~p but the data we were trying to trying to write has checksum ~p",
+                        [Offset, Filename, OtherCsum, TaggedCsum]),
+            {error, written};
+        _Chunks ->
+            %% No byte is trimmed, but at least one byte is written
+            {error, written}
     end.
 
 % @private Implements the disk writes for both the write and append
@@ -646,99 +624,20 @@ handle_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Data, U) ->
                 TaggedCsum :: binary(),
                 Offset     :: non_neg_integer(),
                 Size       :: non_neg_integer(),
-                Data       :: binary(),
-                Unwritten  :: [byte_sequence()]
-              ) -> {ok, NewUnwritten :: [byte_sequence()]} |
-                   {error, Reason :: term()}.
-do_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Size, Data, U) ->
+                Data       :: binary()
+              ) -> ok | {error, Reason :: term()}.
+do_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Size, Data) ->
     case file:pwrite(FHd, Offset, Data) of
         ok ->
             lager:debug("Successful write in file ~p at offset ~p, length ~p",
                         [Filename, Offset, Size]),
             ok = machi_csum_table:write(CsumTable, Offset, Size, TaggedCsum),
-            NewU = update_unwritten(Offset, Size, U),
-            lager:debug("Successful write to checksum file for ~p; unwritten bytes are now: ~p",
-                        [Filename, NewU]),
-            {ok, NewU};
+            lager:debug("Successful write to checksum file for ~p",
+                        [Filename]),
+            %% io:format(user, "here, heh ~p~n", [?LINE]),
+            ok;
         Other ->
             lager:error("Got ~p during write to file ~p at offset ~p, length ~p",
             [Other, Filename, Offset, Size]),
             {error, Other}
     end.
-
--spec is_byte_range_unwritten( Offset    :: non_neg_integer(),
-                            Size      :: pos_integer(),
-                            Unwritten :: [byte_sequence()] ) -> boolean().
-% @private Given an offset and a size, return `true' if a byte range has
-% <b>not</b> been written. Otherwise, return `false'.
-is_byte_range_unwritten(Offset, Size, Unwritten) ->
-    case Unwritten of
-        [] ->
-            lager:critical("Unwritten byte list has 0 entries! This should never happen."),
-            false;
-        [{Eof, infinity}] ->
-            Offset >= Eof;
-        _ ->
-            case lookup_unwritten(Offset, Size, Unwritten) of
-                {ok, _}   -> true;
-                not_found -> false
-            end
-    end.
-
--spec lookup_unwritten( Offset    :: non_neg_integer(),
-                        Size      :: pos_integer(),
-                        Unwritten :: [byte_sequence()]
-                      ) -> {ok, byte_sequence()} | not_found.
-% @private Given an offset and a size, scan the list of unwritten bytes and
-% look for a "hole" where a write might be allowed if any exist. If a
-% suitable byte sequence is found, the function returns a tuple of {ok,
-% {Position, Space}} is returned. `not_found' is returned if no suitable
-% space is located.
-lookup_unwritten(_Offset, _Size, []) ->
-    not_found;
-lookup_unwritten(Offset, _Size, [H={Pos, infinity}|_Rest]) when Offset >= Pos ->
-    {ok, H};
-lookup_unwritten(Offset, Size, [H={Pos, Space}|_Rest]) 
-                when Offset >= Pos andalso Offset < Pos+Space 
-                     andalso Size =< (Space - (Offset - Pos)) ->
-    {ok, H};
-lookup_unwritten(Offset, Size, [_H|Rest]) ->
-    %% These are not the droids you're looking for.
-    lookup_unwritten(Offset, Size, Rest).
-
-%%% if the pos is greater than offset + size then we're done. End early.
-
--spec update_unwritten( Offset    :: non_neg_integer(),
-                        Size      :: pos_integer(),
-                        Unwritten :: [byte_sequence()] ) -> NewUnwritten :: [byte_sequence()].
-% @private Given an offset, a size and the unwritten byte list, return an updated
-% and sorted unwritten byte list accounting for any completed write operation.
-update_unwritten(Offset, Size, Unwritten) ->
-    case lookup_unwritten(Offset, Size, Unwritten) of
-        not_found ->
-            lager:error("Couldn't find byte sequence tuple for a write which earlier found a valid spot to write!!! This should never happen!"),
-            Unwritten;
-        {ok, {Offset, Size}} ->
-            %% we neatly filled in our hole...
-            lists:keydelete(Offset, 1, Unwritten);
-        {ok, S={Pos, _}} ->
-            lists:sort(lists:keydelete(Pos, 1, Unwritten) ++
-              update_byte_range(Offset, Size, S))
-    end.
-
--spec update_byte_range( Offset   :: non_neg_integer(),
-                         Size     :: pos_integer(),
-                         Sequence :: byte_sequence() ) -> Updates :: [byte_sequence()].
-% @private Given an offset and size and a byte sequence tuple where a
-% write took place, return a list of updates to the list of unwritten bytes
-% accounting for the space occupied by the just completed write.
-update_byte_range(Offset, Size, {Eof, infinity}) when Offset == Eof ->
-    [{Offset + Size, infinity}];
-update_byte_range(Offset, Size, {Eof, infinity}) when Offset > Eof ->
-    [{Eof, (Offset - Eof)}, {Offset+Size, infinity}];
-update_byte_range(Offset, Size, {Pos, Space}) when Offset == Pos andalso Size < Space ->
-    [{Offset + Size, Space - Size}];
-update_byte_range(Offset, Size, {Pos, Space}) when Offset > Pos ->
-    [{Pos, Offset - Pos}, {Offset+Size, ( (Pos+Space) - (Offset + Size) )}].
-
-

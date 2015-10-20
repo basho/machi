@@ -2,6 +2,7 @@
 
 -export([open/2,
          find/3, write/4, trim/3,
+         all_trimmed/2,
          sync/1,
          calc_unwritten_bytes/1,
          close/1, delete/1]).
@@ -11,7 +12,7 @@
 -include("machi.hrl").
 
 -ifdef(TEST).
--export([split_checksum_list_blob_decode/1]).
+-export([split_checksum_list_blob_decode/1, all/1]).
 -endif.
 
 -record(machi_csum_table,
@@ -29,6 +30,9 @@
                   {ok, table()} | {error, file:posix()}.
 open(CSumFilename, _Opts) ->
     T = ets:new(?MODULE, [private, ordered_set]),
+    CSum = machi_util:make_tagged_csum(none),
+    %% Dummy entry for headers
+    true = ets:insert_new(T, {0, ?MINIMUM_OFFSET, CSum}),
     C0 = #machi_csum_table{
            file=CSumFilename,
            table=T},
@@ -57,15 +61,18 @@ open(CSumFilename, _Opts) ->
     {ok, C0#machi_csum_table{fd=Fd}}.
 
 -spec find(table(), machi_dt:chunk_pos(), machi_dt:chunk_size()) ->
-                  {ok, machi_dt:chunk_csum()} | {error, trimmed|notfound}.
+                  list({machi_dt:chunk_pos(),
+                        machi_dt:chunk_size(),
+                        machi_dt:csum()}).
 find(#machi_csum_table{table=T}, Offset, Size) ->
-    %% TODO: Check whether all bytes here are written or not
-    case ets:lookup(T, Offset) of
-        [{Offset, Size, trimmed}] -> {error, trimmed};
-        [{Offset, Size, Checksum}] -> {ok, Checksum};
-        [{Offset, _, _}] -> {error, unknown_chunk};
-        [] -> {error, unknown_chunk}
-    end.
+    ets:select(T, [{{'$1', '$2', '$3'},
+                    [inclusion_match_spec(Offset, Size)],
+                    ['$_']}]).
+
+-ifdef(TEST).
+all(#machi_csum_table{table=T}) ->
+    ets:tab2list(T).
+-endif.
 
 -spec write(table(), machi_dt:chunk_pos(), machi_dt:chunk_size(),
             machi_dt:chunk_csum()) ->
@@ -95,6 +102,10 @@ trim(#machi_csum_table{fd=Fd, table=T}, Offset, Size) ->
         Error ->
             Error
     end.
+
+-spec all_trimmed(table(), machi_dt:chunk_pos()) -> boolean().
+all_trimmed(#machi_csum_table{table=T}, Pos) ->
+    runthru(ets:tab2list(T), 0, Pos).
 
 -spec sync(table()) -> ok | {error, file:posix()}.
 sync(#machi_csum_table{fd=Fd}) ->
@@ -218,3 +229,22 @@ build_unwritten_bytes_list([{CurrentOffset, CurrentSize, _Csum}|Rest], LastOffse
     build_unwritten_bytes_list(Rest, (CurrentOffset+CurrentSize), [{LastOffset, Hole}|Acc]);
 build_unwritten_bytes_list([{CO, CS, _Ck}|Rest], _LastOffset, Acc) ->
     build_unwritten_bytes_list(Rest, CO + CS, Acc).
+
+%% @doc make sure all trimmed chunks are continously chained
+%% TODO: test with EQC
+runthru([], Pos, Pos) -> true;
+runthru([], Pos0, Pos) when Pos0 < Pos -> false;
+runthru([{Offset, Size, trimmed}|T], Offset, Pos) ->
+    runthru(T, Offset+Size, Pos);
+runthru(_, _, _) ->
+    false.
+
+%% @doc If you want to find an overlap among two areas [x, y] and [a,
+%% b] where x < y and a < b; if (a-y)*(b-x) < 0 then there's a
+%% overlap, else, > 0 then there're no overlap. border condition = 0
+%% is not overlap in this offset-size case.
+inclusion_match_spec(Offset, Size) ->
+    {'>', 0,
+     {'*',
+      {'-', Offset + Size, '$1'},
+      {'-', Offset, {'+', '$1', '$2'}}}}.

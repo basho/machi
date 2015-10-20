@@ -112,6 +112,7 @@
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+-export([trim_both_side/3]).
 -endif. % TEST.
 
 -export([start_link/1]).
@@ -432,8 +433,8 @@ do_append_midtail2([FLU|RestFLUs]=FLUs, Prefix, File, Offset, Chunk,
             %% We know what the chunk ought to be, so jump to the
             %% middle of read-repair.
             Resume = {append, Offset, iolist_size(Chunk), File},
-            read_repair3(FLUs, Resume, Chunk, [], File, Offset,
-                         iolist_size(Chunk), Depth, STime, S);
+            do_repair_chunk(FLUs, Resume, Chunk, [], File, Offset,
+                            iolist_size(Chunk), Depth, STime, S);
         {error, not_written} ->
             exit({todo_should_never_happen,?MODULE,?LINE,File,Offset})
     end.
@@ -529,14 +530,13 @@ do_read_chunk2(File, Offset, Size, Depth, STime, TO,
     ConsistencyMode = P#projection_v1.mode,
     case ?FLU_PC:read_chunk(orddict:fetch(Tail, PD), EpochID,
                             File, Offset, Size, ?TIMEOUT) of
-        {ok, [{_, _, Chunk, _Csum}] = Chunks} when byte_size(Chunk) == Size ->
+        {ok, Chunks0} when is_list(Chunks0) ->
+            Chunks = trim_both_side(Chunks0, Offset, Size),
             {reply, {ok, Chunks}, S};
-        {ok, Chunks} when is_list(Chunks) ->
-            {reply, {ok, Chunks}, S};
-        {ok, BadChunk} ->
-            %% TODO cleaner handling of bad chunks
-            exit({todo, bad_chunk_size, ?MODULE, ?LINE, File, Offset, Size,
-                  got, byte_size(BadChunk)});
+        %% {ok, BadChunk} ->
+        %%     %% TODO cleaner handling of bad chunks
+        %%     exit({todo, bad_chunk_size, ?MODULE, ?LINE, File, Offset, Size,
+        %%           got, byte_size(BadChunk)});
         {error, bad_arg} = BadArg -> 
             {reply, BadArg, S};
         {error, partial_read}=Err ->
@@ -599,13 +599,14 @@ read_repair2(cp_mode=ConsistencyMode,
     Tail = lists:last(readonly_flus(P)),
     case ?FLU_PC:read_chunk(orddict:fetch(Tail, PD), EpochID,
                             File, Offset, Size, ?TIMEOUT) of
-        {ok, [{_, Offset, Chunk, _}]} when byte_size(Chunk) == Size ->
+        {ok, Chunks} when is_list(Chunks) ->
             ToRepair = mutation_flus(P) -- [Tail],
-            read_repair3(ToRepair, ReturnMode, Chunk, [Tail], File, Offset,
-                         Size, Depth, STime, S);
-        {ok, BadChunk} ->
-            exit({todo, bad_chunk_size, ?MODULE, ?LINE, File, Offset,
-                  Size, got, byte_size(BadChunk)});
+            {Reply, S1} = do_repair_chunks(Chunks, ToRepair, ReturnMode,
+                                           [Tail], File, Depth, STime, S, {ok, Chunks}),
+            {reply, Reply, S1};
+        %% {ok, BadChunk} ->
+        %%     exit({todo, bad_chunk_size, ?MODULE, ?LINE, File, Offset,
+        %%           Size, got, byte_size(BadChunk)});
         {error, bad_checksum}=BadCS ->
             %% TODO: alternate strategy?
             {reply, BadCS, S};
@@ -623,26 +624,11 @@ read_repair2(ap_mode=ConsistencyMode,
              #state{proj=P}=S) ->
     Eligible = mutation_flus(P),
     case try_to_find_chunk(Eligible, File, Offset, Size, S) of
-        {ok, [{File0,Offset0,Chunk0,Csum}], GotItFrom} when byte_size(Chunk0) == Size ->
+        {ok, Chunks, GotItFrom} when is_list(Chunks) ->
             ToRepair = mutation_flus(P) -- [GotItFrom],
-            %% TODO: stop matching single-size list
-            %% {RepairedChunks, S2} =
-            %%     lists:foldl(fun({_, Offset0, Chunk0, Csum}, {Chunks0, S0}) ->
-            %%                         Size0 = byte_size(Chunk0),
-            %%                         {reply, {ok, Chunk1}, S1} =
-            %%                             read_repair3(ToRepair, ReturnMode, Chunk0, [GotItFrom], File,
-            %%                                          Offset0, Size0, Depth, STime, S0),
-            %%                         {[{File, Offset0, Chunk1, Csum}|Chunks0], S1}
-            %%                 end,
-            %%                 {[], S}, Chunks),
-            %% {reply, {ok, RepairedChunks}, S2};
-            {reply, {ok, RepairedChunk}, S2}
-                = read_repair3(ToRepair, ReturnMode, Chunk0, [GotItFrom], File0,
-                               Offset0, Size, Depth, STime, S),
-            {reply, {ok, [{File0, Offset0, RepairedChunk, Csum}]}, S2};
-        {ok, BadChunk, _GotItFrom} ->
-            exit({todo, bad_chunk_size, ?MODULE, ?LINE, File,
-                  Offset, Size, got, byte_size(BadChunk)});
+            {Reply, S1} = do_repair_chunks(Chunks, ToRepair, ReturnMode, [GotItFrom],
+                                           File, Depth, STime, S, {ok, Chunks}),
+            {reply, Reply, S1};
         {error, bad_checksum}=BadCS ->
             %% TODO: alternate strategy?
             {reply, BadCS, S};
@@ -656,19 +642,21 @@ read_repair2(ap_mode=ConsistencyMode,
             exit({todo_should_never_happen,?MODULE,?LINE,File,Offset,Size})
     end.
 
-read_repair3([], ReturnMode, Chunk, Repaired, File, Offset,
-             Size, Depth, STime, S) ->
-    read_repair4([], ReturnMode, Chunk, Repaired, File, Offset,
-                 Size, Depth, STime, S);
-%% Never matches because Depth is always incremented beyond 0 prior to
-%% getting here.
-%%
-%% read_repair3(ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
-%%              Size, 0=Depth, STime, S) ->
-%%     read_repair4(ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
-%%                   Size, Depth + 1, STime, S);
-read_repair3(ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
-             Size, Depth, STime, #state{proj=P}=S) ->
+do_repair_chunks([], _, _, _, _, _, _, S, Reply) ->
+    {Reply, S};
+do_repair_chunks([{_, Offset, Chunk, _Csum}|T],
+                 ToRepair, ReturnMode, [GotItFrom], File, Depth, STime, S, Reply) ->
+    Size = iolist_size(Chunk),
+    case do_repair_chunk(ToRepair, ReturnMode, Chunk, [GotItFrom], File, Offset,
+                         Size, Depth, STime, S) of
+        {ok, Chunk, S1} ->
+            do_repair_chunks(T, ToRepair, ReturnMode, [GotItFrom], File, Depth, STime, S1, Reply);
+        Error ->
+            Error
+    end.
+
+do_repair_chunk(ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
+                Size, Depth, STime, #state{proj=P}=S) ->
     %% io:format(user, "read_repair3 sleep1,", []),
     sleep_a_while(Depth),
     DiffMs = timer:now_diff(os:timestamp(), STime) div 1000,
@@ -679,43 +667,43 @@ read_repair3(ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
             case S2#state.proj of
                 P2 when P2 == undefined orelse
                         P2#projection_v1.upi == [] ->
-                    read_repair3(ToRepair, ReturnMode, Chunk, Repaired, File,
-                                 Offset, Size, Depth + 1, STime, S2);
+                    do_repair_chunk(ToRepair, ReturnMode, Chunk, Repaired, File,
+                                    Offset, Size, Depth + 1, STime, S2);
                 P2 ->
                     ToRepair2 = mutation_flus(P2) -- Repaired,
-                    read_repair4(ToRepair2, ReturnMode, Chunk, Repaired, File,
-                                 Offset, Size, Depth + 1, STime, S2)
+                    do_repair_chunk2(ToRepair2, ReturnMode, Chunk, Repaired, File,
+                                     Offset, Size, Depth + 1, STime, S2)
             end
     end.
 
-read_repair4([], ReturnMode, Chunk, _Repaired, File, Offset,
-             _IgnoreSize, _Depth, _STime, S) ->
+do_repair_chunk2([], ReturnMode, Chunk, _Repaired, File, Offset,
+                 _IgnoreSize, _Depth, _STime, S) ->
     %% TODO: add stats for # of repairs, length(_Repaired)-1, etc etc?
     case ReturnMode of
         read ->
-            {reply, {ok, Chunk}, S};
+            {ok, Chunk, S};
         {append, Offset, Size, File} ->
-            {reply, {ok, {Offset, Size, File}}, S}
+            {ok, {Offset, Size, File}, S}
     end;
-read_repair4([First|Rest]=ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
-             Size, Depth, STime, #state{epoch_id=EpochID, proxies_dict=PD}=S) ->
+do_repair_chunk2([First|Rest]=ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
+                 Size, Depth, STime, #state{epoch_id=EpochID, proxies_dict=PD}=S) ->
     Proxy = orddict:fetch(First, PD),
     case ?FLU_PC:write_chunk(Proxy, EpochID, File, Offset, Chunk, ?TIMEOUT) of
         ok ->
-            read_repair4(Rest, ReturnMode, Chunk, [First|Repaired], File,
-                         Offset, Size, Depth, STime, S);
+            do_repair_chunk2(Rest, ReturnMode, Chunk, [First|Repaired], File,
+                             Offset, Size, Depth, STime, S);
         {error, bad_checksum}=BadCS ->
             %% TODO: alternate strategy?
-            {reply, BadCS, S};
+            {BadCS, S};
         {error, Retry}
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
-            read_repair3(ToRepair, ReturnMode, Chunk, Repaired, File,
-                         Offset, Size, Depth, STime, S);
+            do_repair_chunk(ToRepair, ReturnMode, Chunk, Repaired, File,
+                            Offset, Size, Depth, STime, S);
         {error, written} ->
             %% TODO: To be very paranoid, read the chunk here to verify
             %% that it is exactly our Chunk.
-            read_repair4(Rest, ReturnMode, Chunk, Repaired, File,
-                         Offset, Size, Depth, STime, S);
+            do_repair_chunk2(Rest, ReturnMode, Chunk, Repaired, File,
+                             Offset, Size, Depth, STime, S);
         {error, not_written} ->
             exit({todo_should_never_happen,?MODULE,?LINE,File,Offset,Size})
     end.
@@ -872,7 +860,7 @@ try_to_find_chunk(Eligible, File, Offset, Size,
                    Proxy = orddict:fetch(FLU, PD),
                    case ?FLU_PC:read_chunk(Proxy, EpochID,
                                            File, Offset, Size) of
-                       {ok, [{_, Offset, Chunk, _}] = Chunks} when byte_size(Chunk) == Size ->
+                       {ok, Chunks} when is_list(Chunks) ->
                            {FLU, {ok, Chunks}};
                        Else ->
                            {FLU, Else}
@@ -935,3 +923,22 @@ timeout(infinity) ->
     timeout(15*60*1000);                        % close enough to infinity
 timeout(Timeout0) ->
     {Timeout0, Timeout0 + 30*1000}.
+
+trim_both_side([], _Offset, _Size) -> [];
+trim_both_side([{F, Offset0, Chunk, _Csum}|L], Offset, Size)
+  when Offset0 < Offset ->
+    TrashLen = 8 * (Offset - Offset0),
+    <<_:TrashLen/binary, NewChunk/binary>> = Chunk,
+    NewH = {F, Offset, NewChunk, <<>>},
+    trim_both_side([NewH|L], Offset, Size);
+trim_both_side(Chunks, Offset, Size) ->
+    %% TODO: optimize
+    [{F, Offset1, Chunk1, _Csum1}|L] = lists:reverse(Chunks),
+    Size1 = iolist_size(Chunk1),
+    if Offset + Size < Offset1 + Size1 ->
+            Size2 = Offset + Size - Offset1,
+            <<NewChunk1:Size2/binary, _/binary>> = Chunk1,
+            lists:reverse([{F, Offset1, NewChunk1, <<>>}|L]);
+       true ->
+            Chunks
+    end.

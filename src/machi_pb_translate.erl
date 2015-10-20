@@ -659,7 +659,6 @@ to_pb_response(ReqID, {high_read_chunk, _File, _Offset, _Size}, Resp) ->
         {ok, Chunks} ->
             MpbChunks = lists:map(fun({File, Offset, Bytes, Csum}) ->
                                           {Tag, Ck} = machi_util:unmake_tagged_csum(Csum),
-                                          io:format(user, "~p oom~n", [Csum]),
                                           #mpb_chunk{
                                              offset=Offset,
                                              file_name=File,
