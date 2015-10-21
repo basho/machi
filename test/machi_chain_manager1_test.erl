@@ -294,7 +294,10 @@ smoke0_test() ->
         ok = machi_partition_simulator:stop()
     end.
 
-smoke1_test() ->
+smoke1_test_() ->
+    {timeout, 1*60, fun() -> smoke1_test2() end}.
+
+smoke1_test2() ->
     machi_partition_simulator:start_link({1,2,3}, 100, 0),
     TcpPort = 62777,
     FluInfo = [{a,TcpPort+0,"./data.a"}, {b,TcpPort+1,"./data.b"}, {c,TcpPort+2,"./data.c"}],
@@ -309,12 +312,18 @@ smoke1_test() ->
     try
         {ok, P1} = ?MGR:test_calc_projection(M0, false),
         % DERP! Check for race with manager's proxy vs. proj listener
-        case ?MGR:test_read_latest_public_projection(M0, false) of
-            {error, partition} -> timer:sleep(500);
-            _                  -> ok
-        end,
-        {remote_write_results,{true,[{c,ok},{b,ok},{a,ok}]}} =
-            ?MGR:test_write_public_projection(M0, P1),
+        ok = lists:foldl(
+                    fun(_, {_,{true,[{c,ok},{b,ok},{a,ok}]}}) ->
+                            ok;             % Short-circuit remaining attempts
+                       (_, ok) ->
+                            ok;             % Skip remaining!
+                       (_, _Else) ->
+                            timer:sleep(10),
+                            ?MGR:test_write_public_projection(M0, P1)
+                    end, not_ok, lists:seq(1, 1000)),
+        %% Writing the exact same projection multiple times returns ok:
+        %% no change!
+        {_,{true,[{c,ok},{b,ok},{a,ok}]}} =  ?MGR:test_write_public_projection(M0, P1),
         {unanimous, P1, Extra1} = ?MGR:test_read_latest_public_projection(M0, false),
 
         ok
@@ -337,8 +346,6 @@ nonunanimous_setup_and_fix_test() ->
     %% {ok, Mb} = ?MGR:start_link(b, MembersDict, [{active_mode, false}]++XX),
     [{ok,_}=machi_flu_psup:start_flu_package(Name, Port, Dir, Opts) ||
                {Name,Port,Dir} <- FluInfo],
-    FLUs = [machi_flu_psup:make_flu_regname(Name) ||
-               {Name,_Port,_Dir} <- FluInfo],
     [Proxy_a, Proxy_b] = Proxies =
         [element(2,?FLU_PC:start_link(P)) || P <- P_s],
     MembersDict = machi_projection:make_members_dict(P_s),
