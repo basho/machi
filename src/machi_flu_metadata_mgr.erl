@@ -228,7 +228,7 @@ clear_ets(Tid, Mref) ->
     update_ets(Tid, R#md{ proxy_pid = undefined, mref = undefined }).
 
 purge_ets(Tid, R) ->
-    ok = ets:delete_object(Tid, R).
+    true = ets:delete_object(Tid, R).
 
 get_md_record_by_mref(Tid, Mref) ->
     [R] = ets:match_object(Tid, {md, '_', '_', Mref}),

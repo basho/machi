@@ -189,8 +189,8 @@ find_file(DataDir, Prefix, N) ->
     filelib:wildcard(Path).
 
 list_files(DataDir, Prefix) ->
-    {F, Path} = machi_util:make_data_filename(DataDir, Prefix, "*", "*"),
-    filelib:wildcard(F, filename:dirname(Path)).
+    {F_bin, Path} = machi_util:make_data_filename(DataDir, Prefix, "*", "*"),
+    filelib:wildcard(binary_to_list(F_bin), filename:dirname(Path)).
 
 make_filename_mgr_name(FluName) when is_atom(FluName) ->
     list_to_atom(atom_to_list(FluName) ++ "_filename_mgr").
