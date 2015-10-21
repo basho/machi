@@ -32,8 +32,8 @@ doc](./doc/high-level-machi.pdf) for further references.)
   mode") and strong constency use ("CP mode").  Both modes use a new
   consensus technique, Humming Consensus.
     * Scott will be
-      [http://ricon.io/agenda/#managing-chain-replication-metadata-with-humming-consensus](speaking about Humming Consensus)
-      at the [http://ricon.io](Ricon 2015 conference) in San Francisco,
+      [speaking about Humming Consensus](http://ricon.io/agenda/#managing-chain-replication-metadata-with-humming-consensus)
+      at the [Ricon 2015 conference] (http://ricon.io) in San Francisco,
       CA, USA on Thursday, November 5th, 2015.
     * Implementation of the file repair process for strong consistency
       is still in progress.
