@@ -60,7 +60,8 @@ DIALYZER_DEP_APPS = ebin/machi_pb.beam \
 		    deps/cluster_info/ebin \
 		    deps/protobuffs/ebin \
 		    deps/riak_dt/ebin
-DIALYZER_FLAGS = -Wno_return -Wrace_conditions -Wunderspecs
+### DIALYZER_FLAGS = -Wno_return -Wrace_conditions -Wunderspecs
+DIALYZER_FLAGS = -Wno_return -Wrace_conditions
 
 dialyzer: deps compile
 	dialyzer $(DIALYZER_FLAGS) --plt $(PLT) ebin $(DIALYZER_DEP_APPS) | \
