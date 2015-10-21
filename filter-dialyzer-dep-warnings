@@ -1,4 +1,5 @@
 ####################### patterns for general errors in dep modules:
+^riak_dt[a-z_]*\.erl:
 ^protobuffs\.erl:
 ^protobuffs_[a-z_]*\.erl:
 ^leexinc\.hrl:[0-9][0-9]*: 

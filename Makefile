@@ -56,11 +56,15 @@ PLT = $(HOME)/.machi_dialyzer_plt
 build_plt: deps compile
 	dialyzer --build_plt --output_plt $(PLT) --apps $(APPS) deps/*/ebin
 
-DIALYZER_DEP_APPS = ebin/machi_pb.beam deps/protobuffs/ebin
+DIALYZER_DEP_APPS = ebin/machi_pb.beam \
+		    deps/cluster_info/ebin \
+		    deps/protobuffs/ebin \
+		    deps/riak_dt/ebin
 DIALYZER_FLAGS = -Wno_return -Wrace_conditions -Wunderspecs
 
 dialyzer: deps compile
 	dialyzer $(DIALYZER_FLAGS) --plt $(PLT) ebin $(DIALYZER_DEP_APPS) | \
+	    tee ./.dialyzer-last-run.txt | \
             egrep -v -f ./filter-dialyzer-dep-warnings
 
 dialyzer-test: deps compile

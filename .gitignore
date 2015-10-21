@@ -1,4 +1,5 @@
 prototype/chain-manager/patch.*
+.dialyzer-last-run.txt
 .eqc-info
 .eunit
 deps
