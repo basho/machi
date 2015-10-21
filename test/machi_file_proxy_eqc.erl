@@ -202,7 +202,8 @@ read_next(S, _Res, _Args) -> S.
 
 read(Pid, Offset, Length) ->
     case machi_file_proxy:read(Pid, Offset, Length) of
-        {ok, [{_, Offset, Data, Csum}]} ->
+        {ok, Chunks} ->
+            [{_, Offset, Data, Csum}] = machi_cr_client:trim_both_side(Chunks, Offset, Offset+Length),
             {ok, Data, Csum};
         E ->
             E
