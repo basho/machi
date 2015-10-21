@@ -45,11 +45,10 @@
          %% List twiddling
          permutations/1, perms/1,
          combinations/1, ordered_combinations/1,
-         mk_order/2
+         mk_order/2,
+         %% Other
+         wait_for_death/2, wait_for_life/2
         ]).
-
-%% TODO: Leave this in place?
--compile(export_all).
 
 -include("machi.hrl").
 -include("machi_projection.hrl").
@@ -316,9 +315,20 @@ wait_for_death(Pid, Iters) when is_pid(Pid) ->
     case erlang:is_process_alive(Pid) of
         false ->
             ok;
-        true  ->
+        true ->
             timer:sleep(1),
             wait_for_death(Pid, Iters-1)
+    end.
+
+wait_for_life(Reg, 0) ->
+    exit({not_alive_yet, Reg});
+wait_for_life(Reg, Iters) when is_atom(Reg) ->
+    case erlang:whereis(Reg) of
+        Pid when is_pid(Pid) ->
+            {ok, Pid};
+        _ ->
+            timer:sleep(1),
+            wait_for_life(Reg, Iters-1)
     end.
 
 %%%%%%%%%%%%%%%%%
