@@ -105,7 +105,10 @@ api_smoke_test() ->
         (catch machi_flu1_test:stop_flu_package(RegName))
     end.
 
-flu_restart_test() ->
+flu_restart_test_() ->
+    {timeout, 1*60, fun() -> flu_restart_test2() end}.
+
+flu_restart_test2() ->
     RegName = a,
     Host = "localhost",
     TcpPort = 57125,
