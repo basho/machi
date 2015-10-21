@@ -71,7 +71,7 @@
 
 -record(state, {fluname :: atom(),
                 tid     :: ets:tid(),
-                datadir :: file:dir(),
+                datadir :: string(),
                 epoch   :: pv1_epoch_n()
                }).
 

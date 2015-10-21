@@ -65,25 +65,25 @@ dump() ->
                                [Y,M,D,HH,MM,SS])),
     cluster_info:dump_local_node(Filename).
 
--spec public_projection(atom()) -> ok.
+-spec public_projection(atom()) -> [{atom(), term()}].
 public_projection(FluName) ->
     projection(FluName, public).
 
--spec private_projection(atom()) -> ok.
+-spec private_projection(atom()) -> [{atom(), term()}].
 private_projection(FluName) ->
     projection(FluName, private).
 
--spec chain_manager(atom()) -> ok.
+-spec chain_manager(atom()) -> term().
 chain_manager(FluName) ->
     Mgr = machi_flu_psup:make_mgr_supname(FluName),
     sys:get_status(Mgr).
 
--spec fitness(atom()) -> ok.
+-spec fitness(atom()) -> term().
 fitness(FluName) ->
     Fitness = machi_flu_psup:make_fitness_regname(FluName),
     sys:get_status(Fitness).
 
--spec flu1(atom()) -> ok.
+-spec flu1(atom()) -> [{atom(), term()}].
 flu1(FluName) ->
     State = machi_flu1:current_state(FluName),
     machi_flu1:format_state(State).

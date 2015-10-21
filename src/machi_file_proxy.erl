@@ -84,7 +84,7 @@
     csum_file             :: string()|undefined,
     csum_path             :: string()|undefined,
     eof_position = 0      :: non_neg_integer(),
-    data_filehandle       :: file:filehandle(),
+    data_filehandle       :: file:io_device(),
     csum_table            :: machi_csum_table:table(),
     tref                  :: reference(), %% timer ref
     ticks = 0             :: non_neg_integer(), %% ticks elapsed with no new operations
@@ -498,7 +498,7 @@ check_or_make_tagged_csum(OtherTag, _ClientCsum, _Data) ->
     lager:warning("Unknown checksum tag ~p", [OtherTag]),
     {error, bad_checksum}.
    
--spec do_read(FHd        :: file:filehandle(),
+-spec do_read(FHd        :: file:io_device(),
               Filename   :: string(),
               CsumTable  :: machi_csum_table:table(),
               Offset     :: non_neg_integer(),
@@ -560,7 +560,7 @@ read_all_ranges(FHd, Filename, [{Offset, Size, TaggedCsum}|T], ReadChunks) ->
             {error, Other}
     end.
 
--spec handle_write( FHd        :: file:filehandle(),
+-spec handle_write( FHd        :: file:io_device(),
                     CsumTable  :: machi_csum_table:table(),
                     Filename   :: string(),
                     TaggedCsum :: binary(),
@@ -618,7 +618,7 @@ handle_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Data) ->
 
 % @private Implements the disk writes for both the write and append
 % operation.
--spec do_write( FHd        :: file:descriptor(),
+-spec do_write( FHd        :: file:io_device(),
                 CsumTable  :: machi_csum_table:table(),
                 Filename   :: string(),
                 TaggedCsum :: binary(),
