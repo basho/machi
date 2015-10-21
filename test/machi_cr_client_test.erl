@@ -32,6 +32,7 @@ smoke_test_() -> {timeout, 1*60, fun() -> smoke_test2() end}.
 
 setup_smoke_test(Host, PortBase, Os, Witness_list) ->
     os:cmd("rm -rf ./data.a ./data.b ./data.c"),
+    {ok, _} = machi_util:wait_for_life(machi_flu_sup, 100),
 
     F = fun(X) -> case lists:member(X, Witness_list) of
                       true ->
@@ -185,9 +186,10 @@ smoke_test2() ->
 
         ok
     after
+        exit(SupPid, normal),
+        machi_util:wait_for_death(SupPid, 100),
         error_logger:tty(true),
-        catch application:stop(machi),
-        exit(SupPid, normal)
+        catch application:stop(machi)
     end.
 
 witness_smoke_test_() -> {timeout, 1*60, fun() -> witness_smoke_test2() end}.
