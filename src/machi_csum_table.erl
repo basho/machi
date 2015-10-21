@@ -63,8 +63,8 @@ open(CSumFilename, _Opts) ->
     {ok, C0#machi_csum_table{fd=Fd}}.
 
 -spec find(table(), machi_dt:file_offset(), machi_dt:file_size()) ->
-                  list({machi_dt:chunk_pos(),
-                        machi_dt:chunk_size(),
+                  list({machi_dt:file_offset(),
+                        machi_dt:file_size(),
                         machi_dt:chunk_csum()}).
 find(#machi_csum_table{table=T}, Offset, Size) ->
     ets:select(T, [{{'$1', '$2', '$3'},

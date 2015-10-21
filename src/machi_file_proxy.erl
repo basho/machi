@@ -281,8 +281,6 @@ handle_call({read, Offset, Length}, _From,
             %% For now we are omiting the checksum data because it blows up
             %% protobufs.
                 {{ok, Chunks}, Err};
-            eof ->
-                {{error, not_written}, Err + 1};
             Error ->
                 {Error, Err + 1}
         end,
@@ -477,7 +475,7 @@ code_change(_OldVsn, State, _Extra) ->
 schedule_tick() ->
     erlang:send_after(?TICK, self(), tick).
 
--spec check_or_make_tagged_csum(Type     :: binary(),
+-spec check_or_make_tagged_csum(Type     :: non_neg_integer(),
                                 Checksum :: binary(),
                                 Data     :: binary() ) -> binary() |
                                                           {error, {bad_csum, Bad :: binary()}}.
