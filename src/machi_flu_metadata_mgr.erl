@@ -150,7 +150,7 @@ handle_info({'DOWN', Mref, process, Pid, file_rollover}, State = #state{ fluname
                                                                          tid = Tid }) ->
     lager:info("file proxy ~p shutdown because of file rollover", [Pid]),
     R = get_md_record_by_mref(Tid, Mref),
-    [Prefix | _Rest] = machi_util:parse_filename({file, R#md.filename}),
+    [Prefix | _Rest] = machi_util:parse_filename(R#md.filename),
 
     %% We only increment the counter here. The filename will be generated on the 
     %% next append request to that prefix and since the filename will have a new
