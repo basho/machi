@@ -11,3 +11,7 @@
 ^  erl_prettypr:format/1
 ^  erl_syntax:form_list/1
 ^  machi_partition_simulator:get/1
+####################### Dialyzer warnings that including test/* code will silence
+### test code includes more variety so these match errors disappear
+machi_chain_manager1.erl.* The pattern .*P1.*P2.*expected_author2.*can never match the type
+machi_chain_manager1.erl.* The pattern .*P1.*P2.*epoch_not_si.*can never match the type
