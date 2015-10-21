@@ -5,14 +5,16 @@
          all_trimmed/2,
          sync/1,
          calc_unwritten_bytes/1,
+         split_checksum_list_blob_decode/1,
          close/1, delete/1]).
 
--export([encode_csum_file_entry/3, decode_csum_file_entry/1]).
+-export([encode_csum_file_entry/3, encode_csum_file_entry_bin/3,
+         decode_csum_file_entry/1]).
 
 -include("machi.hrl").
 
 -ifdef(TEST).
--export([split_checksum_list_blob_decode/1, all/1]).
+-export([all/1]).
 -endif.
 
 -record(machi_csum_table,

@@ -117,6 +117,8 @@
          simple_chain_state_transition_is_sane/3,
          simple_chain_state_transition_is_sane/5,
          chain_state_transition_is_sane/6]).
+-export([perhaps_call/5, % for partition simulator use w/machi_fitness
+         init_remember_down_list/0]).
 %% Exports so that EDoc docs generated for these internal funcs.
 -export([mk/3]).
 
@@ -129,8 +131,7 @@
 -export([test_calc_projection/2,
          test_write_public_projection/2,
          test_read_latest_public_projection/2]).
--export([perhaps_call/5, % for partition simulator use w/machi_fitness
-         init_remember_down_list/0, update_remember_down_list/1,
+-export([update_remember_down_list/1,
          get_remember_down_list/0]).
 
 -ifdef(EQC).

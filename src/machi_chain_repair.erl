@@ -210,7 +210,7 @@ make_repair_directives(ConsistencyMode, RepairMode, File, Size, EpochID,
                          Proxy, EpochID, File, ?LONG_TIMEOUT) of
                       {ok, InfoBin} ->
                           {Info, _} =
-                            machi_flu1:split_checksum_list_blob_decode(InfoBin),
+                            machi_csum_table:split_checksum_list_blob_decode(InfoBin),
                           Info;
                       {error, no_such_file} ->
                           []
