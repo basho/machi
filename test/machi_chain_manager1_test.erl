@@ -284,7 +284,6 @@ smoke0_test() ->
     timer:sleep(1),
     {ok, FLUaP} = ?FLU_PC:start_link(Pa),
     {ok, M0} = ?MGR:start_link(a, Members_Dict, [{active_mode, false}]),
-    _SockA = machi_util:connect(Host, TcpPort),
     try
         pong = ?MGR:ping(M0)
     after
