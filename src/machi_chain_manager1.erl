@@ -2678,10 +2678,10 @@ simple_chain_state_transition_is_sane(_Author1, UPI1, Repair1, Author2, UPI2) ->
                             ?RETURN2(true);
                         UPI1_tail ->
                             ?RETURN2({expected_author2,UPI1_tail,
-                                     [{upi1,UPI1},
-                                      {repair1,Repair1},
-                                      {author2,Author2},
-                                      {upi2,UPI2}]})
+                                      [{upi1,UPI1},
+                                       {repair1,Repair1},
+                                       {author2,Author2},
+                                       {upi2,UPI2}]})
                     end
             end
     end.
