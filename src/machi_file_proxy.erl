@@ -127,7 +127,7 @@ sync(_Pid, Type) ->
 
 % @doc Read file at offset for length. This returns a sequence of all
 % chunks that overlaps with requested offset and length. Note that
-% borders are not alinged, not to mess up repair at cr_client with
+% borders are not aligned, not to mess up repair at cr_client with
 % checksums. They should be cut at cr_client.
 -spec read(Pid :: pid(),
            Offset :: non_neg_integer(),

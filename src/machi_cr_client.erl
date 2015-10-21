@@ -531,7 +531,7 @@ do_read_chunk2(File, Offset, Size, Depth, STime, TO,
     case ?FLU_PC:read_chunk(orddict:fetch(Tail, PD), EpochID,
                             File, Offset, Size, ?TIMEOUT) of
         {ok, Chunks0} when is_list(Chunks0) ->
-            Chunks = trim_both_side(Chunks0, Offset, Size),
+            Chunks = trim_both_side(Chunks0, Offset, Offset + Size),
             {reply, {ok, Chunks}, S};
         %% {ok, BadChunk} ->
         %%     %% TODO cleaner handling of bad chunks
@@ -924,21 +924,23 @@ timeout(infinity) ->
 timeout(Timeout0) ->
     {Timeout0, Timeout0 + 30*1000}.
 
-trim_both_side([], _Offset, _Size) -> [];
-trim_both_side([{F, Offset0, Chunk, _Csum}|L], Offset, Size)
-  when Offset0 < Offset ->
-    TrashLen = 8 * (Offset - Offset0),
+%% @doc Trim both right and left border of chunks to fit in to given
+%% range [LeftPos, RightPos]. TODO: write unit tests for this function.
+trim_both_side([], _, _) -> [];
+trim_both_side([{F, Offset, Chunk, _Csum}|L], LeftPos, RightPos)
+  when Offset < LeftPos andalso LeftPos < RightPos ->
+    TrashLen = 8 * (LeftPos - Offset),
     <<_:TrashLen/binary, NewChunk/binary>> = Chunk,
-    NewH = {F, Offset, NewChunk, <<>>},
-    trim_both_side([NewH|L], Offset, Size);
-trim_both_side(Chunks, Offset, Size) ->
+    NewH = {F, LeftPos, NewChunk, <<>>},
+    trim_both_side([NewH|L], LeftPos, RightPos);
+trim_both_side(Chunks, LeftPos, RightPos) when LeftPos =< RightPos ->
     %% TODO: optimize
-    [{F, Offset1, Chunk1, _Csum1}|L] = lists:reverse(Chunks),
-    Size1 = iolist_size(Chunk1),
-    if Offset + Size < Offset1 + Size1 ->
-            Size2 = Offset + Size - Offset1,
-            <<NewChunk1:Size2/binary, _/binary>> = Chunk1,
-            lists:reverse([{F, Offset1, NewChunk1, <<>>}|L]);
+    [{F, Offset, Chunk, _Csum}|L] = lists:reverse(Chunks),
+    Size = iolist_size(Chunk),
+    if RightPos < Offset + Size ->
+            NewSize = RightPos - Offset,
+            <<NewChunk:NewSize/binary, _/binary>> = Chunk,
+            lists:reverse([{F, Offset, NewChunk, <<>>}|L]);
        true ->
             Chunks
     end.
