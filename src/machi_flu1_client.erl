@@ -56,7 +56,7 @@
          %% File API
          append_chunk/4, append_chunk/5,
          append_chunk_extra/5, append_chunk_extra/6,
-         read_chunk/5, read_chunk/6,
+         read_chunk/6, read_chunk/7,
          checksum_list/3, checksum_list/4,
          list_files/2, list_files/3,
          wedge_status/1, wedge_status/2,
@@ -144,26 +144,28 @@ append_chunk_extra(Host, TcpPort, EpochID, Prefix, Chunk, ChunkExtra)
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
--spec read_chunk(port_wrap(), machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk_size()) ->
+-spec read_chunk(port_wrap(), machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk_size(),
+                 proplists:proplist()) ->
       {ok, machi_dt:chunk_s()} |
       {error, machi_dt:error_general() | 'not_written' | 'partial_read'} |
       {error, term()}.
-read_chunk(Sock, EpochID, File, Offset, Size)
+read_chunk(Sock, EpochID, File, Offset, Size, Opts)
   when Offset >= ?MINIMUM_OFFSET, Size >= 0 ->
-    read_chunk2(Sock, EpochID, File, Offset, Size).
+    read_chunk2(Sock, EpochID, File, Offset, Size, Opts).
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
 -spec read_chunk(machi_dt:inet_host(), machi_dt:inet_port(), machi_dt:epoch_id(),
-                 machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk_size()) ->
+                 machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk_size(),
+                 proplists:proplist()) ->
       {ok, machi_dt:chunk_s()} |
       {error, machi_dt:error_general() | 'not_written' | 'partial_read'} |
       {error, term()}.
-read_chunk(Host, TcpPort, EpochID, File, Offset, Size)
+read_chunk(Host, TcpPort, EpochID, File, Offset, Size, Opts)
   when Offset >= ?MINIMUM_OFFSET, Size >= 0 ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
-        read_chunk2(Sock, EpochID, File, Offset, Size)
+        read_chunk2(Sock, EpochID, File, Offset, Size, Opts)
     after
         disconnect(Sock)
     end.
@@ -516,12 +518,12 @@ trunc_hack(Host, TcpPort, EpochID, File) when is_integer(TcpPort) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-read_chunk2(Sock, EpochID, File0, Offset, Size) ->
+read_chunk2(Sock, EpochID, File0, Offset, Size, Opts) ->
     ReqID = <<"id">>,
     File = machi_util:make_binary(File0),
     Req = machi_pb_translate:to_pb_request(
             ReqID,
-            {low_read_chunk, EpochID, File, Offset, Size, []}),
+            {low_read_chunk, EpochID, File, Offset, Size, Opts}),
     do_pb_request_common(Sock, ReqID, Req).
 
 append_chunk2(Sock, EpochID, Prefix0, Chunk0, ChunkExtra) ->

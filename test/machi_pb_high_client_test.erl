@@ -81,8 +81,8 @@ smoke_test2() ->
                      {iolist_to_binary(Chunk3), File3, Off3, Size3}],
             [begin
                  File = binary_to_list(Fl),
-                 ?assertMatch({ok, [{File, Off, Ch, _}]},
-                              ?C:read_chunk(Clnt, Fl, Off, Sz))
+                 ?assertMatch({ok, {[{File, Off, Ch, _}], []}},
+                              ?C:read_chunk(Clnt, Fl, Off, Sz, []))
              end || {Ch, Fl, Off, Sz} <- Reads],
 
             {ok, KludgeBin} = ?C:checksum_list(Clnt, File1),

@@ -75,13 +75,15 @@ from_pb_request(#mpb_ll_request{
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    read_chunk=#mpb_ll_readchunkreq{
-                     epoch_id=PB_EpochID,
-                     chunk_pos=ChunkPos,
-                     flag_no_checksum=PB_GetNoChecksum,
-                     flag_no_chunk=PB_GetNoChunk}}) ->
+                                 epoch_id=PB_EpochID,
+                                 chunk_pos=ChunkPos,
+                                 flag_no_checksum=PB_GetNoChecksum,
+                                 flag_no_chunk=PB_GetNoChunk,
+                                 flag_needs_trimmed=PB_NeedsTrimmed}}) ->
     EpochID = conv_to_epoch_id(PB_EpochID),
     Opts = [{no_checksum, conv_to_boolean(PB_GetNoChecksum)},
-            {no_chunk, conv_to_boolean(PB_GetNoChunk)}],
+            {no_chunk, conv_to_boolean(PB_GetNoChunk)},
+            {needs_trimmed, conv_to_boolean(PB_NeedsTrimmed)}],
     #mpb_chunkpos{file_name=File,
                   offset=Offset,
                   chunk_size=Size} = ChunkPos,
@@ -177,8 +179,15 @@ from_pb_request(#mpb_request{req_id=ReqID,
                              read_chunk=IR=#mpb_readchunkreq{}}) ->
     #mpb_readchunkreq{chunk_pos=#mpb_chunkpos{file_name=File,
                                               offset=Offset,
-                                              chunk_size=Size}} = IR,
-    {ReqID, {high_read_chunk, File, Offset, Size}};
+                                              chunk_size=Size},
+                     flag_no_checksum=FlagNoChecksum,
+                     flag_no_chunk=FlagNoChunk,
+                     flag_needs_trimmed=NeedsTrimmed} = IR,
+    %% I want MAPS
+    Options = [{no_checksum, machi_util:int2bool(FlagNoChecksum)},
+               {no_chunk, machi_util:int2bool(FlagNoChunk)},
+               {needs_trimmed, machi_util:int2bool(NeedsTrimmed)}],
+    {ReqID, {high_read_chunk, File, Offset, Size, Options}};
 from_pb_request(#mpb_request{req_id=ReqID,
                              trim_chunk=IR=#mpb_trimchunkreq{}}) ->
     #mpb_trimchunkreq{chunk_pos=#mpb_chunkpos{file_name=File,
@@ -233,7 +242,8 @@ from_pb_response(#mpb_ll_response{
 from_pb_response(#mpb_ll_response{
                     req_id=ReqID,
                     read_chunk=#mpb_ll_readchunkresp{status=Status,
-                                                     chunks=PB_Chunks}}) ->
+                                                     chunks=PB_Chunks,
+                                                     trimmed=PB_Trimmed}}) ->
     case Status of
         'OK' ->
             Chunks = lists:map(fun(#mpb_chunk{file_name=File,
@@ -243,7 +253,12 @@ from_pb_response(#mpb_ll_response{
                                        Csum = <<(conv_to_csum_tag(T)):8, Ck/binary>>,
                                       {File, Offset, Bytes, Csum}
                               end, PB_Chunks),
-            {ReqID, {ok, Chunks}};
+            Trimmed = lists:map(fun(#mpb_chunkpos{file_name=File,
+                                                  offset=Offset,
+                                                  chunk_size=Size}) ->
+                                        {File, Offset, Size}
+                                end, PB_Trimmed),
+            {ReqID, {ok, {Chunks, Trimmed}}};
         _ ->
             {ReqID, machi_pb_high_client:convert_general_status_code(Status)}
     end;
@@ -382,17 +397,23 @@ to_pb_request(ReqID, {low_write_chunk, EpochID, File, Offset, Chunk, CSum_tag, C
                                                     offset=Offset,
                                                     chunk=Chunk,
                                                     csum=PB_CSum}}};
-to_pb_request(ReqID, {low_read_chunk, EpochID, File, Offset, Size, _Opts}) ->
+to_pb_request(ReqID, {low_read_chunk, EpochID, File, Offset, Size, Opts}) ->
     %% TODO: stop ignoring Opts ^_^
     PB_EpochID = conv_from_epoch_id(EpochID),
+    FNChecksum = proplists:get_value(no_checksum, Opts, false),
+    FNChunk = proplists:get_value(no_chunk, Opts, false),
+    NeedsTrimmed = proplists:get_value(needs_merge, Opts, false),
     #mpb_ll_request{
                req_id=ReqID, do_not_alter=2,
                read_chunk=#mpb_ll_readchunkreq{
-                 epoch_id=PB_EpochID,
-                 chunk_pos=#mpb_chunkpos{
-                              file_name=File,
-                              offset=Offset,
-                              chunk_size=Size}}};
+                             epoch_id=PB_EpochID,
+                             chunk_pos=#mpb_chunkpos{
+                                          file_name=File,
+                                          offset=Offset,
+                                          chunk_size=Size},
+                            flag_no_checksum=machi_util:bool2int(FNChecksum),
+                            flag_no_chunk=machi_util:bool2int(FNChunk),
+                            flag_needs_trimmed=machi_util:bool2int(NeedsTrimmed)}};
 to_pb_request(ReqID, {low_checksum_list, EpochID, File}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
@@ -478,7 +499,7 @@ to_pb_response(ReqID, {low_write_chunk, _EID, _Fl, _Off, _Ch, _CST, _CS},Resp)->
                      write_chunk=#mpb_ll_writechunkresp{status=Status}};
 to_pb_response(ReqID, {low_read_chunk, _EID, _Fl, _Off, _Sz, _Opts}, Resp)->
     case Resp of
-        {ok, Chunks} ->
+        {ok, {Chunks, Trimmed}} ->
             PB_Chunks = lists:map(fun({File, Offset, Bytes, Csum}) ->
                                           {Tag, Ck} = machi_util:unmake_tagged_csum(Csum),
                                           #mpb_chunk{file_name=File,
@@ -487,9 +508,15 @@ to_pb_response(ReqID, {low_read_chunk, _EID, _Fl, _Off, _Sz, _Opts}, Resp)->
                                                      csum=#mpb_chunkcsum{type=conv_from_csum_tag(Tag),
                                                                          csum=Ck}}
                                   end, Chunks),
+            PB_Trimmed = lists:map(fun({File, Offset, Size}) ->
+                                           #mpb_chunkpos{file_name=File,
+                                                         offset=Offset,
+                                                         chunk_size=Size}
+                                   end, Trimmed),
             #mpb_ll_response{req_id=ReqID,
                              read_chunk=#mpb_ll_readchunkresp{status='OK',
-                                                              chunks=PB_Chunks}};
+                                                              chunks=PB_Chunks,
+                                                              trimmed=PB_Trimmed}};
         {error, _}=Error ->
             Status = conv_from_status(Error),
             #mpb_ll_response{req_id=ReqID,
@@ -654,10 +681,10 @@ to_pb_response(ReqID, {high_write_chunk, _File, _Offset, _Chunk, _TaggedCSum}, R
         _Else ->
             make_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
-to_pb_response(ReqID, {high_read_chunk, _File, _Offset, _Size}, Resp) ->
+to_pb_response(ReqID, {high_read_chunk, _File, _Offset, _Size, _}, Resp) ->
     case Resp of
-        {ok, Chunks} ->
-            MpbChunks = lists:map(fun({File, Offset, Bytes, Csum}) ->
+        {ok, {Chunks, Trimmed}} ->
+            PB_Chunks = lists:map(fun({File, Offset, Bytes, Csum}) ->
                                           {Tag, Ck} = machi_util:unmake_tagged_csum(Csum),
                                           #mpb_chunk{
                                              offset=Offset,
@@ -665,9 +692,15 @@ to_pb_response(ReqID, {high_read_chunk, _File, _Offset, _Size}, Resp) ->
                                              chunk=Bytes,
                                              csum=#mpb_chunkcsum{type=conv_from_csum_tag(Tag), csum=Ck}}
                                   end, Chunks),
+            PB_Trimmed = lists:map(fun({File, Offset, Size}) ->
+                                           #mpb_chunkpos{file_name=File,
+                                                         offset=Offset,
+                                                         chunk_size=Size}
+                                   end, Trimmed),
             #mpb_response{req_id=ReqID,
                           read_chunk=#mpb_readchunkresp{status='OK',
-                                                        chunks=MpbChunks}};
+                                                        chunks=PB_Chunks,
+                                                        trimmed=PB_Trimmed}};
         {error, _}=Error ->
             Status = conv_from_status(Error),
             #mpb_response{req_id=ReqID,

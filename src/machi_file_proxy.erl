@@ -52,6 +52,7 @@
     sync/1,
     sync/2,
     read/3,
+    read/4,
     write/3,
     write/4,
     append/2,
@@ -83,9 +84,9 @@
     wedged = false        :: boolean(),
     csum_file             :: string()|undefined,
     csum_path             :: string()|undefined,
-    eof_position = 0      :: non_neg_integer(),
     data_filehandle       :: file:io_device(),
     csum_table            :: machi_csum_table:table(),
+    eof_position = 0      :: non_neg_integer(),
     tref                  :: reference(), %% timer ref
     ticks = 0             :: non_neg_integer(), %% ticks elapsed with no new operations
     ops = 0               :: non_neg_integer(), %% sum of all ops
@@ -135,11 +136,22 @@ sync(_Pid, Type) ->
                   {ok, [{Filename::string(), Offset :: non_neg_integer(),
                          Data :: binary(), Checksum :: binary()}]} |
                   {error, Reason :: term()}.
-read(Pid, Offset, Length) when is_pid(Pid) andalso is_integer(Offset) andalso Offset >= 0 
-                               andalso is_integer(Length) andalso Length > 0 ->
-    gen_server:call(Pid, {read, Offset, Length}, ?TIMEOUT);
-read(_Pid, Offset, Length) ->
-    lager:warning("Bad args to read: Offset ~p, Length ~p", [Offset, Length]),
+read(Pid, Offset, Length) ->
+    read(Pid, Offset, Length, []).
+
+-spec read(Pid :: pid(),
+           Offset :: non_neg_integer(),
+           Length :: non_neg_integer(),
+           [{no_checksum|no_chunk|needs_trimmed, boolean()}]) ->
+                  {ok, [{Filename::string(), Offset :: non_neg_integer(),
+                         Data :: binary(), Checksum :: binary()}]} |
+                  {error, Reason :: term()}.
+read(Pid, Offset, Length, Opts) when is_pid(Pid) andalso is_integer(Offset) andalso Offset >= 0 
+                                     andalso is_integer(Length) andalso Length > 0
+                                     andalso is_list(Opts) ->
+    gen_server:call(Pid, {read, Offset, Length, Opts}, ?TIMEOUT);
+read(_Pid, Offset, Length, Opts) ->
+    lager:warning("Bad args to read: Offset ~p, Length ~p, Options ~p", [Offset, Length, Opts]),
     {error, bad_arg}.
 
 % @doc Write data at offset
@@ -211,8 +223,8 @@ init({Filename, DataDir}) ->
         csum_table      = CsumTable,
         tref            = Tref,
         eof_position    = Eof},
-    lager:debug("Starting file proxy ~p for filename ~p, state = ~p",
-                [self(), Filename, St]),
+    lager:debug("Starting file proxy ~p for filename ~p, state = ~p, Eof = ~p",
+                [self(), Filename, St, Eof]),
     {ok, St}.
 
 % @private
@@ -250,13 +262,13 @@ handle_call({sync, all}, _From, State = #state{filename = F,
 
 %%% READS
 
-handle_call({read, _Offset, _Length}, _From,
+handle_call({read, _Offset, _Length, _}, _From,
             State = #state{wedged = true,
                            reads = {T, Err}
                           }) ->
     {reply, {error, wedged}, State#state{writes = {T + 1, Err + 1}}};
 
-handle_call({read, Offset, Length}, _From,
+handle_call({read, Offset, Length, _Opts}, _From,
                 State = #state{eof_position = Eof,
                                reads = {T, Err}
                               }) when Offset > Eof ->
@@ -265,23 +277,28 @@ handle_call({read, Offset, Length}, _From,
                 [Offset, Length, Eof]),
     {reply, {error, not_written}, State#state{reads = {T + 1, Err + 1}}};
 
-handle_call({read, Offset, Length}, _From,
+handle_call({read, Offset, Length, Opts}, _From,
             State = #state{filename = F,
                            data_filehandle = FH,
                            csum_table = CsumTable,
+                           eof_position = EofP,
                            reads = {T, Err}
                           }) ->
+    NoChecksum = proplists:get_value(no_checksum, Opts, false),
+    NoChunk = proplists:get_value(no_chunk, Opts, false),
+    NeedsMerge = proplists:get_value(needs_trimmed, Opts, false),
     {Resp, NewErr} =
-        case do_read(FH, F, CsumTable, Offset, Length) of
-            {ok, []} ->
+        case do_read(FH, F, CsumTable, Offset, Length, NoChecksum, NoChunk, NeedsMerge) of
+            {ok, {[], []}} ->
                 {{error, not_written}, Err + 1};
-            {ok, Chunks} ->
-            %% Kludge to wrap read result in tuples, to support fragmented read
-            %% XXX FIXME 
-            %% For now we are omiting the checksum data because it blows up
-            %% protobufs.
-                {{ok, Chunks}, Err};
+            {ok, {Chunks, Trimmed}} ->
+                %% Kludge to wrap read result in tuples, to support fragmented read
+                %% XXX FIXME 
+                %% For now we are omiting the checksum data because it blows up
+                %% protobufs.
+                {{ok, {Chunks, Trimmed}}, Err};
             Error ->
+                lager:error("Can't read ~p, ~p at File ~p", [Offset, Length, F]),
                 {Error, Err + 1}
         end,
     {reply, Resp, State#state{reads = {T+1, NewErr}}};
@@ -298,6 +315,7 @@ handle_call({write, Offset, ClientMeta, Data}, _From,
             State = #state{filename = F,
                            writes = {T, Err},
                            data_filehandle = FHd,
+                           eof_position=EofP,
                            csum_table = CsumTable}) ->
 
     ClientCsumTag = proplists:get_value(client_csum_tag, ClientMeta, ?CSUM_TAG_NONE),
@@ -318,6 +336,8 @@ handle_call({write, Offset, ClientMeta, Data}, _From,
             end
     end,
     {NewEof, infinity} = lists:last(machi_csum_table:calc_unwritten_bytes(CsumTable)),
+    lager:debug("Wrote ~p bytes at ~p of file ~p, NewEOF = ~p~n",
+                [iolist_size(Data), Offset, F, NewEof]),
     {reply, Resp, State#state{writes = {T+1, NewErr},
                               eof_position = NewEof}};
 
@@ -351,15 +371,14 @@ handle_call({append, ClientMeta, Extra, Data}, _From,
                 ok ->
                     {{ok, F, EofP}, Err};
                 Error ->
-                    {Error, Err + 1, EofP}
+                    {Error, Err + 1}
             end
     end,
-    %% TODO: do we check this with calling
-    %% machi_csum_table:calc_unwritten_bytes/1?
     NewEof = EofP + byte_size(Data) + Extra,
+    lager:debug("appended ~p bytes at ~p file ~p. NewEofP = ~p",
+                [iolist_size(Data), EofP, F, NewEof]),
     {reply, Resp, State#state{appends = {T+1, NewErr},
-                              eof_position = NewEof
-                             }};
+                              eof_position = NewEof}};
 
 handle_call(Req, _From, State) ->
     lager:warning("Unknown call: ~p", [Req]),
@@ -500,7 +519,10 @@ check_or_make_tagged_csum(OtherTag, _ClientCsum, _Data) ->
               Filename   :: string(),
               CsumTable  :: machi_csum_table:table(),
               Offset     :: non_neg_integer(),
-              Size       :: non_neg_integer()
+              Size       :: non_neg_integer(),
+              NoChecksum :: boolean(),
+              NoChunk    :: boolean(),
+              NeedsTrimmed :: boolean()
              ) -> {ok, Chunks :: [{string(), Offset::non_neg_integer(), binary(), Csum :: binary()}]} |
                   {error, bad_checksum} |
                   {error, partial_read} |
@@ -519,6 +541,9 @@ check_or_make_tagged_csum(OtherTag, _ClientCsum, _Data) ->
 %        tuple is returned.</ul>
 % </li>
 %
+do_read(FHd, Filename, CsumTable, Offset, Size, _, _, _) ->
+    do_read(FHd, Filename, CsumTable, Offset, Size).
+
 do_read(FHd, Filename, CsumTable, Offset, Size) ->
     %% Note that find/3 only returns overlapping chunks, both borders
     %% are not aligned to original Offset and Size.
@@ -526,7 +551,8 @@ do_read(FHd, Filename, CsumTable, Offset, Size) ->
     read_all_ranges(FHd, Filename, ChunkCsums, []).
 
 read_all_ranges(_, _, [], ReadChunks) ->
-    {ok, lists:reverse(ReadChunks)};
+    %% TODO: currently returns empty list of trimmed chunks
+    {ok, {lists:reverse(ReadChunks), []}};
 
 read_all_ranges(FHd, Filename, [{Offset, Size, TaggedCsum}|T], ReadChunks) ->
     case file:pread(FHd, Offset, Size) of
@@ -592,12 +618,12 @@ handle_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Data) ->
                     {error, Reason}
             end;
         [{Offset, Size, TaggedCsum}] ->
-            case do_read(FHd, Filename, CsumTable, Offset, Size) of
+            case do_read(FHd, Filename, CsumTable, Offset, Size, false, false, false) of
                 {error, _} = E ->
                     lager:warning("This should never happen: got ~p while reading at offset ~p in file ~p that's supposedly written",
                                   [E, Offset, Filename]),
                     {error, server_insanity};
-                {ok, [{_, Offset, Data, TaggedCsum}]} ->
+                {ok, {[{_, Offset, Data, TaggedCsum}], _}} ->
                     %% TODO: what if different checksum got from do_read()?
                     ok;
                 {ok, _Other} ->
@@ -632,7 +658,6 @@ do_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Size, Data) ->
             ok = machi_csum_table:write(CsumTable, Offset, Size, TaggedCsum),
             lager:debug("Successful write to checksum file for ~p",
                         [Filename]),
-            %% io:format(user, "here, heh ~p~n", [?LINE]),
             ok;
         Other ->
             lager:error("Got ~p during write to file ~p at offset ~p, length ~p",

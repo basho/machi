@@ -122,7 +122,7 @@
          append_chunk/3, append_chunk/4,
          append_chunk_extra/4, append_chunk_extra/5,
          write_chunk/4, write_chunk/5,
-         read_chunk/4, read_chunk/5,
+         read_chunk/5, read_chunk/6,
          trim_chunk/4, trim_chunk/5,
          checksum_list/2, checksum_list/3,
          list_files/1, list_files/2,
@@ -201,14 +201,14 @@ write_chunk(PidSpec, File, Offset, Chunk, Timeout0) ->
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
-read_chunk(PidSpec, File, Offset, Size) ->
-    read_chunk(PidSpec, File, Offset, Size, ?DEFAULT_TIMEOUT).
+read_chunk(PidSpec, File, Offset, Size, Opts) ->
+    read_chunk(PidSpec, File, Offset, Size, Opts, ?DEFAULT_TIMEOUT).
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
-read_chunk(PidSpec, File, Offset, Size, Timeout0) ->
+read_chunk(PidSpec, File, Offset, Size, Opts, Timeout0) ->
     {TO, Timeout} = timeout(Timeout0),
-    gen_server:call(PidSpec, {req, {read_chunk, File, Offset, Size, TO}},
+    gen_server:call(PidSpec, {req, {read_chunk, File, Offset, Size, Opts, TO}},
                     Timeout).
 
 %% @doc Trim a chunk of data of size `Size' from `File' at `Offset'.
@@ -288,8 +288,8 @@ handle_call2({append_chunk_extra, Prefix, Chunk, ChunkExtra, TO}, _From, S) ->
     do_append_head(Prefix, Chunk, ChunkExtra, 0, os:timestamp(), TO, S);
 handle_call2({write_chunk, File, Offset, Chunk, TO}, _From, S) ->
     do_write_head(File, Offset, Chunk, 0, os:timestamp(), TO, S);
-handle_call2({read_chunk, File, Offset, Size, TO}, _From, S) ->
-    do_read_chunk(File, Offset, Size, 0, os:timestamp(), TO, S);
+handle_call2({read_chunk, File, Offset, Size, Opts, TO}, _From, S) ->
+    do_read_chunk(File, Offset, Size, Opts, 0, os:timestamp(), TO, S);
 handle_call2({trim_chunk, File, Offset, Size, TO}, _From, S) ->
     do_trim_chunk(File, Offset, Size, 0, os:timestamp(), TO, S);
 handle_call2({checksum_list, File, TO}, _From, S) ->
@@ -503,11 +503,10 @@ do_write_head2(File, Offset, Chunk, Depth, STime, TO,
                   iolist_size(Chunk)})
     end.
 
-do_read_chunk(File, Offset, Size, 0=Depth, STime, TO,
+do_read_chunk(File, Offset, Size, Opts, 0=Depth, STime, TO,
               #state{proj=#projection_v1{upi=[_|_]}}=S) -> % UPI is non-empty
-    do_read_chunk2(File, Offset, Size, Depth + 1, STime, TO, S);
-do_read_chunk(File, Offset, Size, Depth, STime, TO, #state{proj=P}=S) ->
-    %% io:format(user, "read sleep1,", []),
+    do_read_chunk2(File, Offset, Size, Opts, Depth + 1, STime, TO, S);
+do_read_chunk(File, Offset, Size, Opts, Depth, STime, TO, #state{proj=P}=S) ->
     sleep_a_while(Depth),
     DiffMs = timer:now_diff(os:timestamp(), STime) div 1000,
     if DiffMs > TO ->
@@ -517,22 +516,22 @@ do_read_chunk(File, Offset, Size, Depth, STime, TO, #state{proj=P}=S) ->
             case S2#state.proj of
                 P2 when P2 == undefined orelse
                         P2#projection_v1.upi == [] ->
-                    do_read_chunk(File, Offset, Size, Depth + 1, STime, TO, S2);
+                    do_read_chunk(File, Offset, Size, Opts, Depth + 1, STime, TO, S2);
                 _ ->
-                    do_read_chunk2(File, Offset, Size, Depth + 1, STime, TO, S2)
+                    do_read_chunk2(File, Offset, Size, Opts, Depth + 1, STime, TO, S2)
             end
     end.
 
-do_read_chunk2(File, Offset, Size, Depth, STime, TO,
+do_read_chunk2(File, Offset, Size, Opts, Depth, STime, TO,
                #state{proj=P, epoch_id=EpochID, proxies_dict=PD}=S) ->
     UPI = readonly_flus(P),
     Tail = lists:last(UPI),
     ConsistencyMode = P#projection_v1.mode,
     case ?FLU_PC:read_chunk(orddict:fetch(Tail, PD), EpochID,
-                            File, Offset, Size, ?TIMEOUT) of
-        {ok, Chunks0} when is_list(Chunks0) ->
+                            File, Offset, Size, Opts, ?TIMEOUT) of
+        {ok, {Chunks0, []}} when is_list(Chunks0) ->
             Chunks = trim_both_side(Chunks0, Offset, Offset + Size),
-            {reply, {ok, Chunks}, S};
+            {reply, {ok, {Chunks, []}}, S};
         %% {ok, BadChunk} ->
         %%     %% TODO cleaner handling of bad chunks
         %%     exit({todo, bad_chunk_size, ?MODULE, ?LINE, File, Offset, Size,
@@ -546,7 +545,7 @@ do_read_chunk2(File, Offset, Size, Depth, STime, TO,
             {reply, BadCS, S};
         {error, Retry}
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
-            do_read_chunk(File, Offset, Size, Depth, STime, TO, S);
+            do_read_chunk(File, Offset, Size, Opts, Depth, STime, TO, S);
         {error, not_written} ->
             read_repair(ConsistencyMode, read, File, Offset, Size, Depth, STime, S);
             %% {reply, {error, not_written}, S};
@@ -624,10 +623,12 @@ read_repair2(ap_mode=ConsistencyMode,
              #state{proj=P}=S) ->
     Eligible = mutation_flus(P),
     case try_to_find_chunk(Eligible, File, Offset, Size, S) of
-        {ok, Chunks, GotItFrom} when is_list(Chunks) ->
+        {ok, {Chunks, _Trimmed}, GotItFrom} when is_list(Chunks) ->
             ToRepair = mutation_flus(P) -- [GotItFrom],
-            {Reply, S1} = do_repair_chunks(Chunks, ToRepair, ReturnMode, [GotItFrom],
+            {Reply0, S1} = do_repair_chunks(Chunks, ToRepair, ReturnMode, [GotItFrom],
                                            File, Depth, STime, S, {ok, Chunks}),
+            {ok, Chunks} = Reply0,
+            Reply = {ok, {Chunks, _Trimmed}},
             {reply, Reply, S1};
         {error, bad_checksum}=BadCS ->
             %% TODO: alternate strategy?
@@ -818,7 +819,7 @@ update_proj2(Count, #state{bad_proj=BadProj, proxies_dict=ProxiesDict}=S) ->
 run_middleworker_job(Fun, ArgList, WTimeout) ->
     Parent = self(),
     MiddleWorker =
-        spawn(fun() ->
+        spawn_link(fun() ->
                   PidsMons =
                       [spawn_monitor(fun() ->
                                              Res = (catch Fun(Arg)),
@@ -859,17 +860,19 @@ try_to_find_chunk(Eligible, File, Offset, Size,
     Work = fun(FLU) ->
                    Proxy = orddict:fetch(FLU, PD),
                    case ?FLU_PC:read_chunk(Proxy, EpochID,
-                                           File, Offset, Size) of
-                       {ok, Chunks} when is_list(Chunks) ->
-                           {FLU, {ok, Chunks}};
+                                           %% TODO Trimmed is required here
+                                           File, Offset, Size, []) of
+                       {ok, {_Chunks, _} = ChunksAndTrimmed} ->
+                           {FLU, {ok, ChunksAndTrimmed}};
                        Else ->
                            {FLU, Else}
                    end
            end,
     Rs = run_middleworker_job(Work, Eligible, Timeout),
-    case [X || {_, {ok, [{_,_,B,_}]}}=X <- Rs, is_binary(B)] of
-        [{FoundFLU, {ok, Chunk}}|_] ->
-            {ok, Chunk, FoundFLU};
+
+    case [X || {_Fluname, {ok, {[{_,_,B,_}], _}}}=X <- Rs, is_binary(B)] of
+        [{FoundFLU, {ok, ChunkAndTrimmed}}|_] ->
+            {ok, ChunkAndTrimmed, FoundFLU};
         [] ->
             RetryErrs = [partition, bad_epoch, wedged],
             case [Err || {error, Err} <- Rs, lists:member(Err, RetryErrs)] of

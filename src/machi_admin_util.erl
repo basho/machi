@@ -76,7 +76,7 @@ verify_file_checksums_local2(Sock1, EpochID, Path0) ->
                 ReadChunk = fun(F, Offset, Size) ->
                                     case file:pread(FH, Offset, Size) of
                                         {ok, Bin} ->
-                                            {ok, [{F, Offset, Bin, undefined}]};
+                                            {ok, {[{F, Offset, Bin, undefined}], []}};
                                         Err ->
                                             Err
                                     end
@@ -92,7 +92,7 @@ verify_file_checksums_local2(Sock1, EpochID, Path0) ->
 verify_file_checksums_remote2(Sock1, EpochID, File) ->
     ReadChunk = fun(File_name, Offset, Size) ->
                         ?FLU_C:read_chunk(Sock1, EpochID,
-                                          File_name, Offset, Size)
+                                          File_name, Offset, Size, [])
                 end,
     verify_file_checksums_common(Sock1, EpochID, File, ReadChunk).
 
@@ -117,7 +117,7 @@ verify_file_checksums_common(Sock1, EpochID, File, ReadChunk) ->
 verify_chunk_checksum(File, ReadChunk) ->
     fun({Offset, Size, <<_Tag:1/binary, CSum/binary>>}, Acc) ->
             case ReadChunk(File, Offset, Size) of
-                {ok, [{_, Offset, Chunk, _}]} ->
+                {ok, {[{_, Offset, Chunk, _}], _}} ->
                     CSum2 = machi_util:checksum_chunk(Chunk),
                     if CSum == CSum2 ->
                             Acc;

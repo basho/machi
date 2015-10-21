@@ -80,22 +80,22 @@ machi_file_proxy_test_() ->
     clean_up_data_dir(?TESTDIR),
     {ok, Pid} = machi_file_proxy:start_link("test", ?TESTDIR),
     [
-	?_assertEqual({error, bad_arg}, machi_file_proxy:read(Pid, -1, -1)),
-	?_assertEqual({error, bad_arg}, machi_file_proxy:write(Pid, -1, <<"yo">>)),
-	?_assertEqual({error, bad_arg}, machi_file_proxy:append(Pid, [], -1, <<"krep">>)),
-	?_assertEqual({error, not_written}, machi_file_proxy:read(Pid, 1, 1)),
-        ?_assertEqual({error, not_written}, machi_file_proxy:read(Pid, 1024, 1)),
-        ?_assertEqual({error, not_written}, machi_file_proxy:read(Pid, 1, 1024)),
-        ?_assertEqual({error, not_written}, machi_file_proxy:read(Pid, 1024, ?HYOOGE)),
-        ?_assertEqual({error, not_written}, machi_file_proxy:read(Pid, ?HYOOGE, 1)),
-	?_assertEqual({error, written}, machi_file_proxy:write(Pid, 1, random_binary(0, ?HYOOGE))),
-	?_assertMatch({ok, "test", _}, machi_file_proxy:append(Pid, random_binary(0, 1024))),
-	?_assertEqual({error, written}, machi_file_proxy:write(Pid, 1024, <<"fail">>)),
-	?_assertEqual({error, written}, machi_file_proxy:write(Pid, 1, <<"fail">>)),
-	?_assertMatch({ok, [{_, _, _, _}]}, machi_file_proxy:read(Pid, 1025, 1000)),
-	?_assertMatch({ok, "test", _}, machi_file_proxy:append(Pid, [], 1024, <<"mind the gap">>)),
-	?_assertEqual(ok, machi_file_proxy:write(Pid, 2060, [], random_binary(0, 1024))),
-        ?_assertException(exit, {normal, _}, machi_file_proxy:stop(Pid))
+     ?_assertEqual({error, bad_arg}, machi_file_proxy:read(Pid, -1, -1)),
+     ?_assertEqual({error, bad_arg}, machi_file_proxy:write(Pid, -1, <<"yo">>)),
+     ?_assertEqual({error, bad_arg}, machi_file_proxy:append(Pid, [], -1, <<"krep">>)),
+     ?_assertEqual({error, not_written}, machi_file_proxy:read(Pid, 1, 1)),
+     ?_assertEqual({error, not_written}, machi_file_proxy:read(Pid, 1024, 1)),
+     ?_assertEqual({error, not_written}, machi_file_proxy:read(Pid, 1, 1024)),
+     ?_assertEqual({error, not_written}, machi_file_proxy:read(Pid, 1024, ?HYOOGE)),
+     ?_assertEqual({error, not_written}, machi_file_proxy:read(Pid, ?HYOOGE, 1)),
+     ?_assertEqual({error, written}, machi_file_proxy:write(Pid, 1, random_binary(0, ?HYOOGE))),
+     ?_assertMatch({ok, "test", _}, machi_file_proxy:append(Pid, random_binary(0, 1024))),
+     ?_assertEqual({error, written}, machi_file_proxy:write(Pid, 1024, <<"fail">>)),
+     ?_assertEqual({error, written}, machi_file_proxy:write(Pid, 1, <<"fail">>)),
+     ?_assertMatch({ok, {[{_, _, _, _}], []}}, machi_file_proxy:read(Pid, 1025, 1000)),
+     ?_assertMatch({ok, "test", _}, machi_file_proxy:append(Pid, [], 1024, <<"mind the gap">>)),
+     ?_assertEqual(ok, machi_file_proxy:write(Pid, 2060, [], random_binary(0, 1024))),
+     ?_assertException(exit, {normal, _}, machi_file_proxy:stop(Pid))
     ].
 
 multiple_chunks_read_test_() ->
@@ -108,11 +108,11 @@ multiple_chunks_read_test_() ->
      ?_assertEqual(ok, machi_file_proxy:write(Pid, 30000, <<"fail">>)),
      %% Freeza
      ?_assertEqual(ok, machi_file_proxy:write(Pid, 530000, <<"fail">>)),
-     ?_assertMatch({ok, [{"test", 1024, _, _},
-                         {"test", 10000, <<"fail">>, _},
-                         {"test", 20000, <<"fail">>, _},
-                         {"test", 30000, <<"fail">>, _},
-                         {"test", 530000, <<"fail">>, _}]},
+     ?_assertMatch({ok, {[{"test", 1024, _, _},
+                          {"test", 10000, <<"fail">>, _},
+                          {"test", 20000, <<"fail">>, _},
+                          {"test", 30000, <<"fail">>, _},
+                          {"test", 530000, <<"fail">>, _}], []}},
                    machi_file_proxy:read(Pid, 1024, 530000)),
      ?_assertException(exit, {normal, _}, machi_file_proxy:stop(Pid))
     ].

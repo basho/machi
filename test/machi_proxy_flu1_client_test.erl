@@ -60,14 +60,14 @@ api_smoke_test() ->
             {ok, {MyOff,MySize,MyFile}} =
                 ?MUT:append_chunk(Prox1, FakeEpoch, Prefix, MyChunk,
                                   infinity),
-            {ok, [{_, MyOff, MyChunk, _}]} =
-                ?MUT:read_chunk(Prox1, FakeEpoch, MyFile, MyOff, MySize),
+            {ok, {[{_, MyOff, MyChunk, _}], []}} =
+                ?MUT:read_chunk(Prox1, FakeEpoch, MyFile, MyOff, MySize, []),
             MyChunk2 = <<"my chunk data, yeah, again">>,
             {ok, {MyOff2,MySize2,MyFile2}} =
                 ?MUT:append_chunk_extra(Prox1, FakeEpoch, Prefix,
                                         MyChunk2, 4242, infinity),
-            {ok, [{_, MyOff2, MyChunk2, _}]} =
-                ?MUT:read_chunk(Prox1, FakeEpoch, MyFile2, MyOff2, MySize2),
+            {ok, {[{_, MyOff2, MyChunk2, _}], []}} =
+                ?MUT:read_chunk(Prox1, FakeEpoch, MyFile2, MyOff2, MySize2, []),
             MyChunk_badcs = {<<?CSUM_TAG_CLIENT_SHA:8, 0:(8*20)>>, MyChunk},
             {error, bad_checksum} = ?MUT:append_chunk(Prox1, FakeEpoch,
                                                       Prefix, MyChunk_badcs),
@@ -245,13 +245,13 @@ flu_restart_test2() ->
                     (stop) -> ?MUT:append_chunk_extra(Prox1, FakeEpoch,
                                              <<"prefix">>, Data, 42, infinity)
                  end,
-                 fun(run) -> {ok, [{_, Off1, Data, _}]} =
+                 fun(run) -> {ok, {[{_, Off1, Data, _}], []}} =
                                  ?MUT:read_chunk(Prox1, FakeEpoch,
-                                                 File1, Off1, Size1),
+                                                 File1, Off1, Size1, []),
                              ok;
                     (line) -> io:format("line ~p, ", [?LINE]);
                     (stop) -> ?MUT:read_chunk(Prox1, FakeEpoch,
-                                                 File1, Off1, Size1)
+                                              File1, Off1, Size1, [])
                  end,
                  fun(run) -> {ok, KludgeBin} =
                                  ?MUT:checksum_list(Prox1, FakeEpoch, File1),
