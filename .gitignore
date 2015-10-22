@@ -1,14 +1,18 @@
 prototype/chain-manager/patch.*
-.dialyzer-last-run.txt
 .eqc-info
 .eunit
 deps
-*.plt
 erl_crash.dump
 .concrete/DEV_MODE
 .rebar
 edoc
+
+# Dialyzer stuff
+.dialyzer-last-run.txt
 .local_dialyzer_plt
+dialyzer_unhandled_warnings
+dialyzer_warnings
+*.plt
 
 # PB artifacts for Erlang
 include/machi_pb.hrl
