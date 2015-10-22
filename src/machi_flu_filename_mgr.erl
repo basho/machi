@@ -202,7 +202,8 @@ list_files(DataDir, Prefix) ->
 make_filename_mgr_name(FluName) when is_atom(FluName) ->
     list_to_atom(atom_to_list(FluName) ++ "_filename_mgr").
 
-handle_find_file(Tid, {coc,CoC_Namespace,CoC_Locator}, Prefix, DataDir) ->
+handle_find_file(Tid, {coc,CoC_Namespace,CoC_Locator}=_CoC, Prefix, DataDir) ->
+io:format(user, "\nCoC ~p\n", [_CoC]),
     N = machi_util:read_max_filenum(DataDir, CoC_Namespace, CoC_Locator, Prefix),
     {File, Cleanup} = case find_file(DataDir, Prefix, N) of
         [] ->
@@ -214,7 +215,7 @@ handle_find_file(Tid, {coc,CoC_Namespace,CoC_Locator}, Prefix, DataDir) ->
               [Prefix, N, L]),
             {Fn, true}
     end,
-    maybe_cleanup(Tid, {Prefix, N}, Cleanup),
+    maybe_cleanup(Tid, {CoC_Namespace, CoC_Locator, Prefix, N}, Cleanup),
     filename:basename(File).
 
 find_or_make_filename(Tid, DataDir, CoC_Namespace, CoC_Locator, Prefix, N) ->

@@ -30,7 +30,7 @@
          hexstr_to_int/1, int_to_hexstr/2, int_to_hexbin/2,
          make_binary/1, make_string/1,
          make_regname/1,
-         make_config_filename/4,
+         make_config_filename/4, make_config_filename/2,
          make_checksum_filename/4, make_checksum_filename/2,
          make_data_filename/6, make_data_filename/2,
          make_projection_filename/2, 
@@ -74,6 +74,14 @@ make_config_filename(DataDir, CoC_Namespace, CoC_Locator, Prefix) ->
     Locator_str = int_to_hexstr(CoC_Locator, 32),
     lists:flatten(io_lib:format("~s/config/~s^~s^~s",
                                 [DataDir, Prefix, CoC_Namespace, Locator_str])).
+
+%% @doc Calculate a config file path, by common convention.
+
+-spec make_config_filename(string(), string()) ->
+      string().
+make_config_filename(DataDir, Filename) ->
+    lists:flatten(io_lib:format("~s/config/~s",
+                                [DataDir, Filename])).
 
 %% @doc Calculate a checksum file path, by common convention.
 
@@ -154,7 +162,16 @@ is_valid_filename(Filename) ->
 -spec parse_filename( Filename :: string() ) -> [ string() ].
 parse_filename(Filename) ->
     case string:tokens(Filename, "^") of
-        [_Prefix, _UUID, _SeqNo] = L -> L;
+        [_Prefix, _CoC_NS, _CoC_Loc, _UUID, _SeqNo] = L ->
+            L;
+        [Prefix,          CoC_Loc, UUID, SeqNo] ->
+            %% string:tokens() doesn't consider "foo^^bar" as 3 tokens {sigh}
+            case re:replace(Filename, "[^^]+", "x", [global,{return,binary}]) of
+                <<"x^^x^x^x">> ->
+                    [Prefix, "", CoC_Loc, UUID, SeqNo];
+                _ ->
+                    []
+            end;
         _ -> []
     end.
 
