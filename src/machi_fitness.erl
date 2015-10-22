@@ -86,7 +86,7 @@ send_spam_to_everyone(Pid) ->
 init([{MyFluName}|Args]) ->
     RegName = machi_flu_psup:make_fitness_regname(MyFluName),
     register(RegName, self()),
-    timer:send_interval(5000, debug_dump),
+    {ok, _} = timer:send_interval(5000, debug_dump),
     UseSimulatorP = proplists:get_value(use_partition_simulator, Args, false),
     {ok, #state{my_flu_name=MyFluName, reg_name=RegName,
                 partition_simulator_p=UseSimulatorP,
@@ -171,7 +171,7 @@ handle_info({adjust_down_list, FLU}, #state{active_unfit=ActiveUnfit}=S) ->
     %% hiding where we need this extra round of messages to *remove* a
     %% FLU from the active_unfit list?
 
-    schedule_adjust_messages(lists:usort(Added_to_new ++ Dropped_from_new)),
+    _ = schedule_adjust_messages(lists:usort(Added_to_new ++ Dropped_from_new)),
     case {lists:member(FLU,Added_to_new), lists:member(FLU,Dropped_from_new)} of
         {true, true} ->
             error({bad, ?MODULE, ?LINE, FLU, ActiveUnfit, NewUnfit});
@@ -295,8 +295,8 @@ proxy_pid(Name, #state{proxies_dict=ProxiesDict}) ->
 
 calc_unfit(All_list, HosedAnnotations) ->
     G = digraph:new(),
-    [digraph:add_vertex(G, V) || V <- All_list],
-    [digraph:add_edge(G, V1, V2) || {V1, problem_with, V2} <- HosedAnnotations],
+    _ = [digraph:add_vertex(G, V) || V <- All_list],
+    _ = [digraph:add_edge(G, V1, V2) || {V1, problem_with, V2} <- HosedAnnotations],
     calc_unfit2(lists:sort(digraph:vertices(G)), G).
 
 calc_unfit2([], G) ->
@@ -350,7 +350,7 @@ do_map_change(NewMap, DontSendList, MembersDict,
               #state{my_flu_name=_MyFluName, pending_map=OldMap}=S) ->
     send_spam(NewMap, DontSendList, MembersDict, S),
     ChangedServers = find_changed_servers(OldMap, NewMap, _MyFluName),
-    schedule_adjust_messages(ChangedServers),
+    _ = schedule_adjust_messages(ChangedServers),
     %% _OldMapV = map_value(OldMap),
     %% _MapV = map_value(NewMap),
     %% io:format(user, "TODO: ~w async tick trigger/scheduling... ~w for:\n"

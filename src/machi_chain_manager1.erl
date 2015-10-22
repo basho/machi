@@ -226,8 +226,8 @@ test_read_latest_public_projection(Pid, ReadRepairP) ->
 %% local projection store.
 
 init({MyName, InitMembersDict, MgrOpts}) ->
-put(ttt, [?LINE]),
-    random:seed(now()),
+    put(ttt, [?LINE]),
+    _ = random:seed(now()),
     init_remember_down_list(),
     Opt = fun(Key, Default) -> proplists:get_value(Key, MgrOpts, Default) end,
     InitWitness_list = Opt(witnesses, []),
