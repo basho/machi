@@ -30,13 +30,13 @@
          hexstr_to_int/1, int_to_hexstr/2, int_to_hexbin/2,
          make_binary/1, make_string/1,
          make_regname/1,
-         make_config_filename/2,
+         make_config_filename/4,
          make_checksum_filename/4, make_checksum_filename/2,
-         make_data_filename/4, make_data_filename/2,
+         make_data_filename/6, make_data_filename/2,
          make_projection_filename/2, 
          is_valid_filename/1,
          parse_filename/1,
-         read_max_filenum/2, increment_max_filenum/2,
+         read_max_filenum/4, increment_max_filenum/4,
          info_msg/2, verb/1, verb/2,
          mbytes/1, 
          pretty_time/0, pretty_time/2,
@@ -68,10 +68,12 @@ make_regname(Prefix) when is_list(Prefix) ->
 
 %% @doc Calculate a config file path, by common convention.
 
--spec make_config_filename(string(), string()) ->
+-spec make_config_filename(string(), riak_dt:coc_namespace(), riak_dt:coc_locator(), string()) ->
       string().
-make_config_filename(DataDir, Prefix) ->
-    lists:flatten(io_lib:format("~s/config/~s", [DataDir, Prefix])).
+make_config_filename(DataDir, CoC_Namespace, CoC_Locator, Prefix) ->
+    Locator_str = int_to_hexstr(CoC_Locator, 32),
+    lists:flatten(io_lib:format("~s/config/~s^~s^~s",
+                                [DataDir, Prefix, CoC_Namespace, Locator_str])).
 
 %% @doc Calculate a checksum file path, by common convention.
 
@@ -92,17 +94,19 @@ make_checksum_filename(DataDir, FileName) ->
 
 %% @doc Calculate a file data file path, by common convention.
 
--spec make_data_filename(string(), string(), atom()|string()|binary(), integer()|string()) ->
+-spec make_data_filename(string(), riak_dt:coc_namespace(), riak_dt:coc_locator(), string(), atom()|string()|binary(), integer()|string()) ->
       {binary(), string()}.
-make_data_filename(DataDir, Prefix, SequencerName, FileNum)
+make_data_filename(DataDir, CoC_Namespace, CoC_Locator, Prefix, SequencerName, FileNum)
   when is_integer(FileNum) ->
-    File = erlang:iolist_to_binary(io_lib:format("~s^~s^~w",
-                                                 [Prefix, SequencerName, FileNum])),
+    Locator_str = int_to_hexstr(CoC_Locator, 32),
+    File = erlang:iolist_to_binary(io_lib:format("~s^~s^~s^~s^~w",
+                                                 [Prefix, CoC_Namespace, Locator_str, SequencerName, FileNum])),
     make_data_filename2(DataDir, File);
-make_data_filename(DataDir, Prefix, SequencerName, String)
+make_data_filename(DataDir, CoC_Namespace, CoC_Locator, Prefix, SequencerName, String)
   when is_list(String) ->
-    File = erlang:iolist_to_binary(io_lib:format("~s^~s^~s",
-                                                 [Prefix, SequencerName, string])),
+    Locator_str = int_to_hexstr(CoC_Locator, 32),
+    File = erlang:iolist_to_binary(io_lib:format("~s^~s^~s^~s^~s",
+                                                 [Prefix, CoC_Namespace, Locator_str, SequencerName, string])),
     make_data_filename2(DataDir, File).
 
 make_data_filename2(DataDir, File) ->
@@ -158,10 +162,10 @@ parse_filename(Filename) ->
 %% @doc Read the file size of a config file, which is used as the
 %% basis for a minimum sequence number.
 
--spec read_max_filenum(string(), string()) ->
+-spec read_max_filenum(string(), riak_dt:coc_namespace(), riak_dt:coc_locator(), string()) ->
       non_neg_integer().
-read_max_filenum(DataDir, Prefix) ->
-    case file:read_file_info(make_config_filename(DataDir, Prefix)) of
+read_max_filenum(DataDir, CoC_Namespace, CoC_Locator, Prefix) ->
+    case file:read_file_info(make_config_filename(DataDir, CoC_Namespace, CoC_Locator, Prefix)) of
         {error, enoent} ->
             0;
         {ok, FI} ->
@@ -171,11 +175,11 @@ read_max_filenum(DataDir, Prefix) ->
 %% @doc Increase the file size of a config file, which is used as the
 %% basis for a minimum sequence number.
 
--spec increment_max_filenum(string(), string()) ->
+-spec increment_max_filenum(string(), riak_dt:coc_namespace(), riak_dt:coc_locator(), string()) ->
       ok | {error, term()}.
-increment_max_filenum(DataDir, Prefix) ->
+increment_max_filenum(DataDir, CoC_Namespace, CoC_Locator, Prefix) ->
     try
-        {ok, FH} = file:open(make_config_filename(DataDir, Prefix), [append]),
+        {ok, FH} = file:open(make_config_filename(DataDir, CoC_Namespace, CoC_Locator, Prefix), [append]),
         ok = file:write(FH, "x"),
         ok = file:sync(FH),
         ok = file:close(FH)
