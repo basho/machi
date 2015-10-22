@@ -9,6 +9,7 @@ edoc
 
 # Dialyzer stuff
 .dialyzer-last-run.txt
+.ebin.native
 .local_dialyzer_plt
 dialyzer_unhandled_warnings
 dialyzer_warnings

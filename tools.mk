@@ -53,26 +53,44 @@ xref: compile
 PLT ?= $(HOME)/.combo_dialyzer_plt
 LOCAL_PLT = .local_dialyzer_plt
 DIALYZER_FLAGS ?= -Wunmatched_returns
+NATIVE_EBIN ?= ./.ebin.native
+DIALYZER_BIN ?= dialyzer
+# Always include -pa arg in DIALYZER_CMD for speed
+DIALYZER_CMD ?= $(DIALYZER_BIN) -pa $(NATIVE_EBIN)
+DIALYZER_VERSION = $(shell $(DIALYZER_BIN) --version | sed 's/.* //')
+ERL_LIB_DIR = $(shell erl -eval '{io:format("~s\n", [code:lib_dir()]), erlang:halt(0)}.' | tail -1)
+
+native-ebin:
+	mkdir -p $(NATIVE_EBIN)
+	rm -f $(NATIVE_EBIN)/*.erl $(NATIVE_EBIN)/*.hrl $(NATIVE_EBIN)/*.beam
+	cp $(ERL_LIB_DIR)/stdlib-*/src/{lists,dict,digraph,digraph_utils,ets,gb_sets,gb_trees,ordsets,sets,sofs}.erl $(NATIVE_EBIN)
+	cp $(ERL_LIB_DIR)/compiler-*/src/{cerl,cerl_trees,core_parse}.?rl  $(NATIVE_EBIN)
+	cp $(ERL_LIB_DIR)/dialyzer-*/src/{dialyzer_analysis_callgraph,dialyzer,dialyzer_behaviours,dialyzer_codeserver,dialyzer_contracts,dialyzer_coordinator,dialyzer_dataflow,dialyzer_dep,dialyzer_plt,dialyzer_succ_typings,dialyzer_typesig,dialyzer_worker}.?rl  $(NATIVE_EBIN)
+	cp $(ERL_LIB_DIR)/hipe-*/*/{erl_types,erl_bif_types}.?rl  $(NATIVE_EBIN)
+	erlc -o $(NATIVE_EBIN) -smp +native -DVSN='"$(DIALYZER_VERSION)"' $(NATIVE_EBIN)/*erl
 
 ${PLT}: compile
+	@mkdir -p $(NATIVE_EBIN)
 	@if [ -f $(PLT) ]; then \
-		dialyzer --check_plt --plt $(PLT) --apps $(DIALYZER_APPS) && \
-		dialyzer --add_to_plt --plt $(PLT) --output_plt $(PLT) --apps $(DIALYZER_APPS) ; test $$? -ne 1; \
+		$(DIALYZER_CMD) --check_plt --plt $(PLT) --apps $(DIALYZER_APPS) && \
+		$(DIALYZER_CMD) --add_to_plt --plt $(PLT) --output_plt $(PLT) --apps $(DIALYZER_APPS) ; test $$? -ne 1; \
 	else \
-		dialyzer --build_plt --output_plt $(PLT) --apps $(DIALYZER_APPS); test $$? -ne 1; \
+		$(DIALYZER_CMD) --build_plt --output_plt $(PLT) --apps $(DIALYZER_APPS); test $$? -ne 1; \
 	fi
 
 ${LOCAL_PLT}: compile
+	@mkdir -p $(NATIVE_EBIN)
 	@if [ -d deps ]; then \
 		if [ -f $(LOCAL_PLT) ]; then \
-			dialyzer --check_plt --plt $(LOCAL_PLT) deps/*/ebin  && \
-			dialyzer --add_to_plt --plt $(LOCAL_PLT) --output_plt $(LOCAL_PLT) deps/*/ebin ; test $$? -ne 1; \
+			$(DIALYZER_CMD) --check_plt --plt $(LOCAL_PLT) deps/*/ebin  && \
+			$(DIALYZER_CMD) --add_to_plt --plt $(LOCAL_PLT) --output_plt $(LOCAL_PLT) deps/*/ebin ; test $$? -ne 1; \
 		else \
-			dialyzer --build_plt --output_plt $(LOCAL_PLT) deps/*/ebin ; test $$? -ne 1; \
+			$(DIALYZER_CMD) --build_plt --output_plt $(LOCAL_PLT) deps/*/ebin ; test $$? -ne 1; \
 		fi \
 	fi
 
 dialyzer-run:
+	@mkdir -p $(NATIVE_EBIN)
 	@echo "==> $(shell basename $(shell pwd)) (dialyzer)"
 # The bulk of the code below deals with the dialyzer.ignore-warnings file
 # which contains strings to ignore if output by dialyzer.
@@ -107,7 +125,7 @@ dialyzer-run:
 			echo "ERROR: dialyzer.ignore-warnings contains a blank/empty line, this will match all messages!"; \
 			exit 1; \
 		fi; \
-		dialyzer $(DIALYZER_FLAGS) --plts $${PLTS} -c ebin > dialyzer_warnings ; \
+		$(DIALYZER_CMD) $(DIALYZER_FLAGS) --plts $${PLTS} -c ebin > dialyzer_warnings ; \
 		cat dialyzer.ignore-warnings \
 		| sed -E 's/^([^:]+:)[^:]+:/\1/' \
 		| sort \
@@ -126,13 +144,13 @@ dialyzer-run:
 		| sed -E 's/^(.*)$$/^[[:space:]]*\1$$/g' \
 		> dialyzer_unhandled_warnings ; \
 		rm dialyzer.ignore-warnings.tmp; \
-		if [ $$(cat dialyzer_unhandled_warnings | wc -l) -gt 0 ]; then \
+		if [ $$(cat dialyzer_unhandled_warnings | egrep -v 'Unknown functions\\:' | wc -l) -gt 0 ]; then \
 		    egrep -f dialyzer_unhandled_warnings dialyzer_warnings ; \
 			found_warnings=1; \
 	    fi; \
 		[ "$$found_warnings" != 1 ] ; \
 	else \
-		dialyzer $(DIALYZER_FLAGS) --plts $${PLTS} -c ebin; \
+		$(DIALYZER_CMD) $(DIALYZER_FLAGS) --plts $${PLTS} -c ebin; \
 	fi
 
 dialyzer-quick: compile-no-deps dialyzer-run
