@@ -34,14 +34,6 @@ deps:
 clean:
 	$(REBAR) -r clean
 
-test: deps compile eunit
-
-eunit:
-	$(REBAR) -v skip_deps=true eunit
-
-edoc: edoc-clean
-	$(REBAR) skip_deps=true doc
-
 edoc-clean:
 	rm -f edoc/*.png edoc/*.html edoc/*.css edoc/edoc-info
 
@@ -49,33 +41,6 @@ pulse: compile
 	@echo Sorry, PULSE test needs maintenance. -SLF
 	#env USE_PULSE=1 $(REBAR) skip_deps=true clean compile
 	#env USE_PULSE=1 $(REBAR) skip_deps=true -D PULSE eunit -v
-
-APPS = kernel stdlib sasl erts ssl compiler eunit crypto
-PLT = $(HOME)/.machi_dialyzer_plt
-
-build_plt: deps compile
-	dialyzer --build_plt --output_plt $(PLT) --apps $(APPS) deps/*/ebin
-
-DIALYZER_DEP_APPS = ebin/machi_pb.beam \
-		    deps/cluster_info/ebin \
-		    deps/protobuffs/ebin \
-		    deps/riak_dt/ebin
-### DIALYZER_FLAGS = -Wno_return -Wrace_conditions -Wunderspecs
-DIALYZER_FLAGS = -Wno_return -Wrace_conditions
-
-dialyzer: deps compile
-	dialyzer $(DIALYZER_FLAGS) --plt $(PLT) ebin $(DIALYZER_DEP_APPS) | \
-	    tee ./.dialyzer-last-run.txt | \
-            egrep -v -f ./filter-dialyzer-dep-warnings
-
-dialyzer-test: deps compile
-	echo Force rebar to recompile .eunit dir w/o running tests > /dev/null
-	rebar skip_deps=true eunit suite=lamport_clock
-	dialyzer $(DIALYZER_FLAGS) --plt $(PLT) .eunit $(DIALYZER_DEP_APPS) | \
-            egrep -v -f ./filter-dialyzer-dep-warnings
-
-clean_plt:
-	rm $(PLT)
 
 ##
 ## Release targets
@@ -87,3 +52,8 @@ relclean:
 
 stage : rel
 	$(foreach dep,$(wildcard deps/*), rm -rf rel/$(REPO)/lib/$(shell basename $(dep))* && ln -sf $(abspath $(dep)) rel/$(REPO)/lib;)
+
+DIALYZER_APPS = kernel stdlib sasl erts ssl compiler eunit crypto
+PLT = $(HOME)/.machi_dialyzer_plt
+
+include tools.mk

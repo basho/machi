@@ -105,10 +105,10 @@ repair(ap_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
     RepairMode = proplists:get_value(repair_mode, Opts, repair),
     Verb = proplists:get_value(verbose, Opts, true),
     Res = try
-              [begin
-                   {ok, Proxy} = machi_proxy_flu1_client:start_link(P),
-                   Add(FLU, Proxy)
-               end || {FLU,P} <- MembersDict, lists:member(FLU, OurFLUs)],
+              _ = [begin
+                       {ok, Proxy} = machi_proxy_flu1_client:start_link(P),
+                       Add(FLU, Proxy)
+                   end || {FLU,P} <- MembersDict, lists:member(FLU, OurFLUs)],
               ProxiesDict = get(proxies_dict),
 
               D = dict:new(),
@@ -280,8 +280,8 @@ make_repair_directives3([{Offset, Size, CSum, _FLU}=A|Rest0],
                                true  -> Src;
                                false -> hd(Gots)
                            end,
-                 [ets:update_counter(ETS, {directive_bytes, FLU_m}, Size) ||
-                     FLU_m <- Missing],
+                 _ = [ets:update_counter(ETS, {directive_bytes, FLU_m}, Size) ||
+                         FLU_m <- Missing],
                  if Missing == [] ->
                          noop;
                     true ->
@@ -332,19 +332,19 @@ execute_repair_directive({File, Cmds}, {ProxiesDict, EpochID, Verb, ETS}=Acc) ->
                 <<_Tag:1/binary, CSum/binary>> = TaggedCSum,
                 case machi_util:checksum_chunk(Chunk) of
                     CSum_now when CSum_now == CSum ->
-                        [begin
-                             DstP = orddict:fetch(DstFLU, ProxiesDict),
-                             _T3 = os:timestamp(),
-                             ok = machi_proxy_flu1_client:write_chunk(
-                                    DstP, EpochID, File, Offset, Chunk,
-                                    ?SHORT_TIMEOUT),
-                             _T4 = os:timestamp()
-                         end || DstFLU <- MyDsts],
-                        ets:update_counter(ETS, in_chunks, 1),
-                        ets:update_counter(ETS, in_bytes, Size),
+                        _ = [begin
+                                 DstP = orddict:fetch(DstFLU, ProxiesDict),
+                                 _T3 = os:timestamp(),
+                                 ok = machi_proxy_flu1_client:write_chunk(
+                                        DstP, EpochID, File, Offset, Chunk,
+                                        ?SHORT_TIMEOUT),
+                                 _T4 = os:timestamp()
+                             end || DstFLU <- MyDsts],
+                        _ = ets:update_counter(ETS, in_chunks, 1),
+                        _ = ets:update_counter(ETS, in_bytes, Size),
                         N = length(MyDsts),
-                        ets:update_counter(ETS, out_chunks, N),
-                        ets:update_counter(ETS, out_bytes, N*Size),
+                        _ = ets:update_counter(ETS, out_chunks, N),
+                        _ = ets:update_counter(ETS, out_bytes, N*Size),
                         Acc2;
                     CSum_now ->
                         error_logger:error_msg(
@@ -363,8 +363,8 @@ execute_repair_directive({File, Cmds}, {ProxiesDict, EpochID, Verb, ETS}=Acc) ->
         end,
     ok = lists:foldl(F, ok, Cmds),
     %% Copy this file's stats to the total counts.
-    [ets:update_counter(ETS, T_K, ets:lookup_element(ETS, L_K, 2)) ||
-        {L_K, T_K} <- EtsKeys],
+    _ = [ets:update_counter(ETS, T_K, ets:lookup_element(ETS, L_K, 2)) ||
+            {L_K, T_K} <- EtsKeys],
     Acc.
 
 mbytes(N) ->

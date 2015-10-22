@@ -241,7 +241,7 @@ append_server_loop(FluPid, #state{wedged=Wedged_p,
         {seq_append, From, Prefix, Chunk, CSum, Extra, EpochID} ->
             %% Old is the one from our state, plain old 'EpochID' comes
             %% from the client.
-            case OldEpochId == EpochID of
+            _ = case OldEpochId == EpochID of
                 true ->
                     spawn(fun() -> 
                         append_server_dispatch(From, Prefix, Chunk, CSum, Extra, FluName, EpochID) 
@@ -381,7 +381,7 @@ do_pb_ll_request2(EpochID, CMD, S) ->
                true ->
                     %% We're at same epoch # but different checksum, or
                     %% we're at a newer/bigger epoch #.
-                    wedge_myself(S#state.flu_name, CurrentEpochID),
+                    _ = wedge_myself(S#state.flu_name, CurrentEpochID),
                     ok
             end,
             {{error, bad_epoch}, S#state{epoch_id=CurrentEpochID}};
