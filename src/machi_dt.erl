@@ -26,7 +26,7 @@
 -type chunk_bin()   :: binary() | iolist().    % client can use either
 -type chunk_csum()  :: binary().               % 1 byte tag, N-1 bytes checksum
 -type chunk_summary() :: {file_offset(), chunk_size(), binary()}.
--type chunk_s()     :: binary().               % server always uses binary()
+-type chunk_s()     :: 'trimmed' | binary().
 -type chunk_pos()   :: {file_offset(), chunk_size(), file_name_s()}.
 -type chunk_size()  :: non_neg_integer().
 -type error_general() :: 'bad_arg' | 'wedged' | 'bad_checksum'.

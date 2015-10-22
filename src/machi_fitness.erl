@@ -105,7 +105,7 @@ handle_call({update_local_down_list, Down, MembersDict}, _From,
     S2 = if Down == OldDown, MembersDict == OldMembersDict ->
                  %% Do nothing only if both are equal.  If members_dict is
                  %% changing, that's sufficient reason to spam.
-                 ok;
+                 S;
             true ->
                  do_map_change(NewMap, [MyFluName], MembersDict, S)
          end,

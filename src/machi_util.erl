@@ -90,11 +90,20 @@ make_checksum_filename(DataDir, FileName) ->
 
 %% @doc Calculate a file data file path, by common convention.
 
--spec make_data_filename(string(), string(), atom()|string()|binary(), integer()) ->
+-spec make_data_filename(string(), string(), atom()|string()|binary(), integer()|string()) ->
       {binary(), string()}.
-make_data_filename(DataDir, Prefix, SequencerName, FileNum) ->
+make_data_filename(DataDir, Prefix, SequencerName, FileNum)
+  when is_integer(FileNum) ->
     File = erlang:iolist_to_binary(io_lib:format("~s^~s^~w",
                                                  [Prefix, SequencerName, FileNum])),
+    make_data_filename2(DataDir, File);
+make_data_filename(DataDir, Prefix, SequencerName, String)
+  when is_list(String) ->
+    File = erlang:iolist_to_binary(io_lib:format("~s^~s^~s",
+                                                 [Prefix, SequencerName, string])),
+    make_data_filename2(DataDir, File).
+
+make_data_filename2(DataDir, File) ->
     FullPath = lists:flatten(io_lib:format("~s/data/~s",  [DataDir, File])),
     {File, FullPath}.
 

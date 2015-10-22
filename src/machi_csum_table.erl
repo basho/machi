@@ -5,19 +5,21 @@
          all_trimmed/2,
          sync/1,
          calc_unwritten_bytes/1,
+         split_checksum_list_blob_decode/1,
          close/1, delete/1]).
 
--export([encode_csum_file_entry/3, decode_csum_file_entry/1]).
+-export([encode_csum_file_entry/3, encode_csum_file_entry_bin/3,
+         decode_csum_file_entry/1]).
 
 -include("machi.hrl").
 
 -ifdef(TEST).
--export([split_checksum_list_blob_decode/1, all/1]).
+-export([all/1]).
 -endif.
 
 -record(machi_csum_table,
-        {file :: filename:filename(),
-         fd   :: file:descriptor(),
+        {file :: string(),
+         fd   :: file:io_device(),
          table :: ets:tid()}).
 
 -type table() :: #machi_csum_table{}.
@@ -26,7 +28,7 @@
 
 -export_type([table/0]).
 
--spec open(filename:filename(), proplists:proplists()) ->
+-spec open(string(), proplists:proplist()) ->
                   {ok, table()} | {error, file:posix()}.
 open(CSumFilename, _Opts) ->
     T = ets:new(?MODULE, [private, ordered_set]),
@@ -60,10 +62,10 @@ open(CSumFilename, _Opts) ->
     {ok, Fd} = file:open(CSumFilename, [raw, binary, append]),
     {ok, C0#machi_csum_table{fd=Fd}}.
 
--spec find(table(), machi_dt:chunk_pos(), machi_dt:chunk_size()) ->
-                  list({machi_dt:chunk_pos(),
-                        machi_dt:chunk_size(),
-                        machi_dt:csum()}).
+-spec find(table(), machi_dt:file_offset(), machi_dt:file_size()) ->
+                  list({machi_dt:file_offset(),
+                        machi_dt:file_size(),
+                        machi_dt:chunk_csum()}).
 find(#machi_csum_table{table=T}, Offset, Size) ->
     ets:select(T, [{{'$1', '$2', '$3'},
                     [inclusion_match_spec(Offset, Size)],
@@ -74,7 +76,7 @@ all(#machi_csum_table{table=T}) ->
     ets:tab2list(T).
 -endif.
 
--spec write(table(), machi_dt:chunk_pos(), machi_dt:chunk_size(),
+-spec write(table(), machi_dt:file_offset(), machi_dt:file_size(),
             machi_dt:chunk_csum()) ->
                    ok | {error, used|file:posix()}.
 write(#machi_csum_table{fd=Fd, table=T}, Offset, Size, CSum) ->
@@ -91,7 +93,7 @@ write(#machi_csum_table{fd=Fd, table=T}, Offset, Size, CSum) ->
             Error
     end.
 
--spec trim(table(), machi_dt:chunk_pos(), machi_dt:chunk_size()) ->
+-spec trim(table(), machi_dt:file_offset(), machi_dt:file_size()) ->
                   ok | {error, file:posix()}.
 trim(#machi_csum_table{fd=Fd, table=T}, Offset, Size) ->
     Binary = encode_csum_file_entry_bin(Offset, Size, trimmed),

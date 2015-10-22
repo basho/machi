@@ -150,7 +150,7 @@ handle_info({'DOWN', Mref, process, Pid, file_rollover}, State = #state{ fluname
                                                                          tid = Tid }) ->
     lager:info("file proxy ~p shutdown because of file rollover", [Pid]),
     R = get_md_record_by_mref(Tid, Mref),
-    [Prefix | _Rest] = machi_util:parse_filename({file, R#md.filename}),
+    [Prefix | _Rest] = machi_util:parse_filename(R#md.filename),
 
     %% We only increment the counter here. The filename will be generated on the 
     %% next append request to that prefix and since the filename will have a new
@@ -228,7 +228,7 @@ clear_ets(Tid, Mref) ->
     update_ets(Tid, R#md{ proxy_pid = undefined, mref = undefined }).
 
 purge_ets(Tid, R) ->
-    ok = ets:delete_object(Tid, R).
+    true = ets:delete_object(Tid, R).
 
 get_md_record_by_mref(Tid, Mref) ->
     [R] = ets:match_object(Tid, {md, '_', '_', Mref}),
