@@ -450,18 +450,18 @@ connect(#p_srvr{name=Name, props=Props})->
                    chunk_size=ChunkSize
                   },
     %% Add fake dict entries for these files
-    [begin
-         Prefix = list_to_binary(io_lib:format("fake~w", [X])),
-         {ok, _} = append_chunk_extra(Sock, {1,<<"unused">>}, Prefix, <<>>, FileSize)
-     end || X <- lists:seq(1, NumFiles)],
+    _ = [begin
+             Prefix = list_to_binary(io_lib:format("fake~w", [X])),
+             {ok, _} = append_chunk_extra(Sock, {1,<<"unused">>}, Prefix, <<>>, FileSize)
+         end || X <- lists:seq(1, NumFiles)],
 
     Sock.
 
 disconnect(#yessir{name=Name}) ->
-    [erase(K) || {{N,offset,_}=K, _V} <- get(), N == Name],
-    [erase(K) || {{N,chunk,_}=K, _V} <- get(), N == Name],
-    [erase(K) || {{N,csum,_}=K, _V} <- get(), N == Name],
-    [erase(K) || {{N,proj,_,_}=K, _V} <- get(), N == Name],
+    _ = [erase(K) || {{N,offset,_}=K, _V} <- get(), N == Name],
+    _ = [erase(K) || {{N,chunk,_}=K, _V} <- get(), N == Name],
+    _ = [erase(K) || {{N,csum,_}=K, _V} <- get(), N == Name],
+    _ = [erase(K) || {{N,proj,_,_}=K, _V} <- get(), N == Name],
     ok.
 
 %% Example use:
