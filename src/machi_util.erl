@@ -47,7 +47,9 @@
          combinations/1, ordered_combinations/1,
          mk_order/2,
          %% Other
-         wait_for_death/2, wait_for_life/2
+         wait_for_death/2, wait_for_life/2,
+         bool2int/1,
+         int2bool/1
         ]).
 
 -include("machi.hrl").
@@ -390,3 +392,9 @@ mk_order(UPI2, Repair1) ->
                       error     -> error
                   end || X <- UPI2],
     UPI2_order.
+
+%% C-style conversion for PB usage.
+bool2int(true) -> 1;
+bool2int(false) -> 0.
+int2bool(0) -> false;
+int2bool(I) when is_integer(I) -> true.

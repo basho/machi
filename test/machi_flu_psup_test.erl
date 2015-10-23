@@ -146,7 +146,7 @@ partial_stop_restart2() ->
         {_, #p_srvr{address=Addr_a, port=TcpPort_a}} = hd(Ps),
         {error, wedged} = machi_flu1_client:read_chunk(
                             Addr_a, TcpPort_a, ?DUMMY_PV1_EPOCH,
-                            <<>>, 99999999, 1),
+                            <<>>, 99999999, 1, []),
         {error, wedged} = machi_flu1_client:checksum_list(
                             Addr_a, TcpPort_a, ?DUMMY_PV1_EPOCH, <<>>),
         %% list_files() is permitted despite wedged status

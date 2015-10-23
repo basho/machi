@@ -450,9 +450,9 @@ do_pb_hl_request2({high_write_chunk, File, Offset, ChunkBin, TaggedCSum},
     Chunk = {TaggedCSum, ChunkBin},
     Res = machi_cr_client:write_chunk(Clnt, File, Offset, Chunk),
     {Res, S};
-do_pb_hl_request2({high_read_chunk, File, Offset, Size},
+do_pb_hl_request2({high_read_chunk, File, Offset, Size, Opts},
                   #state{high_clnt=Clnt}=S) ->
-    Res = machi_cr_client:read_chunk(Clnt, File, Offset, Size),
+    Res = machi_cr_client:read_chunk(Clnt, File, Offset, Size, Opts),
     {Res, S};
 do_pb_hl_request2({high_trim_chunk, File, Offset, Size},
                   #state{high_clnt=Clnt}=S) ->
@@ -548,13 +548,13 @@ do_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum, #state{flu_name=FluNa
             {error, bad_arg}
     end.
 
-do_server_read_chunk(File, Offset, Size, _Opts, #state{flu_name=FluName})->
+do_server_read_chunk(File, Offset, Size, Opts, #state{flu_name=FluName})->
     %% TODO: Look inside Opts someday.
     case sanitize_file_string(File) of
         ok ->
             {ok, Pid} = machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, File}),
-            case machi_file_proxy:read(Pid, Offset, Size) of
-                {ok, Chunks} -> {ok, Chunks};
+            case machi_file_proxy:read(Pid, Offset, Size, Opts) of
+                {ok, ChunksAndTrimmed} -> {ok, ChunksAndTrimmed};
                 Other -> Other
             end;
         _ ->

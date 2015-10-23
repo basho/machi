@@ -40,7 +40,7 @@
          auth/3, auth/4,
          append_chunk/6, append_chunk/7,
          write_chunk/5, write_chunk/6,
-         read_chunk/4, read_chunk/5,
+         read_chunk/5, read_chunk/6,
          trim_chunk/4, trim_chunk/5,
          checksum_list/2, checksum_list/3,
          list_files/1, list_files/2
@@ -94,11 +94,18 @@ write_chunk(PidSpec, File, Offset, Chunk, CSum) ->
 write_chunk(PidSpec, File, Offset, Chunk, CSum, Timeout) ->
     send_sync(PidSpec, {write_chunk, File, Offset, Chunk, CSum}, Timeout).
 
-read_chunk(PidSpec, File, Offset, Size) ->
-    read_chunk(PidSpec, File, Offset, Size, ?DEFAULT_TIMEOUT).
+-spec read_chunk(pid(), string(), pos_integer(), pos_integer(),
+                 [{flag_no_checksum | flag_no_chunk | needs_trimmed, boolean()}]) ->
+                        {ok, {list(), list()}} | {error, term()}.
+read_chunk(PidSpec, File, Offset, Size, Options) ->
+    read_chunk(PidSpec, File, Offset, Size, Options, ?DEFAULT_TIMEOUT).
 
-read_chunk(PidSpec, File, Offset, Size, Timeout) ->
-    send_sync(PidSpec, {read_chunk, File, Offset, Size}, Timeout).
+-spec read_chunk(pid(), string(), pos_integer(), pos_integer(),
+                 [{no_checksum | no_chunk | needs_trimmed, boolean()}],
+                 pos_integer()) ->
+                        {ok, {list(), list()}} | {error, term()}.
+read_chunk(PidSpec, File, Offset, Size, Options, Timeout) ->
+    send_sync(PidSpec, {read_chunk, File, Offset, Size, Options}, Timeout).
 
 trim_chunk(PidSpec, File, Offset, Size) ->
     trim_chunk(PidSpec, File, Offset, Size, ?DEFAULT_TIMEOUT).
@@ -282,13 +289,19 @@ do_send_sync2({write_chunk, File, Offset, Chunk, CSum},
             Res = {bummer, {X, Y, erlang:get_stacktrace()}},
             {Res, S#state{count=Count+1}}
     end;
-do_send_sync2({read_chunk, File, Offset, Size},
+do_send_sync2({read_chunk, File, Offset, Size, Options},
              #state{sock=Sock, sock_id=Index, count=Count}=S) ->
     try
         ReqID = <<Index:64/big, Count:64/big>>,
+        FlagNoChecksum = proplists:get_value(no_checksum, Options, false),
+        FlagNoChunk = proplists:get_value(no_chunk, Options, false),
+        NeedsTrimmed = proplists:get_value(needs_trimmed, Options, false),
         Req = #mpb_readchunkreq{chunk_pos=#mpb_chunkpos{file_name=File,
                                                         offset=Offset,
-                                                        chunk_size=Size}},
+                                                        chunk_size=Size},
+                                flag_no_checksum=machi_util:bool2int(FlagNoChecksum),
+                                flag_no_chunk=machi_util:bool2int(FlagNoChunk),
+                                flag_needs_trimmed=machi_util:bool2int(NeedsTrimmed)},
         R1a = #mpb_request{req_id=ReqID, do_not_alter=1,
                            read_chunk=Req},
         Bin1a = machi_pb:encode_mpb_request(R1a),
@@ -416,7 +429,7 @@ convert_write_chunk_resp(#mpb_writechunkresp{status='OK'}) ->
 convert_write_chunk_resp(#mpb_writechunkresp{status=Status}) ->
     convert_general_status_code(Status).
 
-convert_read_chunk_resp(#mpb_readchunkresp{status='OK', chunks=PB_Chunks}) ->
+convert_read_chunk_resp(#mpb_readchunkresp{status='OK', chunks=PB_Chunks, trimmed=PB_Trimmed}) ->
     Chunks = lists:map(fun(#mpb_chunk{offset=Offset,
                                       file_name=File,
                                       chunk=Chunk,
@@ -425,7 +438,12 @@ convert_read_chunk_resp(#mpb_readchunkresp{status='OK', chunks=PB_Chunks}) ->
                                Csum = <<(machi_pb_translate:conv_to_csum_tag(T)):8, Ck/binary>>,
                                {File, Offset, Chunk, Csum}
                        end, PB_Chunks),
-    {ok, Chunks};
+    Trimmed = lists:map(fun(#mpb_chunkpos{file_name=File,
+                                          offset=Offset,
+                                          chunk_size=Size}) ->
+                                {File, Offset, Size}
+                        end, PB_Trimmed),
+    {ok, {Chunks, Trimmed}};
 convert_read_chunk_resp(#mpb_readchunkresp{status=Status}) ->
     convert_general_status_code(Status).
 

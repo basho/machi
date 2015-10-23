@@ -205,11 +205,15 @@ message Mpb_ReadChunkReq {
     // only makes sense if flag_no_checksum is not set).
     // TODO: not implemented yet.
     optional uint32 flag_no_chunk = 3 [default=0];
+
+    // TODO: not implemented yet.
+    optional uint32 flag_needs_trimmed = 4 [default=0];
 }
 
 message Mpb_ReadChunkResp {
     required Mpb_GeneralStatusCode status = 1;
     repeated Mpb_Chunk chunks = 2;
+    repeated Mpb_ChunkPos trimmed = 3;
 }
 
 // High level API: trim_chunk() request & response
@@ -410,11 +414,14 @@ message Mpb_LL_ReadChunkReq {
     // only makes sense if flag_checksum is not set).
     // TODO: not implemented yet.
     optional uint32 flag_no_chunk = 4 [default=0];
+
+    optional uint32 flag_needs_trimmed = 5 [default=0];
 }
 
 message Mpb_LL_ReadChunkResp {
     required Mpb_GeneralStatusCode status = 1;
     repeated Mpb_Chunk chunks = 2;
+    repeated Mpb_ChunkPos trimmed = 3;
 }
 
 // Low level API: checksum_list()
