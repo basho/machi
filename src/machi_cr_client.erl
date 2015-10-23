@@ -934,7 +934,9 @@ trim_both_side([{F, Offset, Chunk, _Csum}|L], LeftPos, RightPos)
   when Offset < LeftPos andalso LeftPos < RightPos ->
     TrashLen = 8 * (LeftPos - Offset),
     <<_:TrashLen/binary, NewChunk/binary>> = Chunk,
-    NewH = {F, LeftPos, NewChunk, <<>>},
+    %% CR Client is client or server?
+    NewChecksum = machi_util:make_tagged_csum(client_sha, Chunk),
+    NewH = {F, LeftPos, NewChunk, NewChecksum},
     trim_both_side([NewH|L], LeftPos, RightPos);
 trim_both_side(Chunks, LeftPos, RightPos) when LeftPos =< RightPos ->
     %% TODO: optimize
@@ -943,7 +945,9 @@ trim_both_side(Chunks, LeftPos, RightPos) when LeftPos =< RightPos ->
     if RightPos < Offset + Size ->
             NewSize = RightPos - Offset,
             <<NewChunk:NewSize/binary, _/binary>> = Chunk,
-            lists:reverse([{F, Offset, NewChunk, <<>>}|L]);
+            %% CR Client is client or server?
+            NewChecksum = machi_util:make_tagged_csum(client_sha, Chunk),
+            lists:reverse([{F, Offset, NewChunk, NewChecksum}|L]);
        true ->
             Chunks
     end.
