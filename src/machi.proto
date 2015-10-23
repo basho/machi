@@ -48,9 +48,10 @@ enum Mpb_GeneralStatusCode {
      PARTITION = 4;
      NOT_WRITTEN = 5;
      WRITTEN = 6;
-     NO_SUCH_FILE = 7;
-     PARTIAL_READ = 8;
-     BAD_EPOCH = 9;
+     TRIMMED = 7; // The whole file was trimmed
+     NO_SUCH_FILE = 8;
+     PARTIAL_READ = 9;
+     BAD_EPOCH = 10;
      BAD_JOSS = 255;    // Only for testing by the Taipan
 }
 
@@ -355,6 +356,7 @@ message Mpb_ProjectionV1 {
 // append_chunk()
 // write_chunk()
 // read_chunk()
+// trim_chunk()
 // checksum_list()
 // list_files()
 // wedge_status()
@@ -422,6 +424,20 @@ message Mpb_LL_ReadChunkResp {
     required Mpb_GeneralStatusCode status = 1;
     repeated Mpb_Chunk chunks = 2;
     repeated Mpb_ChunkPos trimmed = 3;
+}
+
+// Low level API: trim_chunk()
+
+message Mpb_LL_TrimChunkReq {
+    required Mpb_EpochID epoch_id = 1;
+    required string file = 2;
+    required uint64 offset = 3;
+    required uint32 size = 4;
+    optional uint32 trigger_gc = 5 [default=1];
+}
+
+message Mpb_LL_TrimChunkResp {
+    required Mpb_GeneralStatusCode status = 1;
 }
 
 // Low level API: checksum_list()
@@ -588,11 +604,12 @@ message Mpb_LL_Request {
     optional Mpb_LL_AppendChunkReq append_chunk = 30;
     optional Mpb_LL_WriteChunkReq write_chunk = 31;
     optional Mpb_LL_ReadChunkReq read_chunk = 32;
-    optional Mpb_LL_ChecksumListReq checksum_list = 33;
-    optional Mpb_LL_ListFilesReq list_files = 34;
-    optional Mpb_LL_WedgeStatusReq wedge_status = 35;
-    optional Mpb_LL_DeleteMigrationReq delete_migration = 36;
-    optional Mpb_LL_TruncHackReq trunc_hack = 37;
+    optional Mpb_LL_TrimChunkReq trim_chunk = 33;
+    optional Mpb_LL_ChecksumListReq checksum_list = 34;
+    optional Mpb_LL_ListFilesReq list_files = 35;
+    optional Mpb_LL_WedgeStatusReq wedge_status = 36;
+    optional Mpb_LL_DeleteMigrationReq delete_migration = 37;
+    optional Mpb_LL_TruncHackReq trunc_hack = 38;
 }
 
 message Mpb_LL_Response {
@@ -622,9 +639,10 @@ message Mpb_LL_Response {
     optional Mpb_LL_AppendChunkResp append_chunk = 30;
     optional Mpb_LL_WriteChunkResp write_chunk = 31;
     optional Mpb_LL_ReadChunkResp read_chunk = 32;
-    optional Mpb_LL_ChecksumListResp checksum_list = 33;
-    optional Mpb_LL_ListFilesResp list_files = 34;
-    optional Mpb_LL_WedgeStatusResp wedge_status = 35;
-    optional Mpb_LL_DeleteMigrationResp delete_migration = 36;
-    optional Mpb_LL_TruncHackResp trunc_hack = 37;
+    optional Mpb_LL_TrimChunkResp trim_chunk = 33;
+    optional Mpb_LL_ChecksumListResp checksum_list = 34;
+    optional Mpb_LL_ListFilesResp list_files = 35;
+    optional Mpb_LL_WedgeStatusResp wedge_status = 36;
+    optional Mpb_LL_DeleteMigrationResp delete_migration = 37;
+    optional Mpb_LL_TruncHackResp trunc_hack = 38;
 }

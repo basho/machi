@@ -177,7 +177,14 @@ all_trimmed(#machi_csum_table{table=T}, Left, Right) ->
 
 -spec all_trimmed(table(), machi_dt:chunk_pos()) -> boolean().
 all_trimmed(#machi_csum_table{table=T}, Pos) ->
-    runthru(ets:tab2list(T), 0, Pos).
+    case ets:tab2list(T) of
+        [{0, ?MINIMUM_OFFSET, _}|L] ->
+            %% tl/1 to remove header space {0, 1024, <<0>>}
+            runthru(L, ?MINIMUM_OFFSET, Pos);
+        List ->
+            %% In case a header is removed;
+            runthru(List, 0, Pos)
+    end.
 
 -spec any_trimmed(table(),
                   pos_integer(),

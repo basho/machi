@@ -76,13 +76,14 @@ smoke3_test() ->
          {?LINE, trim, {0, 1024, <<>>}, undefined, undefined}
         ],
     [ begin
-          %% ?debugVal({Line, Chunk}),
+          %% ?debugVal({_Line, Chunk}),
           {Offset, Size, Csum} = Chunk,
           ?assertEqual(LeftN0,
                        machi_csum_table:find_leftneighbor(MC, Offset)),
           ?assertEqual(RightN0,
                        machi_csum_table:find_rightneighbor(MC, Offset+Size)),
           LeftN = case LeftN0 of
+                      {OffsL, SizeL, trimmed} -> {OffsL, SizeL, trimmed};
                       {OffsL, SizeL, _} -> {OffsL, SizeL, <<"boom">>};
                       OtherL -> OtherL
                   end,

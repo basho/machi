@@ -75,6 +75,7 @@
           epoch_id        :: 'undefined' | machi_dt:epoch_id(),
           pb_mode = undefined  :: 'undefined' | 'high' | 'low',
           high_clnt       :: 'undefined' | pid(),
+          trim_table      :: ets:tid(),
           props = []      :: list()  % proplist
          }).
 
@@ -148,6 +149,7 @@ main2(FluName, TcpPort, DataDir, Props) ->
                 {true, undefined}
         end,
     Witness_p = proplists:get_value(witness_mode, Props, false),
+    
     S0 = #state{flu_name=FluName,
                 proj_store=ProjectionPid,
                 tcp_port=TcpPort,
@@ -409,8 +411,11 @@ do_pb_ll_request3({low_write_chunk, _EpochID, File, Offset, Chunk, CSum_tag,
                   #state{witness=false}=S) ->
     {do_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum, S), S};
 do_pb_ll_request3({low_read_chunk, _EpochID, File, Offset, Size, Opts},
-                  #state{witness=false}=S) ->
+                  #state{witness=false} = S) ->
     {do_server_read_chunk(File, Offset, Size, Opts, S), S};
+do_pb_ll_request3({low_trim_chunk, _EpochID, File, Offset, Size, TriggerGC},
+                  #state{witness=false}=S) ->
+    {do_server_trim_chunk(File, Offset, Size, TriggerGC, S), S};
 do_pb_ll_request3({low_checksum_list, _EpochID, File},
                   #state{witness=false}=S) ->
     {do_server_checksum_listing(File, S), S};
@@ -541,21 +546,47 @@ do_server_append_chunk2(_PKey, Prefix, Chunk, CSum_tag, Client_CSum,
 do_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum, #state{flu_name=FluName}) ->
     case sanitize_file_string(File) of
         ok ->
-            {ok, Pid} = machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, File}),
-            Meta = [{client_csum_tag, CSum_tag}, {client_csum, CSum}],
-            machi_file_proxy:write(Pid, Offset, Meta, Chunk);
+            case machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, File}) of
+                {ok, Pid} ->
+                    Meta = [{client_csum_tag, CSum_tag}, {client_csum, CSum}],
+                    machi_file_proxy:write(Pid, Offset, Meta, Chunk);
+                {error, trimmed} = Error ->
+                    Error
+            end;
         _ ->
             {error, bad_arg}
     end.
 
 do_server_read_chunk(File, Offset, Size, Opts, #state{flu_name=FluName})->
-    %% TODO: Look inside Opts someday.
     case sanitize_file_string(File) of
         ok ->
-            {ok, Pid} = machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, File}),
-            case machi_file_proxy:read(Pid, Offset, Size, Opts) of
-                {ok, ChunksAndTrimmed} -> {ok, ChunksAndTrimmed};
-                Other -> Other
+            case machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, File}) of
+                {ok, Pid} ->
+                    case machi_file_proxy:read(Pid, Offset, Size, Opts) of
+                        %% XXX FIXME 
+                        %% For now we are omiting the checksum data because it blows up
+                        %% protobufs.
+                        {ok, ChunksAndTrimmed} -> {ok, ChunksAndTrimmed};
+                        Other -> Other
+                    end;
+                {error, trimmed} = Error ->
+                    Error
+            end;
+        _ ->
+            {error, bad_arg}
+    end.
+
+do_server_trim_chunk(File, Offset, Size, TriggerGC, #state{flu_name=FluName}) ->
+    lager:debug("Hi there! I'm trimming this: ~s, (~p, ~p), ~p~n",
+                [File, Offset, Size, TriggerGC]),
+    case sanitize_file_string(File) of
+        ok ->
+            case machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, File}) of
+                {ok, Pid} ->
+                    machi_file_proxy:trim(Pid, Offset, Size, TriggerGC);
+                {error, trimmed} = Trimmed ->
+                    %% Should be returned back to (maybe) trigger repair
+                    Trimmed
             end;
         _ ->
             {error, bad_arg}
@@ -662,10 +693,14 @@ handle_append(Prefix, Chunk, Csum, Extra, FluName, EpochId) ->
     Res = machi_flu_filename_mgr:find_or_make_filename_from_prefix(FluName, EpochId, {prefix, Prefix}),
     case Res of
         {file, F} ->
-            {ok, Pid} = machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, F}),
-            {Tag, CS} = machi_util:unmake_tagged_csum(Csum),
-            Meta = [{client_csum_tag, Tag}, {client_csum, CS}],
-            machi_file_proxy:append(Pid, Meta, Extra, Chunk);
+            case machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, F}) of
+                {ok, Pid} ->
+                    {Tag, CS} = machi_util:unmake_tagged_csum(Csum),
+                    Meta = [{client_csum_tag, Tag}, {client_csum, CS}],
+                    machi_file_proxy:append(Pid, Meta, Extra, Chunk);
+                {error, trimmed} = E ->
+                    E
+            end;
         Error ->
             Error
     end.

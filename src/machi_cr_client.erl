@@ -360,6 +360,9 @@ do_append_head3(Prefix, Chunk, ChunkExtra, Depth, STime, TO,
             %% written block is.  But we lost a race.  Repeat, with a new
             %% sequencer assignment.
             do_append_head(Prefix, Chunk, ChunkExtra, Depth, STime, TO, S);
+        {error, trimmed} = Err ->
+            %% TODO: behaviour
+            {reply, Err, S};
         {error, not_written} ->
             exit({todo_should_never_happen,?MODULE,?LINE,
                   Prefix,iolist_size(Chunk)})
@@ -406,7 +409,7 @@ do_append_midtail(_RestFLUs, Prefix, File, Offset, Chunk, ChunkExtra,
                                                Ws, Depth + 1, STime, TO, S2)
                     end
             end
-    end.            
+    end.
 
 do_append_midtail2([], _Prefix, File, Offset, Chunk,
                    _ChunkExtra, _Ws, _Depth, _STime, _TO, S) ->
@@ -434,6 +437,9 @@ do_append_midtail2([FLU|RestFLUs]=FLUs, Prefix, File, Offset, Chunk,
             Resume = {append, Offset, iolist_size(Chunk), File},
             do_repair_chunk(FLUs, Resume, Chunk, [], File, Offset,
                             iolist_size(Chunk), Depth, STime, S);
+        {error, trimmed} = Err ->
+            %% TODO: nothing can be done
+            {reply, Err, S};
         {error, not_written} ->
             exit({todo_should_never_happen,?MODULE,?LINE,File,Offset})
     end.
@@ -497,6 +503,8 @@ do_write_head2(File, Offset, Chunk, Depth, STime, TO,
             do_write_head(File, Offset, Chunk, Depth, STime, TO, S);
         {error, written}=Err ->
             {reply, Err, S};
+        {error, trimmed}=Err ->
+            {reply, Err, S};
         {error, not_written} ->
             exit({todo_should_never_happen,?MODULE,?LINE,
                   iolist_size(Chunk)})
@@ -528,18 +536,26 @@ do_read_chunk2(File, Offset, Size, Opts, Depth, STime, TO,
     ConsistencyMode = P#projection_v1.mode,
     case ?FLU_PC:read_chunk(orddict:fetch(Tail, PD), EpochID,
                             File, Offset, Size, Opts, ?TIMEOUT) of
-        {ok, {Chunks, []}} when is_list(Chunks) ->
-            {reply, {ok, {Chunks, []}}, S};
+        {ok, {Chunks, Trimmed}} when is_list(Chunks), is_list(Trimmed) ->
+            %% After partition heal, there could happen that heads may
+            %% have chunk trimmed but tails may have chunk written -
+            %% such repair couldn't be triggered in read time (because
+            %% there's data!). In this case, repair should happen by
+            %% partition heal event or some background
+            %% hashtree-n-repair service. TODO. FIXME.
+            {reply, {ok, {Chunks, Trimmed}}, S};
         %% {ok, BadChunk} ->
         %%     %% TODO cleaner handling of bad chunks
         %%     exit({todo, bad_chunk_size, ?MODULE, ?LINE, File, Offset, Size,
         %%           got, byte_size(BadChunk)});
-        {error, bad_arg} = BadArg -> 
+        {error, bad_arg} = BadArg ->
             {reply, BadArg, S};
         {error, partial_read}=Err ->
+            %% TODO: maybe this case we might need another repair?
             {reply, Err, S};
         {error, bad_checksum}=BadCS ->
             %% TODO: alternate strategy?
+            %% Maybe we need read repair here, too?
             {reply, BadCS, S};
         {error, Retry}
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
@@ -548,12 +564,125 @@ do_read_chunk2(File, Offset, Size, Opts, Depth, STime, TO,
             read_repair(ConsistencyMode, read, File, Offset, Size, Depth, STime, S);
             %% {reply, {error, not_written}, S};
         {error, written} ->
-            exit({todo_should_never_happen,?MODULE,?LINE,File,Offset,Size})
+            exit({todo_should_never_happen,?MODULE,?LINE,File,Offset,Size});
+        {error, trimmed}=Err ->
+            {reply, Err, S}
     end.
 
-do_trim_chunk(_File, _Offset, _Size, _Depth, _STime, _TO, S) ->
-    %% This is just a stub to reach CR client from high level client
-    {reply, {error, bad_joss}, S}.
+do_trim_chunk(File, Offset, Size, 0=Depth, STime, TO, S) ->
+    do_trim_chunk(File, Offset, Size, Depth+1, STime, TO, S);
+
+do_trim_chunk(File, Offset, Size, Depth, STime, TO, #state{proj=P}=S) ->
+    sleep_a_while(Depth),
+    DiffMs = timer:now_diff(os:timestamp(), STime) div 1000,
+    if DiffMs > TO ->
+            {reply, {error, partition}, S};
+       true ->
+            %% This is suboptimal for performance: there are some paths
+            %% through this point where our current projection is good
+            %% enough.  But we're going to try to keep the code as simple
+            %% as we can for now.
+            S2 = update_proj(S#state{proj=undefined, bad_proj=P}),
+            case S2#state.proj of
+                P2 when P2 == undefined orelse
+                        P2#projection_v1.upi == [] ->
+                    do_trim_chunk(File, Offset, Size, Depth + 1,
+                                  STime, TO, S2);
+                _ ->
+                    do_trim_chunk2(File, Offset, Size, Depth + 1,
+                                   STime, TO, S2)
+            end
+    end.
+
+do_trim_chunk2(File, Offset, Size, Depth, STime, TO,
+               #state{epoch_id=EpochID, proj=P, proxies_dict=PD}=S) ->
+    [HeadFLU|RestFLUs] = mutation_flus(P),
+    Proxy = orddict:fetch(HeadFLU, PD),
+    case ?FLU_PC:trim_chunk(Proxy, EpochID, File, Offset, Size, ?TIMEOUT) of
+        ok ->
+            %% From this point onward, we use the same code & logic path as
+            %% append does.
+            do_trim_midtail(RestFLUs, undefined, File, Offset, Size,
+                            [HeadFLU], 0, STime, TO, S);
+        {error, trimmed} ->
+            %% Maybe the trim had failed in the middle of the tail so re-run
+            %% trim accross the whole chain.
+            do_trim_midtail(RestFLUs, undefined, File, Offset, Size,
+                            [HeadFLU], 0, STime, TO, S);
+        {error, bad_checksum}=BadCS ->
+            {reply, BadCS, S};
+        {error, Retry}
+          when Retry == partition; Retry == bad_epoch; Retry == wedged ->
+            do_trim_chunk(File, Offset, Size, Depth, STime, TO, S)
+    end.
+
+do_trim_midtail(RestFLUs, Prefix, File, Offset, Size,
+                Ws, Depth, STime, TO, S)
+  when RestFLUs == [] orelse Depth == 0 ->
+       do_trim_midtail2(RestFLUs, Prefix, File, Offset, Size,
+                        Ws, Depth + 1, STime, TO, S);
+do_trim_midtail(_RestFLUs, Prefix, File, Offset, Size,
+                Ws, Depth, STime, TO, #state{proj=P}=S) ->
+    %% io:format(user, "midtail sleep2,", []),
+    sleep_a_while(Depth),
+    DiffMs = timer:now_diff(os:timestamp(), STime) div 1000,
+    if DiffMs > TO ->
+            {reply, {error, partition}, S};
+       true ->
+            S2 = update_proj(S#state{proj=undefined, bad_proj=P}),
+            case S2#state.proj of
+                undefined ->
+                    {reply, {error, partition}, S};
+                P2 ->
+                    RestFLUs2 = mutation_flus(P2),
+                    case RestFLUs2 -- Ws of
+                        RestFLUs2 ->
+                            %% None of the writes that we have done so far
+                            %% are to FLUs that are in the RestFLUs2 list.
+                            %% We are pessimistic here and assume that
+                            %% those FLUs are permanently dead.  Start
+                            %% over with a new sequencer assignment, at
+                            %% the 2nd have of the impl (we have already
+                            %% slept & refreshed the projection).
+
+                            if Prefix == undefined -> % atom! not binary()!!
+                                    {error, partition};
+                               true ->
+                                    do_trim_chunk(Prefix, Offset, Size,
+                                                  Depth, STime, TO, S2)
+                            end;
+                        RestFLUs3 ->
+                            do_trim_midtail2(RestFLUs3, Prefix, File, Offset, Size,
+                                             Ws, Depth + 1, STime, TO, S2)
+                    end
+            end
+    end.
+
+do_trim_midtail2([], _Prefix, _File, _Offset, _Size,
+                   _Ws, _Depth, _STime, _TO, S) ->
+    %% io:format(user, "ok!\n", []),
+    {reply, ok, S};
+do_trim_midtail2([FLU|RestFLUs]=FLUs, Prefix, File, Offset, Size,
+                   Ws, Depth, STime, TO,
+                   #state{epoch_id=EpochID, proxies_dict=PD}=S) ->
+    Proxy = orddict:fetch(FLU, PD),
+    case ?FLU_PC:trim_chunk(Proxy, EpochID, File, Offset, Size, ?TIMEOUT) of
+        ok ->
+            %% io:format(user, "write ~w,", [FLU]),
+            do_trim_midtail2(RestFLUs, Prefix, File, Offset, Size,
+                             [FLU|Ws], Depth, STime, TO, S);
+        {error, trimmed} ->
+            do_trim_midtail2(RestFLUs, Prefix, File, Offset, Size,
+                             [FLU|Ws], Depth, STime, TO, S);
+        {error, bad_checksum}=BadCS ->
+            %% TODO: alternate strategy?
+            {reply, BadCS, S};
+        {error, Retry}
+          when Retry == partition; Retry == bad_epoch; Retry == wedged ->
+            do_trim_midtail(FLUs, Prefix, File, Offset, Size,
+                            Ws, Depth, STime, TO, S)
+    end.
+
 
 %% Read repair: depends on the consistency mode that we're in:
 %%
@@ -597,6 +726,7 @@ read_repair2(cp_mode=ConsistencyMode,
     case ?FLU_PC:read_chunk(orddict:fetch(Tail, PD), EpochID,
                             File, Offset, Size, [], ?TIMEOUT) of
         {ok, Chunks} when is_list(Chunks) ->
+            %% TODO: change to {Chunks, Trimmed} and have them repaired
             ToRepair = mutation_flus(P) -- [Tail],
             {Reply, S1} = do_repair_chunks(Chunks, ToRepair, ReturnMode,
                                            [Tail], File, Depth, STime, S, {ok, Chunks}),
@@ -614,7 +744,12 @@ read_repair2(cp_mode=ConsistencyMode,
         {error, not_written} ->
             {reply, {error, not_written}, S};
         {error, written} ->
-            exit({todo_should_never_happen,?MODULE,?LINE,File,Offset,Size})
+            exit({todo_should_never_happen,?MODULE,?LINE,File,Offset,Size});
+        {error, trimmed} ->
+            %% TODO: Again, whole file was trimmed. Needs repair. How
+            %% do we repair trimmed file (which was already unlinked)
+            %% across the flu servers?
+            exit({todo_should_repair_unlinked_files, ?MODULE, ?LINE, File})
     end;
 read_repair2(ap_mode=ConsistencyMode,
              ReturnMode, File, Offset, Size, Depth, STime,
@@ -622,6 +757,7 @@ read_repair2(ap_mode=ConsistencyMode,
     Eligible = mutation_flus(P),
     case try_to_find_chunk(Eligible, File, Offset, Size, S) of
         {ok, {Chunks, _Trimmed}, GotItFrom} when is_list(Chunks) ->
+            %% TODO: Repair trimmed chunks
             ToRepair = mutation_flus(P) -- [GotItFrom],
             {Reply0, S1} = do_repair_chunks(Chunks, ToRepair, ReturnMode, [GotItFrom],
                                            File, Depth, STime, S, {ok, Chunks}),
@@ -638,7 +774,11 @@ read_repair2(ap_mode=ConsistencyMode,
         {error, not_written} ->
             {reply, {error, not_written}, S};
         {error, written} ->
-            exit({todo_should_never_happen,?MODULE,?LINE,File,Offset,Size})
+            exit({todo_should_never_happen,?MODULE,?LINE,File,Offset,Size});
+        {error, trimmed} ->
+            %% TODO: Again, whole file was trimmed. Needs repair. How
+            %% do we repair trimmed file across the flu servers?
+            exit({todo_should_repair_unlinked_files, ?MODULE, ?LINE, File})
     end.
 
 do_repair_chunks([], _, _, _, _, _, _, S, Reply) ->
@@ -703,6 +843,9 @@ do_repair_chunk2([First|Rest]=ToRepair, ReturnMode, Chunk, Repaired, File, Offse
             %% that it is exactly our Chunk.
             do_repair_chunk2(Rest, ReturnMode, Chunk, Repaired, File,
                              Offset, Size, Depth, STime, S);
+        {error, trimmed} = _Error ->
+            %% TODO
+            exit(todo_should_repair_trimmed);
         {error, not_written} ->
             exit({todo_should_never_happen,?MODULE,?LINE,File,Offset,Size})
     end.
@@ -872,7 +1015,9 @@ try_to_find_chunk(Eligible, File, Offset, Size,
         [{FoundFLU, {ok, ChunkAndTrimmed}}|_] ->
             {ok, ChunkAndTrimmed, FoundFLU};
         [] ->
-            RetryErrs = [partition, bad_epoch, wedged],
+            RetryErrs = [partition, bad_epoch, wedged, trimmed],
+            %% Adding 'trimmed' to return so as to trigger repair,
+            %% once all other retry errors fixed
             case [Err || {error, Err} <- Rs, lists:member(Err, RetryErrs)] of
                 [SomeErr|_] ->
                     {error, SomeErr};

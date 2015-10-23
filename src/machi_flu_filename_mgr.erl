@@ -17,8 +17,8 @@
 %% under the License.
 %%
 %% -------------------------------------------------------------------
-%% 
-%% @doc This process is responsible for managing filenames assigned to 
+%%
+%% @doc This process is responsible for managing filenames assigned to
 %% prefixes. It's started out of `machi_flu_psup'.
 %%
 %% Supported operations include finding the "current" filename assigned to
@@ -32,7 +32,7 @@
 %% First it looks up the sequence number from the prefix name. If
 %% no sequence file is found, it uses 0 as the sequence number and searches
 %% for a matching file with the prefix and 0 as the sequence number.
-%% If no file is found, the it generates a new filename by incorporating 
+%% If no file is found, the it generates a new filename by incorporating
 %% the given prefix, a randomly generated (v4) UUID and 0 as the
 %% sequence number.
 %%
@@ -79,7 +79,7 @@
 
 child_spec(FluName, DataDir) ->
     Name = make_filename_mgr_name(FluName),
-    {Name, 
+    {Name,
         {?MODULE, start_link, [FluName, DataDir]},
         permanent, 5000, worker, [?MODULE]}.
 
@@ -87,8 +87,8 @@ start_link(FluName, DataDir) when is_atom(FluName) andalso is_list(DataDir) ->
     N = make_filename_mgr_name(FluName),
     gen_server:start_link({local, N}, ?MODULE, [FluName, DataDir], []).
 
--spec find_or_make_filename_from_prefix( FluName :: atom(), 
-                                         EpochId :: pv1_epoch_n(), 
+-spec find_or_make_filename_from_prefix( FluName :: atom(),
+                                         EpochId :: pv1_epoch_n(),
                                          Prefix :: {prefix, string()} ) ->
         {file, Filename :: string()} | {error, Reason :: term() } | timeout.
 % @doc Find the latest available or make a filename from a prefix. A prefix
@@ -96,7 +96,7 @@ start_link(FluName, DataDir) when is_atom(FluName) andalso is_list(DataDir) ->
 % tuple in the form of `{file, F}' or an `{error, Reason}'
 find_or_make_filename_from_prefix(FluName, EpochId, {prefix, Prefix}) when is_atom(FluName) ->
     N = make_filename_mgr_name(FluName),
-    gen_server:call(N, {find_filename, EpochId, Prefix}, ?TIMEOUT); 
+    gen_server:call(N, {find_filename, EpochId, Prefix}, ?TIMEOUT);
 find_or_make_filename_from_prefix(_FluName, _EpochId, Other) ->
     lager:error("~p is not a valid prefix.", [Other]),
     error(badarg).
@@ -104,9 +104,9 @@ find_or_make_filename_from_prefix(_FluName, _EpochId, Other) ->
 -spec increment_prefix_sequence( FluName :: atom(), Prefix :: {prefix, string()} ) ->
         ok | {error, Reason :: term() } | timeout.
 % @doc Increment the sequence counter for a given prefix. Prefix should
-% be in the form of `{prefix, P}'. 
+% be in the form of `{prefix, P}'.
 increment_prefix_sequence(FluName, {prefix, Prefix}) when is_atom(FluName) ->
-    gen_server:call(make_filename_mgr_name(FluName), {increment_sequence, Prefix}, ?TIMEOUT); 
+    gen_server:call(make_filename_mgr_name(FluName), {increment_sequence, Prefix}, ?TIMEOUT);
 increment_prefix_sequence(_FluName, Other) ->
     lager:error("~p is not a valid prefix.", [Other]),
     error(badarg).
@@ -117,7 +117,7 @@ increment_prefix_sequence(_FluName, Other) ->
 % all the data files associated with that prefix. Returns
 % a list.
 list_files_by_prefix(FluName, {prefix, Prefix}) when is_atom(FluName) ->
-    gen_server:call(make_filename_mgr_name(FluName), {list_files, Prefix}, ?TIMEOUT); 
+    gen_server:call(make_filename_mgr_name(FluName), {list_files, Prefix}, ?TIMEOUT);
 list_files_by_prefix(_FluName, Other) ->
     lager:error("~p is not a valid prefix.", [Other]),
     error(badarg).
@@ -125,7 +125,10 @@ list_files_by_prefix(_FluName, Other) ->
 %% gen_server API
 init([FluName, DataDir]) ->
     Tid = ets:new(make_filename_mgr_name(FluName), [named_table, {read_concurrency, true}]),
-    {ok, #state{ fluname = FluName, epoch = 0, datadir = DataDir, tid = Tid }}.
+    {ok, #state{fluname = FluName,
+                epoch = 0,
+                datadir = DataDir,
+                tid = Tid}}.
 
 handle_cast(Req, State) ->
     lager:warning("Got unknown cast ~p", [Req]),
@@ -135,9 +138,9 @@ handle_cast(Req, State) ->
 %% the FLU has already validated that the caller's epoch id and the FLU's epoch id
 %% are the same. So we *assume* that remains the case here - that is to say, we
 %% are not wedged.
-handle_call({find_filename, EpochId, Prefix}, _From, S = #state{ datadir = DataDir, 
-                                                                 epoch = EpochId, 
-                                                                 tid = Tid }) ->
+handle_call({find_filename, EpochId, Prefix}, _From, S = #state{ datadir = DataDir,
+                                                                 epoch = EpochId,
+                                                                 tid = Tid}) ->
     %% Our state and the caller's epoch ids are the same. Business as usual.
     File = handle_find_file(Tid, Prefix, DataDir),
     {reply, {file, File}, S};
@@ -154,7 +157,7 @@ handle_call({increment_sequence, Prefix}, _From, S = #state{ datadir = DataDir }
     ok = machi_util:increment_max_filenum(DataDir, Prefix),
     {reply, ok, S};
 handle_call({list_files, Prefix}, From, S = #state{ datadir = DataDir }) ->
-    spawn(fun() -> 
+    spawn(fun() ->
         L = list_files(DataDir, Prefix),
         gen_server:reply(From, L)
     end),
@@ -181,7 +184,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% MIT License
 generate_uuid_v4_str() ->
     <<A:32, B:16, C:16, D:16, E:48>> = crypto:strong_rand_bytes(16),
-    io_lib:format("~8.16.0b-~4.16.0b-4~3.16.0b-~4.16.0b-~12.16.0b", 
+    io_lib:format("~8.16.0b-~4.16.0b-4~3.16.0b-~4.16.0b-~12.16.0b",
                         [A, B, C band 16#0fff, D band 16#3fff bor 16#8000, E]).
 
 find_file(DataDir, Prefix, N) ->
@@ -201,7 +204,7 @@ handle_find_file(Tid, Prefix, DataDir) ->
         [] ->
             {find_or_make_filename(Tid, DataDir, Prefix, N), false};
         [H] -> {H, true};
-        [Fn | _ ] = L -> 
+        [Fn | _ ] = L ->
             lager:warning(
               "Searching for a matching file to prefix ~p and sequence number ~p gave multiples: ~p",
               [Prefix, N, L]),
@@ -245,4 +248,3 @@ increment_and_cache_filename(Tid, DataDir, Prefix) ->
 -ifdef(TEST).
 
 -endif.
-
