@@ -281,9 +281,7 @@ handle_call({read, Offset, Length, Opts}, _From,
             State = #state{filename = F,
                            data_filehandle = FH,
                            csum_table = CsumTable,
-                           eof_position = EofP,
-                           reads = {T, Err}
-                          }) ->
+                           reads = {T, Err}}) ->
     NoChecksum = proplists:get_value(no_checksum, Opts, false),
     NoChunk = proplists:get_value(no_chunk, Opts, false),
     NeedsMerge = proplists:get_value(needs_trimmed, Opts, false),
@@ -291,12 +289,9 @@ handle_call({read, Offset, Length, Opts}, _From,
         case do_read(FH, F, CsumTable, Offset, Length, NoChecksum, NoChunk, NeedsMerge) of
             {ok, {[], []}} ->
                 {{error, not_written}, Err + 1};
-            {ok, {Chunks, Trimmed}} ->
-                %% Kludge to wrap read result in tuples, to support fragmented read
-                %% XXX FIXME 
-                %% For now we are omiting the checksum data because it blows up
-                %% protobufs.
-                {{ok, {Chunks, Trimmed}}, Err};
+            {ok, {Chunks0, Trimmed0}} ->
+                Chunks = slice_both_side(Chunks0, Offset, Offset+Length),
+                {{ok, {Chunks, Trimmed0}}, Err};
             Error ->
                 lager:error("Can't read ~p, ~p at File ~p", [Offset, Length, F]),
                 {Error, Err + 1}
@@ -663,4 +658,27 @@ do_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Size, Data) ->
             lager:error("Got ~p during write to file ~p at offset ~p, length ~p",
             [Other, Filename, Offset, Size]),
             {error, Other}
+    end.
+
+%% @doc Trim both right and left border of chunks to fit in to given
+%% range [LeftPos, RightPos]. TODO: write unit tests for this function.
+slice_both_side([], _, _) -> [];
+slice_both_side([{F, Offset, Chunk, _Csum}|L], LeftPos, RightPos)
+  when Offset < LeftPos andalso LeftPos < RightPos ->
+    TrashLen = 8 * (LeftPos - Offset),
+    <<_:TrashLen/binary, NewChunk/binary>> = Chunk,
+    NewChecksum = machi_util:make_tagged_csum(client_sha, Chunk),
+    NewH = {F, LeftPos, NewChunk, NewChecksum},
+    slice_both_side([NewH|L], LeftPos, RightPos);
+slice_both_side(Chunks, LeftPos, RightPos) when LeftPos =< RightPos ->
+    %% TODO: optimize
+    [{F, Offset, Chunk, _Csum}|L] = lists:reverse(Chunks),
+    Size = iolist_size(Chunk),
+    if RightPos < Offset + Size ->
+            NewSize = RightPos - Offset,
+            <<NewChunk:NewSize/binary, _/binary>> = Chunk,
+            NewChecksum = machi_util:make_tagged_csum(client_sha, Chunk),
+            lists:reverse([{F, Offset, NewChunk, NewChecksum}|L]);
+       true ->
+            Chunks
     end.
