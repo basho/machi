@@ -667,7 +667,7 @@ slice_both_side([{F, Offset, Chunk, _Csum}|L], LeftPos, RightPos)
   when Offset < LeftPos andalso LeftPos < RightPos ->
     TrashLen = 8 * (LeftPos - Offset),
     <<_:TrashLen/binary, NewChunk/binary>> = Chunk,
-    NewChecksum = machi_util:make_tagged_csum(client_sha, Chunk),
+    NewChecksum = machi_util:make_tagged_csum(?CSUM_TAG_SERVER_REGEN_SHA_ATOM, Chunk),
     NewH = {F, LeftPos, NewChunk, NewChecksum},
     slice_both_side([NewH|L], LeftPos, RightPos);
 slice_both_side(Chunks, LeftPos, RightPos) when LeftPos =< RightPos ->
@@ -677,7 +677,7 @@ slice_both_side(Chunks, LeftPos, RightPos) when LeftPos =< RightPos ->
     if RightPos < Offset + Size ->
             NewSize = RightPos - Offset,
             <<NewChunk:NewSize/binary, _/binary>> = Chunk,
-            NewChecksum = machi_util:make_tagged_csum(client_sha, Chunk),
+            NewChecksum = machi_util:make_tagged_csum(?CSUM_TAG_SERVER_REGEN_SHA_ATOM, Chunk),
             lists:reverse([{F, Offset, NewChunk, NewChecksum}|L]);
        true ->
             Chunks
