@@ -103,7 +103,7 @@ start_link(FluName, DataDir, Options) ->
 %% tree for the given file (if it hasn't already).
 initialize(FluName, Filename) ->
     gen_server:cast(make_merkle_tree_mgr_name(FluName), 
-                    {initialize, Filename}, ?TIMEOUT).
+                    {initialize, Filename}).
 
 -spec update(  FluName :: atom(),
               Filename :: string(),
@@ -114,7 +114,7 @@ initialize(FluName, Filename) ->
 %% with the particular information.
 update(FluName, Filename, Offset, Length, Csum) ->
     gen_server:cast(make_merkle_tree_mgr_name(FluName), 
-                    {update, Filename, Offset, Length, Csum}, ?TIMEOUT).
+                    {update, Filename, Offset, Length, Csum}).
 
 -spec fetch ( FluName :: atom(),
              Filename :: string() ) -> {ok, [ Data :: binary() ]}.
@@ -148,7 +148,7 @@ init({FluName, DataDir, Options}) ->
 
 handle_call({fetch, Filename, Level}, _From, S = #state{ tid = Tid }) ->
     Res = handle_fetch(Tid, Filename, Level),
-    {reply, {ok, [ Res ]}, S};
+    {reply, {ok, Res}, S};
 handle_call(Req, _From, State) ->
     lager:warning("Unknown call: ~p", [Req]),
     {reply, whoaaaaaaaaaaaa, State}.
@@ -187,8 +187,9 @@ handle_load(Tid, DataDir) ->
     Files = get_files(DataDir),
     lists:foreach(fun(F) -> load_filename(Tid, DataDir, F) end, Files).
 
-get_files(_DataDir) ->
-    [].
+get_files(DataDir) ->
+    {_, WildPath} = machi_util:make_data_filename(DataDir, ""),
+    filelib:wildcard("*", WildPath).
 
 load_filename(Tid, DataDir, Filename) ->
     CsumFile = machi_util:make_checksum_filename(DataDir, Filename),
@@ -202,7 +203,7 @@ load_filename(Tid, DataDir, Filename) ->
     end.
 
 load_bin(Tid, Filename, Bin) ->
-    CsumL = machi_csum_table:split_checksum_list_blob_decode(Bin),
+    {CsumL, _} = machi_csum_table:split_checksum_list_blob_decode(Bin),
     iter_csum_list(Tid, Filename, CsumL).
 
 iter_csum_list(Tid, Filename, []) ->
@@ -299,37 +300,44 @@ find(Tid, Filename) ->
     end.
 
 build_tree(Tid, MT = #mt{ leaves = D }) ->
-    Lvl1s = build_level_1(?CHUNK_SIZE, lists:map(fun map_dict/1, orddict:to_list(D)), 1, [ crypto:hash_init(?H) ]),
+    Leaves = lists:map(fun map_dict/1, orddict:to_list(D)),
+    io:format(user, "Leaves: ~p~n", [Leaves]),
+    Lvl1s = build_level_1(?CHUNK_SIZE, Leaves, 1, [ crypto:hash_init(?H) ]),
+    io:format(user, "Lvl1: ~p~n", [Lvl1s]),
     Mod2 = length(Lvl1s) div ?LEVEL_SIZE,
     Lvl2s = build_int_level(Mod2, Lvl1s, 1, [ crypto:hash_init(?H) ]),
+    io:format(user, "Lvl2: ~p~n", [Lvl2s]),
     Mod3 = length(Lvl2s) div 2,
     Lvl3s = build_int_level(Mod3, Lvl2s, 1, [ crypto:hash_init(?H) ]),
+    io:format(user, "Lvl3: ~p~n", [Lvl3s]),
     Root = build_root(Lvl3s, crypto:hash_init(?H)),
+    io:format(user, "Root: ~p~n", [Root]),
     ets:insert(Tid, MT#mt{ root = Root, lvl1 = Lvl1s, lvl2 = Lvl2s, lvl3 = Lvl3s, recalc = false }),
     [Root, Lvl3s, Lvl2s, Lvl1s].
 
 build_root([], Ctx) ->
     crypto:hash_final(Ctx);
 build_root([H|T], Ctx) ->
-    build_root(T, crypto:hash_update(H, Ctx)).
+    build_root(T, crypto:hash_update(Ctx, H)).
 
 build_int_level(_Mod, [], _Cnt, [ Ctx | Rest ]) ->
     lists:reverse( [ crypto:hash_final(Ctx) | Rest ] );
 build_int_level(Mod, [H|T], Cnt, [ Ctx | Rest ]) when Cnt rem Mod == 0 ->
     NewCtx = crypto:hash_init(?H),
-    build_int_level(Mod, T, Cnt + 1, [ crypto:hash_update(H, NewCtx), crypto:hash_final(Ctx) | Rest ]);
+    build_int_level(Mod, T, Cnt + 1, [ crypto:hash_update(NewCtx, H), crypto:hash_final(Ctx) | Rest ]);
 build_int_level(Mod, [H|T], Cnt, [ Ctx | Rest ]) ->
-    build_int_level(Mod, T, Cnt+1, [ crypto:hash_update(H, Ctx) | Rest ]).
+    build_int_level(Mod, T, Cnt+1, [ crypto:hash_update(Ctx, H) | Rest ]).
 
 map_dict({{Offset, Len}, Hash}) ->
     {Offset + Len, Hash}.
 
 build_level_1(_Size, [], _Multiple, [ Ctx | Rest ]) ->
     lists:reverse([ crypto:hash_final(Ctx) | Rest ]);
-build_level_1(Size, [{Pos, Hash}|T], Multiple, [ Ctx | Rest ]) when Pos > Size ->
+build_level_1(Size, [{Pos, Hash}|T], Multiple, [ Ctx | Rest ]) when Pos > ( Size * Multiple ) ->
     NewCtx = crypto:hash_init(?H),
-    build_level_1(Size*(Multiple+1), T, Multiple+1, 
-                  [ crypto:hash_update(Hash, NewCtx), crypto:hash_final(Ctx) | Rest ]);
-build_level_1(Size, [{Pos, Hash}|T], Multiple, [ Ctx | Rest ]) when Pos =< Size ->
-    build_level_1(Size, T, Multiple, [ crypto:hash_update(Hash, Ctx) | Rest ]).
+    build_level_1(Size, T, Multiple+1, 
+                  [ crypto:hash_update(NewCtx, Hash), crypto:hash_final(Ctx) | Rest ]);
+build_level_1(Size, [{Pos, Hash}|T], Multiple, [ Ctx | Rest ]) when Pos =< ( Size * Multiple ) ->
+    io:format(user, "Size: ~p, Pos: ~p, Multiple: ~p~n", [Size, Pos, Multiple]),
+    build_level_1(Size, T, Multiple, [ crypto:hash_update(Ctx, Hash) | Rest ]).
 
