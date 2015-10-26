@@ -51,14 +51,21 @@ open(CSumFilename, _Opts) ->
                            List0;
                        {List0, _Junk} ->
                            %% Partially written, needs repair TODO
-                           %% [write(CSumFilename, List),
                            List0
                    end,
             %% assuming all entries are strictly ordered by offset,
             %% trim command should always come after checksum entry.
             %% *if* by any chance that order cound not be kept, we
             %% still can do ordering check and monotonic merge here.
-            ets:insert(T, List);
+            %% TODO: make some random injection tests?
+            [begin %% Replay all file contents, Same logic as in write/6
+                 Chunks = find(C0, Offset, Size),
+                 lists:foreach(fun({O, _, _}) ->
+                                       ets:delete(T, O)
+                               end, Chunks),
+                 true = ets:insert(T, {Offset, Size, CsumOrTrimmed})
+             end
+             || {Offset, Size, CsumOrTrimmed} <- List];
         {error, enoent} ->
             ok;
         Error ->
