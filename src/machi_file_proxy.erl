@@ -601,7 +601,7 @@ read_all_ranges(FHd, Filename, [{Offset, Size, TaggedCsum}|T], ReadChunks) ->
 handle_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Data) ->
     Size = iolist_size(Data),
     case machi_csum_table:find(CsumTable, Offset, Size) of
-        [] ->
+        [] -> %% Nothing should be there
             try
                 do_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Size, Data)
             catch
@@ -614,7 +614,8 @@ handle_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Data) ->
         [{Offset, Size, TaggedCsum}] ->
             case do_read(FHd, Filename, CsumTable, Offset, Size, false, false, false) of
                 {error, _} = E ->
-                    lager:warning("This should never happen: got ~p while reading at offset ~p in file ~p that's supposedly written",
+                    lager:warning("This should never happen: got ~p while reading"
+                                  " at offset ~p in file ~p that's supposedly written",
                                   [E, Offset, Filename]),
                     {error, server_insanity};
                 {ok, {[{_, Offset, Data, TaggedCsum}], _}} ->
@@ -626,12 +627,25 @@ handle_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Data) ->
             end;
         [{Offset, Size, OtherCsum}] ->
             %% Got a checksum, but it doesn't match the data block's
-            lager:error("During a potential write at offset ~p in file ~p, a check for unwritten bytes gave us checksum ~p but the data we were trying to trying to write has checksum ~p",
+            lager:error("During a potential write at offset ~p in file ~p,"
+                        " a check for unwritten bytes gave us checksum ~p"
+                        " but the data we were trying to write has checksum ~p",
                         [Offset, Filename, OtherCsum, TaggedCsum]),
             {error, written};
         _Chunks ->
-            %% No byte is trimmed, but at least one byte is written
-            {error, written}
+            %% TODO: Do we try to read all continuous chunks to see
+            %% wether its total checksum matches client-provided checksum?
+            case machi_csum_table:any_trimmed(CsumTable, Offset, Size) of
+                true ->
+                    %% More than a byte is trimmed, besides, do we
+                    %% have to return exact written bytes? No. Clients
+                    %% must issue read_chunk() with needs_trimmed
+                    %% option as true
+                    {error, trimmed};
+                false ->
+                    %% No byte is trimmed, but at least one byte is written
+                    {error, written}
+            end
     end.
 
 % @private Implements the disk writes for both the write and append
@@ -649,7 +663,18 @@ do_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Size, Data) ->
         ok ->
             lager:debug("Successful write in file ~p at offset ~p, length ~p",
                         [Filename, Offset, Size]),
-            ok = machi_csum_table:write(CsumTable, Offset, Size, TaggedCsum),
+
+            %% Overlapping chunk; calculate checksum
+            %% read {LOffset, Offset - LOffset} and make csum
+            %% as server_sha
+            LUpdate = maybe_regenerate_checksum(
+                        FHd,
+                        machi_csum_table:find_leftneighbor(CsumTable, Offset)),
+            RUpdate = maybe_regenerate_checksum(
+                        FHd,
+                        machi_csum_table:find_rightneighbor(CsumTable, Offset+Size)),
+            ok = machi_csum_table:write(CsumTable, Offset, Size,
+                                        TaggedCsum, LUpdate, RUpdate),
             lager:debug("Successful write to checksum file for ~p",
                         [Filename]),
             ok;
@@ -682,4 +707,21 @@ slice_both_side(Chunks, LeftPos, RightPos) when LeftPos =< RightPos ->
             lists:reverse([{F, Offset, NewChunk, NewChecksum}|L]);
        true ->
             Chunks
+    end.
+
+maybe_regenerate_checksum(_, undefined) ->
+    undefined;
+maybe_regenerate_checksum(_, {_, _, trimmed} = Change) ->
+    Change;
+maybe_regenerate_checksum(FHd, {Offset, Size, _Csum}) ->
+    case file:pread(FHd, Offset, Size) of
+        eof ->
+            error(eof);
+        {ok, Bytes} when byte_size(Bytes) =:= Size ->
+
+            TaggedCsum = machi_util:make_tagged_csum(server_regen_sha,
+                                                     machi_util:checksum_chunk(Bytes)),
+            {Offset, Size, TaggedCsum};
+        Error ->
+            throw(Error)
     end.
