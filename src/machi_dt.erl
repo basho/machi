@@ -46,7 +46,7 @@
 
 %% @doc Tags that stand for how that checksum was generated. See
 %% machi_util:make_tagged_csum/{1,2} for further documentation and
-%% implementationo.
+%% implementation.
 -type csum_tag()    :: none | client_sha | server_sha | server_regen_sha.
 
 -export_type([
