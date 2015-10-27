@@ -327,7 +327,7 @@ execute_repair_directive({File, Cmds}, {ProxiesDict, EpochID, Verb, ETS}=Acc) ->
                 %% TODO: support case multiple written or trimmed chunks returned
                 {ok, {[{_, Offset, Chunk, _}], _}} =
                     machi_proxy_flu1_client:read_chunk(
-                      SrcP, EpochID, File, Offset, Size,
+                      SrcP, EpochID, File, Offset, Size, [],
                       ?SHORT_TIMEOUT),
                 _T2 = os:timestamp(),
                 <<_Tag:1/binary, CSum/binary>> = TaggedCSum,

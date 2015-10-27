@@ -597,7 +597,7 @@ read_repair2(cp_mode=ConsistencyMode,
     %% TODO WTF was I thinking here??....
     Tail = lists:last(readonly_flus(P)),
     case ?FLU_PC:read_chunk(orddict:fetch(Tail, PD), EpochID,
-                            File, Offset, Size, ?TIMEOUT) of
+                            File, Offset, Size, [], ?TIMEOUT) of
         {ok, Chunks} when is_list(Chunks) ->
             ToRepair = mutation_flus(P) -- [Tail],
             {Reply, S1} = do_repair_chunks(Chunks, ToRepair, ReturnMode,
