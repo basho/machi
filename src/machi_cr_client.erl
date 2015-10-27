@@ -112,7 +112,6 @@
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
--export([trim_both_side/3]).
 -endif. % TEST.
 
 -export([start_link/1]).
@@ -529,8 +528,7 @@ do_read_chunk2(File, Offset, Size, Opts, Depth, STime, TO,
     ConsistencyMode = P#projection_v1.mode,
     case ?FLU_PC:read_chunk(orddict:fetch(Tail, PD), EpochID,
                             File, Offset, Size, Opts, ?TIMEOUT) of
-        {ok, {Chunks0, []}} when is_list(Chunks0) ->
-            Chunks = trim_both_side(Chunks0, Offset, Offset + Size),
+        {ok, {Chunks, []}} when is_list(Chunks) ->
             {reply, {ok, {Chunks, []}}, S};
         %% {ok, BadChunk} ->
         %%     %% TODO cleaner handling of bad chunks
@@ -926,24 +924,3 @@ timeout(infinity) ->
     timeout(15*60*1000);                        % close enough to infinity
 timeout(Timeout0) ->
     {Timeout0, Timeout0 + 30*1000}.
-
-%% @doc Trim both right and left border of chunks to fit in to given
-%% range [LeftPos, RightPos]. TODO: write unit tests for this function.
-trim_both_side([], _, _) -> [];
-trim_both_side([{F, Offset, Chunk, _Csum}|L], LeftPos, RightPos)
-  when Offset < LeftPos andalso LeftPos < RightPos ->
-    TrashLen = 8 * (LeftPos - Offset),
-    <<_:TrashLen/binary, NewChunk/binary>> = Chunk,
-    NewH = {F, LeftPos, NewChunk, <<>>},
-    trim_both_side([NewH|L], LeftPos, RightPos);
-trim_both_side(Chunks, LeftPos, RightPos) when LeftPos =< RightPos ->
-    %% TODO: optimize
-    [{F, Offset, Chunk, _Csum}|L] = lists:reverse(Chunks),
-    Size = iolist_size(Chunk),
-    if RightPos < Offset + Size ->
-            NewSize = RightPos - Offset,
-            <<NewChunk:NewSize/binary, _/binary>> = Chunk,
-            lists:reverse([{F, Offset, NewChunk, <<>>}|L]);
-       true ->
-            Chunks
-    end.
