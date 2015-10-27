@@ -18,10 +18,9 @@
 %%
 %% -------------------------------------------------------------------
 
--define(MAX_FILE_SIZE, 256*1024*1024).     % 256 MBytes
--define(MAX_CHUNK_SIZE, ((1 bsl 32) - 1)).
-%% -define(DATA_DIR, "/Volumes/SAM1/seq-tests/data").
--define(DATA_DIR, "./data").
+%% @doc Now 4GiBytes, could be up to 64bit due to PB message limit of
+%% chunk size
+-define(DEFAULT_MAX_FILE_SIZE, ((1 bsl 32) - 1)).
 -define(MINIMUM_OFFSET, 1024).
 
 %% 0th draft of checksum typing with 1st byte.
@@ -39,4 +38,5 @@
 -define(PB_MAX_MSG_SIZE, (33*1024*1024)).
 -define(PB_PACKET_OPTS, [{packet, 4}, {packet_size, ?PB_MAX_MSG_SIZE}]).
 
+%% TODO: it's used in flu_sup and elsewhere, change this to suitable name
 -define(TEST_ETS_TABLE, test_ets_table).

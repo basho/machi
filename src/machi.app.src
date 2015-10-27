@@ -5,9 +5,6 @@
     {mod,{machi_app,[]}},
     {registered, []},
     {env, [
-           {flu_list,
-            [
-             %%%%%% {flu_a, 32900, "./data.flu_a"}
-            ]}
+    %% Don't use this static env for defaults, or we will fall into config hell.
     ]}
 ]}.
