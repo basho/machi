@@ -35,16 +35,16 @@
 
 -spec open(string(), proplists:proplist()) ->
                   {ok, table()} | {error, file:posix()}.
+
 open(CSumFilename, _Opts) ->
     T = ets:new(?MODULE, [private, ordered_set]),
     CSum = machi_util:make_tagged_csum(none),
     %% Dummy entry for headers
     true = ets:insert_new(T, {0, ?MINIMUM_OFFSET, CSum}),
     C0 = #machi_csum_table{
-           file=CSumFilename,
-           table=T},
+            file=CSumFilename,
+            table=T},
     case file:read_file(CSumFilename) of
-        %% , [read, raw, binary]) of
         {ok, Bin} ->
             List = case split_checksum_list_blob_decode(Bin) of
                        {List0, <<>>} ->
@@ -65,7 +65,8 @@ open(CSumFilename, _Opts) ->
                                end, Chunks),
                  true = ets:insert(T, {Offset, Size, CsumOrTrimmed})
              end
-             || {Offset, Size, CsumOrTrimmed} <- List];
+             || {Offset, Size, CsumOrTrimmed} <- List],
+            ok;
         {error, enoent} ->
             ok;
         Error ->
@@ -77,7 +78,7 @@ open(CSumFilename, _Opts) ->
 -spec find(table(), machi_dt:file_offset(), machi_dt:file_size()) ->
                   list({machi_dt:file_offset(),
                         machi_dt:file_size(),
-                        machi_dt:chunk_csum()}).
+                        machi_dt:chunk_csum()|trimmed}).
 find(#machi_csum_table{table=T}, Offset, Size) ->
     ets:select(T, [{{'$1', '$2', '$3'},
                     [inclusion_match_spec(Offset, Size)],
@@ -128,6 +129,9 @@ write(#machi_csum_table{fd=Fd, table=T} = CsumT,
             Error
     end.
 
+-spec find_leftneighbor(table(), non_neg_integer()) ->
+                               undefined |
+                               {non_neg_integer(), machi_dt:chunk_size(), trimmed|machi_dt:chunk_csum()}.
 find_leftneighbor(CsumT, Offset) ->
     case find(CsumT, Offset, 1) of
         [] -> undefined;
@@ -135,6 +139,9 @@ find_leftneighbor(CsumT, Offset) ->
         [{LOffset, _, CsumOrTrimmed}] -> {LOffset, Offset - LOffset, CsumOrTrimmed}
     end.
 
+-spec find_rightneighbor(table(), non_neg_integer()) ->
+                                undefined |
+                                {non_neg_integer(), machi_dt:chunk_size(), trimmed|machi_dt:chunk_csum()}.
 find_rightneighbor(CsumT, Offset) ->
     case find(CsumT, Offset, 1) of
         [] -> undefined;
@@ -144,8 +151,8 @@ find_rightneighbor(CsumT, Offset) ->
     end.
 
 -spec write(table(), machi_dt:file_offset(), machi_dt:file_size(),
-            machi_dt:chunk_csum()) ->
-                   ok | {error, used|file:posix()}.
+            machi_dt:chunk_csum()|trimmed) ->
+                   ok | {error, trimmed|file:posix()}.
 write(CsumT, Offset, Size, CSum) ->
     write(CsumT, Offset, Size, CSum, undefined, undefined).
 
@@ -173,7 +180,7 @@ all_trimmed(#machi_csum_table{table=T}, Pos) ->
     runthru(ets:tab2list(T), 0, Pos).
 
 -spec any_trimmed(table(),
-                  machi_dt:chunk_pos(),
+                  pos_integer(),
                   machi_dt:chunk_size()) -> boolean().
 any_trimmed(CsumT, Offset, Size) ->
     Chunks = find(CsumT, Offset, Size),
