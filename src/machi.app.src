@@ -5,6 +5,6 @@
     {mod,{machi_app,[]}},
     {registered, []},
     {env, [
-    %% Don't use this env for defaults, or I'll give some poopies
+    %% Don't use this static env for defaults, or we will fall into config hell.
     ]}
 ]}.
