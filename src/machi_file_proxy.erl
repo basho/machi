@@ -310,7 +310,6 @@ handle_call({write, Offset, ClientMeta, Data}, _From,
             State = #state{filename = F,
                            writes = {T, Err},
                            data_filehandle = FHd,
-                           eof_position=EofP,
                            csum_table = CsumTable}) ->
 
     ClientCsumTag = proplists:get_value(client_csum_tag, ClientMeta, ?CSUM_TAG_NONE),
@@ -662,7 +661,9 @@ do_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Size, Data) ->
 
 %% @doc Trim both right and left border of chunks to fit in to given
 %% range [LeftPos, RightPos]. TODO: write unit tests for this function.
-slice_both_side([], _, _) -> [];
+
+%% Dialyzer 'can never match': slice_both_side([], _, _) ->
+    %% [];
 slice_both_side([{F, Offset, Chunk, _Csum}|L], LeftPos, RightPos)
   when Offset < LeftPos andalso LeftPos < RightPos ->
     TrashLen = 8 * (LeftPos - Offset),
