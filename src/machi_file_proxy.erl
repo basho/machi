@@ -283,7 +283,6 @@ handle_call({read, Offset, Length, Opts}, _From,
             State = #state{filename = F,
                            data_filehandle = FH,
                            csum_table = CsumTable,
-                           eof_position = EofP,
                            reads = {T, Err}
                           }) ->
     NoChecksum = proplists:get_value(no_checksum, Opts, false),
@@ -317,7 +316,6 @@ handle_call({write, Offset, ClientMeta, Data}, _From,
             State = #state{filename = F,
                            writes = {T, Err},
                            data_filehandle = FHd,
-                           eof_position=EofP,
                            csum_table = CsumTable}) ->
 
     ClientCsumTag = proplists:get_value(client_csum_tag, ClientMeta, ?CSUM_TAG_NONE),
