@@ -91,8 +91,9 @@ test() ->
     _ = machi_merkle_tree_mgr:start_link(test, ".", []),
     machi_merkle_tree_mgr:initialize(test, ?TESTFILE),
     timer:sleep(1000),
-    Root = machi_merkle_tree_mgr:fetch(test, ?TESTFILE, root),
-    ?debugFmt("Root: ~p~n", [Root]),
+    All = machi_merkle_tree_mgr:fetch(test, ?TESTFILE),
+    ?debugFmt("All: ~p~n", [All]),
+    timer:sleep(1000),
     All = machi_merkle_tree_mgr:fetch(test, ?TESTFILE),
     ?debugFmt("All: ~p~n", [All]),
     ok.
