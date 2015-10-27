@@ -1065,5 +1065,7 @@ chunk_wrapper_size(Chunk) ->
 
 timeout(infinity) ->
     timeout(15*60*1000);                        % close enough to infinity
+timeout({_, _}=Timeout) ->
+    Timeout;
 timeout(Timeout0) ->
     {Timeout0, Timeout0 + 30*1000}.
