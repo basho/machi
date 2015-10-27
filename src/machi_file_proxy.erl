@@ -86,7 +86,8 @@
     csum_path             :: string()|undefined,
     data_filehandle       :: file:io_device(),
     csum_table            :: machi_csum_table:table(),
-    eof_position = 0      :: non_neg_integer(),
+    eof_position = 0      :: machi_dt:chunk_pos(),
+    max_file_size = ?DEFAULT_MAX_FILE_SIZE :: machi_dt:chunk_pos(),
     tref                  :: reference(), %% timer ref
     ticks = 0             :: non_neg_integer(), %% ticks elapsed with no new operations
     ops = 0               :: non_neg_integer(), %% sum of all ops
@@ -222,7 +223,8 @@ init({Filename, DataDir}) ->
         data_filehandle = FHd,
         csum_table      = CsumTable,
         tref            = Tref,
-        eof_position    = Eof},
+        eof_position    = Eof,
+        max_file_size   = machi_config:max_file_size()},
     lager:debug("Starting file proxy ~p for filename ~p, state = ~p, Eof = ~p",
                 [self(), Filename, St, Eof]),
     {ok, St}.
@@ -390,9 +392,10 @@ handle_cast(Cast, State) ->
     {noreply, State}.
 
 % @private
-handle_info(tick, State = #state{eof_position = Eof}) when Eof >= ?MAX_FILE_SIZE ->
+handle_info(tick, State = #state{eof_position = Eof,
+                                 max_file_size = MaxFileSize}) when Eof >= MaxFileSize ->
     lager:notice("Eof position ~p >= max file size ~p. Shutting down.",
-                 [Eof, ?MAX_FILE_SIZE]),
+                 [Eof, MaxFileSize]),
     {stop, file_rollover, State};
 
 %% XXX Is this a good idea? Need to think this through a bit.

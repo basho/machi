@@ -40,4 +40,4 @@
 
 -spec max_file_size() -> pos_integer().
 max_file_size() ->
-    application:get_env(machi, max_file_size, ?MAX_FILE_SIZE).
+    application:get_env(machi, max_file_size, ?DEFAULT_MAX_FILE_SIZE).
