@@ -114,7 +114,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -endif. % TEST.
 
--export([start_link/1]).
+-export([start_link/1, start_link/2]).
 %% FLU1 API
 -export([
          %% File API
@@ -146,7 +146,8 @@
           proxies_dict    :: orddict:orddict(),
           epoch_id,
           proj,
-          bad_proj
+          bad_proj,
+          opts            :: proplists:proplist()
          }).
 
 %% @doc Start a local, long-lived process that will be our steady
@@ -154,7 +155,10 @@
 %% remote Machi server.
 
 start_link(P_srvr_list) ->
-    gen_server:start_link(?MODULE, [P_srvr_list], []).
+    gen_server:start_link(?MODULE, [P_srvr_list, []], []).
+
+start_link(P_srvr_list, Opts) ->
+    gen_server:start_link(?MODULE, [P_srvr_list, Opts], []).
 
 %% @doc Append a chunk (binary- or iolist-style) of data to a file
 %% with `Prefix'.
@@ -254,10 +258,10 @@ quit(PidSpec) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init([P_srvr_list]) ->
+init([P_srvr_list, Opts]) ->
     MembersDict = orddict:from_list([{P#p_srvr.name, P} || P <- P_srvr_list]),
     ProxiesDict = ?FLU_PC:start_proxies(MembersDict),
-    {ok, #state{members_dict=MembersDict, proxies_dict=ProxiesDict}}.
+    {ok, #state{members_dict=MembersDict, proxies_dict=ProxiesDict, opts=Opts}}.
 
 handle_call({req, Req}, From, S) ->
     handle_call2(Req, From, update_proj(S));
@@ -923,10 +927,22 @@ update_proj(#state{proj=undefined}=S) ->
 update_proj(S) ->
     S.
 
-update_proj2(Count, #state{bad_proj=BadProj, proxies_dict=ProxiesDict}=S) ->
+update_proj2(Count, #state{bad_proj=BadProj, proxies_dict=ProxiesDict,
+                           opts=Opts}=S) ->
     Timeout = 2*1000,
     WTimeout = 2*Timeout,
-    Proxies = orddict:to_list(ProxiesDict),
+    SimName = proplists:get_value(simulator_self_name, Opts, cr_client),
+    ExcludedFLUs =
+        case proplists:get_value(use_partition_simulator, Opts, false) of
+            true ->
+                Members = proplists:get_value(simulator_members, Opts, []),
+                {Partitions, _Islands} = machi_partition_simulator:get(Members),
+                [B || {A, B} <- Partitions, A =:= SimName];
+            false -> []
+        end,
+    Proxies = lists:foldl(fun(Name, Dict) ->
+                                  orddict:erase(Name, Dict)
+                          end, ProxiesDict, ExcludedFLUs),
     Work = fun({_K, Proxy}) ->
                    ?FLU_PC:read_latest_projection(Proxy, private, Timeout)
            end,
@@ -950,7 +966,7 @@ update_proj2(Count, #state{bad_proj=BadProj, proxies_dict=ProxiesDict}=S) ->
             NewProxiesDict = ?FLU_PC:start_proxies(NewMembersDict),
             S#state{bad_proj=undefined, proj=P, epoch_id=EpochID,
                     members_dict=NewMembersDict, proxies_dict=NewProxiesDict};
-        _ ->
+        _P ->
             sleep_a_while(Count),
             update_proj2(Count + 1, S)
     end.
