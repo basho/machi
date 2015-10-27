@@ -86,8 +86,8 @@
     csum_path             :: string()|undefined,
     data_filehandle       :: file:io_device(),
     csum_table            :: machi_csum_table:table(),
-    eof_position = 0      :: machi_dt:chunk_pos(),
-    max_file_size = ?DEFAULT_MAX_FILE_SIZE :: machi_dt:chunk_pos(),
+    eof_position = 0      :: non_neg_integer(),
+    max_file_size = ?DEFAULT_MAX_FILE_SIZE :: pos_integer(),
     tref                  :: reference(), %% timer ref
     ticks = 0             :: non_neg_integer(), %% ticks elapsed with no new operations
     ops = 0               :: non_neg_integer(), %% sum of all ops
