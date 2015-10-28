@@ -18,7 +18,7 @@
 %%
 %% -------------------------------------------------------------------
 
--module(machi_merkle_tree_mgr_test).
+-module(machi_merkle_tree_test).
 -compile([export_all]).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -26,6 +26,16 @@
 
 -define(TESTFILE, "yza^4c784dc2-19bf-4ac6-91f6-58bbe5aa88e0^1").
 -define(GAP_CHANCE, 0.10).
+
+choose_filename() ->
+    random_from_list([
+        "def^c5ea7511-d649-47d6-a8c3-2b619379c237^1",
+        "jkl^b077eff7-b2be-4773-a73f-fea4acb8a732^1",
+        "stu^553fa47a-157c-4fac-b10f-2252c7d8c37a^1",
+        "vwx^ae015d68-7689-4c9f-9677-926c6664f513^1",
+        "yza^4c784dc2-19bf-4ac6-91f6-58bbe5aa88e0^1"
+                     ]).
+
 
 make_csum_file(DataDir, Filename, Offsets) ->
     Path = machi_util:make_checksum_filename(DataDir, Filename),
@@ -82,19 +92,38 @@ generate_offsets(FH, Filesize, Current, Acc) when Current < Filesize ->
 generate_offsets(_FH, _Filesize, _Current, Acc) ->
     lists:reverse(Acc).
 
-test() ->
+test() -> 
+    test(100).
+
+test(N) ->
+    {ok, F} = file:open("results.txt", [raw, write]),
+    lists:foreach(fun(X) -> format_and_store(F, run_test(X)) end, lists:seq(1, N)).
+
+format_and_store(F, {OffsetNum, {MTime, MSize}, {NTime, NSize}}) ->
+    S = io_lib:format("~w\t~w\t~w\t~w\t~w\n", [OffsetNum, MTime, MSize, NTime, NSize]),
+    ok = file:write(F, S).
+
+run_test(C) ->
     random:seed(os:timestamp()),
-    O = make_offsets("test/" ++ ?TESTFILE),
-    ?debugFmt("Offsets: ~p", [O]),
-    make_csum_file(".", ?TESTFILE, O),
+    OffsetFn = "test/" ++ choose_filename(),
+    O = make_offsets(OffsetFn),
+    Fn = "csum_" ++ integer_to_list(C),
+    make_csum_file(".", Fn, O),
 
-    _ = machi_merkle_tree_mgr:start_link(test, ".", []),
-    machi_merkle_tree_mgr:initialize(test, ?TESTFILE),
-    timer:sleep(1000),
-    All = machi_merkle_tree_mgr:fetch(test, ?TESTFILE),
-    ?debugFmt("All: ~p~n", [All]),
-    timer:sleep(1000),
-    All = machi_merkle_tree_mgr:fetch(test, ?TESTFILE),
-    ?debugFmt("All: ~p~n", [All]),
-    ok.
+    Osize = length(O),
 
+    {MTime, {ok, M}} = timer:tc(fun() -> machi_merkle_tree:open(Fn, ".", merklet) end),
+    {NTime, {ok, N}} = timer:tc(fun() -> machi_merkle_tree:open(Fn, ".", naive) end),
+
+    ?assertEqual(Fn, machi_merkle_tree:filename(M)),
+    ?assertEqual(Fn, machi_merkle_tree:filename(N)),
+
+    MTree = machi_merkle_tree:tree(M),
+    MSize = byte_size(term_to_binary(MTree)),
+
+    NTree = machi_merkle_tree:tree(N),
+    NSize = byte_size(term_to_binary(NTree)),
+
+    ?assertEqual(same, machi_merkle_tree:diff(N, N)),
+    ?assertEqual(same, machi_merkle_tree:diff(M, M)),
+    {Osize, {MTime, MSize}, {NTime, NSize}}.
