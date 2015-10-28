@@ -171,11 +171,11 @@ trim(#machi_csum_table{fd=Fd, table=T}, Offset, Size) ->
             Error
     end.
 
--spec all_trimmed(table(), machi_dt:chunk_pos(), machi_dt:chunk_pos()) -> boolean().
+-spec all_trimmed(table(), non_neg_integer(), non_neg_integer()) -> boolean().
 all_trimmed(#machi_csum_table{table=T}, Left, Right) ->
     runthru(ets:tab2list(T), Left, Right).
 
--spec all_trimmed(table(), machi_dt:chunk_pos()) -> boolean().
+-spec all_trimmed(table(), non_neg_integer()) -> boolean().
 all_trimmed(#machi_csum_table{table=T}, Pos) ->
     case ets:tab2list(T) of
         [{0, ?MINIMUM_OFFSET, _}|L] ->

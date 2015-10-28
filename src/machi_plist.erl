@@ -9,14 +9,14 @@
 -endif.
 
 -record(machi_plist,
-        {filename :: string(),
-         fd :: file:descriptor(),
-        list}).
+        {filename :: file:filename_all(),
+         fd :: file:io_device(),
+         list = [] :: list(string)}).
 
 -type plist() :: #machi_plist{}.
 -export_type([plist/0]).
 
--spec open(filename:filename(), proplists:proplist()) ->
+-spec open(file:filename_all(), proplists:proplist()) ->
                   {ok, plist()} | {error, file:posix()}.
 open(Filename, _Opt) ->
     List = case file:read_file(Filename) of
