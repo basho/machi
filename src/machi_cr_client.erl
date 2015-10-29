@@ -955,7 +955,7 @@ update_proj2(Count, #state{bad_proj=BadProj, proxies_dict=ProxiesDict,
     %% b's projection.
     case choose_best_proj(Rs) of
         P when P == ?WORST_PROJ ->
-            io:format(user, "TODO: Using ?WORST_PROJ, chain is not available\n", []),
+            io:format(user, "TODO: Using ?WORST_PROJ, chain is not available ~w\n", [self()]),
             sleep_a_while(Count),
             update_proj2(Count + 1, S);
         P when P >= BadProj ->
