@@ -1,6 +1,6 @@
 -module(machi_plist).
 
-%%% @doc persistent list of binaries that support mutual exclusion
+%%% @doc persistent list of binaries
 
 -export([open/2, close/1, find/2, add/2]).
 
@@ -19,6 +19,9 @@
 -spec open(file:filename_all(), proplists:proplist()) ->
                   {ok, plist()} | {error, file:posix()}.
 open(Filename, _Opt) ->
+    %% TODO: This decode could fail if the file didn't finish writing
+    %% whole contents, which should be fixed by some persistent
+    %% solution.
     List = case file:read_file(Filename) of
                {ok, <<>>} -> [];
                {ok, Bin} -> binary_to_term(Bin);
@@ -48,6 +51,9 @@ add(Plist = #machi_plist{list=List0, fd=Fd}, Name) ->
             {ok, Plist};
         false ->
             List = lists:append(List0, [Name]),
+            %% TODO: partial write could break the file with other
+            %% persistent info (even lose data of trimmed states);
+            %% needs a solution.
             case file:pwrite(Fd, 0, term_to_binary(List)) of
                 ok ->
                     {ok, Plist#machi_plist{list=List}};

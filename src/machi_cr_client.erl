@@ -600,8 +600,6 @@ do_trim_chunk2(File, Offset, Size, Depth, STime, TO,
     Proxy = orddict:fetch(HeadFLU, PD),
     case ?FLU_PC:trim_chunk(Proxy, EpochID, File, Offset, Size, ?TIMEOUT) of
         ok ->
-            %% From this point onward, we use the same code & logic path as
-            %% append does.
             do_trim_midtail(RestFLUs, undefined, File, Offset, Size,
                             [HeadFLU], 0, STime, TO, S);
         {error, trimmed} ->
