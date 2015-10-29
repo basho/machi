@@ -433,7 +433,7 @@ message Mpb_LL_TrimChunkReq {
     required string file = 2;
     required uint64 offset = 3;
     required uint32 size = 4;
-    optional uint32 trigger_gc = 5 [default=1];
+    optional uint32 trigger_gc = 5 [default=0];
 }
 
 message Mpb_LL_TrimChunkResp {
