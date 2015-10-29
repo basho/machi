@@ -79,10 +79,12 @@ open(CSumFilename, _Opts) ->
                   list({machi_dt:file_offset(),
                         machi_dt:file_size(),
                         machi_dt:chunk_csum()|trimmed}).
-find(#machi_csum_table{table=T}, Offset, Size) ->
-    ets:select(T, [{{'$1', '$2', '$3'},
-                    [inclusion_match_spec(Offset, Size)],
-                    ['$_']}]).
+find(_, _, _) ->
+    [].
+%% find(#machi_csum_table{table=T}, Offset, Size) ->
+%%     ets:select(T, [{{'$1', '$2', '$3'},
+%%                     [inclusion_match_spec(Offset, Size)],
+%%                     ['$_']}]).
 
 -ifdef(TEST).
 all(#machi_csum_table{table=T}) ->

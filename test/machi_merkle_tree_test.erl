@@ -29,11 +29,9 @@
 
 choose_filename() ->
     random_from_list([
-        "def^c5ea7511-d649-47d6-a8c3-2b619379c237^1",
-        "jkl^b077eff7-b2be-4773-a73f-fea4acb8a732^1",
-        "stu^553fa47a-157c-4fac-b10f-2252c7d8c37a^1",
-        "vwx^ae015d68-7689-4c9f-9677-926c6664f513^1",
-        "yza^4c784dc2-19bf-4ac6-91f6-58bbe5aa88e0^1"
+                      %% Created by running:
+                      %%   dd if=/dev/random of=test/foo-data-1 bs=1m count=400
+                      "foo-data-1"
                      ]).
 
 
@@ -114,6 +112,9 @@ run_test(C) ->
 
     {MTime, {ok, M}} = timer:tc(fun() -> machi_merkle_tree:open(Fn, ".", merklet) end),
     {NTime, {ok, N}} = timer:tc(fun() -> machi_merkle_tree:open(Fn, ".", naive) end),
+    Osize2 = length(element(8,element(3, N))),
+    io:format(user, "Osize ~p Osize2 ~p\n", [Osize, Osize2]),
+%% io:format(user, "Osize ~p N ~P\n", [Osize, N, 10]),
 
     ?assertEqual(Fn, machi_merkle_tree:filename(M)),
     ?assertEqual(Fn, machi_merkle_tree:filename(N)),

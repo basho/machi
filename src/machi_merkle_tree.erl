@@ -121,11 +121,15 @@ load_filename(Filename, DataDir, naive) ->
     {Last, M} = do_load(Filename, DataDir, fun insert_csum_naive/2, []),
     ChunkSize = max(?MINIMUM_CHUNK, Last div 100),
     T = #naive{ leaves = lists:reverse(M), chunk_size = ChunkSize, recalc = true },
-    build_tree(T).
+    %% io:format(user, "~p is going to call build_tree() in 15 seconds\n", [self()]), timer:sleep(15*1000),
+    {USec, Res} = timer:tc(fun() -> build_tree(T) end),
+    io:format(user, "build_tree(size = ~p) -> ~p usec\n", [length(M), USec]),
+    Res.
 
 do_load(Filename, DataDir, FoldFun, AccInit) ->
     CsumFile = machi_util:make_checksum_filename(DataDir, Filename),
-    {ok, T} = machi_csum_table:open(CsumFile, []),
+    {USec, {ok, T}} = timer:tc(fun() -> machi_csum_table:open(CsumFile, []) end),
+    io:format(user, "machi_csum_table:open(~s) -> ~p usec\n", [CsumFile, USec]),
     Acc = machi_csum_table:foldl_chunks(FoldFun, {0, AccInit}, T),
     ok = machi_csum_table:close(T),
     Acc.
@@ -165,17 +169,18 @@ update_acc({Offset, Size, Csum}, MT) ->
     [ {Offset, Size, ?NAIVE_ENCODE(Offset, Size, Csum)} | MT ].
 
 build_tree(MT = #naive{ leaves = L, chunk_size = ChunkSize }) ->
-    lager:debug("Leaves: ~p~n", [L]),
+io:format(user, "build_tree leaves = ~p by pid ~p\n", [length(L), self()]),
+    %%lager:debug("Leaves: ~p~n", [L]),
     Lvl1s = build_level_1(ChunkSize, L, 1, [ crypto:hash_init(?H) ]),
-    lager:debug("Lvl1: ~p~n", [Lvl1s]),
+    %%lager:debug("Lvl1: ~p~n", [Lvl1s]),
     Mod2 = length(Lvl1s) div ?LEVEL_SIZE,
     Lvl2s = build_int_level(Mod2, Lvl1s, 1, [ crypto:hash_init(?H) ]),
-    lager:debug("Lvl2: ~p~n", [Lvl2s]),
+    %%lager:debug("Lvl2: ~p~n", [Lvl2s]),
     Mod3 = length(Lvl2s) div 2,
     Lvl3s = build_int_level(Mod3, Lvl2s, 1, [ crypto:hash_init(?H) ]),
-    lager:debug("Lvl3: ~p~n", [Lvl3s]),
+    %%lager:debug("Lvl3: ~p~n", [Lvl3s]),
     Root = build_root(Lvl3s, crypto:hash_init(?H)),
-    lager:debug("Root: ~p~n", [Root]),
+    %%lager:debug("Root: ~p~n", [Root]),
     MT#naive{ root = Root, lvl1 = Lvl1s, lvl2 = Lvl2s, lvl3 = Lvl3s, recalc = false }.
 
 build_root([], Ctx) ->
