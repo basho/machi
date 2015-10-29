@@ -33,6 +33,7 @@
 
 -module(machi_merkle_tree_mgr).
 -behaviour(gen_server).
+-compile(export_all).
 
 -include("machi.hrl").
 
@@ -301,18 +302,18 @@ find(Tid, Filename) ->
 
 build_tree(Tid, MT = #mt{ leaves = D }) ->
     Leaves = lists:map(fun map_dict/1, orddict:to_list(D)),
-    io:format(user, "Leaves: ~p~n", [Leaves]),
+    %io:format(user, "Leaves: ~p~n", [Leaves]),
     Lvl1s = build_level_1(?CHUNK_SIZE, Leaves, 1, [ crypto:hash_init(?H) ]),
-    io:format(user, "Lvl1: ~p~n", [Lvl1s]),
+    %io:format(user, "Lvl1: ~p~n", [Lvl1s]),
     Mod2 = length(Lvl1s) div ?LEVEL_SIZE,
     Lvl2s = build_int_level(Mod2, Lvl1s, 1, [ crypto:hash_init(?H) ]),
-    io:format(user, "Lvl2: ~p~n", [Lvl2s]),
+    %io:format(user, "Lvl2: ~p~n", [Lvl2s]),
     Mod3 = length(Lvl2s) div 2,
     Lvl3s = build_int_level(Mod3, Lvl2s, 1, [ crypto:hash_init(?H) ]),
-    io:format(user, "Lvl3: ~p~n", [Lvl3s]),
+    %io:format(user, "Lvl3: ~p~n", [Lvl3s]),
     Root = build_root(Lvl3s, crypto:hash_init(?H)),
     io:format(user, "Root: ~p~n", [Root]),
-    ets:insert(Tid, MT#mt{ root = Root, lvl1 = Lvl1s, lvl2 = Lvl2s, lvl3 = Lvl3s, recalc = false }),
+    %%% ets:insert(Tid, MT#mt{ root = Root, lvl1 = Lvl1s, lvl2 = Lvl2s, lvl3 = Lvl3s, recalc = false }),
     [Root, Lvl3s, Lvl2s, Lvl1s].
 
 build_root([], Ctx) ->
@@ -338,6 +339,6 @@ build_level_1(Size, [{Pos, Hash}|T], Multiple, [ Ctx | Rest ]) when Pos > ( Size
     build_level_1(Size, T, Multiple+1, 
                   [ crypto:hash_update(NewCtx, Hash), crypto:hash_final(Ctx) | Rest ]);
 build_level_1(Size, [{Pos, Hash}|T], Multiple, [ Ctx | Rest ]) when Pos =< ( Size * Multiple ) ->
-    io:format(user, "Size: ~p, Pos: ~p, Multiple: ~p~n", [Size, Pos, Multiple]),
+    %io:format(user, "Size: ~p, Pos: ~p, Multiple: ~p~n", [Size, Pos, Multiple]),
     build_level_1(Size, T, Multiple, [ crypto:hash_update(Ctx, Hash) | Rest ]).
 
