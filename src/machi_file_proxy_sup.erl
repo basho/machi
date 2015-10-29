@@ -44,7 +44,8 @@ start_link(FluName) ->
     supervisor:start_link({local, make_proxy_name(FluName)}, ?MODULE, []).
 
 start_proxy(FluName, DataDir, Filename) ->
-    supervisor:start_child(make_proxy_name(FluName), [Filename, DataDir]).
+    supervisor:start_child(make_proxy_name(FluName),
+                           [FluName, Filename, DataDir]).
 
 init([]) ->
     SupFlags = {simple_one_for_one, 1000, 10},

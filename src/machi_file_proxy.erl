@@ -22,20 +22,20 @@
 %% controlled files.  In particular, it manages the "write-once register"
 %% conceit at the heart of Machi's design.
 %%
-%% Read, write and append requests for a single file will be managed 
+%% Read, write and append requests for a single file will be managed
 %% through this proxy.  Clients can also request syncs for specific
 %% types of filehandles.
 %%
 %% As operations are requested, the proxy keeps track of how many
 %% operations it has performed (and how many errors were generated.)
-%% After a sufficient number of inactivity, the server terminates 
+%% After a sufficient number of inactivity, the server terminates
 %% itself.
 %%
 %% TODO:
-%% 1. Some way to transition the proxy into a wedged state that 
+%% 1. Some way to transition the proxy into a wedged state that
 %% doesn't rely on message delivery.
 %%
-%% 2. Check max file size on appends. Writes we take on faith we can 
+%% 2. Check max file size on appends. Writes we take on faith we can
 %% and should handle.
 %%
 %% 3. Async checksum reads on startup.
@@ -47,7 +47,7 @@
 
 %% public API
 -export([
-    start_link/2,
+    start_link/3,
     stop/1,
     sync/1,
     sync/2,
@@ -55,6 +55,7 @@
     read/4,
     write/3,
     write/4,
+    trim/4,
     append/2,
     append/4
 ]).
@@ -74,10 +75,11 @@
 -define(TIMEOUT, 10*1000).
 -define(TOO_MANY_ERRORS_RATIO, 50).
 
--type op_stats()      :: { Total  :: non_neg_integer(), 
+-type op_stats()      :: { Total  :: non_neg_integer(),
                            Errors :: non_neg_integer() }.
 
 -record(state, {
+    fluname               :: atom(),
     data_dir              :: string() | undefined,
     filename              :: string() | undefined,
     data_path             :: string() | undefined,
@@ -93,17 +95,18 @@
     ops = 0               :: non_neg_integer(), %% sum of all ops
     reads = {0, 0}        :: op_stats(),
     writes = {0, 0}       :: op_stats(),
-    appends = {0, 0}      :: op_stats()
+    appends = {0, 0}      :: op_stats(),
+    trims = {0, 0}        :: op_stats()
 }).
 
 %% Public API
 
-% @doc Start a new instance of the file proxy service. Takes the filename 
+% @doc Start a new instance of the file proxy service. Takes the filename
 % and data directory as arguments. This function is typically called by the
 % `machi_file_proxy_sup:start_proxy/2' function.
--spec start_link(Filename :: string(), DataDir :: string()) -> any().
-start_link(Filename, DataDir) ->
-    gen_server:start_link(?MODULE, {Filename, DataDir}, []).
+-spec start_link(FluName :: atom(), Filename :: string(), DataDir :: string()) -> any().
+start_link(FluName, Filename, DataDir) ->
+    gen_server:start_link(?MODULE, {FluName, Filename, DataDir}, []).
 
 % @doc Request to stop an instance of the file proxy service.
 -spec stop(Pid :: pid()) -> ok.
@@ -120,7 +123,7 @@ sync(_Pid) ->
 
 % @doc Force a sync of a specific filehandle type. Valid types are `all', `csum' and `data'.
 -spec sync(Pid :: pid(), Type :: all|data|csum) -> ok|{error, term()}.
-sync(Pid, Type) when is_pid(Pid) andalso 
+sync(Pid, Type) when is_pid(Pid) andalso
                      ( Type =:= all orelse Type =:= csum orelse Type =:= data ) ->
     gen_server:call(Pid, {sync, Type}, ?TIMEOUT);
 sync(_Pid, Type) ->
@@ -147,7 +150,7 @@ read(Pid, Offset, Length) ->
                   {ok, [{Filename::string(), Offset :: non_neg_integer(),
                          Data :: binary(), Checksum :: binary()}]} |
                   {error, Reason :: term()}.
-read(Pid, Offset, Length, Opts) when is_pid(Pid) andalso is_integer(Offset) andalso Offset >= 0 
+read(Pid, Offset, Length, Opts) when is_pid(Pid) andalso is_integer(Offset) andalso Offset >= 0
                                      andalso is_integer(Length) andalso Length > 0
                                      andalso is_list(Opts) ->
     gen_server:call(Pid, {read, Offset, Length, Opts}, ?TIMEOUT);
@@ -179,6 +182,12 @@ write(_Pid, Offset, ClientMeta, _Data) ->
     lager:warning("Bad arg to write: Offset ~p, ClientMeta: ~p", [Offset, ClientMeta]),
     {error, bad_arg}.
 
+trim(Pid, Offset, Size, TriggerGC) when is_pid(Pid),
+                                        is_integer(Offset) andalso Offset >= 0,
+                                        is_integer(Size) andalso Size > 0,
+                                        is_boolean(TriggerGC) ->
+    gen_server:call(Pid, {trim ,Offset, Size, TriggerGC}, ?TIMEOUT).
+
 % @doc Append data
 -spec append(Pid :: pid(), Data :: binary()) -> {ok, File :: string(), Offset :: non_neg_integer()}
                                                 |{error, term()}.
@@ -194,8 +203,8 @@ append(_Pid, _Data) ->
 -spec append(Pid :: pid(), ClientMeta :: proplists:proplist(),
              Extra :: non_neg_integer(), Data :: binary()) -> {ok, File :: string(), Offset :: non_neg_integer()}
                                                               |{error, term()}.
-append(Pid, ClientMeta, Extra, Data) when is_pid(Pid) andalso is_list(ClientMeta) 
-                                          andalso is_integer(Extra) andalso Extra >= 0 
+append(Pid, ClientMeta, Extra, Data) when is_pid(Pid) andalso is_list(ClientMeta)
+                                          andalso is_integer(Extra) andalso Extra >= 0
                                           andalso is_binary(Data) ->
     gen_server:call(Pid, {append, ClientMeta, Extra, Data}, ?TIMEOUT);
 append(_Pid, ClientMeta, Extra, _Data) ->
@@ -205,7 +214,7 @@ append(_Pid, ClientMeta, Extra, _Data) ->
 %% gen_server callbacks
 
 % @private
-init({Filename, DataDir}) ->
+init({FluName, Filename, DataDir}) ->
     CsumFile = machi_util:make_checksum_filename(DataDir, Filename),
     {_, DPath} = machi_util:make_data_filename(DataDir, Filename),
     ok = filelib:ensure_dir(CsumFile),
@@ -216,6 +225,7 @@ init({Filename, DataDir}) ->
     {ok, FHd} = file:open(DPath, [read, write, binary, raw]),
     Tref = schedule_tick(),
     St = #state{
+        fluname         = FluName,
         filename        = Filename,
         data_dir        = DataDir,
         data_path       = DPath,
@@ -250,13 +260,13 @@ handle_call({sync, all}, _From, State = #state{filename = F,
     R1 = file:sync(FHd),
     Resp = case {R, R1} of
         {ok, ok} -> ok;
-        {ok, O1} -> 
-                   lager:error("Got ~p during a data file sync on file ~p", [O1, F]), 
+        {ok, O1} ->
+                   lager:error("Got ~p during a data file sync on file ~p", [O1, F]),
                    O1;
-        {O2, ok} -> 
-                   lager:error("Got ~p during a csum file sync on file ~p", [O2, F]), 
+        {O2, ok} ->
+                   lager:error("Got ~p during a csum file sync on file ~p", [O2, F]),
                    O2;
-        {O3, O4} -> 
+        {O3, O4} ->
                    lager:error("Got ~p ~p syncing all files for file ~p", [O3, O4, F]),
                    {O3, O4}
     end,
@@ -285,16 +295,21 @@ handle_call({read, Offset, Length, Opts}, _From,
                            csum_table = CsumTable,
                            reads = {T, Err}
                           }) ->
+    %% TODO: use these options - NoChunk prevents reading from disks
+    %% NoChecksum doesn't check checksums
     NoChecksum = proplists:get_value(no_checksum, Opts, false),
     NoChunk = proplists:get_value(no_chunk, Opts, false),
-    NeedsMerge = proplists:get_value(needs_trimmed, Opts, false),
     {Resp, NewErr} =
-        case do_read(FH, F, CsumTable, Offset, Length, NoChecksum, NoChunk, NeedsMerge) of
+        case do_read(FH, F, CsumTable, Offset, Length, NoChunk, NoChecksum) of
             {ok, {[], []}} ->
                 {{error, not_written}, Err + 1};
             {ok, {Chunks0, Trimmed0}} ->
                 Chunks = slice_both_side(Chunks0, Offset, Offset+Length),
-                {{ok, {Chunks, Trimmed0}}, Err};
+                Trimmed = case proplists:get_value(needs_trimmed, Opts, false) of
+                              true -> Trimmed0;
+                              false -> []
+                          end,
+                {{ok, {Chunks, Trimmed}}, Err};
             Error ->
                 lager:error("Can't read ~p, ~p at File ~p", [Offset, Length, F]),
                 {Error, Err + 1}
@@ -337,6 +352,45 @@ handle_call({write, Offset, ClientMeta, Data}, _From,
                 [iolist_size(Data), Offset, F, NewEof]),
     {reply, Resp, State#state{writes = {T+1, NewErr},
                               eof_position = NewEof}};
+
+
+%%% TRIMS
+
+handle_call({trim, _Offset, _ClientMeta, _Data}, _From,
+            State = #state{wedged = true,
+                           writes = {T, Err}
+                          }) ->
+    {reply, {error, wedged}, State#state{writes = {T + 1, Err + 1}}};
+
+handle_call({trim, Offset, Size, _TriggerGC}, _From,
+            State = #state{data_filehandle=FHd,
+                           ops = Ops,
+                           trims = {T, Err},
+                           csum_table = CsumTable}) ->
+
+    case machi_csum_table:all_trimmed(CsumTable, Offset, Size) of
+        true ->
+            NewState = State#state{ops=Ops+1, trims={T, Err+1}},
+            %% All bytes of that range was already trimmed returns ok
+            %% here, not {error, trimmed}, which means the whole file
+            %% was trimmed
+            maybe_gc(ok, NewState);
+        false ->
+            LUpdate = maybe_regenerate_checksum(
+                        FHd,
+                        machi_csum_table:find_leftneighbor(CsumTable, Offset)),
+            RUpdate = maybe_regenerate_checksum(
+                        FHd,
+                        machi_csum_table:find_rightneighbor(CsumTable, Offset+Size)),
+
+            case machi_csum_table:trim(CsumTable, Offset, Size, LUpdate, RUpdate) of
+                ok ->
+                    NewState = State#state{ops=Ops+1, trims={T+1, Err}},
+                    maybe_gc(ok, NewState);
+                Error ->
+                    {reply, Error, State#state{ops=Ops+1, trims={T, Err+1}}}
+            end
+    end;
 
 %% APPENDS
 
@@ -476,10 +530,20 @@ terminate(Reason, #state{filename = F,
     lager:info("  Reads:  ~p/~p", [RT, RE]),
     lager:info(" Writes:  ~p/~p", [WT, WE]),
     lager:info("Appends:  ~p/~p", [AT, AE]),
-    ok = file:sync(FHd),
-    ok = file:close(FHd),
-    ok = machi_csum_table:sync(T),
-    ok = machi_csum_table:close(T),
+    case FHd of
+        undefined ->
+            noop; %% file deleted
+        _ ->
+            ok = file:sync(FHd),
+            ok = file:close(FHd)
+    end,
+    case T of
+        undefined ->
+            noop; %% file deleted
+        _ ->
+            ok = machi_csum_table:sync(T),
+            ok = machi_csum_table:close(T)
+    end,
     ok.
 
 % @private
@@ -512,15 +576,14 @@ check_or_make_tagged_csum(Tag, InCsum, Data) when Tag == ?CSUM_TAG_CLIENT_SHA;
 check_or_make_tagged_csum(OtherTag, _ClientCsum, _Data) ->
     lager:warning("Unknown checksum tag ~p", [OtherTag]),
     {error, bad_checksum}.
-   
+
 -spec do_read(FHd        :: file:io_device(),
               Filename   :: string(),
               CsumTable  :: machi_csum_table:table(),
               Offset     :: non_neg_integer(),
               Size       :: non_neg_integer(),
-              NoChecksum :: boolean(),
               NoChunk    :: boolean(),
-              NeedsTrimmed :: boolean()
+              NoChecksum :: boolean()
              ) -> {ok, Chunks :: [{string(), Offset::non_neg_integer(), binary(), Csum :: binary()}]} |
                   {error, bad_checksum} |
                   {error, partial_read} |
@@ -539,23 +602,23 @@ check_or_make_tagged_csum(OtherTag, _ClientCsum, _Data) ->
 %        tuple is returned.</ul>
 % </li>
 %
-do_read(FHd, Filename, CsumTable, Offset, Size, _, _, _) ->
-    do_read(FHd, Filename, CsumTable, Offset, Size).
-
-do_read(FHd, Filename, CsumTable, Offset, Size) ->
+do_read(FHd, Filename, CsumTable, Offset, Size, _, _) ->
     %% Note that find/3 only returns overlapping chunks, both borders
     %% are not aligned to original Offset and Size.
     ChunkCsums = machi_csum_table:find(CsumTable, Offset, Size),
-    read_all_ranges(FHd, Filename, ChunkCsums, []).
+    read_all_ranges(FHd, Filename, ChunkCsums, [], []).
 
-read_all_ranges(_, _, [], ReadChunks) ->
+read_all_ranges(_, _, [], ReadChunks, TrimmedChunks) ->
     %% TODO: currently returns empty list of trimmed chunks
-    {ok, {lists:reverse(ReadChunks), []}};
+    {ok, {lists:reverse(ReadChunks), lists:reverse(TrimmedChunks)}};
 
-read_all_ranges(FHd, Filename, [{Offset, Size, TaggedCsum}|T], ReadChunks) ->
+read_all_ranges(FHd, Filename, [{Offset, Size, trimmed}|T], ReadChunks, TrimmedChunks) ->
+    read_all_ranges(FHd, Filename, T, ReadChunks, [{Filename, Offset, Size}|TrimmedChunks]);
+
+read_all_ranges(FHd, Filename, [{Offset, Size, TaggedCsum}|T], ReadChunks, TrimmedChunks) ->
     case file:pread(FHd, Offset, Size) of
         eof ->
-            read_all_ranges(FHd, Filename, T, ReadChunks);
+            read_all_ranges(FHd, Filename, T, ReadChunks, TrimmedChunks);
         {ok, Bytes} when byte_size(Bytes) == Size ->
             {Tag, Ck} = machi_util:unmake_tagged_csum(TaggedCsum),
             case check_or_make_tagged_csum(Tag, Ck, Bytes) of
@@ -565,19 +628,21 @@ read_all_ranges(FHd, Filename, [{Offset, Size, TaggedCsum}|T], ReadChunks) ->
                     {error, bad_checksum};
                 TaggedCsum ->
                     read_all_ranges(FHd, Filename, T,
-                                    [{Filename, Offset, Bytes, TaggedCsum}|ReadChunks]);
+                                    [{Filename, Offset, Bytes, TaggedCsum}|ReadChunks],
+                                    TrimmedChunks);
                 OtherCsum when Tag =:= ?CSUM_TAG_NONE ->
                     %% XXX FIXME: Should we return something other than
                     %% {ok, ....} in this case?
                     read_all_ranges(FHd, Filename, T,
-                                    [{Filename, Offset, Bytes, OtherCsum}|ReadChunks])
+                                    [{Filename, Offset, Bytes, OtherCsum}|ReadChunks],
+                                    TrimmedChunks)
             end;
         {ok, Partial} ->
-            lager:error("In file ~p, offset ~p, wanted to read ~p bytes, but got ~p", 
+            lager:error("In file ~p, offset ~p, wanted to read ~p bytes, but got ~p",
                         [Filename, Offset, Size, byte_size(Partial)]),
             {error, partial_read};
         Other ->
-            lager:error("While reading file ~p, offset ~p, length ~p, got ~p", 
+            lager:error("While reading file ~p, offset ~p, length ~p, got ~p",
                         [Filename, Offset, Size, Other]),
             {error, Other}
     end.
@@ -616,7 +681,7 @@ handle_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Data) ->
                     {error, Reason}
             end;
         [{Offset, Size, TaggedCsum}] ->
-            case do_read(FHd, Filename, CsumTable, Offset, Size, false, false, false) of
+            case do_read(FHd, Filename, CsumTable, Offset, Size, false, false) of
                 {error, _} = E ->
                     lager:warning("This should never happen: got ~p while reading"
                                   " at offset ~p in file ~p that's supposedly written",
@@ -693,6 +758,8 @@ do_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Size, Data) ->
 
 %% Dialyzer 'can never match': slice_both_side([], _, _) ->
     %% [];
+slice_both_side([], _, _) ->
+    [];
 slice_both_side([{F, Offset, Chunk, _Csum}|L], LeftPos, RightPos)
   when Offset < LeftPos andalso LeftPos < RightPos ->
     TrashLen = 8 * (LeftPos - Offset),
@@ -728,4 +795,44 @@ maybe_regenerate_checksum(FHd, {Offset, Size, _Csum}) ->
             {Offset, Size, TaggedCsum};
         Error ->
             throw(Error)
+    end.
+
+%% GC: make sure unwritte bytes = [{Eof, infinity}] and Eof is > max file size
+%% walk through the checksum table and make sure all chunks trimmed
+%% Then unlink the file
+-spec maybe_gc(term(), #state{}) ->
+                      {reply, term(), #state{}} | {stop, normal, term(), #state{}}.
+maybe_gc(Reply, S = #state{eof_position = Eof,
+                           max_file_size = MaxFileSize}) when Eof < MaxFileSize ->
+    lager:debug("The file is still small; not trying GC (Eof, MaxFileSize) = (~p, ~p)~n",
+                [Eof, MaxFileSize]),
+    {reply, Reply, S};
+maybe_gc(Reply, S = #state{fluname=FluName,
+                           data_filehandle = FHd,
+                           data_dir = DataDir,
+                           filename = Filename,
+                           eof_position = Eof,
+                           csum_table=CsumTable}) ->
+    case machi_csum_table:all_trimmed(CsumTable, Eof) of
+        true ->
+            lager:debug("GC? Let's do it: ~p.~n", [Filename]),
+            %% Before unlinking a file, it should inform
+            %% machi_flu_filename_mgr that this file is
+            %% deleted and mark it as "trimmed" to avoid
+            %% filename reuse and resurrection. Maybe garbage
+            %% will remain if a process crashed but it also
+            %% should be recovered at filename_mgr startup.
+
+            %% Also, this should be informed *before* file proxy
+            %% deletes files.
+            ok = machi_flu_metadata_mgr:trim_file(FluName, {file, Filename}),
+            ok = file:close(FHd),
+            {_, DPath} = machi_util:make_data_filename(DataDir, Filename),
+            ok = file:delete(DPath),
+            machi_csum_table:delete(CsumTable),
+            {stop, normal, Reply,
+             S#state{data_filehandle=undefined,
+                     csum_table=undefined}};
+        false ->
+            {reply, Reply, S}
     end.

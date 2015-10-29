@@ -171,13 +171,20 @@ trim(#machi_csum_table{fd=Fd, table=T}, Offset, Size) ->
             Error
     end.
 
--spec all_trimmed(table(), machi_dt:chunk_pos(), machi_dt:chunk_pos()) -> boolean().
+-spec all_trimmed(table(), non_neg_integer(), non_neg_integer()) -> boolean().
 all_trimmed(#machi_csum_table{table=T}, Left, Right) ->
     runthru(ets:tab2list(T), Left, Right).
 
--spec all_trimmed(table(), machi_dt:chunk_pos()) -> boolean().
+-spec all_trimmed(table(), non_neg_integer()) -> boolean().
 all_trimmed(#machi_csum_table{table=T}, Pos) ->
-    runthru(ets:tab2list(T), 0, Pos).
+    case ets:tab2list(T) of
+        [{0, ?MINIMUM_OFFSET, _}|L] ->
+            %% tl/1 to remove header space {0, 1024, <<0>>}
+            runthru(L, ?MINIMUM_OFFSET, Pos);
+        List ->
+            %% In case a header is removed;
+            runthru(List, 0, Pos)
+    end.
 
 -spec any_trimmed(table(),
                   pos_integer(),

@@ -170,7 +170,7 @@ start_command(S) ->
 start(_S) ->
     {_, _, MS} = os:timestamp(),
     File = test_server:temp_name("eqc_data") ++ "." ++ integer_to_list(MS),
-    {ok, Pid} = machi_file_proxy:start_link(File, ?TESTDIR),
+    {ok, Pid} = machi_file_proxy:start_link(some_flu, File, ?TESTDIR),
     unlink(Pid),
     Pid.
 

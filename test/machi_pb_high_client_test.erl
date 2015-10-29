@@ -38,6 +38,7 @@ smoke_test2() ->
     Ps = [#p_srvr{name=a, address="localhost", port=Port, props="./data.a"}
          ],
     D = orddict:from_list([{P#p_srvr.name, P} || P <- Ps]),
+    ok = application:set_env(machi, max_file_size, 1024*1024),
     
     [os:cmd("rm -rf " ++ P#p_srvr.props) || P <- Ps],
     {ok, SupPid} = machi_flu_sup:start_link(),
@@ -90,23 +91,54 @@ smoke_test2() ->
             {ok, [{File1Size,File1}]} = ?C:list_files(Clnt),
             true = is_integer(File1Size),
 
+            File1Bin = binary_to_list(File1),
             [begin
-                 %% ok = ?C:trim_chunk(Clnt, Fl, Off, Sz)
-                 %% This gets an error as trim API is still a stub
-                 ?assertMatch({bummer,
-                               {throw,
-                                {error, bad_joss_taipan_fixme},
-                                _Boring_stack_trace}},
-                              ?C:trim_chunk(Clnt, Fl, Off, Sz))
-             end || {Ch, Fl, Off, Sz} <- Reads],
+                 #p_srvr{name=Name, port=Port, props=Dir} = P,
+                 ?assertEqual({ok, [File1Bin]},
+                              file:list_dir(filename:join([Dir, "data"]))),
+                 FileListFileName = filename:join([Dir, "known_files_" ++ atom_to_list(Name)]),
+                 {ok, Plist} = machi_plist:open(FileListFileName, []),
+                 ?assertEqual([], machi_plist:all(Plist))
+             end || P <- Ps],
 
+            [begin
+                 ok = ?C:trim_chunk(Clnt, Fl, Off, Sz)
+             end || {_Ch, Fl, Off, Sz} <- Reads],
+            [begin
+                 {ok, {[], Trimmed}} =
+                        ?C:read_chunk(Clnt, Fl, Off, Sz, [{needs_trimmed, true}]),
+                 Filename = binary_to_list(Fl),
+                 ?assertEqual([{Filename, Off, Sz}], Trimmed)
+             end || {_Ch, Fl, Off, Sz} <- Reads],
+
+            LargeBytes = binary:copy(<<"x">>, 1024*1024),
+            LBCsum = {client_sha, machi_util:checksum_chunk(LargeBytes)},
+            {ok, {Offx, Sizex, Filex}} =
+                ?C:append_chunk(Clnt, PK, Prefix, LargeBytes, LBCsum, 0),
+            ok = ?C:trim_chunk(Clnt, Filex, Offx, Sizex),
+
+            %% Make sure everything was trimmed
+            File = binary_to_list(Filex),
+            [begin
+                 #p_srvr{name=Name, port=_Port, props=Dir} = P,
+                 ?assertEqual({ok, []},
+                              file:list_dir(filename:join([Dir, "data"]))),
+                 FileListFileName = filename:join([Dir, "known_files_" ++ atom_to_list(Name)]),
+                 {ok, Plist} = machi_plist:open(FileListFileName, []),
+                 ?assertEqual([File], machi_plist:all(Plist))
+             end || P <- Ps],
+
+            [begin
+                 {error, trimmed} =
+                        ?C:read_chunk(Clnt, Fl, Off, Sz, [])
+             end || {_Ch, Fl, Off, Sz} <- Reads],
             ok
         after
             (catch ?C:quit(Clnt))
         end
     after
         exit(SupPid, normal),
-       [os:cmd("rm -rf " ++ P#p_srvr.props) || P <- Ps],
+        [os:cmd("rm -rf " ++ P#p_srvr.props) || P <- Ps],
         machi_util:wait_for_death(SupPid, 100),
         ok
     end.

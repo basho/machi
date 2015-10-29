@@ -94,6 +94,9 @@ write_chunk(PidSpec, File, Offset, Chunk, CSum) ->
 write_chunk(PidSpec, File, Offset, Chunk, CSum, Timeout) ->
     send_sync(PidSpec, {write_chunk, File, Offset, Chunk, CSum}, Timeout).
 
+%% @doc Tries to read a chunk of a specified file. It returns `{ok,
+%% {Chunks, TrimmedChunks}}' for live file while it returns `{error,
+%% trimmed}' if all bytes of the file was trimmed.
 -spec read_chunk(pid(), string(), pos_integer(), pos_integer(),
                  [{flag_no_checksum | flag_no_chunk | needs_trimmed, boolean()}]) ->
                         {ok, {list(), list()}} | {error, term()}.
@@ -107,6 +110,10 @@ read_chunk(PidSpec, File, Offset, Size, Options) ->
 read_chunk(PidSpec, File, Offset, Size, Options, Timeout) ->
     send_sync(PidSpec, {read_chunk, File, Offset, Size, Options}, Timeout).
 
+%% @doc Trims arbitrary binary range of any file. TODO: Add option
+%% specifying whether to trigger GC.
+-spec trim_chunk(pid(), string(), non_neg_integer(), machi_dt:chunk_size()) ->
+                        ok | {error, term()}.
 trim_chunk(PidSpec, File, Offset, Size) ->
     trim_chunk(PidSpec, File, Offset, Size, ?DEFAULT_TIMEOUT).
 
@@ -415,6 +422,8 @@ convert_general_status_code('NOT_WRITTEN') ->
     {error, not_written};
 convert_general_status_code('WRITTEN') ->
     {error, written};
+convert_general_status_code('TRIMMED') ->
+    {error, trimmed};
 convert_general_status_code('NO_SUCH_FILE') ->
     {error, no_such_file};
 convert_general_status_code('PARTIAL_READ') ->

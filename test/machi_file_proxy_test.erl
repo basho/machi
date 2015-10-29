@@ -78,7 +78,7 @@ random_binary(Start, End) ->
 
 machi_file_proxy_test_() ->
     clean_up_data_dir(?TESTDIR),
-    {ok, Pid} = machi_file_proxy:start_link("test", ?TESTDIR),
+    {ok, Pid} = machi_file_proxy:start_link(fluname, "test", ?TESTDIR),
     [
      ?_assertEqual({error, bad_arg}, machi_file_proxy:read(Pid, -1, -1)),
      ?_assertEqual({error, bad_arg}, machi_file_proxy:write(Pid, -1, <<"yo">>)),
@@ -100,7 +100,7 @@ machi_file_proxy_test_() ->
 
 multiple_chunks_read_test_() ->
     clean_up_data_dir(?TESTDIR),
-    {ok, Pid} = machi_file_proxy:start_link("test", ?TESTDIR),
+    {ok, Pid} = machi_file_proxy:start_link(fluname, "test", ?TESTDIR),
     [
      ?_assertMatch({ok, "test", _}, machi_file_proxy:append(Pid, random_binary(0, 1024))),
      ?_assertEqual(ok, machi_file_proxy:write(Pid, 10000, <<"fail">>)),
