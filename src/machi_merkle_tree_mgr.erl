@@ -82,7 +82,7 @@
 -define(LEVEL_SIZE, 10).
 -define(H, sha).
 
--define(TIMEOUT, (10*1000)).
+-define(TIMEOUT, infinity).
 
 %% public API
 
@@ -133,6 +133,7 @@ fetch(FluName, Filename) ->
 %% checksum of the tree.  If `all' is specified, returns a list
 %% with all levels.
 fetch(FluName, Filename, Level) ->
+    io:format(user, "build_tree LINE ~p at ~p\n", [?LINE, now()]),
     gen_server:call(make_merkle_tree_mgr_name(FluName),
                     {fetch, Filename, Level}, ?TIMEOUT).
 
@@ -148,6 +149,7 @@ init({FluName, DataDir, Options}) ->
     {ok, #state{fluname=FluName, datadir=DataDir, tid = Tid}}.
 
 handle_call({fetch, Filename, Level}, _From, S = #state{ tid = Tid }) ->
+    io:format(user, "build_tree LINE ~p at ~p\n", [?LINE, now()]),
     Res = handle_fetch(Tid, Filename, Level),
     {reply, {ok, Res}, S};
 handle_call(Req, _From, State) ->
@@ -301,17 +303,23 @@ find(Tid, Filename) ->
     end.
 
 build_tree(Tid, MT = #mt{ leaves = D }) ->
+    io:format(user, "build_tree LINE ~p at ~p\n", [?LINE, now()]),
     Leaves = lists:map(fun map_dict/1, orddict:to_list(D)),
+    io:format(user, "build_tree LINE ~p at ~p\n", [?LINE, now()]),
     %io:format(user, "Leaves: ~p~n", [Leaves]),
     Lvl1s = build_level_1(?CHUNK_SIZE, Leaves, 1, [ crypto:hash_init(?H) ]),
+    io:format(user, "build_tree LINE ~p at ~p\n", [?LINE, now()]),
     %io:format(user, "Lvl1: ~p~n", [Lvl1s]),
     Mod2 = length(Lvl1s) div ?LEVEL_SIZE,
     Lvl2s = build_int_level(Mod2, Lvl1s, 1, [ crypto:hash_init(?H) ]),
+    io:format(user, "build_tree LINE ~p at ~p\n", [?LINE, now()]),
     %io:format(user, "Lvl2: ~p~n", [Lvl2s]),
     Mod3 = length(Lvl2s) div 2,
     Lvl3s = build_int_level(Mod3, Lvl2s, 1, [ crypto:hash_init(?H) ]),
+    io:format(user, "build_tree LINE ~p at ~p\n", [?LINE, now()]),
     %io:format(user, "Lvl3: ~p~n", [Lvl3s]),
     Root = build_root(Lvl3s, crypto:hash_init(?H)),
+    io:format(user, "build_tree LINE ~p at ~p\n", [?LINE, now()]),
     io:format(user, "Root: ~p~n", [Root]),
     %%% ets:insert(Tid, MT#mt{ root = Root, lvl1 = Lvl1s, lvl2 = Lvl2s, lvl3 = Lvl3s, recalc = false }),
     [Root, Lvl3s, Lvl2s, Lvl1s].
