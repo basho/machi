@@ -439,8 +439,9 @@ do_append_midtail2([FLU|RestFLUs]=FLUs, Prefix, File, Offset, Chunk,
             %% We know what the chunk ought to be, so jump to the
             %% middle of read-repair.
             Resume = {append, Offset, iolist_size(Chunk), File},
-            do_repair_chunk(FLUs, Resume, Chunk, [], File, Offset,
-                            iolist_size(Chunk), Depth, STime, S);
+            {Reply, S1} = do_repair_chunk(FLUs, Resume, Chunk, [], File, Offset,
+                                  iolist_size(Chunk), Depth, STime, S),
+            {reply, Reply, S1};
         {error, trimmed} = Err ->
             %% TODO: nothing can be done
             {reply, Err, S};
