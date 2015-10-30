@@ -196,6 +196,11 @@ num() ->
     choose(2, 5).
     %% return(3).
 
+sublist(L) ->
+    ?LET(K, nat(),
+    ?LET(L2, eqc_gen:vector(K, eqc_gen:oneof(L)),
+         lists:usort(L2))).
+
 %% Generator for possibly assymmetric partition information
 partition(FLUNames) ->
     frequency([{10, return([])},

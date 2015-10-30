@@ -125,6 +125,7 @@ list_files_by_prefix(_FluName, Other) ->
 %% gen_server API
 init([FluName, DataDir]) ->
     Tid = ets:new(make_filename_mgr_name(FluName), [named_table, {read_concurrency, true}]),
+    ets:insert(Tid, {counter, 0}), %% In theory, persistent counter over the lifetime of the FLU
     {ok, #state{fluname = FluName,
                 epoch = 0,
                 datadir = DataDir,
@@ -143,6 +144,7 @@ handle_call({find_filename, EpochId, Prefix}, _From, S = #state{ datadir = DataD
                                                                  tid = Tid}) ->
     %% Our state and the caller's epoch ids are the same. Business as usual.
     File = handle_find_file(Tid, Prefix, DataDir),
+    %% io:format(user, "~s:find_filename ~w ~w: ~W ~s -> ~s\n", [?MODULE, ?LINE, S#state.fluname, EpochId, 4, Prefix, File]),
     {reply, {file, File}, S};
 
 handle_call({find_filename, EpochId, Prefix}, _From, S = #state{ datadir = DataDir, tid = Tid }) ->
@@ -151,6 +153,7 @@ handle_call({find_filename, EpochId, Prefix}, _From, S = #state{ datadir = DataD
     %% If epoch ids between our state and the caller's are different, we must increment the
     %% sequence number, generate a filename and then cache it.
     File = increment_and_cache_filename(Tid, DataDir, Prefix),
+    %% io:format(user, "~s:find_filename ~w ~w: ~W ~s -> ~s\n", [?MODULE, ?LINE, S#state.fluname, EpochId, 4, Prefix, File]),
     {reply, {file, File}, S#state{epoch = EpochId}};
 
 handle_call({increment_sequence, Prefix}, _From, S = #state{ datadir = DataDir }) ->
@@ -199,25 +202,15 @@ make_filename_mgr_name(FluName) when is_atom(FluName) ->
     list_to_atom(atom_to_list(FluName) ++ "_filename_mgr").
 
 handle_find_file(Tid, Prefix, DataDir) ->
-    N = machi_util:read_max_filenum(DataDir, Prefix),
-    {File, Cleanup} = case find_file(DataDir, Prefix, N) of
-        [] ->
-            {find_or_make_filename(Tid, DataDir, Prefix, N), false};
-        [H] -> {H, true};
-        [Fn | _ ] = L ->
-            lager:debug(
-              "Searching for a matching file to prefix ~p and sequence number ~p gave multiples: ~p",
-              [Prefix, N, L]),
-            {Fn, true}
-    end,
-    maybe_cleanup(Tid, {Prefix, N}, Cleanup),
+    File = find_or_make_filename(Tid, DataDir, Prefix),
     filename:basename(File).
 
-find_or_make_filename(Tid, DataDir, Prefix, N) ->
-    case ets:lookup(Tid, {Prefix, N}) of
+find_or_make_filename(Tid, DataDir, Prefix) ->
+    case ets:lookup(Tid, {Prefix}) of
          [] ->
+            N = ets:update_counter(Tid, counter, 1),
             F = generate_filename(DataDir, Prefix, N),
-            true = ets:insert_new(Tid, {{Prefix, N}, F}),
+            true = ets:insert_new(Tid, {{Prefix}, F}),
             F;
         [{_Key, File}] ->
             File
@@ -238,9 +231,9 @@ maybe_cleanup(Tid, Key, true) ->
 
 increment_and_cache_filename(Tid, DataDir, Prefix) ->
     ok = machi_util:increment_max_filenum(DataDir, Prefix),
-    N = machi_util:read_max_filenum(DataDir, Prefix),
+    N = ets:update_counter(Tid, counter, 1),
     F = generate_filename(DataDir, Prefix, N),
-    true = ets:insert_new(Tid, {{Prefix, N}, F}),
+    ets:insert(Tid, {{Prefix}, F}),
     filename:basename(F).
 
 
