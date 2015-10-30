@@ -131,9 +131,8 @@ sync(_Pid, Type) ->
     {error, bad_arg}.
 
 % @doc Read file at offset for length. This returns a sequence of all
-% chunks that overlaps with requested offset and length. Note that
-% borders are not aligned, not to mess up repair at cr_client with
-% checksums. They should be cut at cr_client.
+% written and trimmed (optional) bytes that overlaps with requested
+% offset and length. Borders are not aligned.
 -spec read(Pid :: pid(),
            Offset :: non_neg_integer(),
            Length :: non_neg_integer()) ->
@@ -223,6 +222,8 @@ init({FluName, Filename, DataDir}) ->
     UnwrittenBytes = machi_csum_table:calc_unwritten_bytes(CsumTable),
     {Eof, infinity} = lists:last(UnwrittenBytes),
     {ok, FHd} = file:open(DPath, [read, write, binary, raw]),
+    %% Reserve for EC and stuff, to prevent eof when read
+    ok = file:pwrite(FHd, 0, binary:copy(<<"so what?">>, ?MINIMUM_OFFSET div 8)),
     Tref = schedule_tick(),
     St = #state{
         fluname         = FluName,
@@ -385,7 +386,10 @@ handle_call({trim, Offset, Size, _TriggerGC}, _From,
 
             case machi_csum_table:trim(CsumTable, Offset, Size, LUpdate, RUpdate) of
                 ok ->
-                    NewState = State#state{ops=Ops+1, trims={T+1, Err}},
+                    {NewEof, infinity} = lists:last(machi_csum_table:calc_unwritten_bytes(CsumTable)),
+                    NewState = State#state{ops=Ops+1,
+                                           trims={T+1, Err},
+                                           eof_position=NewEof},
                     maybe_gc(ok, NewState);
                 Error ->
                     {reply, Error, State#state{ops=Ops+1, trims={T, Err+1}}}
@@ -573,6 +577,15 @@ check_or_make_tagged_csum(Tag, InCsum, Data) when Tag == ?CSUM_TAG_CLIENT_SHA;
         false ->
             {error, {bad_csum, Csum}}
     end;
+check_or_make_tagged_csum(?CSUM_TAG_SERVER_REGEN_SHA,
+                          InCsum, Data) ->
+    Csum = machi_util:checksum_chunk(Data),
+    case Csum =:= InCsum of
+        true ->
+            machi_util:make_tagged_csum(server_regen_sha, Csum);
+        false ->
+            {error, {bad_csum, Csum}}
+    end;
 check_or_make_tagged_csum(OtherTag, _ClientCsum, _Data) ->
     lager:warning("Unknown checksum tag ~p", [OtherTag]),
     {error, bad_checksum}.
@@ -669,6 +682,7 @@ read_all_ranges(FHd, Filename, [{Offset, Size, TaggedCsum}|T], ReadChunks, Trimm
 % caller as `ok'
 handle_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Data) ->
     Size = iolist_size(Data),
+ 
     case machi_csum_table:find(CsumTable, Offset, Size) of
         [] -> %% Nothing should be there
             try
@@ -762,7 +776,7 @@ slice_both_side([], _, _) ->
     [];
 slice_both_side([{F, Offset, Chunk, _Csum}|L], LeftPos, RightPos)
   when Offset < LeftPos andalso LeftPos < RightPos ->
-    TrashLen = 8 * (LeftPos - Offset),
+    TrashLen = (LeftPos - Offset),
     <<_:TrashLen/binary, NewChunk/binary>> = Chunk,
     NewChecksum = machi_util:make_tagged_csum(?CSUM_TAG_SERVER_REGEN_SHA_ATOM, Chunk),
     NewH = {F, LeftPos, NewChunk, NewChecksum},
@@ -787,7 +801,7 @@ maybe_regenerate_checksum(_, {_, _, trimmed} = Change) ->
 maybe_regenerate_checksum(FHd, {Offset, Size, _Csum}) ->
     case file:pread(FHd, Offset, Size) of
         eof ->
-            error(eof);
+            error({eof, Offset, Size});
         {ok, Bytes} when byte_size(Bytes) =:= Size ->
 
             TaggedCsum = machi_util:make_tagged_csum(server_regen_sha,
@@ -797,9 +811,9 @@ maybe_regenerate_checksum(FHd, {Offset, Size, _Csum}) ->
             throw(Error)
     end.
 
-%% GC: make sure unwritte bytes = [{Eof, infinity}] and Eof is > max file size
-%% walk through the checksum table and make sure all chunks trimmed
-%% Then unlink the file
+%% GC: make sure unwritten bytes = [{Eof, infinity}] and Eof is > max
+%% file size walk through the checksum table and make sure all chunks
+%% trimmed Then unlink the file
 -spec maybe_gc(term(), #state{}) ->
                       {reply, term(), #state{}} | {stop, normal, term(), #state{}}.
 maybe_gc(Reply, S = #state{eof_position = Eof,
