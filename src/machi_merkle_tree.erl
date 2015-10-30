@@ -102,7 +102,7 @@ filename(#mt{ filename = F }) -> F.
 diff(#mt{backend = naive, tree = T1}, #mt{backend = naive, tree = T2}) ->
     case T1#naive.root == T2#naive.root of
         true -> same;
-        false -> different %% TODO: implement diff
+        false -> naive_diff(T1, T2) 
     end;
 diff(#mt{backend = merklet, tree = T1}, #mt{backend = merklet, tree = T2}) ->
     case merklet:diff(T1, T2) of
@@ -201,3 +201,21 @@ build_level_1(Size, [{Pos, Len, Hash}|T], Multiple, [ Ctx | Rest ])
 build_level_1(Size, [{Pos, Len, Hash}|T], Multiple, [ Ctx | Rest ])
                                     when ( Pos + Len ) =< ( Size * Multiple ) ->
     build_level_1(Size, T, Multiple, [ crypto:hash_update(Ctx, Hash) | Rest ]).
+
+naive_diff(#naive{lvl1 = L1}, #naive{lvl1=L2, chunk_size=CS2}) ->
+    lager:debug("naive diff: Our lvl1: ~p~n", [L1]),
+    lager:debug("naive diff: Their chunk size: ~p, lvl1: ~p~n", [CS2, L2]),
+
+    Set1 = gb_sets:from_list(lists:zip(lists:seq(1, length(L1), L1))),
+    Set2 = gb_sets:from_list(lists:zip(lists:seq(1, length(L2), L2))),
+
+    %% The byte ranges in list 2 that do not match in list 1
+    %%
+    %% We have to decide what to do now - should we filter the
+    %% leaf nodes using these ranges and find specific divergence
+    %% between Tree1 and Tree2? 
+    %%
+    %% Or should we do something else?
+    [ {(X-1)*CS2, CS2, SHA} || {X, SHA} <- gb_sets:to_list(gb_sets:subtract(Set1, Set2)) ].
+
+
