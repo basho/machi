@@ -45,14 +45,18 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+help() ->
+    io:format("~s\n", [short_doc()]).
+
 short_doc() ->
 "
 A visualization of the convergence behavior of the chain self-management
 algorithm for Machi.
-  1. Set up 4 FLUs and chain manager pairs.
+
+  1. Set up some server and chain manager pairs.
   2. Create a number of different network partition scenarios, where
-     (simulated) partitions may be symmetric or asymmetric.  Then halt changing
-     the partitions and keep the simulated network stable and broken.
+     (simulated) partitions may be symmetric or asymmetric.  Then stop changing
+     the partitions and keep the simulated network stable (and perhaps broken).
   3. Run a number of iterations of the algorithm in parallel by poking each
      of the manager processes on a random'ish basis.
   4. Afterward, fetch the chain transition changes made by each FLU and
@@ -61,73 +65,65 @@ algorithm for Machi.
 During the iteration periods, the following is a cheatsheet for the output.
 See the internal source for interpreting the rest of the output.
 
-    'Let loose the dogs of war!'  Network instability
-    'SET partitions = '           Network stability (but broken)
-    'x uses:' The FLU x has made an internal state transition.  The rest of
-              the line is a dump of internal state.
-    '{t}'     This is a tick event which triggers one of the manager processes
-              to evaluate its environment and perhaps make a state transition.
+    'SET partitions = '
 
-A long chain of '{t}{t}{t}{t}' means that the chain state has settled
-to a stable configuration, which is the goal of the algorithm.
-Press control-c to interrupt....".
+        A pair-wise list of actors which cannot send messages.  The
+        list is uni-directional.  If there are three servers (a,b,c),
+        and if the partitions list is '[{a,b},{b,c}]' then all
+        messages from a->b and b->c will be dropped, but any other
+        sender->recipient messages will be delivered successfully.
 
-long_doc() ->
-    "
-'Let loose the dogs of war!'
+    'x uses:'
 
-    The simulated network is very unstable for a few seconds.
+        The FLU x has made an internal state transition and is using
+        this epoch's projection as operating chain configuration.  The
+        rest of the line is a summary of the projection.
 
-'x uses'
+    'CONFIRM epoch {N}'
 
-    After a single iteration, server x has determined that the chain
-    should be defined by the upi, repair, and down list in this record.
-    If all participants reach the same conclusion at the same epoch
-    number (and checksum, see next item below), then the chain is
-    stable, fully configured, and can provide full service.
+        This message confirms that all of the servers listed in the
+        UPI and repairing lists of the projection at epoch {N} have
+        agreed to use this projection because they all have written
+        this projection to their respective private projection stores.
+        The chain is now usable by/available to all clients.
 
-'epoch,E'
+    'Sweet, private projections are stable'
 
-    The epoch number for this decision is E.  The checksum of the full
-    record is not shown.  For purposes of the protocol, a server will
-    'wedge' itself and refuse service (until a new config is chosen)
-    whenever: a). it sees a bigger epoch number mentioned somewhere, or
-    b). it sees the same epoch number but a different checksum.  In case
-    of b), there was a network partition that has healed, and both sides
-    had chosen to operate with an identical epoch number but different
-    chain configs.
+        This report announces that this iteration of the test cycle
+        has passed successfully.  The report that follows briefly
+        summarizes the latest private projection used by each
+        participating server.  For example, when in strong consistency
+        mode with 'a' as a witness and 'b' and 'c' as real servers:
 
-'upi', 'repair', and 'down'
+        %% Legend:
+        %% server name, epoch ID, UPI list, repairing list, down list, ...
+        %%                         ... witness list, 'false' (a constant value)
 
-    Members in the chain that are fully in sync and thus preserving the
-    Update Propagation Invariant, up but under repair (simulated), and
-    down, respectively.
+        [{a,{{1116,<<23,143,246,55>>},[a,b],[],[c],[a],false}},
+         {b,{{1116,<<23,143,246,55>>},[a,b],[],[c],[a],false}}]
 
-'ps,[some list]'
+        Both servers 'a' and 'b' agree on epoch 1116 with epoch ID
+        {1116,<<23,143,246,55>>} where UPI=[a,b], repairing=[],
+        down=[c], and witnesses=[a].
 
-    The list of asymmetric network partitions.  {a,b} means that a
-    cannot send to b, but b can send to a.
+        Server 'c' is not shown because 'c' has wedged itself OOS (out
+        of service) by configuring a chain length of zero.
 
-    This partition list is recorded for debugging purposes but is *not*
-    used by the algorithm.  The algorithm only 'feels' its effects via
-    simulated timeout whenever there's a partition in one of the
-    messaging directions.
+        If no servers are listed in the report (i.e. only '[]' is
+        displayed), then all servers have wedged themselves OOS, and
+        the chain is unavailable.
 
-'nodes_up,[list]'
+    'DoIt,' 
 
-    The best guess right now of which ndoes are up, relative to the
-    author node, specified by '{author,X}'
+        This marks a group of tick events which trigger the manager
+        processes to evaluate their environment and perhaps make a
+        state transition.
 
-'SET partitions = [some list]'
+A long chain of 'DoIt,DoIt,DoIt,' means that the chain state has
+(probably) settled to a stable configuration, which is the goal of the
+algorithm.
 
-    All subsequent iterations should have a stable list of partitions,
-    i.e. the 'ps' list described should be stable.
-
-'{FLAP: x flaps n}!'
-
-    Server x has detected that it's flapping/oscillating after iteration
-    n of a naive/1st draft detection algorithm.
-".
+Press control-c to interrupt the test....".
 
 %% ' silly Emacs syntax highlighting....
 
@@ -295,7 +291,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                             private_projections_are_stable(Namez, DoIt)
                     end, false, lists:seq(0, MaxIters)),
            io:format(user, "\n~s Sweet, private projections are stable\n", [machi_util:pretty_time()]),
-           io:format(user, "\t~P\n", [get(stable), 14]),
+           io:format(user, "\t~P\n", [get(stable), 24]),
            io:format(user, "Rolling sanity check ... ", []),
            PrivProjs = [{Name, begin
                                    {ok, Ps8} = ?FLU_PC:get_all_projections(
@@ -719,7 +715,7 @@ private_projections_are_stable(Namez, PollFunc) ->
                 true
         end,
 
-    io:format(user, "\nPriv1 ~p\nPriv2 ~p\n1==2 ~w ap_disjoint ~w u_all_peers ~w cp_mode_agree ~w\n", [lists:sort(Private1), lists:sort(Private2), Private1 == Private2, AP_mode_disjoint_test_p, Unanimous_with_all_peers_p, CP_mode_agree_test_p]),
+    %% io:format(user, "\nPriv1 ~p\nPriv2 ~p\n1==2 ~w ap_disjoint ~w u_all_peers ~w cp_mode_agree ~w\n", [lists:sort(Private1), lists:sort(Private2), Private1 == Private2, AP_mode_disjoint_test_p, Unanimous_with_all_peers_p, CP_mode_agree_test_p]),
     Private1 == Private2 andalso
         AP_mode_disjoint_test_p andalso
         (
