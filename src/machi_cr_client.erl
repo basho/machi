@@ -937,7 +937,10 @@ update_proj2(Count, #state{bad_proj=BadProj, proxies_dict=ProxiesDict,
             true ->
                 Members = proplists:get_value(simulator_members, Opts, []),
                 {Partitions, _Islands} = machi_partition_simulator:get(Members),
-                [B || {A, B} <- Partitions, A =:= SimName];
+                lists:filtermap(fun({A, B}) when A =:= SimName -> {true, B};
+                                   ({A, B}) when B =:= SimName -> {true, A};
+                                   (_) -> false
+                                end, Partitions);
             false -> []
         end,
     Proxies = lists:foldl(fun(Name, Dict) ->
