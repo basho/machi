@@ -21,6 +21,8 @@
 -module(machi_merkle_tree_test).
 -compile([export_all]).
 
+-include("machi_merkle_tree.hrl").
+
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/file.hrl").
 
@@ -127,3 +129,35 @@ run_test(C) ->
     ?assertEqual(same, machi_merkle_tree:diff(N, N)),
     ?assertEqual(same, machi_merkle_tree:diff(M, M)),
     {Osize, {MTime, MSize}, {NTime, NSize}}.
+
+torture_test(C) ->
+    Results = [ run_torture_test() || _ <- lists:seq(1, C) ],
+    {ok, F} = file:open("torture_results.txt", [raw, write]),
+    lists:foreach(fun({MSize, MTime, NSize, NTime}) ->
+                      file:write(F, io_lib:format("~p\t~p\t~p\t~p\n",
+                                                [MSize, MTime, NSize, NTime]))
+                  end, Results),
+    ok = file:close(F).
+
+run_torture_test() ->
+    {MTime, M} = timer:tc(fun() -> merklet_torture() end),
+    {NTime, N} = timer:tc(fun() -> naive_torture() end), 
+
+    MSize = byte_size(term_to_binary(M)),
+    NSize = byte_size(term_to_binary(N)),
+
+    {MSize, MTime, NSize, NTime}.
+
+merklet_torture() ->
+    lists:foldl(
+      fun({O, S, Sha}, Acc) -> 
+          merklet:insert({<<O:64/unsigned-big, S:32/unsigned-big>>, Sha}, Acc) 
+      end, undefined, torture_generator()).
+
+naive_torture() ->
+    N = lists:foldl(fun(T, Acc) -> machi_merkle_tree:update_acc(T, Acc) end, [], torture_generator()),
+    T = #naive{ leaves = lists:reverse(N), chunk_size = 10010, recalc = true },
+    machi_merkle_tree:build_tree(T).
+
+torture_generator() ->
+    [ {O, 1, crypto:hash(sha, term_to_binary(now()))} || O <- lists:seq(1024, 1000000) ].
