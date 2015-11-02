@@ -28,13 +28,16 @@ doc](./doc/high-level-machi.pdf) for further references.)
 
 ## Status: mid-October 2015: work is underway
 
-* The chain manager is ready for both eventual consistency use ("AP
-  mode") and strong constency use ("CP mode").  Both modes use a new
+* The chain manager is ready for both eventual consistency use ("available
+  mode") and strong consistency use ("consistent mode").  Both modes use a new
   consensus technique, Humming Consensus.
     * Scott will be
       [speaking about Humming Consensus](http://ricon.io/agenda/#managing-chain-replication-metadata-with-humming-consensus)
       at the [Ricon 2015 conference] (http://ricon.io) in San Francisco,
       CA, USA on Thursday, November 5th, 2015.
+    * If you would like to run the network partition simulator
+      mentioned in that Ricon presentation, please see the
+      [partition simulator convergence test doc.](./doc/machi_chain_manager1_converge_demo.md)
     * Implementation of the file repair process for strong consistency
       is still in progress.
 
