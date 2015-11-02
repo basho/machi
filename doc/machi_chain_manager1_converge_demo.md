@@ -143,9 +143,23 @@ Run the following command at the Erlang CLI prompt:
     machi_chain_manager1_converge_demo:t(3, [{private_write_verbose,true}]).
 
 The first argument, `3`, is the number of servers to participate in
-the chain.  Chain lengths as long as 7 or 9 can be used, but they may
-suffer from longer periods of churn/instability before all chain
-managers reach agreement via humming consensus.
+the chain.  Please note:
+
+* Chain lengths as short as 1 or 2 are valid, but the results are a
+  bit boring.
+* Chain lengths as long as 7 or 9 can be used, but they may
+  suffer from longer periods of churn/instability before all chain
+  managers reach agreement via humming consensus.  (It is future work
+  to shorten the worst of the unstable churn latencies.)
+* In eventual consistency mode, chain lengths may be even numbers,
+  e.g. 2, 4, or 6.
+* The simulator will choose partition events from the permutations of
+  all 1, 2, and 3 node partition pairs.  The total runtime will
+  increase *dramatically* with chain length.
+    * Chain length 2: about 3 partition cases
+    * Chain length 3: about 35 partition cases
+    * Chain length 4: about 230 partition cases
+    * Chain length 5: about 1100 partition cases
 
 ## Run a test in strong consistency mode (with witnesses):
 
