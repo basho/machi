@@ -125,7 +125,6 @@ write(#machi_csum_table{fd=Fd, table=T} = CsumT,
             true = ets:insert(T, {Offset, Size, CSum}),
             ok;
         Error ->
-            io:format(user, "boob *********************", []),
             Error
     end.
 
