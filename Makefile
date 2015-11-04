@@ -53,7 +53,7 @@ relclean:
 stage : rel
 	$(foreach dep,$(wildcard deps/*), rm -rf rel/$(REPO)/lib/$(shell basename $(dep))* && ln -sf $(abspath $(dep)) rel/$(REPO)/lib;)
 
-DIALYZER_APPS = kernel stdlib sasl erts ssl compiler eunit crypto
+DIALYZER_APPS = kernel stdlib sasl erts ssl compiler eunit crypto public_key syntax_tools
 PLT = $(HOME)/.machi_dialyzer_plt
 
 include tools.mk
