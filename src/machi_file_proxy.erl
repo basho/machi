@@ -369,7 +369,7 @@ handle_call({trim, Offset, Size, _TriggerGC}, _From,
                            trims = {T, Err},
                            csum_table = CsumTable}) ->
 
-    case machi_csum_table:all_trimmed(CsumTable, Offset, Size) of
+    case machi_csum_table:all_trimmed(CsumTable, Offset, Offset+Size) of
         true ->
             NewState = State#state{ops=Ops+1, trims={T, Err+1}},
             %% All bytes of that range was already trimmed returns ok
