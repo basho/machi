@@ -205,7 +205,7 @@ handle_find_file(Tid, Prefix, DataDir) ->
             {find_or_make_filename(Tid, DataDir, Prefix, N), false};
         [H] -> {H, true};
         [Fn | _ ] = L ->
-            lager:warning(
+            lager:debug(
               "Searching for a matching file to prefix ~p and sequence number ~p gave multiples: ~p",
               [Prefix, N, L]),
             {Fn, true}
