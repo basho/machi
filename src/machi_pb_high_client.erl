@@ -59,13 +59,13 @@
          }).
 
 %% @doc official error types that is specific in Machi
--type error_atoms() :: bad_arg | wedged | bad_checksum |
-                       partition | not_written | written |
-                       trimmed | no_such_file | partial_read |
-                       bad_epoch | inet:posix().
+-type machi_client_error_reason() :: bad_arg | wedged | bad_checksum |
+                                     partition | not_written | written |
+                                     trimmed | no_such_file | partial_read |
+                                     bad_epoch | inet:posix().
 
 %% @doc Creates a client process
--spec start_link(p_srvr_dict()) -> {ok, pid()} | {error, error_atoms()}.
+-spec start_link(p_srvr_dict()) -> {ok, pid()} | {error, machi_client_error_reason()}.
 start_link(P_srvr_list) ->
     gen_server:start_link(?MODULE, [P_srvr_list], []).
 
@@ -77,29 +77,29 @@ quit(PidSpec) ->
 connected_p(PidSpec) ->
     gen_server:call(PidSpec, connected_p, infinity).
 
--spec echo(pid(), string()) -> {ok, string()} | {error, error_atoms()}.
+-spec echo(pid(), string()) -> {ok, string()} | {error, machi_client_error_reason()}.
 echo(PidSpec, String) ->
     echo(PidSpec, String, ?DEFAULT_TIMEOUT).
 
--spec echo(pid(), string(), non_neg_integer()) -> {ok, string()} | {error, error_atoms()}.
+-spec echo(pid(), string(), non_neg_integer()) -> {ok, string()} | {error, machi_client_error_reason()}.
 echo(PidSpec, String, Timeout) ->
     send_sync(PidSpec, {echo, String}, Timeout).
 
 %% TODO: auth() is not implemented.  Auth requires SSL, and this client
 %% doesn't support SSL yet.  This is just a placeholder and reminder.
 
--spec auth(pid(), string(), string()) -> ok | {error, error_atoms()}.
+-spec auth(pid(), string(), string()) -> ok | {error, machi_client_error_reason()}.
 auth(PidSpec, User, Pass) ->
     auth(PidSpec, User, Pass, ?DEFAULT_TIMEOUT).
 
--spec auth(pid(), string(), string(), non_neg_integer()) -> ok | {error, error_atoms()}.
+-spec auth(pid(), string(), string(), non_neg_integer()) -> ok | {error, machi_client_error_reason()}.
 auth(PidSpec, User, Pass, Timeout) ->
     send_sync(PidSpec, {auth, User, Pass}, Timeout).
 
 -spec append_chunk(pid(), PlacementKey::binary(), Prefix::binary(), Chunk::binary(),
                    CSum::binary(), ChunkExtra::non_neg_integer()) ->
                           {ok, Filename::string(), Offset::machi_dt:file_offset()} |
-                          {error, error_atoms()}.
+                          {error, machi_client_error_reason()}.
 append_chunk(PidSpec, PlacementKey, Prefix, Chunk, CSum, ChunkExtra) ->
     append_chunk(PidSpec, PlacementKey, Prefix, Chunk, CSum, ChunkExtra, ?DEFAULT_TIMEOUT).
 
@@ -108,19 +108,19 @@ append_chunk(PidSpec, PlacementKey, Prefix, Chunk, CSum, ChunkExtra) ->
                    ChunkExtra::non_neg_integer(),
                    Timeout::non_neg_integer()) ->
                           {ok, Filename::string(), Offset::machi_dt:file_offset()} |
-                          {error, error_atoms()}.
+                          {error, machi_client_error_reason()}.
 append_chunk(PidSpec, PlacementKey, Prefix, Chunk, CSum, ChunkExtra, Timeout) ->
     send_sync(PidSpec, {append_chunk, PlacementKey, Prefix, Chunk, CSum, ChunkExtra}, Timeout).
 
 -spec write_chunk(pid(), File::string(), machi_dt:file_offset(),
                   Chunk::binary(), CSum::binary()) ->
-                         ok | {error, error_atoms()}.
+                         ok | {error, machi_client_error_reason()}.
 write_chunk(PidSpec, File, Offset, Chunk, CSum) ->
     write_chunk(PidSpec, File, Offset, Chunk, CSum, ?DEFAULT_TIMEOUT).
 
 -spec write_chunk(pid(), File::string(), machi_dt:file_offset(),
                   Chunk::binary(), CSum::binary(), Timeout::non_neg_integer()) ->
-                         ok | {error, error_atoms()}.
+                         ok | {error, machi_client_error_reason()}.
 write_chunk(PidSpec, File, Offset, Chunk, CSum, Timeout) ->
     send_sync(PidSpec, {write_chunk, File, Offset, Chunk, CSum}, Timeout).
 
@@ -131,7 +131,7 @@ write_chunk(PidSpec, File, Offset, Chunk, CSum, Timeout) ->
                  [{flag_no_checksum | flag_no_chunk | needs_trimmed, boolean()}]) ->
                         {ok, {Chunks::[{File::string(), machi_dt:file_offset(), machi_dt:chunk_size(), binary()}],
                               Trimmed::[{File::string(), machi_dt:file_offset(), machi_dt:chunk_size()}]}} |
-                        {error, error_atoms()}.
+                        {error, machi_client_error_reason()}.
 read_chunk(PidSpec, File, Offset, Size, Options) ->
     read_chunk(PidSpec, File, Offset, Size, Options, ?DEFAULT_TIMEOUT).
 
@@ -140,7 +140,7 @@ read_chunk(PidSpec, File, Offset, Size, Options) ->
                  Timeout::non_neg_integer()) ->
                         {ok, {Chunks::[{File::string(), machi_dt:file_offset(), machi_dt:chunk_size(), binary()}],
                               Trimmed::[{File::string(), machi_dt:file_offset(), machi_dt:chunk_size()}]}} |
-                        {error, error_atoms()}.
+                        {error, machi_client_error_reason()}.
 read_chunk(PidSpec, File, Offset, Size, Options, Timeout) ->
     send_sync(PidSpec, {read_chunk, File, Offset, Size, Options}, Timeout).
 
@@ -151,7 +151,7 @@ read_chunk(PidSpec, File, Offset, Size, Options, Timeout) ->
 %% off and checksum are re-calculated in server side.  TODO: Add
 %% option specifying whether to trigger GC.
 -spec trim_chunk(pid(), string(), non_neg_integer(), machi_dt:chunk_size()) ->
-                        ok | {error, error_atoms()}.
+                        ok | {error, machi_client_error_reason()}.
 trim_chunk(PidSpec, File, Offset, Size) ->
     trim_chunk(PidSpec, File, Offset, Size, ?DEFAULT_TIMEOUT).
 
@@ -161,7 +161,7 @@ trim_chunk(PidSpec, File, Offset, Size, Timeout) ->
 %% @doc Returns a binary that has checksums and chunks encoded inside
 %% (This is because encoding-decoding them are inefficient). TODO:
 %% return a structured list of them.
--spec checksum_list(pid(), string()) -> {ok, binary()} | {error, error_atoms()}.
+-spec checksum_list(pid(), string()) -> {ok, binary()} | {error, machi_client_error_reason()}.
 checksum_list(PidSpec, File) ->
     checksum_list(PidSpec, File, ?DEFAULT_TIMEOUT).
 

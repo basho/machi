@@ -119,37 +119,18 @@ weight(_S, _) -> 2.
 
 %% HELPERS
 
-%% check if an operation is permitted based on whether a write has
-%% occurred
-check_writes(_Op, [], _Off, _L) ->
-    false;
-check_writes(_Op, [{Pos, Sz}|_T], Off, L) when Pos == Off 
-                                          andalso Sz == L ->
-    mostly_true;
-check_writes(read, [{Pos, Sz}|_T], Off, L) when Off >= Pos 
-                                          andalso Off < (Pos + Sz) 
-                                          andalso Sz >= ( L - ( Off - Pos ) ) ->
-    true;
-check_writes(write, [{Pos, Sz}|_T], Off, L) when ( Off + L ) > Pos 
-                                                 andalso Off < (Pos + Sz) ->
-    true;
-check_writes(Op, [_H|T], Off, L) ->
-    check_writes(Op, T, Off, L).
-
 get_overlaps(_Offset, _Len, [], Acc) -> lists:reverse(Acc);
 get_overlaps(Offset, Len, [{Pos, Sz} = Ck|T], Acc0)
 %% Overlap judgement differnt from the one in machi_csum_table
 %% [a=Offset, b), [x=Pos, y) ...
   when
-      %% (a-y) * (b-x)
-      %%(Offset - Pos - Sz) * (Offset + Len - Pos) < 0 ->
-      %% a x b y
+      %% a =< x && x < b && b =< y
       (Offset =< Pos andalso Pos < Offset + Len andalso Offset + Len =< Pos + Sz) orelse
-      %% a x y b
+      %% a =< x          && y < b
       (Offset =< Pos andalso Pos + Sz < Offset + Len) orelse
-      %% x a y b
+      %% x < a && a < y  && y =< b
       (Pos < Offset andalso Offset < Pos + Sz andalso Pos + Sz =< Offset + Len) orelse
-      %% x a b y
+      %% x < a           && b < y
       (Pos < Offset + Len andalso Offset + Len < Pos + Sz) ->
     get_overlaps(Offset, Len, T, [Ck|Acc0]);
 get_overlaps(Offset, Len, [_Ck|T], Acc0) ->
@@ -336,14 +317,9 @@ write_post(S, Args, Res) ->
         %% false means this range has NOT been written before, so
         %% it should succeed
         true -> eq(Res, ok);
-        %% mostly true means we've written this range before BUT
-        %% as a special case if we get a call to write the EXACT
-        %% same data that's already on the disk, we return "ok"
-        %% instead of {error, written}.
-        %% mostly_true -> probably_error(Res); 
-        %% If we get true, then we've already written this section 
-        %% or a portion of this range to disk and should return an 
-        %% error.
+        %% If we get true, then we've already written or trimmed this
+        %% section or a portion of this range to disk and should
+        %% return an error.
         false -> is_error(Res)
     end.
 
