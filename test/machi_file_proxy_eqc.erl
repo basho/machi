@@ -378,10 +378,12 @@ append_post(_S, _Args, Res) ->
 %% rewrite
 
 rewrite_pre(S) ->
-    S#state.pid /= undefined andalso S#state.written /= [].
+    S#state.pid /= undefined andalso
+        (S#state.written ++ S#state.trimmed) /= [] .
 
 rewrite_args(S) ->
-    ?LET({Off, Len}, get_written_interval(S#state.written),
+    ?LET({Off, Len},
+         get_written_interval(S#state.written ++ S#state.trimmed),
          [S#state.pid, Off, data_with_csum(Len)]).
 
 rewrite(Pid, Offset, {Bin, Tag, Csum}) ->
@@ -398,12 +400,11 @@ rewrite_next(S, _Res, _Args) ->
 %% trim
 
 trim_pre(S) ->
-    S#state.pid /= undefined. %% andalso S#state.planned_trims /= [].
+    S#state.pid /= undefined andalso S#state.planned_trims /= [].
 
 trim_args(S) ->
-    %% {Offset, Length} = hd(S#state.planned_trims),
-    %% [S#state.pid, Offset, Length].
-    [S#state.pid, offset(), len()].     
+    {Offset, Length} = hd(S#state.planned_trims),
+    [S#state.pid, Offset, Length].
 
 trim(Pid, Offset, Length) ->
     machi_file_proxy:trim(Pid, Offset, Length, false).
@@ -414,18 +415,18 @@ trim_post(_S, [_Pid, _Offset, _Length], _Res) ->
     false.
 
 trim_next(S, Res, [_Pid, Offset, Length]) ->
-    case is_ok(Res) of
-        true ->
-            NewWritten = cleanup_chunk(Offset, Length, S#state.written),
-            Trimmed1 = cleanup_chunk(Offset, Length, S#state.trimmed),
-            NewTrimmed = lists:sort([{Offset, Length}|Trimmed1]),
-            S#state{trimmed=NewTrimmed,
-                    written=NewWritten,
-                    prev_extra=0};
-        %% planned_trims=tl(S#state.planned_trims)};
-        _Other ->
-            S
-    end.
+    S1 = case is_ok(Res) of
+             true ->
+                 NewWritten = cleanup_chunk(Offset, Length, S#state.written),
+                 Trimmed1 = cleanup_chunk(Offset, Length, S#state.trimmed),
+                 NewTrimmed = lists:sort([{Offset, Length}|Trimmed1]),
+                 S#state{trimmed=NewTrimmed,
+                         written=NewWritten};
+             _Other ->
+                 S
+         end,
+    S1#state{prev_extra=0,
+             planned_trims=tl(S#state.planned_trims)}.
 
 %% Property
 
