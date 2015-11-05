@@ -67,12 +67,12 @@
     ]).
 
 -define(TIMEOUT, 10 * 1000).
--include("machi_projection.hrl"). %% included for pv1_epoch_n type
+-include("machi_projection.hrl"). %% included for pv1_epoch type
 
 -record(state, {fluname :: atom(),
                 tid     :: ets:tid(),
                 datadir :: string(),
-                epoch   :: pv1_epoch_n()
+                epoch   :: pv1_epoch()
                }).
 
 %% public API
@@ -126,7 +126,7 @@ list_files_by_prefix(_FluName, Other) ->
 init([FluName, DataDir]) ->
     Tid = ets:new(make_filename_mgr_name(FluName), [named_table, {read_concurrency, true}]),
     {ok, #state{fluname = FluName,
-                epoch = 0,
+                epoch = {0, <<"NONE">>},
                 datadir = DataDir,
                 tid = Tid}}.
 
