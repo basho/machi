@@ -37,7 +37,7 @@ eqc_test_() ->
     {timeout, 60,
      {spawn,
       [
-        {timeout, 30, ?_assertEqual(true, eqc:quickcheck(eqc:testing_time(15, ?QC_OUT(prop_ok()))))}
+       {timeout, 30, ?_assertEqual(true, eqc:quickcheck(eqc:testing_time(15, ?QC_OUT(prop_ok()))))}
       ]
      }}.
 
@@ -88,12 +88,14 @@ data_with_csum(Limit) ->
 intervals([]) ->
     [];
 intervals([N]) ->
-    [{N, choose(1,150)}];
+    [{N, choose(1,1)}];
 intervals([A,B|T]) ->
-    [{A, choose(1, B-A)}|intervals([B|T])].
+    [{A, oneof([choose(1, B-A), B-A])}|intervals([B|T])].
 
 interval_list() ->
-    ?LET(L, list(choose(1024, 4096)), intervals(lists:usort(L))).
+    ?LET(L,
+         oneof([list(choose(1025, 1033)), list(choose(1024, 4096))]),
+         intervals(lists:usort(L))).
 
 shuffle_interval() ->
     ?LET(L, interval_list(), shuffle(L)).
@@ -103,39 +105,97 @@ get_written_interval(L) ->
  
 %% INITIALIZATION
 
--record(state, {pid, prev_extra = 0, planned_writes=[], written=[]}).
+-record(state, {pid, prev_extra = 0,
+                planned_writes=[],
+                planned_trims=[],
+                written=[],
+                trimmed=[]}).
 
 initial_state() -> #state{written=[{0,1024}]}.
-initial_state(I) -> #state{written=[{0,1024}], planned_writes=I}.
+initial_state(I, T) -> #state{written=[{0,1024}],
+                              planned_writes=I,
+                              planned_trims=T}.
 
 weight(_S, rewrite) -> 1;
 weight(_S, _) -> 2.
 
 %% HELPERS
 
-%% check if an operation is permitted based on whether a write has
-%% occurred
-check_writes(_Op, [], _Off, _L) ->
-    false;
-check_writes(_Op, [{Pos, Sz}|_T], Off, L) when Pos == Off 
-                                          andalso Sz == L ->
-    mostly_true;
-check_writes(read, [{Pos, Sz}|_T], Off, L) when Off >= Pos 
-                                          andalso Off < (Pos + Sz) 
-                                          andalso Sz >= ( L - ( Off - Pos ) ) ->
-    true;
-check_writes(write, [{Pos, Sz}|_T], Off, L) when ( Off + L ) > Pos 
-                                                 andalso Off < (Pos + Sz) ->
-    true;
-check_writes(Op, [_H|T], Off, L) ->
-    check_writes(Op, T, Off, L).
+get_overlaps(_Offset, _Len, [], Acc) -> lists:reverse(Acc);
+get_overlaps(Offset, Len, [{Pos, Sz} = Ck|T], Acc0)
+%% Overlap judgement differnt from the one in machi_csum_table
+%% [a=Offset, b), [x=Pos, y) ...
+  when
+      %% a =< x && x < b && b =< y
+      (Offset =< Pos andalso Pos < Offset + Len andalso Offset + Len =< Pos + Sz) orelse
+      %% a =< x          && y < b
+      (Offset =< Pos andalso Pos + Sz < Offset + Len) orelse
+      %% x < a && a < y  && y =< b
+      (Pos < Offset andalso Offset < Pos + Sz andalso Pos + Sz =< Offset + Len) orelse
+      %% x < a           && b < y
+      (Pos < Offset + Len andalso Offset + Len < Pos + Sz) ->
+    get_overlaps(Offset, Len, T, [Ck|Acc0]);
+get_overlaps(Offset, Len, [_Ck|T], Acc0) ->
+    %% ?debugVal({Offset, Len, _Ck}),
+    %% ?debugVal(Offset =< Pos andalso Pos < Offset + Len andalso Offset + Len =< Pos + Sz),
+    %% ?debugVal(Offset =< Pos andalso Pos + Sz < Offset + Len),
+    %% ?debugVal(Pos < Offset andalso Offset < Pos + Sz andalso Pos + Sz < Offset + Len),
+    %% ?debugVal(Pos < Offset + Len andalso Offset + Len < Pos + Sz),
+    get_overlaps(Offset, Len, T, Acc0).
+
+%% Inefficient but simple easy code to verify by eyes - returns all
+%% bytes that fits in (Offset, Len)
+chop(Offset, Len, List) ->
+    ChopLeft = fun({Pos, Sz}) when Pos < Offset andalso Offset =< Pos + Sz ->
+                       {Offset, Sz + Pos - Offset};
+                  ({Pos, Sz}) when Offset =< Pos andalso Pos + Sz < Offset + Len ->
+                       {Pos, Sz};
+                  ({Pos, _Sz}) when Offset =< Pos ->
+                       {Pos, Offset + Len - Pos}
+               end,
+    ChopRight = fun({Pos, Sz}) when Offset + Len < Pos + Sz ->
+                        {Pos, Offset + Len - Pos};
+                   ({Pos, Sz}) ->
+                        {Pos, Sz}
+                end,
+    Filter0 = fun({_, 0}) -> false;
+                 (Other) -> {true, Other} end,
+    lists:filtermap(fun(E) -> Filter0(ChopRight(ChopLeft(E))) end,
+                    List).
+
+%% Returns all bytes that are at left side of the Offset
+chopped_left(_Offset, []) -> undefined;
+chopped_left(Offset, [{Pos,_Sz}|_]) when Pos < Offset ->
+    {Pos, Offset - Pos};
+chopped_left(_, _) ->
+    undefined.
+
+chopped_right(_Offset, []) -> undefined;
+chopped_right(Offset, List) ->
+    {Pos, Sz} = lists:last(List),
+    if Offset < Pos + Sz ->
+            {Offset, Pos + Sz - Offset};
+       true ->
+            undefined
+    end.
+
+cleanup_chunk(Offset, Length, ChunkList) ->
+    Overlaps = get_overlaps(Offset, Length, ChunkList, []),
+    NewCL0 = lists:foldl(fun lists:delete/2,
+                         ChunkList, Overlaps),
+    NewCL1 = case chopped_left(Offset, Overlaps) of
+                 undefined -> NewCL0;
+                 LeftRemain -> [LeftRemain|NewCL0]
+             end,
+    NewCL2 = case chopped_right(Offset+Length, Overlaps) of
+                 undefined -> NewCL1;
+                 RightRemain -> [RightRemain|NewCL1]
+             end,
+    lists:sort(NewCL2).
 
 is_error({error, _}) -> true;
 is_error({error, _, _}) -> true;
 is_error(Other) -> {expected_ERROR, Other}.
-
-probably_error(ok) -> true;
-probably_error(V) -> is_error(V).
 
 is_ok({ok, _, _}) -> true;
 is_ok(ok) -> true;
@@ -144,9 +204,10 @@ is_ok(Other) -> {expected_OK, Other}.
 get_offset({ok, _Filename, Offset}) -> Offset;
 get_offset(_) -> error(badarg).
 
-offset_valid(Offset, Extra, L) ->
-    {Pos, Sz} = lists:last(L),
-    Offset == Pos + Sz + Extra.
+last_byte([]) -> 0;
+last_byte(L0) ->
+    L1 = lists:map(fun({Pos, Sz}) -> Pos + Sz end, L0),
+    lists:last(lists:sort(L1)).
 
 -define(TESTDIR, "./eqc").
 
@@ -162,7 +223,7 @@ cleanup() ->
 %% start
 
 start_pre(S) ->
-    S#state.pid == undefined.
+    S#state.pid =:= undefined.
 
 start_command(S) ->
     {call, ?MODULE, start, [S]}.
@@ -185,29 +246,39 @@ read_pre(S) ->
 read_args(S) ->
     [S#state.pid, offset(), len()].
 
-read_ok(S, Off, L) ->
-    case S#state.written of
-        [{0, 1024}] -> false;
-        W -> check_writes(read, W, Off, L)
-    end.
-
 read_post(S, [_Pid, Off, L], Res) ->
-    case read_ok(S, Off, L) of
-        true -> is_ok(Res);
-        mostly_true -> is_ok(Res);
-        false -> is_error(Res)
+    Written = get_overlaps(Off, L, S#state.written, []),
+    Chopped = chop(Off, L, Written),
+    Trimmed = get_overlaps(Off, L, S#state.trimmed, []),
+    Eof = lists:max([Pos+Sz||{Pos,Sz}<-S#state.written]),
+    %% ?debugVal({Off, L}),
+    %% ?debugVal(S),
+    case Res of
+        {ok, {Written0, Trimmed0}} ->
+            Written1 = lists:map(fun({_, Pos, Chunk, _}) ->
+                                         {Pos, iolist_size(Chunk)}
+                                 end, Written0),
+            Trimmed1 = lists:map(fun({_, Pos, Sz}) -> {Pos, Sz} end, Trimmed0),
+            %% ?debugVal({Written, Chopped, Written1}),
+            %% ?debugVal({Trimmed, Trimmed1}),
+            %% ?assertEqual(Chopped, Written1),
+            %% ?assertEqual(Trimmed, Trimmed1),
+            Chopped =:= Written1
+                andalso Trimmed =:= Trimmed1;
+        %% TODO: such response are ugly, rethink the SPEC
+        {error, not_written} when Eof < Off + L ->
+            true;
+        {error, not_written} when Chopped =:= [] andalso Trimmed =:= [] ->
+            true;
+        Other ->
+            ?debugVal(Other),
+            is_error(Res)
     end.
 
 read_next(S, _Res, _Args) -> S.
 
 read(Pid, Offset, Length) ->
-    case machi_file_proxy:read(Pid, Offset, Length) of
-        {ok, {Chunks, _}} ->
-            [{_, Offset, Data, Csum}] = Chunks,
-            {ok, Data, Csum};
-        E ->
-            E
-    end.
+    machi_file_proxy:read(Pid, Offset, Length, [{needs_trimmed, true}]).
 
 %% write
 
@@ -216,6 +287,7 @@ write_pre(S) ->
 
 %% do not allow writes with empty data
 write_pre(_S, [_Pid, _Extra, {<<>>, _Tag, _Csum}]) ->
+    ?assert(false),
     false;
 write_pre(_S, _Args) ->
     true.
@@ -224,28 +296,18 @@ write_args(S) ->
     {Off, Len} = hd(S#state.planned_writes),
     [S#state.pid, Off, data_with_csum(Len)].
 
-write_ok(_S, [_Pid, Off, _Data]) when Off < 1024 -> false;
-write_ok(S, [_Pid, Off, {Bin, _Tag, _Csum}]) ->
+write_post(S, [_Pid, Off, {Bin, _Tag, _Csum}] = _Args, Res) ->
     Size = iolist_size(Bin),
-    %% Check writes checks if a byte range is *written*
-    %% So writes are ok IFF they are NOT written, so
-    %% we want not check_writes/3 to be true.
-    check_writes(write, S#state.written, Off, Size).
-
-write_post(S, Args, Res) ->
-    case write_ok(S, Args) of
-        %% false means this range has NOT been written before, so
-        %% it should succeed
-        false -> eq(Res, ok);
-        %% mostly true means we've written this range before BUT
-        %% as a special case if we get a call to write the EXACT
-        %% same data that's already on the disk, we return "ok"
-        %% instead of {error, written}.
-        mostly_true -> probably_error(Res); 
-        %% If we get true, then we've already written this section 
-        %% or a portion of this range to disk and should return an 
-        %% error.
-        true -> is_error(Res)
+    case {get_overlaps(Off, Size, S#state.written, []),
+          get_overlaps(Off, Size, S#state.trimmed, [])} of
+        {[], []} ->
+            %% No overlap neither with written ranges nor trimmed
+            %% ranges; OK to write things.
+            eq(Res, ok);
+        {_, _} ->
+            %% overlap found in either or both at written or at
+            %% trimmed ranges; can't write.
+            is_error(Res)
     end.
 
 write_next(S, Res, [_Pid, Offset, {Bin, _Tag, _Csum}]) ->
@@ -266,6 +328,7 @@ write(Pid, Offset, {Bin, Tag, Csum}) ->
 %% append
 
 append_pre(S) ->
+    ?assert(undefined =/= S#state.written),
     S#state.pid /= undefined.
 
 %% do not allow appends with empty binary data
@@ -286,7 +349,9 @@ append_next(S, Res, [_Pid, Extra, {Bin, _Tag, _Csum}]) ->
     case is_ok(Res) of
         true -> 
             Offset = get_offset(Res),
-            true = offset_valid(Offset, S#state.prev_extra, S#state.written),
+            Expected = erlang:max(last_byte(S#state.written) + S#state.prev_extra,
+                                  last_byte(S#state.trimmed)),
+            ?assertEqual(Expected, Offset),
             S#state{prev_extra = Extra, written = lists:sort(S#state.written ++ [{Offset, iolist_size(Bin)}])};
         _ ->
             S
@@ -300,11 +365,13 @@ append_post(_S, _Args, Res) ->
 %% rewrite
 
 rewrite_pre(S) ->
-    S#state.pid /= undefined andalso S#state.written /= [].
+    S#state.pid /= undefined andalso
+        (S#state.written ++ S#state.trimmed) /= [] .
 
 rewrite_args(S) ->
-    ?LET({Off, Len}, get_written_interval(S#state.written),
-    [S#state.pid, Off, data_with_csum(Len)]).
+    ?LET({Off, Len},
+         get_written_interval(S#state.written ++ S#state.trimmed),
+         [S#state.pid, Off, data_with_csum(Len)]).
 
 rewrite(Pid, Offset, {Bin, Tag, Csum}) ->
     Meta = [{client_csum_tag, Tag},
@@ -317,18 +384,79 @@ rewrite_post(_S, _Args, Res) ->
 rewrite_next(S, _Res, _Args) ->
     S#state{prev_extra = 0}.
 
+%% trim
+
+trim_pre(S) ->
+    S#state.pid /= undefined andalso S#state.planned_trims /= [].
+
+trim_args(S) ->
+    {Offset, Length} = hd(S#state.planned_trims),
+    [S#state.pid, Offset, Length].
+
+trim(Pid, Offset, Length) ->
+    machi_file_proxy:trim(Pid, Offset, Length, false).
+
+trim_post(_S, [_Pid, _Offset, _Length], ok) ->
+    true;
+trim_post(_S, [_Pid, _Offset, _Length], _Res) ->
+    false.
+
+trim_next(S, Res, [_Pid, Offset, Length]) ->
+    S1 = case is_ok(Res) of
+             true ->
+                 NewWritten = cleanup_chunk(Offset, Length, S#state.written),
+                 Trimmed1 = cleanup_chunk(Offset, Length, S#state.trimmed),
+                 NewTrimmed = lists:sort([{Offset, Length}|Trimmed1]),
+                 S#state{trimmed=NewTrimmed,
+                         written=NewWritten};
+             _Other ->
+                 S
+         end,
+    S1#state{prev_extra=0,
+             planned_trims=tl(S#state.planned_trims)}.
+
 %% Property
 
 prop_ok() ->
   cleanup(),
-  ?FORALL(I, shuffle_interval(),
-    ?FORALL(Cmds, parallel_commands(?MODULE, initial_state(I)),
+  ?FORALL({I, T},
+          {shuffle_interval(), shuffle_interval()},
+    ?FORALL(Cmds, parallel_commands(?MODULE, initial_state(I, T)),
     begin
-      {H, S, Res} = run_parallel_commands(?MODULE, Cmds),
+        {H, S, Res} = run_parallel_commands(?MODULE, Cmds),
+        %% case S#state.pid of
+        %%     undefined -> noop;
+        %%     Pid ->
+        %%         machi_file_proxy:stop(Pid)
+        %% end,
         pretty_commands(?MODULE, Cmds, {H, S, Res},
-        aggregate(command_names(Cmds), Res == ok))
+                        aggregate(command_names(Cmds), Res == ok))
     end)
   ).
+
+%% Test for tester functions
+chopper_test_() ->
+    [?_assertEqual([{0, 1024}],
+                   get_overlaps(1, 1, [{0, 1024}], [])),
+     ?_assertEqual([],
+                   get_overlaps(10, 5, [{9, 1}, {15, 1}], [])),
+     ?_assertEqual([{9,2},{14,1}],
+                   get_overlaps(10, 5, [{9, 2}, {14, 1}], [])),
+     ?_assertEqual([],       chop(0, 0, [{0,2}])),
+     ?_assertEqual([{0, 1}], chop(0, 1, [{0,2}])),
+     ?_assertEqual([],       chop(1, 0, [{0,2}])),
+     ?_assertEqual([{1, 1}], chop(1, 1, [{0,2}])),
+     ?_assertEqual([{1, 1}], chop(1, 2, [{0,2}])),
+     ?_assertEqual([],       chop(2, 1, [{0,2}])),
+     ?_assertEqual([],       chop(2, 2, [{0,2}])),
+     ?_assertEqual([{1, 1}], chop(1, 3, [{0,2}])),
+     ?_assertError(_,  chop(3, 1, [{0,2}])),
+     ?_assertEqual([], chop(2, 3, [{0,2}])),
+     ?_assertEqual({0, 1}, chopped_left(1, [{0, 1024}])),
+     ?_assertEqual([{0, 1}, {2, 1022}], cleanup_chunk(1, 1, [{0, 1024}])),
+     ?_assertEqual([{2, 1022}], cleanup_chunk(0, 2, [{0, 1}, {2, 1022}])),
+     ?_assert(true)
+    ].
 
 -endif. % EQC
 -endif. % TEST

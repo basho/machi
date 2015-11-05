@@ -54,7 +54,6 @@ smoke2_test() ->
     ok = machi_csum_table:close(MC),
     ok = machi_csum_table:delete(MC).
 
-
 smoke3_test() ->
     Filename = "./temp-checksum-dumb-file-4",
     _ = file:delete(Filename),
@@ -106,6 +105,5 @@ smoke3_test() ->
 
     ok = machi_csum_table:close(MC),
     ok = machi_csum_table:delete(MC).
-
 
 %% TODO: add quickcheck test here
