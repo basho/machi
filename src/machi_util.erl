@@ -32,7 +32,7 @@
          make_regname/1,
          make_config_filename/2,
          make_checksum_filename/4, make_checksum_filename/2,
-         make_data_filename/4, make_data_filename/2,
+         make_data_filename/5, make_data_filename/4, make_data_filename/2,
          make_projection_filename/2, 
          is_valid_filename/1,
          parse_filename/1,
@@ -92,6 +92,13 @@ make_checksum_filename(DataDir, FileName) ->
 
 %% @doc Calculate a file data file path, by common convention.
 
+-spec make_data_filename(string(), string(), atom()|string()|binary(), atom(), integer()|string()) ->
+      {binary(), string()}.
+make_data_filename(DataDir, Prefix, SequencerName, FluName, FileNum)
+  when is_atom(FluName) andalso is_integer(FileNum) ->
+    make_data_filename(DataDir, Prefix, SequencerName,
+                       atom_to_list(FluName) ++ "-" ++ integer_to_list(FileNum)).
+
 -spec make_data_filename(string(), string(), atom()|string()|binary(), integer()|string()) ->
       {binary(), string()}.
 make_data_filename(DataDir, Prefix, SequencerName, FileNum)
@@ -102,7 +109,7 @@ make_data_filename(DataDir, Prefix, SequencerName, FileNum)
 make_data_filename(DataDir, Prefix, SequencerName, String)
   when is_list(String) ->
     File = erlang:iolist_to_binary(io_lib:format("~s^~s^~s",
-                                                 [Prefix, SequencerName, string])),
+                                                 [Prefix, SequencerName, String])),
     make_data_filename2(DataDir, File).
 
 make_data_filename2(DataDir, File) ->

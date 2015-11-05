@@ -138,19 +138,22 @@ handle_cast(Req, State) ->
 %% the FLU has already validated that the caller's epoch id and the FLU's epoch id
 %% are the same. So we *assume* that remains the case here - that is to say, we
 %% are not wedged.
-handle_call({find_filename, EpochId, Prefix}, _From, S = #state{ datadir = DataDir,
+handle_call({find_filename, EpochId, Prefix}, _From, S = #state{ fluname = FluName,
+                                                                 datadir = DataDir,
                                                                  epoch = EpochId,
                                                                  tid = Tid}) ->
     %% Our state and the caller's epoch ids are the same. Business as usual.
-    File = handle_find_file(Tid, Prefix, DataDir),
+    File = handle_find_file(Tid, Prefix, DataDir, FluName),
     {reply, {file, File}, S};
 
-handle_call({find_filename, EpochId, Prefix}, _From, S = #state{ datadir = DataDir, tid = Tid }) ->
+handle_call({find_filename, EpochId, Prefix}, _From, S = #state{ fluname = FluName,
+                                                                 datadir = DataDir,
+                                                                 tid = Tid }) ->
     %% If the epoch id in our state and the caller's epoch id were the same, it would've
     %% matched the above clause. Since we're here, we know that they are different.
     %% If epoch ids between our state and the caller's are different, we must increment the
     %% sequence number, generate a filename and then cache it.
-    File = increment_and_cache_filename(Tid, DataDir, Prefix),
+    File = increment_and_cache_filename(Tid, DataDir, Prefix, FluName),
     {reply, {file, File}, S#state{epoch = EpochId}};
 
 handle_call({increment_sequence, Prefix}, _From, S = #state{ datadir = DataDir }) ->
@@ -187,8 +190,8 @@ generate_uuid_v4_str() ->
     io_lib:format("~8.16.0b-~4.16.0b-4~3.16.0b-~4.16.0b-~12.16.0b",
                         [A, B, C band 16#0fff, D band 16#3fff bor 16#8000, E]).
 
-find_file(DataDir, Prefix, N) ->
-    {_Filename, Path} = machi_util:make_data_filename(DataDir, Prefix, "*", N),
+find_file(DataDir, Prefix, FluName, N) ->
+    {_Filename, Path} = machi_util:make_data_filename(DataDir, Prefix, "*", FluName, N),
     filelib:wildcard(Path).
 
 list_files(DataDir, Prefix) ->
@@ -198,36 +201,39 @@ list_files(DataDir, Prefix) ->
 make_filename_mgr_name(FluName) when is_atom(FluName) ->
     list_to_atom(atom_to_list(FluName) ++ "_filename_mgr").
 
-handle_find_file(Tid, Prefix, DataDir) ->
+handle_find_file(Tid, Prefix, DataDir, FluName) ->
     N = machi_util:read_max_filenum(DataDir, Prefix),
-    {File, Cleanup} = case find_file(DataDir, Prefix, N) of
-        [] ->
-            {find_or_make_filename(Tid, DataDir, Prefix, N), false};
-        [H] -> {H, true};
-        [Fn | _ ] = L ->
-            lager:debug(
-              "Searching for a matching file to prefix ~p and sequence number ~p gave multiples: ~p",
-              [Prefix, N, L]),
-            {Fn, true}
+    {File, Cleanup} =
+        case find_file(DataDir, Prefix, FluName, N) of
+            [] ->
+                {find_or_make_filename(Tid, DataDir, Prefix, FluName, N), false};
+            [H] -> {H, true};
+            [_ | _] = L ->
+                lager:error(
+                  "Searching for a matching file to prefix ~p "
+                  "with flu name ~w and sequence number ~p gave multiples: ~p",
+                  [Prefix, FluName, N, L]),
+                exit({bad_file_enties, {Prefix, FluName, N, L}})
     end,
     maybe_cleanup(Tid, {Prefix, N}, Cleanup),
     filename:basename(File).
 
-find_or_make_filename(Tid, DataDir, Prefix, N) ->
+find_or_make_filename(Tid, DataDir, Prefix, FluName, N) ->
     case ets:lookup(Tid, {Prefix, N}) of
-         [] ->
-            F = generate_filename(DataDir, Prefix, N),
+        [] ->
+            F = generate_filename(DataDir, Prefix, FluName, N),
             true = ets:insert_new(Tid, {{Prefix, N}, F}),
             F;
         [{_Key, File}] ->
             File
     end.
 
-generate_filename(DataDir, Prefix, N) ->
+generate_filename(DataDir, Prefix, FluName, N) ->
     {F, _} = machi_util:make_data_filename(
               DataDir,
               Prefix,
               generate_uuid_v4_str(),
+              FluName,
               N),
     binary_to_list(F).
 
@@ -236,10 +242,10 @@ maybe_cleanup(_Tid, _Key, false) ->
 maybe_cleanup(Tid, Key, true) ->
     true = ets:delete(Tid, Key).
 
-increment_and_cache_filename(Tid, DataDir, Prefix) ->
+increment_and_cache_filename(Tid, DataDir, Prefix, FluName) ->
     ok = machi_util:increment_max_filenum(DataDir, Prefix),
     N = machi_util:read_max_filenum(DataDir, Prefix),
-    F = generate_filename(DataDir, Prefix, N),
+    F = generate_filename(DataDir, Prefix, FluName, N),
     true = ets:insert_new(Tid, {{Prefix, N}, F}),
     filename:basename(F).
 
