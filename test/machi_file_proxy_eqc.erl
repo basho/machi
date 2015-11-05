@@ -88,12 +88,14 @@ data_with_csum(Limit) ->
 intervals([]) ->
     [];
 intervals([N]) ->
-    [{N, choose(1,150)}];
+    [{N, choose(1,1)}];
 intervals([A,B|T]) ->
-    [{A, choose(1, B-A)}|intervals([B|T])].
+    [{A, oneof([choose(1, B-A), B-A])}|intervals([B|T])].
 
 interval_list() ->
-    ?LET(L, list(choose(1024, 4096)), intervals(lists:usort(L))).
+    ?LET(L,
+         oneof([list(choose(1025, 1033)), list(choose(1024, 4096))]),
+         intervals(lists:usort(L))).
 
 shuffle_interval() ->
     ?LET(L, interval_list(), shuffle(L)).
@@ -297,30 +299,18 @@ write_args(S) ->
     {Off, Len} = hd(S#state.planned_writes),
     [S#state.pid, Off, data_with_csum(Len)].
 
-write_ok(S, [_Pid, Off, {Bin, _Tag, _Csum}]) ->
+write_post(S, [_Pid, Off, {Bin, _Tag, _Csum}] = _Args, Res) ->
     Size = iolist_size(Bin),
-    %% Check writes checks if a byte range is *written*
-    %% So writes are ok IFF they are NOT written, so
-    %% we want not check_writes/3 to be true.
     case {get_overlaps(Off, Size, S#state.written, []),
           get_overlaps(Off, Size, S#state.trimmed, [])} of
         {[], []} ->
-            true;
-        {[{Off, Size}], []} ->
-            true;
-        _Other ->
-            false
-    end.
-
-write_post(S, Args, Res) ->
-    case write_ok(S, Args) of
-        %% false means this range has NOT been written before, so
-        %% it should succeed
-        true -> eq(Res, ok);
-        %% If we get true, then we've already written or trimmed this
-        %% section or a portion of this range to disk and should
-        %% return an error.
-        false -> is_error(Res)
+            %% No overlap neither with written ranges nor trimmed
+            %% ranges; OK to write things.
+            eq(Res, ok);
+        {_, _} ->
+            %% overlap found in either or both at written or at
+            %% trimmed ranges; can't write.
+            is_error(Res)
     end.
 
 write_next(S, Res, [_Pid, Offset, {Bin, _Tag, _Csum}]) ->
