@@ -265,7 +265,8 @@ init([P_srvr_list, Opts]) ->
 
 handle_call({req, Req}, From, S) ->
     handle_call2(Req, From, update_proj(S));
-handle_call(quit, _From, S) ->
+handle_call(quit, _From, #state{members_dict=MembersDict}=S) ->
+    ?FLU_PC:stop_proxies(MembersDict),
     {stop, normal, ok, S};
 handle_call(_Request, _From, S) ->
     Reply = whaaaaaaaaaaaaaaaaaaaa,
