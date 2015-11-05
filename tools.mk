@@ -27,6 +27,7 @@
 REBAR ?= ./rebar
 REVISION ?= $(shell git rev-parse --short HEAD)
 PROJECT ?= $(shell basename `find src -name "*.app.src"` .app.src)
+EUNIT_OPTS ?=
 
 .PHONY: compile-no-deps test docs xref dialyzer-run dialyzer-quick dialyzer \
 		cleanplt upload-docs
@@ -35,7 +36,7 @@ compile-no-deps:
 	${REBAR} compile skip_deps=true
 
 test: compile
-	${REBAR} eunit skip_deps=true
+	${REBAR} ${EUNIT_OPTS} eunit skip_deps=true
 
 upload-docs: docs
 	@if [ -z "${BUCKET}" -o -z "${PROJECT}" -o -z "${REVISION}" ]; then \

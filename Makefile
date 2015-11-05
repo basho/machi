@@ -8,6 +8,7 @@ ifeq ($(REBAR),)
 REBAR = $(BASE_DIR)/rebar
 endif
 OVERLAY_VARS    ?=
+EUNIT_OPTS       = -v
 
 .PHONY: rel deps package pkgclean edoc
 
