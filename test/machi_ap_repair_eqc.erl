@@ -233,6 +233,7 @@ prop_repair(Verbose) ->
                 ?V("==== Start post operations, stabilize and confirm results~n", []),
                 {_Res2, S2} = stabilize(commands_len(Cmds), SetupState),
                 {Dataloss, Critical} = confirm_result(S2),
+                _ = cleanup(SetupState),
                 pretty_commands(
                   ?MODULE, Cmds, {H, S1, Res},
                   aggregate(with_title(cmds), command_names(Cmds),
@@ -270,6 +271,9 @@ prop_repair_par(Verbose) ->
                             ?V("Res=~w~n", [Res]),
                             {undefined, undefined}
                 end,
+                _ = cleanup(SetupState),
+                %% Process is leaking? This log line can be removed after fix.
+                ?V("process_count=~w~n", [erlang:system_info(process_count)]),
                 pretty_commands(
                   ?MODULE, Cmds, {Seq, Par, Res},
                   aggregate(with_title(cmds), command_names(Cmds),
@@ -352,16 +356,18 @@ setup_chain(Num, Seed, Verbose) ->
     %% Don't wait for complete chain. Even partialy completed, the chain
     %% should work fine. Right?
     wait_until_stable(chain_state_all_ok(FLUNames), FLUNames, MgrNames,
-                      State#state.fc_list, 20),
+                      State#state.fc_list, 20, Verbose),
     State.
 
 %% Post commands
 
 stabilize(0, S) ->
     {ok, S};
-stabilize(_CmdsLen, #state{flu_names=FLUNames, mgr_names=MgrNames, fc_list=FCList}=S) ->
+stabilize(_CmdsLen, #state{flu_names=FLUNames, mgr_names=MgrNames,
+                           fc_list=FCList, verbose=Verbose}=S) ->
     machi_partition_simulator:no_partitions(),
-    wait_until_stable(chain_state_all_ok(FLUNames), FLUNames, MgrNames, FCList, 100),
+    wait_until_stable(chain_state_all_ok(FLUNames), FLUNames, MgrNames,
+                      FCList, 100, Verbose),
     {ok, S}.
 
 chain_state_all_ok(FLUNames) ->
@@ -419,6 +425,11 @@ assert_chunk(C, {Off, Len, FileName}=Key, Bin) ->
             ?V("read_chunk other error for Key=~p: ~p~n", [Key, Other]),
             {error, Other}
     end.
+
+cleanup(#state{fc_list=FCList, cr_list=CRList}=_S) ->
+    [catch machi_proxy_flu1_client:quit(FC) || FC <- FCList],
+    [catch machi_cr_client:quit(CR) || CR <- CRList],
+    _ = shutdown_hard().
 
 %% Internal utilities
 
@@ -505,26 +516,26 @@ tick_fun(FLUNames, MgrNames, Parent) ->
              end || {ThePid, M_name} <- Pids]
     end.
 
-wait_until_stable(ExpectedChainState, FLUNames, MgrNames, FCList) ->
-    wait_until_stable(ExpectedChainState, FLUNames, MgrNames, FCList, 20).
+wait_until_stable(ExpectedChainState, FLUNames, MgrNames, FCList, Verbose) ->
+    wait_until_stable(ExpectedChainState, FLUNames, MgrNames, FCList, 20, Verbose).
 
-wait_until_stable(ExpectedChainState, FLUNames, MgrNames, FCList, Retries) ->
+wait_until_stable(ExpectedChainState, FLUNames, MgrNames, FCList, Retries, Verbose) ->
     TickFun = tick_fun(FLUNames, MgrNames, self()),
-    wait_until_stable1(ExpectedChainState, TickFun, FCList, Retries).
+    wait_until_stable1(ExpectedChainState, TickFun, FCList, Retries, Verbose).
 
-wait_until_stable1(_ExpectedChainState, _TickFun, FCList, 0) ->
+wait_until_stable1(_ExpectedChainState, _TickFun, FCList, 0, _Verbose) ->
     ?V("  [ERROR] wait_until_stable failed.... : ~p~n", [chain_state(FCList)]),
     false;
-wait_until_stable1(ExpectedChainState, TickFun, FCList, Reties) ->
+wait_until_stable1(ExpectedChainState, TickFun, FCList, Reties, Verbose) ->
     [TickFun(3, 0, 100) || _ <- lists:seq(1, 3)],
     Normalized = normalize_chain_state(chain_state(FCList)),
     case Normalized of
         ExpectedChainState ->
-            ?V("  Got stable chain: ~w~n", [chain_state(FCList)]),
+            [?V("  Got stable chain: ~w~n", [chain_state(FCList)]) || Verbose],
             true;
         _ ->
-            ?V("  NOT YET stable chain: ~w~n", [chain_state(FCList)]),
-            wait_until_stable1(ExpectedChainState, TickFun, FCList, Reties-1)
+            [?V("  NOT YET stable chain: ~w~n", [chain_state(FCList)]) || Verbose],
+            wait_until_stable1(ExpectedChainState, TickFun, FCList, Reties-1, Verbose)
     end.
 
 normalize_chain_state(ChainState) ->
