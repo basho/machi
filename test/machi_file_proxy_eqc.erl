@@ -197,9 +197,6 @@ is_error({error, _}) -> true;
 is_error({error, _, _}) -> true;
 is_error(Other) -> {expected_ERROR, Other}.
 
-probably_error(ok) -> true;
-probably_error(V) -> is_error(V).
-
 is_ok({ok, _, _}) -> true;
 is_ok(ok) -> true;
 is_ok(Other) -> {expected_OK, Other}.
