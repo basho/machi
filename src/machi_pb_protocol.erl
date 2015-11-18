@@ -19,7 +19,7 @@
 %% -------------------------------------------------------------------
 
 %% @doc Ranch protocol callback module to handle PB protocol over
-%% transport
+%% transport, including both high and low modes.
 
 %% TODO
 %% - Two modes, high and low should be separated at listener level?
@@ -28,172 +28,114 @@
 
 -behaviour(gen_server).
 -behaviour(ranch_protocol).
+
 -export([start_link/4]).
 -export([init/1]).
 -export([handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
+-include_lib("kernel/include/file.hrl").
+
 -include("machi.hrl").
 -include("machi_pb.hrl").
 -include("machi_projection.hrl").
--define(V(X,Y), ok).
-%% -include("machi_verbose.hrl").
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 -endif. % TEST
 
--record(state, {ref,
-                socket,
-                transport,
-                opts,
-                pb_mode,
-                data_dir,
-                witness,
-                %% - Used in projection related requests in low mode
-                %% - Used in spawning CR client in high mode
-                proj_store,
-                %%%% Low mode only
-                %% Current best knowledge, used for wedge_self / bad_epoch check
-                epoch_id,
-                %% Used in dispatching append_chunk* reqs to the
-                %% append serializing process
-                flu_name,
-                %% Stored in ETS before factorization, can be stored in the recored?
-                wedged,
-                %% Used in server_wedge_status to lookup the table
-                etstab,
-                %%%% High mode only
-                high_clnt,
-                %%%% to be removed
-                eof
-                }).
+-record(state, {
+          %% Transport related items passed from Ranch
+          ref         :: ranch:ref(),
+          socket      :: socket(),
+          transport   :: module(),
 
-%% -record(state, {
-             %% used in append serializer to trigger chain mgr react_to_env
-%%           flu_name        :: atom(),
-%%           proj_store      :: pid(),
-%%           witness = false :: boolean(),
-%%           append_pid      :: pid(),
-%%           tcp_port        :: non_neg_integer(),
-%%           data_dir        :: string(),
-%%           wedged = true   :: boolean(),
-%%           etstab          :: ets:tid(),
-%%           epoch_id        :: 'undefined' | machi_dt:epoch_id(),
-%%           pb_mode = undefined  :: 'undefined' | 'high' | 'low',
-%%           high_clnt       :: 'undefined' | pid(),
-%%           trim_table      :: ets:tid(),
-%%           props = []      :: list()  % proplist
-%%          }).
+          %% Machi application related items below
+          data_dir    :: string(),
+          witness     :: boolean(),
+          pb_mode     :: undefined | high | low,
+          %% - Used in projection related requests in low mode
+          %% - Used in spawning CR client in high mode
+          proj_store  :: pid(),
 
--spec start_link(ranch:ref(), any(), module(), any()) -> {ok, pid()}.
-start_link(Ref, Socket, Transport, Opts) ->
-        proc_lib:start_link(?MODULE, init, [#state{ref=Ref, socket=Socket,
-                                                   transport=Transport,
-                                                   opts=Opts}]).
+          %% Low mode only
+          %% Current best knowledge, used for wedge_self / bad_epoch check
+          epoch_id    :: undefined | machi_dt:epoch_id(),
+          %% Used in dispatching append_chunk* reqs to the
+          %% append serializing process
+          flu_name    :: atom(),
+          %% Used in server_wedge_status to lookup the table
+          epoch_tab   :: ets:tid(),
 
-init(#state{ref=Ref, socket=Socket, transport=Transport, opts=_Opts}=State) ->
-        ok = proc_lib:init_ack({ok, self()}),
-        %% TODO: Perform any required state initialization here.
-        ok = ranch:accept_ack(Ref),
-        ok = Transport:setopts(Socket, [{active, once}]),
-        gen_server:enter_loop(?MODULE, [], State).
+          %% High mode only
+          high_clnt   :: pid(),
+
+          %% anything you want
+          props = []  :: list()  % proplist
+         }).
+
+-type socket() :: any().
+-type state()  :: #state{}.
+
+-spec start_link(ranch:ref(), socket(), module(), [term()]) -> {ok, pid()}.
+start_link(Ref, Socket, Transport, [FluName, Witness, DataDir, EpochTab, ProjStore]) ->
+    proc_lib:start_link(?MODULE, init, [#state{ref=Ref,
+                                               socket=Socket,
+                                               transport=Transport,
+                                               flu_name=FluName,
+                                               witness=Witness,
+                                               data_dir=DataDir,
+                                               epoch_tab=EpochTab,
+                                               proj_store=ProjStore}]).
+
+-spec init(state()) -> no_return().
+init(#state{ref=Ref, socket=Socket, transport=Transport}=State) ->
+    ok = proc_lib:init_ack({ok, self()}),
+    ok = ranch:accept_ack(Ref),
+    {_Wedged_p, CurrentEpochID} = lookup_epoch(State),
+    ok = Transport:setopts(Socket, [{active, once}|?PB_PACKET_OPTS]),
+    gen_server:enter_loop(?MODULE, [], State#state{epoch_id=CurrentEpochID}).
 
 handle_call(Request, _From, S) ->
+    lager:warning("~s:handle_call UNKNOWN message: ~w", [?MODULE, Request]),
     Reply = {error, {unknown_message, Request}},
     {reply, Reply, S}.
 
 handle_cast(_Msg, S) ->
-    io:format(user, "~s:handle_cast: ~p\n", [?MODULE, _Msg]),
+    lager:warning("~s:handle_cast UNKNOWN message: ~w", [?MODULE, _Msg]),
     {noreply, S}.
 
-handle_info({tcp, Sock, Data}=_Info, S) ->
-    io:format(user, "~s:handle_info: ~p\n", [?MODULE, _Info]),
+%% TODO: Other transport support needed?? TLS/SSL, SCTP
+handle_info({tcp, Sock, Data}=_Info, #state{socket=Sock}=S) ->
+    lager:debug("~s:handle_info: ~w", [?MODULE, _Info]),
     transport_received(Sock, Data, S);
-handle_info({tcp_closed, Sock}=_Info, S) ->
-    io:format(user, "~s:handle_info: ~p\n", [?MODULE, _Info]),
+handle_info({tcp_closed, Sock}=_Info, #state{socket=Sock}=S) ->
+    lager:debug("~s:handle_info: ~w", [?MODULE, _Info]),
     transport_closed(Sock, S);
-handle_info({tcp_error, Sock, Reason}=_Info, S) ->
-    io:format(user, "~s:handle_info: ~p\n", [?MODULE, _Info]),
+handle_info({tcp_error, Sock, Reason}=_Info, #state{socket=Sock}=S) ->
+    lager:debug("~s:handle_info: ~w", [?MODULE, _Info]),
     transport_error(Sock, Reason, S);
 handle_info(_Info, S) ->
-    io:format(user, "~s:handle_info: ~p\n", [?MODULE, _Info]),
+    lager:warning("~s:handle_info UNKNOWN message: ~w", [?MODULE, _Info]),
     {noreply, S}.
 
-terminate(_Reason, _S) ->
-    io:format(user, "~s:terminate: ~p\n", [?MODULE, _Reason]),
+terminate(_Reason, #state{socket=undefined}=_S) ->
+    lager:debug("~s:terminate: ~w", [?MODULE, _Reason]),
+    ok;
+terminate(_Reason, #state{socket=Socket}=_S) ->
+    lager:debug("~s:terminate: ~w", [?MODULE, _Reason]),
+    (catch gen_tcp:close(Socket)),
     ok.
 
 code_change(_OldVsn, S, _Extra) ->
     {ok, S}.
 
-%% Internal functions, or copy-n-paste'd thingie
-
-%%%% Just copied and will be removed %%%%
-
-%% TODO: sock opts should be migrated to ranch equivalent
-%% run_listen_server(#state{flu_name=FluName, tcp_port=TcpPort}=S) ->
-%%     register(make_listener_regname(FluName), self()),
-%%     SockOpts = ?PB_PACKET_OPTS ++
-%%         [{reuseaddr, true}, {mode, binary}, {active, false},
-%%          {backlog,8192}],
-%%     case gen_tcp:listen(TcpPort, SockOpts) of
-%%         {ok, LSock} ->
-%%             proc_lib:init_ack({ok, self()}),
-%%             listen_server_loop(LSock, S);
-%%         Else ->
-%%             error_logger:warning_msg("~s:run_listen_server: "
-%%                                      "listen to TCP port ~w: ~w\n",
-%%                                      [?MODULE, TcpPort, Else]),
-%%             exit({?MODULE, run_listen_server, tcp_port, TcpPort, Else})
-%%     end.
-
-%% listen_server_loop(LSock, S) ->
-%%     {ok, Sock} = gen_tcp:accept(LSock),
-%%     spawn_link(fun() -> net_server_loop(Sock, S) end),
-%%     listen_server_loop(LSock, S).
-
-%% net_server_loop(Sock, S) ->
-%%     case gen_tcp:recv(Sock, 0, ?SERVER_CMD_READ_TIMEOUT) of
-%%         {ok, Bin} ->
-%%             {RespBin, S2} = 
-%%                 case machi_pb:decode_mpb_ll_request(Bin) of
-%%                     LL_req when LL_req#mpb_ll_request.do_not_alter == 2 ->
-%%                         {R, NewS} = do_pb_ll_request(LL_req, S),
-%%                         {maybe_encode_response(R), mode(low, NewS)};
-%%                     _ ->
-%%                         HL_req = machi_pb:decode_mpb_request(Bin),
-%%                         1 = HL_req#mpb_request.do_not_alter,
-%%                         {R, NewS} = do_pb_hl_request(HL_req, make_high_clnt(S)),
-%%                         {machi_pb:encode_mpb_response(R), mode(high, NewS)}
-%%                 end,
-%%             if RespBin == async_no_response ->
-%%                     net_server_loop(Sock, S2);
-%%                true ->
-%%                     case gen_tcp:send(Sock, RespBin) of
-%%                         ok ->
-%%                             net_server_loop(Sock, S2);
-%%                         {error, _} ->
-%%                             (catch gen_tcp:close(Sock)),
-%%                             exit(normal)
-%%                     end
-%%             end;
-%%         {error, SockError} ->
-%%             Msg = io_lib:format("Socket error ~w", [SockError]),
-%%             R = #mpb_ll_response{req_id= <<>>,
-%%                                  generic=#mpb_errorresp{code=1, msg=Msg}},
-%%             _Resp = machi_pb:encode_mpb_ll_response(R),
-%%             %% TODO: Weird that sometimes neither catch nor try/catch
-%%             %%       can prevent OTP's SASL from logging an error here.
-%%             %%       Error in process <0.545.0> with exit value: {badarg,[{erlang,port_command,.......
-%%             %% TODO: is this what causes the intermittent PULSE deadlock errors?
-%%             %% _ = (catch gen_tcp:send(Sock, _Resp)), timer:sleep(1000),
-%%             (catch gen_tcp:close(Sock)),
-%%             exit(normal)
-%%     end.
+%% -- private
 
 %%%% Common transport handling
 
+-spec transport_received(socket(), machi_dt:chunk(), state()) ->
+                                {noreply, state()}.
 transport_received(Sock, Bin, #state{transport=Transport}=S) ->
     {RespBin, S2} =
         case machi_pb:decode_mpb_ll_request(Bin) of
@@ -207,33 +149,36 @@ transport_received(Sock, Bin, #state{transport=Transport}=S) ->
                 {machi_pb:encode_mpb_response(R), mode(high, NewS)}
         end,
     if RespBin == async_no_response ->
+            Transport:setopts(Sock, [{active, once}]),
             {noreply, S2};
        true ->
             case Transport:send(Sock, RespBin) of
                 ok ->
+                    Transport:setopts(Sock, [{active, once}]),
                     {noreply, S2};
                 {error, Reason} ->
                     transport_error(Sock, Reason, S2)
             end
     end.
 
-transport_closed(Sock, S) ->
-    (catch gen_tcp:close(Sock)),
-    {stop, normal, S#state{sock=undefined}}.
+-spec transport_closed(socket(), state()) -> {stop, term(), state()}.
+transport_closed(_Socket, S) ->
+    {stop, normal, S}.
 
-transport_error(Sock, Reason, S) ->
-    Msg = io_lib:format("Socket error ~w", [SockError]),
+-spec transport_error(socket(), term(), state()) -> no_return().
+transport_error(Sock, Reason, #state{transport=Transport}=_S) ->
+    Msg = io_lib:format("Socket error ~w", [Reason]),
     R = #mpb_ll_response{req_id= <<>>,
                          generic=#mpb_errorresp{code=1, msg=Msg}},
     _Resp = machi_pb:encode_mpb_ll_response(R),
-    %% TODO of TODO comments: comments below with four %s are copy-n-paste'd,
+    %% TODO for TODO comments: comments below with four %s are copy-n-paste'd,
     %% then it should be considered they are still open and should be addressed.
     %%%% TODO: Weird that sometimes neither catch nor try/catch
     %%%%       can prevent OTP's SASL from logging an error here.
     %%%%       Error in process <0.545.0> with exit value: {badarg,[{erlang,port_command,.......
     %%%% TODO: is this what causes the intermittent PULSE deadlock errors?
     %%%% _ = (catch gen_tcp:send(Sock, _Resp)), timer:sleep(1000),
-    (catch gen_tcp:close(Sock)),
+    (catch Transport:close(Sock)),
     %% TODO: better to exit with `Reason'?
     exit(normal).
 
@@ -242,13 +187,10 @@ maybe_encode_response(async_no_response=X) ->
 maybe_encode_response(R) ->
     machi_pb:encode_mpb_ll_response(R).
 
-%%%% Not categorized / not-yet-well-understood items
-%% TODO: may be external API
 mode(Mode, #state{pb_mode=undefined}=S) ->
     S#state{pb_mode=Mode};
 mode(_, S) ->
     S.
-
 
 %%%% Low PB mode %%%%
 
@@ -257,24 +199,27 @@ do_pb_ll_request(#mpb_ll_request{req_id=ReqID}, #state{pb_mode=high}=S) ->
     {machi_pb_translate:to_pb_response(ReqID, unused, Result), S};
 do_pb_ll_request(PB_request, S) ->
     Req = machi_pb_translate:from_pb_request(PB_request),
+    %% io:format(user, "[~w] do_pb_ll_request Req: ~w~n", [S#state.flu_name, Req]),
     {ReqID, Cmd, Result, S2} = 
         case Req of
-            {RqID, {LowCmd, _}=CMD}
-              when LowCmd == low_proj;
-                   LowCmd == low_wedge_status; LowCmd == low_list_files ->
+            {RqID, {LowCmd, _}=Cmd0}
+              when LowCmd =:= low_proj;
+                   LowCmd =:= low_wedge_status;
+                   LowCmd =:= low_list_files ->
                 %% Skip wedge check for projection commands!
                 %% Skip wedge check for these unprivileged commands
-                {Rs, NewS} = do_pb_ll_request3(CMD, S),
-                {RqID, CMD, Rs, NewS};
-            {RqID, CMD} ->
-                EpochID = element(2, CMD),      % by common convention
-                {Rs, NewS} = do_pb_ll_request2(EpochID, CMD, S),
-                {RqID, CMD, Rs, NewS}
+                {Rs, NewS} = do_pb_ll_request3(Cmd0, S),
+                {RqID, Cmd0, Rs, NewS};
+            {RqID, Cmd0} ->
+                EpochID = element(2, Cmd0),      % by common convention
+                {Rs, NewS} = do_pb_ll_request2(EpochID, Cmd0, S),
+                {RqID, Cmd0, Rs, NewS}
         end,
     {machi_pb_translate:to_pb_response(ReqID, Cmd, Result), S2}.
 
 do_pb_ll_request2(EpochID, CMD, S) ->
-    {Wedged_p, CurrentEpochID} = ets:lookup_element(S#state.etstab, epoch, 2),
+    {Wedged_p, CurrentEpochID} = lookup_epoch(S),
+    %% io:format(user, "{Wedged_p, CurrentEpochID}: ~w~n", [{Wedged_p, CurrentEpochID}]),
     if Wedged_p == true ->
             {{error, wedged}, S#state{epoch_id=CurrentEpochID}};
        is_tuple(EpochID)
@@ -287,13 +232,16 @@ do_pb_ll_request2(EpochID, CMD, S) ->
                true ->
                     %% We're at same epoch # but different checksum, or
                     %% we're at a newer/bigger epoch #.
-                    _ = wedge_myself(S#state.flu_name, CurrentEpochID),
+                    _ = machi_flu1:wedge_myself(S#state.flu_name, CurrentEpochID),
                     ok
             end,
             {{error, bad_epoch}, S#state{epoch_id=CurrentEpochID}};
        true ->
             do_pb_ll_request3(CMD, S#state{epoch_id=CurrentEpochID})
     end.
+
+lookup_epoch(#state{epoch_tab=T}) ->
+    ets:lookup_element(T, epoch, 2).
 
 %% Witness status does not matter below.
 do_pb_ll_request3({low_echo, _BogusEpochID, Msg}, S) ->
@@ -498,7 +446,7 @@ do_server_list_files(#state{data_dir=DataDir}=_S) ->
           end || File <- Files]}.
 
 do_server_wedge_status(S) ->
-    {Wedged_p, CurrentEpochID0} = ets:lookup_element(S#state.etstab, epoch, 2),
+    {Wedged_p, CurrentEpochID0} = lookup_epoch(S),
     CurrentEpochID = if CurrentEpochID0 == undefined ->
                              ?DUMMY_PV1_EPOCH;
                         true ->
@@ -588,9 +536,6 @@ check_or_make_tagged_checksum(?CSUM_TAG_CLIENT_SHA, Client_CSum, Chunk) ->
        true ->
             throw({bad_csum, CS})
     end.
-
-
-
 
 %%%% High PB mode %%%%
 

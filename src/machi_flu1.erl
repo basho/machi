@@ -58,10 +58,9 @@
 
 -export([start_link/1, stop/1,
          update_wedge_state/3, wedge_myself/2]).
--export([make_listener_regname/1, make_projection_server_regname/1]).
+-export([make_projection_server_regname/1]).
 %% TODO: remove or replace in OTP way after gen_*'ified
 -export([main2/4, run_append_server/2,
-         %% run_listen_server/1,
          current_state/1, format_state/1]).
 
 -record(state, {
@@ -69,14 +68,9 @@
           proj_store      :: pid(),
           witness = false :: boolean(),
           append_pid      :: pid(),
-          tcp_port        :: non_neg_integer(),
-          data_dir        :: string(),
           wedged = true   :: boolean(),
           etstab          :: ets:tid(),
           epoch_id        :: 'undefined' | machi_dt:epoch_id(),
-          pb_mode = undefined  :: 'undefined' | 'high' | 'low',
-          high_clnt       :: 'undefined' | pid(),
-          trim_table      :: ets:tid(),
           props = []      :: list()  % proplist
          }).
 
@@ -153,8 +147,6 @@ main2(FluName, TcpPort, DataDir, Props) ->
     
     S0 = #state{flu_name=FluName,
                 proj_store=ProjectionPid,
-                tcp_port=TcpPort,
-                data_dir=DataDir,
                 wedged=Wedged_p,
                 witness=Witness_p,
                 etstab=ets_table_name(FluName),
@@ -168,7 +160,8 @@ main2(FluName, TcpPort, DataDir, Props) ->
             ok
     end,
     S1 = S0#state{append_pid=AppendPid},
-    {ok, ListenPid} = start_listen_server(S1),
+    {ok, ListenerPid} = start_listen_server(TcpPort, DataDir, S1),
+    io:format(user, "Listener started: ~w~n", [{FluName, ListenerPid}]),
 
     Config_e = machi_util:make_config_filename(DataDir, "unused"),
     ok = filelib:ensure_dir(Config_e),
@@ -180,22 +173,23 @@ main2(FluName, TcpPort, DataDir, Props) ->
     put(flu_flu_name, FluName),
     put(flu_append_pid, S1#state.append_pid),
     put(flu_projection_pid, ProjectionPid),
-    put(flu_listen_pid, ListenPid),
+    put(flu_listen_pid, ListenerPid),
     proc_lib:init_ack({ok, self()}),
 
     receive killme -> ok end,
     (catch exit(S1#state.append_pid, kill)),
     (catch exit(ProjectionPid, kill)),
-    (catch exit(ListenPid, kill)),
+    (catch exit(ListenerPid, kill)),
     ok.
 
 start_append_server(S, AckPid) ->
     proc_lib:start_link(?MODULE, run_append_server, [AckPid, S], ?INIT_TIMEOUT).
 
-start_listen_server(_S) ->
-    %% FIXMEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE
-    %% proc_lib:start_link(?MODULE, run_listen_server, [S], ?INIT_TIMEOUT).
-    {ok, dummy}.
+start_listen_server(TcpPort, DataDir,
+                    #state{flu_name=FluName, witness=Witness, etstab=EtsTab,
+                           proj_store=ProjStore}=_S) ->
+    machi_listener_sup:start_listener(FluName, TcpPort, Witness, DataDir,
+                                      EtsTab, ProjStore).
 
 run_append_server(FluPid, #state{flu_name=Name,
                                  wedged=Wedged_p,epoch_id=EpochId}=S) ->
@@ -306,9 +300,6 @@ handle_append(CoC_Namespace, CoC_Locator,
         Error ->
             Error
     end.
-
-make_listener_regname(BaseName) ->
-    list_to_atom(atom_to_list(BaseName) ++ "_listener").
 
 %% This is the name of the projection store that is spawned by the
 %% *flu*, for use primarily in testing scenarios.  In normal use, we
