@@ -113,13 +113,9 @@ get_written_interval(L) ->
                 written=[],
                 trimmed=[]}).
 
--define(FILENAME, "machi_file_proxy_eqc_data").
-
 initial_state() ->
-    %%#state{filename=undefined, written=[{0,1024}]}.
     {_, _, MS} = os:timestamp(),
     Filename = test_server:temp_name("eqc_data") ++ "." ++ integer_to_list(MS),
-    %% Filename = ?FILENAME,
     #state{filename=Filename, written=[{0,1024}]}.
 
 initial_state(I, T) ->
@@ -247,25 +243,19 @@ read_pre(S) ->
     S#state.pid /= undefined.
 
 read_args(S) ->
-    [S#state.pid, offset(), len()].
+    [S#state.pid, oneof([offset(), big_offset()]), len()].
 
 read_post(S, [_Pid, Off, L], Res) ->
     Written = get_overlaps(Off, L, S#state.written, []),
     Chopped = chop(Off, L, Written),
     Trimmed = get_overlaps(Off, L, S#state.trimmed, []),
     Eof = lists:max([Pos+Sz||{Pos,Sz}<-S#state.written]),
-    %% ?debugVal({Off, L}),
-    %% ?debugVal(S),
     case Res of
         {ok, {Written0, Trimmed0}} ->
             Written1 = lists:map(fun({_, Pos, Chunk, _}) ->
                                          {Pos, iolist_size(Chunk)}
                                  end, Written0),
             Trimmed1 = lists:map(fun({_, Pos, Sz}) -> {Pos, Sz} end, Trimmed0),
-            %% ?debugVal({Written, Chopped, Written1}),
-            %% ?debugVal({Trimmed, Trimmed1}),
-            %% ?assertEqual(Chopped, Written1),
-            %% ?assertEqual(Trimmed, Trimmed1),
             Chopped =:= Written1
                 andalso Trimmed =:= Trimmed1;
         %% TODO: such response are ugly, rethink the SPEC
