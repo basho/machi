@@ -64,10 +64,18 @@ ERL_LIB_DIR = $(shell erl -eval '{io:format("~s\n", [code:lib_dir()]), erlang:ha
 native-ebin:
 	mkdir -p $(NATIVE_EBIN)
 	rm -f $(NATIVE_EBIN)/*.erl $(NATIVE_EBIN)/*.hrl $(NATIVE_EBIN)/*.beam
-	cp $(ERL_LIB_DIR)/stdlib-*/src/{lists,dict,digraph,digraph_utils,ets,gb_sets,gb_trees,ordsets,sets,sofs}.erl $(NATIVE_EBIN)
-	cp $(ERL_LIB_DIR)/compiler-*/src/{cerl,cerl_trees,core_parse}.?rl  $(NATIVE_EBIN)
-	cp $(ERL_LIB_DIR)/dialyzer-*/src/{dialyzer_analysis_callgraph,dialyzer,dialyzer_behaviours,dialyzer_codeserver,dialyzer_contracts,dialyzer_coordinator,dialyzer_dataflow,dialyzer_dep,dialyzer_plt,dialyzer_succ_typings,dialyzer_typesig,dialyzer_worker}.?rl  $(NATIVE_EBIN)
-	cp $(ERL_LIB_DIR)/hipe-*/*/{erl_types,erl_bif_types}.?rl  $(NATIVE_EBIN)
+	@for mod in lists dict digraph digraph_utils ets gb_sets gb_trees ordsets sets sofs; do \
+		cp $(ERL_LIB_DIR)/stdlib-*/src/"$$mod".erl $(NATIVE_EBIN); \
+	done
+	@for mod in cerl cerl_trees core_parse; do \
+		cp $(ERL_LIB_DIR)/compiler-*/src/"$$mod".?rl  $(NATIVE_EBIN); \
+	done
+	@for mod in dialyzer_analysis_callgraph dialyzer dialyzer_behaviours dialyzer_codeserver dialyzer_contracts dialyzer_coordinator dialyzer_dataflow dialyzer_dep dialyzer_plt dialyzer_succ_typings dialyzer_typesig dialyzer_worker; do \
+		cp $(ERL_LIB_DIR)/dialyzer-*/src/"$$mod".?rl  $(NATIVE_EBIN); \
+	done
+	@for mod in erl_types erl_bif_types; do \
+		cp $(ERL_LIB_DIR)/hipe-*/*/"$$mod".?rl  $(NATIVE_EBIN); \
+	done
 	erlc -o $(NATIVE_EBIN) -smp +native -DVSN='"$(DIALYZER_VERSION)"' $(NATIVE_EBIN)/*erl
 
 ${PLT}: compile
