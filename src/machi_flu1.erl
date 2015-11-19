@@ -161,7 +161,7 @@ main2(FluName, TcpPort, DataDir, Props) ->
     end,
     S1 = S0#state{append_pid=AppendPid},
     {ok, ListenerPid} = start_listen_server(TcpPort, DataDir, S1),
-    io:format(user, "Listener started: ~w~n", [{FluName, ListenerPid}]),
+    %% io:format(user, "Listener started: ~w~n", [{FluName, ListenerPid}]),
 
     Config_e = machi_util:make_config_filename(DataDir, "unused"),
     ok = filelib:ensure_dir(Config_e),

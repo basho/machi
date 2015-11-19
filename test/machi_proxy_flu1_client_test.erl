@@ -38,6 +38,7 @@ api_smoke_test() ->
     W_props = [{active_mode, false},{initial_wedged, false}],
     Prefix = <<"prefix">>,
 
+    {ok, SupPid} = machi_sup:start_link(),
     machi_flu1_test:start_flu_package(RegName, TcpPort, DataDir, W_props),
 
     try
@@ -102,7 +103,8 @@ api_smoke_test() ->
             _ = (catch ?MUT:quit(Prox1))
         end
     after
-        (catch machi_flu1_test:stop_flu_package(RegName))
+        (catch machi_flu1_test:stop_flu_package(RegName)),
+        exit(SupPid, normal)
     end.
 
 flu_restart_test_() ->
@@ -114,6 +116,7 @@ flu_restart_test2() ->
     TcpPort = 57125,
     DataDir = "./data.api_smoke_flu2",
     W_props = [{initial_wedged, false}, {active_mode, false}],
+    {ok, SupPid} = machi_sup:start_link(),
     machi_flu1_test:start_flu_package(RegName, TcpPort, DataDir, W_props),
 
     try
@@ -306,7 +309,8 @@ flu_restart_test2() ->
              end || Fun <- ExpectedOps ],
             ok
         after
-            _ = (catch ?MUT:quit(Prox1))
+            _ = (catch ?MUT:quit(Prox1)),
+            exit(SupPid, normal)
         end
     after
         (catch machi_flu1_test:stop_flu_package(RegName))

@@ -48,7 +48,7 @@ setup() ->
           {c,#p_srvr{name=c, address="localhost", port=5557, props="./data.c"}}
          ],
     [os:cmd("rm -rf " ++ P#p_srvr.props) || {_,P} <- Ps],
-    {ok, SupPid} = machi_flu_sup:start_link(),
+    {ok, SupPid} = machi_sup:start_link(),
     %% Only run a, don't run b & c so we have 100% failures talking to them
     [begin
          #p_srvr{name=Name, port=Port, props=Dir} = P,

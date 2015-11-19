@@ -274,42 +274,30 @@ make_prop_ets() ->
 -endif. % EQC
 
 smoke0_test() ->
-    {ok, _} = machi_partition_simulator:start_link({1,2,3}, 50, 50),
-    Host = "localhost",
     TcpPort = 6623,
-    {ok, FLUa} = machi_flu1:start_link([{a,TcpPort,"./data.a"}]),
-    Pa = #p_srvr{name=a, address=Host, port=TcpPort},
-    Members_Dict = machi_projection:make_members_dict([Pa]),
-    %% Egadz, more racing on startup, yay.  TODO fix.
-    timer:sleep(1),
+    {_, [Pa], [M0]} = machi_psup_test_util:start_flu_packages(
+                          1, "./data.", TcpPort, []),
     {ok, FLUaP} = ?FLU_PC:start_link(Pa),
-    {ok, M0} = ?MGR:start_link(a, Members_Dict, [{active_mode, false}]),
     try
         pong = ?MGR:ping(M0)
     after
-        ok = ?MGR:stop(M0),
-        ok = machi_flu1:stop(FLUa),
         ok = ?FLU_PC:quit(FLUaP),
-        ok = machi_partition_simulator:stop()
+        machi_psup_test_util:stop_flu_packages()
     end.
 
 smoke1_test_() ->
     {timeout, 1*60, fun() -> smoke1_test2() end}.
 
 smoke1_test2() ->
-    machi_partition_simulator:start_link({1,2,3}, 100, 0),
     TcpPort = 62777,
-    FluInfo = [{a,TcpPort+0,"./data.a"}, {b,TcpPort+1,"./data.b"}, {c,TcpPort+2,"./data.c"}],
-    P_s = [#p_srvr{name=Name, address="localhost", port=Port} ||
-              {Name,Port,_Dir} <- FluInfo],
-
-    [machi_flu1_test:clean_up_data_dir(Dir) || {_,_,Dir} <- FluInfo],
-    FLUs = [element(2, machi_flu1:start_link([{Name,Port,Dir}])) ||
-               {Name,Port,Dir} <- FluInfo],
-    MembersDict = machi_projection:make_members_dict(P_s),
-    {ok, M0} = ?MGR:start_link(a, MembersDict, [{active_mode,false}]),
+    MgrOpts = [{active_mode,false}],
+    {_, Ps, MgrNames} = machi_psup_test_util:start_flu_packages(
+                          3, "./data.", TcpPort, MgrOpts),
+    MembersDict = machi_projection:make_members_dict(Ps),
+    [machi_chain_manager1:set_chain_members(M, MembersDict) || M <- MgrNames],
+    Ma = hd(MgrNames),
     try
-        {ok, P1} = ?MGR:test_calc_projection(M0, false),
+        {ok, P1} = ?MGR:test_calc_projection(Ma, false),
         % DERP! Check for race with manager's proxy vs. proj listener
         ok = lists:foldl(
                     fun(_, {_,{true,[{c,ok},{b,ok},{a,ok}]}}) ->
@@ -318,37 +306,28 @@ smoke1_test2() ->
                             ok;             % Skip remaining!
                        (_, _Else) ->
                             timer:sleep(10),
-                            ?MGR:test_write_public_projection(M0, P1)
+                            ?MGR:test_write_public_projection(Ma, P1)
                     end, not_ok, lists:seq(1, 1000)),
         %% Writing the exact same projection multiple times returns ok:
         %% no change!
-        {_,{true,[{c,ok},{b,ok},{a,ok}]}} =  ?MGR:test_write_public_projection(M0, P1),
-        {unanimous, P1, Extra1} = ?MGR:test_read_latest_public_projection(M0, false),
+        {_,{true,[{c,ok},{b,ok},{a,ok}]}} =  ?MGR:test_write_public_projection(Ma, P1),
+        {unanimous, P1, Extra1} = ?MGR:test_read_latest_public_projection(Ma, false),
 
         ok
     after
-        ok = ?MGR:stop(M0),
-        [ok = machi_flu1:stop(X) || X <- FLUs],
-        ok = machi_partition_simulator:stop()
+        machi_psup_test_util:stop_flu_packages()
     end.
 
 nonunanimous_setup_and_fix_test() ->
-    machi_partition_simulator:start_link({1,2,3}, 100, 0),
     TcpPort = 62877,
-    FluInfo = [{a,TcpPort+0,"./data.a"}, {b,TcpPort+1,"./data.b"}],
-    P_s = [#p_srvr{name=Name, address="localhost", port=Port} ||
-              {Name,Port,_Dir} <- FluInfo],
-    
-    [machi_flu1_test:clean_up_data_dir(Dir) || {_,_,Dir} <- FluInfo],
-    {ok, SupPid} = machi_flu_sup:start_link(),
-    Opts = [{active_mode, false}],
-    %% {ok, Mb} = ?MGR:start_link(b, MembersDict, [{active_mode, false}]++XX),
-    [{ok,_}=machi_flu_psup:start_flu_package(Name, Port, Dir, Opts) ||
-               {Name,Port,Dir} <- FluInfo],
+    MgrOpts = [{active_mode,false}],
+    {_, Ps, [Ma,Mb]} = machi_psup_test_util:start_flu_packages(
+                          2, "./data.", TcpPort, MgrOpts),
+    MembersDict = machi_projection:make_members_dict(Ps),
+    [machi_chain_manager1:set_chain_members(M, MembersDict) || M <- [Ma, Mb]],
+
     [Proxy_a, Proxy_b] = Proxies =
-        [element(2,?FLU_PC:start_link(P)) || P <- P_s],
-    MembersDict = machi_projection:make_members_dict(P_s),
-    [Ma,Mb] = [a_chmgr, b_chmgr],
+        [element(2, ?FLU_PC:start_link(P)) || P <- Ps],
     ok = machi_chain_manager1:set_chain_members(Ma, MembersDict, []),
     ok = machi_chain_manager1:set_chain_members(Mb, MembersDict, []),
     try
@@ -394,9 +373,8 @@ nonunanimous_setup_and_fix_test() ->
 
         ok
     after
-        exit(SupPid, normal),
         [ok = ?FLU_PC:quit(X) || X <- Proxies],
-        ok = machi_partition_simulator:stop()
+        machi_psup_test_util:stop_flu_packages()
     end.
 
 unanimous_report_test() ->

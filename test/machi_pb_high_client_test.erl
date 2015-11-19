@@ -41,7 +41,7 @@ smoke_test2() ->
     ok = application:set_env(machi, max_file_size, 1024*1024),
     
     [os:cmd("rm -rf " ++ P#p_srvr.props) || P <- Ps],
-    {ok, SupPid} = machi_flu_sup:start_link(),
+    {ok, SupPid} = machi_sup:start_link(),
     try
         [begin
              #p_srvr{name=Name, port=Port, props=Dir} = P,
