@@ -31,6 +31,7 @@
 -define(QC_OUT(P),
         eqc:on_output(fun(Str, Args) -> io:format(user, Str, Args) end, P)).
 
+-define(TESTDIR, "./eqc").
 
 %% EUNIT TEST DEFINITION
 eqc_test_() ->
@@ -102,19 +103,26 @@ shuffle_interval() ->
 
 get_written_interval(L) ->
     ?LET({O, Ln}, elements(L), {O+1, Ln-1}).
- 
+
 %% INITIALIZATION
 
 -record(state, {pid, prev_extra = 0,
+                filename = undefined,
                 planned_writes=[],
                 planned_trims=[],
                 written=[],
                 trimmed=[]}).
 
-initial_state() -> #state{written=[{0,1024}]}.
-initial_state(I, T) -> #state{written=[{0,1024}],
-                              planned_writes=I,
-                              planned_trims=T}.
+initial_state() ->
+    {_, _, MS} = os:timestamp(),
+    Filename = test_server:temp_name("eqc_data") ++ "." ++ integer_to_list(MS),
+    #state{filename=Filename, written=[{0,1024}]}.
+
+initial_state(I, T) ->
+    S=initial_state(),
+    S#state{written=[{0,1024}],
+            planned_writes=I,
+            planned_trims=T}.
 
 weight(_S, rewrite) -> 1;
 weight(_S, _) -> 2.
@@ -136,11 +144,6 @@ get_overlaps(Offset, Len, [{Pos, Sz} = Ck|T], Acc0)
       (Pos < Offset + Len andalso Offset + Len < Pos + Sz) ->
     get_overlaps(Offset, Len, T, [Ck|Acc0]);
 get_overlaps(Offset, Len, [_Ck|T], Acc0) ->
-    %% ?debugVal({Offset, Len, _Ck}),
-    %% ?debugVal(Offset =< Pos andalso Pos < Offset + Len andalso Offset + Len =< Pos + Sz),
-    %% ?debugVal(Offset =< Pos andalso Pos + Sz < Offset + Len),
-    %% ?debugVal(Pos < Offset andalso Offset < Pos + Sz andalso Pos + Sz < Offset + Len),
-    %% ?debugVal(Pos < Offset + Len andalso Offset + Len < Pos + Sz),
     get_overlaps(Offset, Len, T, Acc0).
 
 %% Inefficient but simple easy code to verify by eyes - returns all
@@ -209,8 +212,6 @@ last_byte(L0) ->
     L1 = lists:map(fun({Pos, Sz}) -> Pos + Sz end, L0),
     lists:last(lists:sort(L1)).
 
--define(TESTDIR, "./eqc").
-
 cleanup() ->
     [begin
          Fs = filelib:wildcard(?TESTDIR ++ Glob),
@@ -228,14 +229,12 @@ start_pre(S) ->
 start_command(S) ->
     {call, ?MODULE, start, [S]}.
 
-start(_S) ->
-    {_, _, MS} = os:timestamp(),
-    File = test_server:temp_name("eqc_data") ++ "." ++ integer_to_list(MS),
+start(#state{filename=File}) ->
     {ok, Pid} = machi_file_proxy:start_link(some_flu, File, ?TESTDIR),
     unlink(Pid),
     Pid.
 
-start_next(S, Pid, _Args) ->
+start_next(S, Pid, _) ->
     S#state{pid = Pid}.
 
 %% read
@@ -244,25 +243,19 @@ read_pre(S) ->
     S#state.pid /= undefined.
 
 read_args(S) ->
-    [S#state.pid, offset(), len()].
+    [S#state.pid, oneof([offset(), big_offset()]), len()].
 
 read_post(S, [_Pid, Off, L], Res) ->
     Written = get_overlaps(Off, L, S#state.written, []),
     Chopped = chop(Off, L, Written),
     Trimmed = get_overlaps(Off, L, S#state.trimmed, []),
     Eof = lists:max([Pos+Sz||{Pos,Sz}<-S#state.written]),
-    %% ?debugVal({Off, L}),
-    %% ?debugVal(S),
     case Res of
         {ok, {Written0, Trimmed0}} ->
             Written1 = lists:map(fun({_, Pos, Chunk, _}) ->
                                          {Pos, iolist_size(Chunk)}
                                  end, Written0),
             Trimmed1 = lists:map(fun({_, Pos, Sz}) -> {Pos, Sz} end, Trimmed0),
-            %% ?debugVal({Written, Chopped, Written1}),
-            %% ?debugVal({Trimmed, Trimmed1}),
-            %% ?assertEqual(Chopped, Written1),
-            %% ?assertEqual(Trimmed, Trimmed1),
             Chopped =:= Written1
                 andalso Trimmed =:= Trimmed1;
         %% TODO: such response are ugly, rethink the SPEC
@@ -270,8 +263,7 @@ read_post(S, [_Pid, Off, L], Res) ->
             true;
         {error, not_written} when Chopped =:= [] andalso Trimmed =:= [] ->
             true;
-        Other ->
-            ?debugVal(Other),
+        _Other ->
             is_error(Res)
     end.
 
@@ -312,13 +304,13 @@ write_post(S, [_Pid, Off, {Bin, _Tag, _Csum}] = _Args, Res) ->
 
 write_next(S, Res, [_Pid, Offset, {Bin, _Tag, _Csum}]) ->
     S0 = case is_ok(Res) of
-        true -> 
+        true ->
             S#state{written = lists:sort(S#state.written ++ [{Offset, iolist_size(Bin)}]) };
-        _ -> 
+        _ ->
             S
     end,
     S0#state{prev_extra = 0, planned_writes=tl(S0#state.planned_writes)}.
-    
+
 
 write(Pid, Offset, {Bin, Tag, Csum}) ->
     Meta = [{client_csum_tag, Tag},
@@ -328,7 +320,6 @@ write(Pid, Offset, {Bin, Tag, Csum}) ->
 %% append
 
 append_pre(S) ->
-    ?assert(undefined =/= S#state.written),
     S#state.pid /= undefined.
 
 %% do not allow appends with empty binary data
@@ -347,20 +338,32 @@ append(Pid, Extra, {Bin, Tag, Csum}) ->
 
 append_next(S, Res, [_Pid, Extra, {Bin, _Tag, _Csum}]) ->
     case is_ok(Res) of
-        true -> 
+        true ->
             Offset = get_offset(Res),
-            Expected = erlang:max(last_byte(S#state.written) + S#state.prev_extra,
-                                  last_byte(S#state.trimmed)),
-            ?assertEqual(Expected, Offset),
-            S#state{prev_extra = Extra, written = lists:sort(S#state.written ++ [{Offset, iolist_size(Bin)}])};
-        _ ->
+            S#state{prev_extra = Extra,
+                    written = lists:sort(S#state.written ++ [{Offset, iolist_size(Bin)}])};
+        _Other ->
             S
     end.
 
-%% appends should always succeed unless the disk is full 
+%% appends should always succeed unless the disk is full
 %% or there's a hardware failure.
-append_post(_S, _Args, Res) ->
-    true == is_ok(Res).
+append_post(S, _Args, Res) ->
+    case is_ok(Res) of
+        true ->
+            Offset = get_offset(Res),
+            case erlang:max(last_byte(S#state.written),
+                            last_byte(S#state.trimmed)) + S#state.prev_extra of
+                Offset ->
+                    true;
+                UnexpectedByte ->
+                    {wrong_offset_after_append,
+                     {Offset, UnexpectedByte},
+                     {S#state.written, S#state.prev_extra}}
+            end;
+        Error ->
+            Error
+    end.
 
 %% rewrite
 
@@ -415,24 +418,33 @@ trim_next(S, Res, [_Pid, Offset, Length]) ->
     S1#state{prev_extra=0,
              planned_trims=tl(S#state.planned_trims)}.
 
+stop_pre(S) ->
+    S#state.pid /= undefined.
+
+stop_args(S) ->
+    [S#state.pid].
+
+stop(Pid) ->
+    catch machi_file_proxy:stop(Pid).
+
+stop_post(_, _, _) -> true.
+
+stop_next(S, _, _) ->
+    S#state{pid=undefined, prev_extra=0}.
+
 %% Property
 
 prop_ok() ->
-  cleanup(),
-  ?FORALL({I, T},
-          {shuffle_interval(), shuffle_interval()},
-    ?FORALL(Cmds, parallel_commands(?MODULE, initial_state(I, T)),
-    begin
-        {H, S, Res} = run_parallel_commands(?MODULE, Cmds),
-        %% case S#state.pid of
-        %%     undefined -> noop;
-        %%     Pid ->
-        %%         machi_file_proxy:stop(Pid)
-        %% end,
-        pretty_commands(?MODULE, Cmds, {H, S, Res},
-                        aggregate(command_names(Cmds), Res == ok))
-    end)
-  ).
+    cleanup(),
+    ?FORALL({I, T},
+            {shuffle_interval(), shuffle_interval()},
+            ?FORALL(Cmds, parallel_commands(?MODULE, initial_state(I, T)),
+                    begin
+                        {H, S, Res} = run_parallel_commands(?MODULE, Cmds),
+                        cleanup(),
+                        pretty_commands(?MODULE, Cmds, {H, S, Res},
+                                        aggregate(command_names(Cmds), Res == ok))
+                    end)).
 
 %% Test for tester functions
 chopper_test_() ->
