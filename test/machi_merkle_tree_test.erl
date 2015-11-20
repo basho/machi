@@ -26,9 +26,13 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/file.hrl").
 
--define(TESTFILE, "yza^4c784dc2-19bf-4ac6-91f6-58bbe5aa88e0^1").
 -define(GAP_CHANCE, 0.10).
 
+%% unit tests
+
+
+%% Define or remove these ifdefs if benchmarking is desired.
+-ifdef(BENCH).
 choose_filename() ->
     random_from_list([
         "def^c5ea7511-d649-47d6-a8c3-2b619379c237^1",
@@ -140,19 +144,12 @@ torture_test(C) ->
     ok = file:close(F).
 
 run_torture_test() ->
-    {MTime, M} = timer:tc(fun() -> merklet_torture() end),
     {NTime, N} = timer:tc(fun() -> naive_torture() end), 
 
     MSize = byte_size(term_to_binary(M)),
     NSize = byte_size(term_to_binary(N)),
 
     {MSize, MTime, NSize, NTime}.
-
-merklet_torture() ->
-    lists:foldl(
-      fun({O, S, Sha}, Acc) -> 
-          merklet:insert({<<O:64/unsigned-big, S:32/unsigned-big>>, Sha}, Acc) 
-      end, undefined, torture_generator()).
 
 naive_torture() ->
     N = lists:foldl(fun(T, Acc) -> machi_merkle_tree:update_acc(T, Acc) end, [], torture_generator()),
@@ -161,3 +158,4 @@ naive_torture() ->
 
 torture_generator() ->
     [ {O, 1, crypto:hash(sha, term_to_binary(now()))} || O <- lists:seq(1024, 1000000) ].
+-endif. % BENCH

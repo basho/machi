@@ -21,12 +21,6 @@
 %% @doc Creates a Merkle tree per file based on the checksum data for
 %% a given data file.
 %%
-%% Has selectable backend, chosen at open.
-%%
-%% The default 'merklet' implementation uses the `merklet' library.  Keys are
-%% encoded as `<<Offset:64, Size:32>>' values encoded as `<<Tag:8, Csum/binary>>'
-%% *or* as `<<0>>' for unwritten bytes, or `<<1>>' for trimmed bytes.
-%%
 %% The `naive' implementation representation is:
 %%
 %% `<<Length:64, Offset:32, 0>>' for unwritten bytes
@@ -35,8 +29,8 @@
 %%
 %% The tree feeds these leaf nodes into hashes representing chunks of a minimum
 %% size of at least 1024 KB (1 MB), but if the file size is larger, we will try
-%% to get about 100 chunks for called "Level 1." We aim for around 10 hashes at
-%% level 2, and then 2 hashes level 3 and finally the root.
+%% to get about 100 chunks for the first rollup "Level 1." We aim for around 10
+%% hashes at level 2, and then 2 hashes level 3 and finally the root.
 
 -module(machi_merkle_tree).
 
@@ -57,11 +51,7 @@
 
 -define(TRIMMED, <<1>>).
 -define(UNWRITTEN, <<0>>).
--define(ENCODE(Offset, Size), <<Offset:64/unsigned-big, Size:32/unsigned-big>>).
 -define(NAIVE_ENCODE(Offset, Size, Data), <<Offset:64/unsigned-big, Size:32/unsigned-big, Data/binary>>).
-
--define(NEW_MERKLET, undefined).
--define(TIMEOUT, (10*1000)).
 
 -define(MINIMUM_CHUNK, 1048576). %% 1024 * 1024
 -define(LEVEL_SIZE, 10).
@@ -70,13 +60,12 @@
 %% public API
 
 open(Filename, DataDir) ->
-    open(Filename, DataDir, merklet).
+    open(Filename, DataDir, naive).
 
 open(Filename, DataDir, Type) ->
     Tree = load_filename(Filename, DataDir, Type),
     {ok, #mt{ filename = Filename, tree = Tree, backend = Type}}.
 
-tree(#mt{ tree = T, backend = merklet }) -> T;
 tree(#mt{ tree = T, backend = naive }) ->
     case T#naive.recalc of
          true -> build_tree(T);
@@ -90,19 +79,11 @@ diff(#mt{backend = naive, tree = T1}, #mt{backend = naive, tree = T2}) ->
         true -> same;
         false -> naive_diff(T1, T2) 
     end;
-diff(#mt{backend = merklet, tree = T1}, #mt{backend = merklet, tree = T2}) ->
-    case merklet:diff(T1, T2) of
-        [] -> same;
-        Diff -> Diff
-    end;
 diff(_, _) -> error(badarg).
 
 %% private
 
 % @private
-load_filename(Filename, DataDir, merklet) ->
-    {_Last, M} = do_load(Filename, DataDir, fun insert_csum/2, ?NEW_MERKLET),
-    M;
 load_filename(Filename, DataDir, naive) ->
     {Last, M} = do_load(Filename, DataDir, fun insert_csum_naive/2, []),
     ChunkSize = max(?MINIMUM_CHUNK, Last div 100),
@@ -117,16 +98,6 @@ do_load(Filename, DataDir, FoldFun, AccInit) ->
     Acc.
 
 % @private
-insert_csum({Last, Size, _Csum}=In, {Last, MT}) ->
-    %% no gap here, insert a record
-    {Last+Size, update_merkle_tree(In, MT)};
-insert_csum({Offset, Size, _Csum}=In, {Last, MT}) ->
-    %% gap here, insert unwritten record 
-    %% *AND* insert written record
-    Hole = Offset - Last,
-    MT0 = update_merkle_tree({Last, Hole, unwritten}, MT),
-    {Offset+Size, update_merkle_tree(In, MT0)}.
-
 insert_csum_naive({Last, Size, _Csum}=In, {Last, MT}) ->
     %% no gap
     {Last+Size, update_acc(In, MT)};
@@ -136,32 +107,20 @@ insert_csum_naive({Offset, Size, _Csum}=In, {Last, MT}) ->
     {Offset+Size, update_acc(In, MT0)}.
 
 % @private
-update_merkle_tree({Offset, Size, unwritten}, MT) ->
-    merklet:insert({?ENCODE(Offset, Size), ?UNWRITTEN}, MT);
-update_merkle_tree({Offset, Size, trimmed}, MT) ->
-    merklet:insert({?ENCODE(Offset, Size), ?TRIMMED}, MT);
-update_merkle_tree({Offset, Size, Csum}, MT) ->
-    merklet:insert({?ENCODE(Offset, Size), Csum}, MT).
-
 update_acc({Offset, Size, unwritten}, MT) ->
     [ {Offset, Size, ?NAIVE_ENCODE(Offset, Size, ?UNWRITTEN)} | MT ];
 update_acc({Offset, Size, trimmed}, MT) ->
     [ {Offset, Size, ?NAIVE_ENCODE(Offset, Size, ?TRIMMED)} | MT ];
-update_acc({Offset, Size, Csum}, MT) ->
+update_acc({Offset, Size, <<_Tag:8, Csum/binary>>}, MT) ->
     [ {Offset, Size, ?NAIVE_ENCODE(Offset, Size, Csum)} | MT ].
 
 build_tree(MT = #naive{ leaves = L, chunk_size = ChunkSize }) ->
-    lager:debug("Leaves: ~p~n", [L]),
     Lvl1s = build_level_1(ChunkSize, L, 1, [ crypto:hash_init(?H) ]),
-    lager:debug("Lvl1: ~p~n", [Lvl1s]),
     Mod2 = length(Lvl1s) div ?LEVEL_SIZE,
     Lvl2s = build_int_level(Mod2, Lvl1s, 1, [ crypto:hash_init(?H) ]),
-    lager:debug("Lvl2: ~p~n", [Lvl2s]),
     Mod3 = length(Lvl2s) div 2,
     Lvl3s = build_int_level(Mod3, Lvl2s, 1, [ crypto:hash_init(?H) ]),
-    lager:debug("Lvl3: ~p~n", [Lvl3s]),
     Root = build_root(Lvl3s, crypto:hash_init(?H)),
-    lager:debug("Root: ~p~n", [Root]),
     MT#naive{ root = Root, lvl1 = Lvl1s, lvl2 = Lvl2s, lvl3 = Lvl3s, recalc = false }.
 
 build_root([], Ctx) ->
@@ -189,19 +148,9 @@ build_level_1(Size, [{Pos, Len, Hash}|T], Multiple, [ Ctx | Rest ])
     build_level_1(Size, T, Multiple, [ crypto:hash_update(Ctx, Hash) | Rest ]).
 
 naive_diff(#naive{lvl1 = L1}, #naive{lvl1=L2, chunk_size=CS2}) ->
-    lager:debug("naive diff: Our lvl1: ~p~n", [L1]),
-    lager:debug("naive diff: Their chunk size: ~p, lvl1: ~p~n", [CS2, L2]),
-
     Set1 = gb_sets:from_list(lists:zip(lists:seq(1, length(L1), L1))),
     Set2 = gb_sets:from_list(lists:zip(lists:seq(1, length(L2), L2))),
 
     %% The byte ranges in list 2 that do not match in list 1
-    %%
-    %% We have to decide what to do now - should we filter the
-    %% leaf nodes using these ranges and find specific divergence
-    %% between Tree1 and Tree2? 
-    %%
     %% Or should we do something else?
     [ {(X-1)*CS2, CS2, SHA} || {X, SHA} <- gb_sets:to_list(gb_sets:subtract(Set1, Set2)) ].
-
-
