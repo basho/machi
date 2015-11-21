@@ -14,7 +14,7 @@
 
 -record(mt, {
           filename               :: string(),
-          tree                   :: #naive{}|merklet:tree(),
-          backend = 'merklet'    :: 'naive'|'merklet'
+          tree                   :: #naive{},
+          backend = 'naive'      :: 'naive'
          }).
 
