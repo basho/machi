@@ -148,8 +148,8 @@ build_level_1(Size, [{Pos, Len, Hash}|T], Multiple, [ Ctx | Rest ])
     build_level_1(Size, T, Multiple, [ crypto:hash_update(Ctx, Hash) | Rest ]).
 
 naive_diff(#naive{lvl1 = L1}, #naive{lvl1=L2, chunk_size=CS2}) ->
-    Set1 = gb_sets:from_list(lists:zip(lists:seq(1, length(L1), L1))),
-    Set2 = gb_sets:from_list(lists:zip(lists:seq(1, length(L2), L2))),
+    Set1 = gb_sets:from_list(lists:zip(lists:seq(1, length(L1)), L1)),
+    Set2 = gb_sets:from_list(lists:zip(lists:seq(1, length(L2)), L2)),
 
     %% The byte ranges in list 2 that do not match in list 1
     %% Or should we do something else?

@@ -29,10 +29,92 @@
 -define(GAP_CHANCE, 0.10).
 
 %% unit tests
+basic_test() ->
+    random:seed(os:timestamp()),
+    Fsz = choose_size() * 1024,
+    Filesize = max(Fsz, 10*1024*1024),
+    ChunkSize = max(1048576, Filesize div 100),
+    N = make_leaf_nodes(Filesize),
+    D0 = #naive{ leaves = N, chunk_size = ChunkSize, recalc = true },
+    T1 = machi_merkle_tree:build_tree(D0),
 
+    D1 = #naive{ leaves = tl(N), chunk_size = ChunkSize, recalc = true },
+    T2 = machi_merkle_tree:build_tree(D1),
+
+    ?assertNotEqual(T1#naive.root, T2#naive.root),
+    ?assertEqual(1, length(machi_merkle_tree:naive_diff(T1, T2))).
+
+
+make_leaf_nodes(Filesize) ->
+    lists:reverse(
+      lists:foldl(fun(T, Acc) -> machi_merkle_tree:update_acc(T, Acc) end, 
+                  [], 
+                  generate_offsets(Filesize, 1024, []))
+     ).
+
+choose_int(Factor) ->
+    random:uniform(1024*Factor).
+
+small_int() ->
+    choose_int(10).
+
+medium_int() ->
+    choose_int(1024).
+
+large_int() ->
+    choose_int(4096).
+
+generate_offsets(Filesize, Current, Acc) when Current < Filesize ->
+    Length0 = choose_size(),
+
+    Length = case Length0 + Current > Filesize of
+                 false -> Length0;
+                  true -> Filesize - Current
+    end,
+    Data = term_to_binary(os:timestamp()),
+    Checksum = machi_util:make_tagged_csum(client_sha, machi_util:checksum_chunk(Data)),
+    Gap = maybe_gap(random:uniform()),
+    generate_offsets(Filesize, Current + Length + Gap, [ {Current, Length, Checksum} | Acc ]);
+generate_offsets(_Filesize, _Current, Acc) ->
+    lists:reverse(Acc).
+
+
+random_from_list(L) ->
+    N = random:uniform(length(L)),
+    lists:nth(N, L).
+
+choose_size() ->
+    F = random_from_list([fun small_int/0, fun medium_int/0, fun large_int/0]),
+    F().
+
+maybe_gap(Chance) when Chance < ?GAP_CHANCE ->
+    choose_size();
+maybe_gap(_) -> 0.
 
 %% Define or remove these ifdefs if benchmarking is desired.
 -ifdef(BENCH).
+generate_offsets(FH, Filesize, Current, Acc) when Current < Filesize ->
+    Length0 = choose_size(),
+
+    Length = case Length0 + Current > Filesize of
+                 false -> Length0;
+                  true -> Filesize - Current
+    end,
+    {ok, Data} = file:pread(FH, Current, Length),
+    Checksum = machi_util:make_tagged_csum(client_sha, machi_util:checksum_chunk(Data)),
+    Gap = maybe_gap(random:uniform()),
+    generate_offsets(FH, Filesize, Current + Length + Gap, [ {Current, Length, Checksum} | Acc ]);
+generate_offsets(_FH, _Filesize, _Current, Acc) ->
+    lists:reverse(Acc).
+
+make_offsets_from_file(Filename) ->
+    {ok, Info} = file:read_file_info(Filename),
+    Filesize = Info#file_info.size,
+    {ok, FH} = file:open(Filename, [read, raw, binary]),
+    Offsets = generate_offsets(FH, Filesize, 1024, []),
+    file:close(FH),
+    Offsets.
+
 choose_filename() ->
     random_from_list([
         "def^c5ea7511-d649-47d6-a8c3-2b619379c237^1",
@@ -52,51 +134,6 @@ make_csum_file(DataDir, Filename, Offsets) ->
                   Offsets),
     machi_csum_table:close(MC).
 
-choose_int(Factor) ->
-    random:uniform(1024*Factor).
-
-small_int() ->
-    choose_int(10).
-
-medium_int() ->
-    choose_int(1024).
-
-large_int() ->
-    choose_int(4096).
-
-make_offsets(Filename) ->
-    {ok, Info} = file:read_file_info(Filename),
-    Filesize = Info#file_info.size,
-    {ok, FH} = file:open(Filename, [read, raw, binary]),
-    Offsets = generate_offsets(FH, Filesize, 1024, []),
-    file:close(FH),
-    Offsets.
-
-random_from_list(L) ->
-    N = random:uniform(length(L)),
-    lists:nth(N, L).
-
-choose_size() ->
-    F = random_from_list([fun small_int/0, fun medium_int/0, fun large_int/0]),
-    F().
-
-maybe_gap(Chance) when Chance < ?GAP_CHANCE ->
-    choose_size();
-maybe_gap(_) -> 0.
-
-generate_offsets(FH, Filesize, Current, Acc) when Current < Filesize ->
-    Length0 = choose_size(),
-
-    Length = case Length0 + Current > Filesize of
-                 false -> Length0;
-                  true -> Filesize - Current
-    end,
-    {ok, Data} = file:pread(FH, Current, Length),
-    Checksum = machi_util:make_tagged_csum(client_sha, machi_util:checksum_chunk(Data)),
-    Gap = maybe_gap(random:uniform()),
-    generate_offsets(FH, Filesize, Current + Length + Gap, [ {Current, Length, Checksum} | Acc ]);
-generate_offsets(_FH, _Filesize, _Current, Acc) ->
-    lists:reverse(Acc).
 
 test() -> 
     test(100).
@@ -112,7 +149,7 @@ format_and_store(F, {OffsetNum, {MTime, MSize}, {NTime, NSize}}) ->
 run_test(C) ->
     random:seed(os:timestamp()),
     OffsetFn = "test/" ++ choose_filename(),
-    O = make_offsets(OffsetFn),
+    O = make_offsets_from_file(OffsetFn),
     Fn = "csum_" ++ integer_to_list(C),
     make_csum_file(".", Fn, O),
 
