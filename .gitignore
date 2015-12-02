@@ -26,3 +26,4 @@ rel/machi
 current_counterexample.eqc
 foo*
 typescript*
+*.swp
