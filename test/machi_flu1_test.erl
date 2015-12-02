@@ -146,7 +146,7 @@ flu_smoke_test() ->
         Chunk2 = <<"yo yo">>,
         Len2 = byte_size(Chunk2),
         Off2 = ?MINIMUM_OFFSET + 77,
-        File2 = "smoke-whole-file^1^1",
+        File2 = "smoke-whole-file^^0^1^1",
         ok = ?FLU_C:write_chunk(Host, TcpPort, ?DUMMY_PV1_EPOCH,
                                 File2, Off2, Chunk2),
         {error, bad_arg} = ?FLU_C:write_chunk(Host, TcpPort, ?DUMMY_PV1_EPOCH,

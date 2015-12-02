@@ -72,7 +72,7 @@ api_smoke_test() ->
             {error, bad_checksum} = ?MUT:append_chunk(Prox1, FakeEpoch,
                                                       Prefix, MyChunk_badcs),
             {error, bad_checksum} = ?MUT:write_chunk(Prox1, FakeEpoch,
-                                                     <<"foo-file^1^1">>, 99832,
+                                                     <<"foo-file^^0^1^1">>, 99832,
                                                      MyChunk_badcs),
 
             %% Put kick_projection_reaction() in the middle of the test so
