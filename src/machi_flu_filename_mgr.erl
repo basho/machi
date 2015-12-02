@@ -191,8 +191,10 @@ generate_uuid_v4_str() ->
     io_lib:format("~8.16.0b-~4.16.0b-4~3.16.0b-~4.16.0b-~12.16.0b",
                         [A, B, C band 16#0fff, D band 16#3fff bor 16#8000, E]).
 
-find_file(DataDir, Prefix, N) ->
-    {_Filename, Path} = machi_util:make_data_filename(DataDir, Prefix, "*", N),
+find_file(DataDir, {coc,CoC_Namespace,CoC_Locator}=_CoC_NL, Prefix, N) ->
+    {_Filename, Path} = machi_util:make_data_filename(DataDir,
+                                                      CoC_Namespace,CoC_Locator,
+                                                      Prefix, "*", N),
     filelib:wildcard(Path).
 
 list_files(DataDir, Prefix) ->
@@ -202,10 +204,9 @@ list_files(DataDir, Prefix) ->
 make_filename_mgr_name(FluName) when is_atom(FluName) ->
     list_to_atom(atom_to_list(FluName) ++ "_filename_mgr").
 
-handle_find_file(Tid, {coc,CoC_Namespace,CoC_Locator}=_CoC, Prefix, DataDir) ->
-io:format(user, "\nCoC ~p\n", [_CoC]),
+handle_find_file(Tid, {coc,CoC_Namespace,CoC_Locator}=CoC_NL, Prefix, DataDir) ->
     N = machi_util:read_max_filenum(DataDir, CoC_Namespace, CoC_Locator, Prefix),
-    {File, Cleanup} = case find_file(DataDir, Prefix, N) of
+    {File, Cleanup} = case find_file(DataDir, CoC_NL, Prefix, N) of
         [] ->
             {find_or_make_filename(Tid, DataDir, CoC_Namespace, CoC_Locator, Prefix, N), false};
         [H] -> {H, true};
