@@ -213,6 +213,11 @@ all_list_extra(Num) ->
           DirBase ++ "/data.eqc." ++ FLUNameStr}
      end || I <- lists:seq(1, Num)].
 
+sublist(L) ->
+    ?LET(K, nat(),
+    ?LET(L2, eqc_gen:vector(K, eqc_gen:oneof(L)),
+         lists:usort(L2))).
+
 %% Generator for possibly assymmetric partition information
 partition(FLUNames) ->
     frequency([{10, return([])},
