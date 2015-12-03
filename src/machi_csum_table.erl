@@ -2,18 +2,14 @@
 
 -export([open/2,
          find/3,
-         write/6, write/4, trim/5, trim/3,
+         write/6, write/4, trim/5,
          find_leftneighbor/2, find_rightneighbor/2,
          all_trimmed/3, any_trimmed/3,
          all_trimmed/2,
-         sync/1,
          calc_unwritten_bytes/1,
          split_checksum_list_blob_decode/1,
          close/1, delete/1,
          foldl_chunks/3]).
-
--export([encode_csum_file_entry/3, encode_csum_file_entry_bin/3,
-         decode_csum_file_entry/1]).
 
 -include("machi.hrl").
 
@@ -24,8 +20,7 @@
 
 -record(machi_csum_table,
         {file :: string(),
-         fd   :: file:io_device(),
-         table :: ets:tid()}).
+         table :: eleveldb:db_ref()}).
 
 -type table() :: #machi_csum_table{}.
 -type byte_sequence() :: { Offset :: non_neg_integer(),
@@ -37,96 +32,93 @@
                   {ok, table()} | {error, file:posix()}.
 
 open(CSumFilename, _Opts) ->
-    T = ets:new(?MODULE, [private, ordered_set]),
-    CSum = machi_util:make_tagged_csum(none),
-    %% Dummy entry for headers
-    true = ets:insert_new(T, {0, ?MINIMUM_OFFSET, CSum}),
+    LevelDBOptions = [{create_if_missing, true},
+                      %% Keep this table small so as not to interfere
+                      %% operating system's file cache, which is for
+                      %% Machi's main read efficiency
+                      {total_leveldb_mem_percent, 10}],
+    {ok, T} = eleveldb:open(CSumFilename, LevelDBOptions),
+    %% Dummy entry for reserved headers
+    ok = eleveldb:put(T,
+                      sext:encode({0, ?MINIMUM_OFFSET}),
+                      sext:encode(?CSUM_TAG_NONE_ATOM),
+                      [{sync, true}]),
     C0 = #machi_csum_table{
             file=CSumFilename,
             table=T},
-    case file:read_file(CSumFilename) of
-        {ok, Bin} ->
-            List = case split_checksum_list_blob_decode(Bin) of
-                       {List0, <<>>} ->
-                           List0;
-                       {List0, _Junk} ->
-                           %% Partially written, needs repair TODO
-                           List0
-                   end,
-            %% assuming all entries are strictly ordered by offset,
-            %% trim command should always come after checksum entry.
-            %% *if* by any chance that order cound not be kept, we
-            %% still can do ordering check and monotonic merge here.
-            %% TODO: make some random injection tests?
-            [begin %% Replay all file contents, Same logic as in write/6
-                 Chunks = find(C0, Offset, Size),
-                 lists:foreach(fun({O, _, _}) ->
-                                       ets:delete(T, O)
-                               end, Chunks),
-                 true = ets:insert(T, {Offset, Size, CsumOrTrimmed})
-             end
-             || {Offset, Size, CsumOrTrimmed} <- List],
-            ok;
-        {error, enoent} ->
-            ok;
-        Error ->
-            throw(Error)
-    end,
-    {ok, Fd} = file:open(CSumFilename, [raw, binary, append]),
-    {ok, C0#machi_csum_table{fd=Fd}}.
+    {ok, C0}.
+
+-spec split_checksum_list_blob_decode(binary())-> term().
+split_checksum_list_blob_decode(_Bin) ->
+    %% binary_to_term(Bin)
+    throw(not_yet).
 
 -spec find(table(), machi_dt:file_offset(), machi_dt:file_size()) ->
                   list({machi_dt:file_offset(),
                         machi_dt:file_size(),
                         machi_dt:chunk_csum()|trimmed}).
 find(#machi_csum_table{table=T}, Offset, Size) ->
-    ets:select(T, [{{'$1', '$2', '$3'},
-                    [inclusion_match_spec(Offset, Size)],
-                    ['$_']}]).
+    {ok, I} = eleveldb:iterator(T, [], keys_only),
+    EndKey = sext:encode({Offset+Size, 0}),
+    StartKey = sext:encode({Offset, Size}),
 
--ifdef(TEST).
-all(#machi_csum_table{table=T}) ->
-    ets:tab2list(T).
--endif.
+    {ok, FirstKey} = case eleveldb:iterator_move(I, StartKey) of
+                         {error, invalid_iterator} ->
+                             eleveldb:iterator_move(I, first);
+                         {ok, _} = R0 ->
+                             case eleveldb:iterator_move(I, prev) of
+                                 {error, invalid_iterator} ->
+                                     R0;
+                                 {ok, _} = R1 ->
+                                     R1
+                             end
+                     end,
+    _ = eleveldb:iterator_close(I),
+    FoldFun = fun({K, V}, Acc) ->
+                      {TargetOffset, TargetSize} = sext:decode(K),
+                      case has_overlap(TargetOffset, TargetSize, Offset, Size) of
+                          true ->
+                              [{TargetOffset, TargetSize, sext:decode(V)}|Acc];
+                          false ->
+                              Acc
+                      end;
+                 (_KV, _) ->
+                         throw(_KV)
+              end,
+    lists:reverse(eleveldb_fold(T, FirstKey, EndKey, FoldFun, [])).
 
-write(#machi_csum_table{fd=Fd, table=T} = CsumT,
-      Offset, Size, CSum,
+has_overlap(LeftOffset, LeftSize, RightOffset, RightSize) ->
+    (LeftOffset - (RightOffset+RightSize)) * (LeftOffset+LeftSize - RightOffset) < 0.
+
+%% @doc Updates all chunk info, by deleting existing entries if exists
+%% and putting new chunk info
+write(#machi_csum_table{table=T} = CsumT, Offset, Size, CSum,
       LeftUpdate, RightUpdate) ->
-    Binary =
-        [encode_csum_file_entry_bin(Offset, Size, CSum),
-         case LeftUpdate of
-             {LO, LS, LCsum} when LO + LS =:= Offset ->
-                 encode_csum_file_entry_bin(LO, LS, LCsum);
-             undefined ->
-                 <<>>
-         end,
-         case RightUpdate of
-             {RO, RS, RCsum} when RO =:= Offset + Size ->
-                 encode_csum_file_entry_bin(RO, RS, RCsum);
-             undefined ->
-                 <<>>
-         end],
-    case file:write(Fd, Binary) of
-        ok ->
-            Chunks = find(CsumT, Offset, Size),
-            lists:foreach(fun({O, _, _}) ->
-                                  ets:delete(T, O)
+    PutOps =
+        [{put,
+          sext:encode({Offset, Size}),
+          sext:encode(CSum)}]
+        ++ case LeftUpdate of
+               {LO, LS, LCsum} when LO + LS =:= Offset ->
+                   [{put,
+                     sext:encode({LO, LS}),
+                     sext:encode(LCsum)}];
+               undefined ->
+                   []
+           end
+        ++ case RightUpdate of
+               {RO, RS, RCsum} when RO =:= Offset + Size ->
+                   [{put,
+                     sext:encode({RO, RS}),
+                     sext:encode({RCsum})}];
+               undefined ->
+                   []
+           end,
+    Chunks = find(CsumT, Offset, Size),
+    DeleteOps = lists:map(fun({O, L, _}) ->
+                                  {delete, sext:encode({O, L})}
                           end, Chunks),
-            case LeftUpdate of
-                {LO1, LS1, _} when LO1 + LS1 =:= Offset ->
-                    ets:insert(T, LeftUpdate);
-                undefined -> noop
-            end,
-            case RightUpdate of
-                {RO1, _, _} when RO1 =:= Offset + Size ->
-                    ets:insert(T, RightUpdate);
-                undefined -> noop
-            end,
-            true = ets:insert(T, {Offset, Size, CSum}),
-            ok;
-        Error ->
-            Error
-    end.
+    eleveldb:write(T, DeleteOps ++ PutOps, [{sync, true}]).
 
 -spec find_leftneighbor(table(), non_neg_integer()) ->
                                undefined |
@@ -156,33 +148,38 @@ write(CsumT, Offset, Size, CSum) ->
     write(CsumT, Offset, Size, CSum, undefined, undefined).
 
 trim(CsumT, Offset, Size, LeftUpdate, RightUpdate) ->
-    write(CsumT, Offset, Size, trimmed, LeftUpdate, RightUpdate).
+    write(CsumT, Offset, Size,
+          trimmed, %% Should this be much smaller like $t or just 't'
+          LeftUpdate, RightUpdate).
 
--spec trim(table(), machi_dt:file_offset(), machi_dt:file_size()) ->
-                  ok | {error, file:posix()}.
-trim(#machi_csum_table{fd=Fd, table=T}, Offset, Size) ->
-    Binary = encode_csum_file_entry_bin(Offset, Size, trimmed),
-    case file:write(Fd, Binary) of
-        ok ->
-            true = ets:insert(T, {Offset, Size, trimmed}),
-            ok;
-        Error ->
-            Error
-    end.
-
+%% @doc returns whether all bytes in a specific window is continously
+%% trimmed or not
 -spec all_trimmed(table(), non_neg_integer(), non_neg_integer()) -> boolean().
-all_trimmed(#machi_csum_table{table=T}, Left, Right) ->
-    runthru(ets:tab2list(T), Left, Right).
+all_trimmed(CsumT, Left, Right) ->
+    Chunks = find(CsumT, Left, Right),
+    runthru(Chunks, Left, Right).
 
+%% @doc returns whether all bytes 0-Pos0 is continously trimmed or
+%% not, including header.
 -spec all_trimmed(table(), non_neg_integer()) -> boolean().
-all_trimmed(#machi_csum_table{table=T}, Pos) ->
-    case ets:tab2list(T) of
-        [{0, ?MINIMUM_OFFSET, _}|L] ->
-            %% tl/1 to remove header space {0, 1024, <<0>>}
-            runthru(L, ?MINIMUM_OFFSET, Pos);
-        List ->
-            %% In case a header is removed;
-            runthru(List, 0, Pos)
+all_trimmed(#machi_csum_table{table=T}, Pos0) ->
+    FoldFun = fun({_, _}, false) ->
+                      false;
+                 ({K, V}, Pos) when is_integer(Pos) andalso Pos =< Pos0 ->
+                      case {sext:decode(K), sext:decode(V)} of
+                          {{Pos, Size}, trimmed} ->
+                              Pos + Size;
+                          _Eh ->
+                              %% ?debugVal({_Eh, Pos}),
+                              false
+                      end
+              end,
+    case eleveldb:fold(T, FoldFun, 0, [{verify_checksums, true}]) of
+        false -> false;
+        Pos0 -> true;
+        LastTrimmed when LastTrimmed < Pos0 -> false;
+        _ -> %% LastTrimmed > Pos0, which is a irregular case but ok
+            true
     end.
 
 -spec any_trimmed(table(),
@@ -192,13 +189,9 @@ any_trimmed(CsumT, Offset, Size) ->
     Chunks = find(CsumT, Offset, Size),
     lists:any(fun({_, _, State}) -> State =:= trimmed end, Chunks).
 
--spec sync(table()) -> ok | {error, file:posix()}.
-sync(#machi_csum_table{fd=Fd}) ->
-    file:sync(Fd).
-
 -spec calc_unwritten_bytes(table()) -> [byte_sequence()].
-calc_unwritten_bytes(#machi_csum_table{table=T}) ->
-    case lists:sort(ets:tab2list(T)) of
+calc_unwritten_bytes(#machi_csum_table{table=_} = CsumT) ->
+    case lists:sort(all(CsumT)) of
         [] ->
             [{?MINIMUM_OFFSET, infinity}];
         Sorted ->
@@ -206,17 +199,22 @@ calc_unwritten_bytes(#machi_csum_table{table=T}) ->
             build_unwritten_bytes_list(Sorted, LastOffset, [])
     end.
 
+all(CsumT) ->
+    FoldFun = fun(E, Acc) -> [E|Acc] end,
+    lists:reverse(foldl_chunks(FoldFun, [], CsumT)).
+
 -spec close(table()) -> ok.
-close(#machi_csum_table{table=T, fd=Fd}) ->
-    true = ets:delete(T),
-    ok = file:close(Fd).
+close(#machi_csum_table{table=T}) ->
+    ok = eleveldb:close(T).
 
 -spec delete(table()) -> ok.
-delete(#machi_csum_table{file=F} = C) ->
-    catch close(C),
-    case file:delete(F) of
+delete(#machi_csum_table{table=T, file=F}) ->
+    catch eleveldb:close(T),
+    %% TODO change this to directory walk
+    case os:cmd("rm -rf " ++ F) of
         ok -> ok;
         {error, enoent} -> ok;
+        "" -> ok;
         E -> E
     end.
 
@@ -225,82 +223,11 @@ delete(#machi_csum_table{file=F} = C) ->
                        -> Acc :: term()),
                    Acc0 :: term(), table()) -> Acc :: term().
 foldl_chunks(Fun, Acc0, #machi_csum_table{table=T}) ->
-    ets:foldl(Fun, Acc0, T).
-
-%% @doc Encode `Offset + Size + TaggedCSum' into an `iolist()' type for
-%% internal storage by the FLU.
-
--spec encode_csum_file_entry(
-        machi_dt:file_offset(), machi_dt:chunk_size(), machi_dt:chunk_s()) ->
-        iolist().
-encode_csum_file_entry(Offset, Size, TaggedCSum) ->
-    Len = 8 + 4 + byte_size(TaggedCSum),
-    [<<$w, Len:8/unsigned-big, Offset:64/unsigned-big, Size:32/unsigned-big>>,
-     TaggedCSum].
-
-%% @doc Encode `Offset + Size + TaggedCSum' into an `binary()' type for
-%% internal storage by the FLU.
-
--spec encode_csum_file_entry_bin(
-        machi_dt:file_offset(), machi_dt:chunk_size(), machi_dt:chunk_s()) ->
-        binary().
-encode_csum_file_entry_bin(Offset, Size, trimmed) ->
-    <<$t, Offset:64/unsigned-big, Size:32/unsigned-big>>;
-encode_csum_file_entry_bin(Offset, Size, TaggedCSum) ->
-    Len = 8 + 4 + byte_size(TaggedCSum),
-    <<$w, Len:8/unsigned-big, Offset:64/unsigned-big, Size:32/unsigned-big,
-      TaggedCSum/binary>>.
-
-%% @doc Decode a single `binary()' blob into an
-%%      `{Offset,Size,TaggedCSum}' tuple.
-%%
-%% The internal encoding (which is currently exposed to the outside world
-%% via this function and related ones) is:
-%%
-%% <ul>
-%% <li> 1 byte: record length
-%% </li>
-%% <li> 8 bytes (unsigned big-endian): byte offset
-%% </li>
-%% <li> 4 bytes (unsigned big-endian): chunk size
-%% </li>
-%% <li> all remaining bytes: tagged checksum (1st byte = type tag)
-%% </li>
-%% </ul>
-%%
-%% See `machi.hrl' for the tagged checksum types, e.g.,
-%% `?CSUM_TAG_NONE'.
-
--spec decode_csum_file_entry(binary()) ->
-        error |
-        {machi_dt:file_offset(), machi_dt:chunk_size(), machi_dt:chunk_s()}.
-decode_csum_file_entry(<<_:8/unsigned-big, Offset:64/unsigned-big, Size:32/unsigned-big, TaggedCSum/binary>>) ->
-    {Offset, Size, TaggedCSum};
-decode_csum_file_entry(_Else) ->
-    error.
-
-%% @doc Split a `binary()' blob of `checksum_list' data into a list of
-%% `{Offset,Size,TaggedCSum}' tuples.
-
--spec split_checksum_list_blob_decode(binary()) ->
-  {list({machi_dt:file_offset(), machi_dt:chunk_size(), machi_dt:chunk_s()}),
-   TrailingJunk::binary()}.
-split_checksum_list_blob_decode(Bin) ->
-    split_checksum_list_blob_decode(Bin, []).
-
-split_checksum_list_blob_decode(<<$w, Len:8/unsigned-big, Part:Len/binary, Rest/binary>>, Acc)->
-    One = <<Len:8/unsigned-big, Part/binary>>,
-    case decode_csum_file_entry(One) of
-        error ->
-            split_checksum_list_blob_decode(Rest, Acc);
-        DecOne ->
-            split_checksum_list_blob_decode(Rest, [DecOne|Acc])
-    end;
-split_checksum_list_blob_decode(<<$t, Offset:64/unsigned-big, Size:32/unsigned-big, Rest/binary>>, Acc) ->
-    %% trimmed offset
-    split_checksum_list_blob_decode(Rest, [{Offset, Size, trimmed}|Acc]);
-split_checksum_list_blob_decode(Rest, Acc) ->
-    {lists:reverse(Acc), Rest}.
+    FoldFun = fun({K, V}, Acc) ->
+                      {Offset, Len} = sext:decode(K),
+                      Fun({Offset, Len, sext:decode(V)}, Acc)
+              end,
+    eleveldb:fold(T, FoldFun, Acc0, [{verify_checksums, true}]).
 
 -spec build_unwritten_bytes_list( CsumData   :: [{ Offset   :: non_neg_integer(),
                                                    Size     :: pos_integer(),
@@ -335,8 +262,37 @@ runthru(_L, _O, _P) ->
 %% b] where x < y and a < b; if (a-y)*(b-x) < 0 then there's a
 %% overlap, else, > 0 then there're no overlap. border condition = 0
 %% is not overlap in this offset-size case.
-inclusion_match_spec(Offset, Size) ->
-    {'>', 0,
-     {'*',
-      {'-', Offset + Size, '$1'},
-      {'-', Offset, {'+', '$1', '$2'}}}}.
+%% inclusion_match_spec(Offset, Size) ->
+%%     {'>', 0,
+%%      {'*',
+%%       {'-', Offset + Size, '$1'},
+%%       {'-', Offset, {'+', '$1', '$2'}}}}.
+
+
+eleveldb_fold(Ref, Start, End, FoldFun, InitAcc) ->
+    {ok, Iterator} = eleveldb:iterator(Ref, []),
+    try
+        eleveldb_do_fold(eleveldb:iterator_move(Iterator, Start),
+                         Iterator, End, FoldFun, InitAcc)
+    catch throw:IteratorClosed ->
+            {error, IteratorClosed}
+    after
+        eleveldb:iterator_close(Iterator)
+    end.
+
+eleveldb_do_fold({ok, Key, Value}, _, End, FoldFun, Acc)
+  when End < Key ->
+    FoldFun({Key, Value}, Acc);
+eleveldb_do_fold({ok, Key, Value}, Iterator, End, FoldFun, Acc) ->
+    eleveldb_do_fold(eleveldb:iterator_move(Iterator, next),
+                     Iterator, End, FoldFun,
+                     FoldFun({Key, Value}, Acc));
+eleveldb_do_fold({error, iterator_closed}, _, _, _, Acc) ->
+            %% It's really an error which is not expected
+    throw({iterator_closed, Acc});
+eleveldb_do_fold({error, invalid_iterator}, _, _, _, Acc) ->
+    %% Probably reached to end
+    Acc.
+
+    
+    
