@@ -83,6 +83,8 @@
 %% Supervisor callbacks
 -export([init/1]).
 
+make_package_spec(#p_srvr{name=FluName, port=TcpPort, props=Props}) when is_list(Props) ->
+    make_package_spec({FluName, TcpPort, Props});
 make_package_spec({FluName, TcpPort, Props}) when is_list(Props) ->
     FluDataDir = get_env(flu_data_dir, undefined_is_invalid),
     MyDataDir = filename:join(FluDataDir, atom_to_list(FluName)),

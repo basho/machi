@@ -173,6 +173,19 @@ partial_stop_restart2() ->
         ok
     end.
 
+p_srvr_rec_test() ->
+    P = #p_srvr{name=a, address="localhost", port=1024, props=[yo]},
+    [P] = machi_flu_sup:sanitize_p_srvr_records([P]),
+    [P] = machi_flu_sup:sanitize_p_srvr_records([P,P]),
+    [] = machi_flu_sup:sanitize_p_srvr_records([nope]),
+    [] = machi_flu_sup:sanitize_p_srvr_records([#p_srvr{proto_mod=does_not_exist}]),
+    [] = machi_flu_sup:sanitize_p_srvr_records([#p_srvr{proto_mod="lists"}]),
+    [] = machi_flu_sup:sanitize_p_srvr_records([#p_srvr{address=7}]),
+    [] = machi_flu_sup:sanitize_p_srvr_records([#p_srvr{port=5}]),
+    [] = machi_flu_sup:sanitize_p_srvr_records([#p_srvr{port=foo}]),
+    [] = machi_flu_sup:sanitize_p_srvr_records([#p_srvr{props=foo}]),
+    ok.
+
 -endif. % !PULSE
 -endif. % TEST
 
