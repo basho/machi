@@ -52,7 +52,7 @@
     child_spec/2,
     start_link/2,
     find_or_make_filename_from_prefix/4,
-    increment_prefix_sequence/2,
+    increment_prefix_sequence/3,
     list_files_by_prefix/2
     ]).
 
@@ -90,7 +90,7 @@ start_link(FluName, DataDir) when is_atom(FluName) andalso is_list(DataDir) ->
 -spec find_or_make_filename_from_prefix( FluName :: atom(), 
                                          EpochId :: pv1_epoch_n(), 
                                          Prefix :: {prefix, string()},
-                                         {coc, riak_dt:coc_namespace(), riak_dt:coc_locator()}) ->
+                                         machi_dt:coc_nl()) ->
         {file, Filename :: string()} | {error, Reason :: term() } | timeout.
 % @doc Find the latest available or make a filename from a prefix. A prefix
 % should be in the form of a tagged tuple `{prefix, P}'. Returns a tagged
@@ -105,13 +105,13 @@ find_or_make_filename_from_prefix(_FluName, _EpochId, Other, Other2) ->
     lager:error("~p is not a valid prefix/CoC ~p", [Other, Other2]),
     error(badarg).
 
--spec increment_prefix_sequence( FluName :: atom(), Prefix :: {prefix, string()} ) ->
+-spec increment_prefix_sequence( FluName :: atom(), CoC_NL :: machi_dt:coc_nl(), Prefix :: {prefix, string()} ) ->
         ok | {error, Reason :: term() } | timeout.
 % @doc Increment the sequence counter for a given prefix. Prefix should
 % be in the form of `{prefix, P}'.
-increment_prefix_sequence(FluName, {prefix, Prefix}) when is_atom(FluName) ->
-    gen_server:call(make_filename_mgr_name(FluName), {increment_sequence, Prefix}, ?TIMEOUT);
-increment_prefix_sequence(_FluName, Other) ->
+increment_prefix_sequence(FluName, {coc,_CoC_Namespace,_CoC_Locator}=CoC_NL, {prefix, Prefix}) when is_atom(FluName) ->
+    gen_server:call(make_filename_mgr_name(FluName), {increment_sequence, CoC_NL, Prefix}, ?TIMEOUT);
+increment_prefix_sequence(_FluName, _CoC_NL, Other) ->
     lager:error("~p is not a valid prefix.", [Other]),
     error(badarg).
 
@@ -157,8 +157,8 @@ handle_call({find_filename, EpochId, CoC_NL, Prefix}, _From, S = #state{ datadir
     File = increment_and_cache_filename(Tid, DataDir, CoC_NL, Prefix),
     {reply, {file, File}, S#state{epoch = EpochId}};
 
-handle_call({increment_sequence, Prefix}, _From, S = #state{ datadir = DataDir }) ->
-    ok = machi_util:increment_max_filenum(DataDir, Prefix),
+handle_call({increment_sequence, {coc,CoC_Namespace,CoC_Locator}=_CoC_NL, Prefix}, _From, S = #state{ datadir = DataDir }) ->
+    ok = machi_util:increment_max_filenum(DataDir, CoC_Namespace,CoC_Locator, Prefix),
     {reply, ok, S};
 handle_call({list_files, Prefix}, From, S = #state{ datadir = DataDir }) ->
     spawn(fun() ->
@@ -198,7 +198,7 @@ find_file(DataDir, {coc,CoC_Namespace,CoC_Locator}=_CoC_NL, Prefix, N) ->
     filelib:wildcard(Path).
 
 list_files(DataDir, Prefix) ->
-    {F_bin, Path} = machi_util:make_data_filename(DataDir, Prefix, "*", "*"),
+    {F_bin, Path} = machi_util:make_data_filename(DataDir, "*^" ++ Prefix ++ "^*"),
     filelib:wildcard(binary_to_list(F_bin), filename:dirname(Path)).
 
 make_filename_mgr_name(FluName) when is_atom(FluName) ->

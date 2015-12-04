@@ -68,7 +68,7 @@ make_regname(Prefix) when is_list(Prefix) ->
 
 %% @doc Calculate a config file path, by common convention.
 
--spec make_config_filename(string(), riak_dt:coc_namespace(), riak_dt:coc_locator(), string()) ->
+-spec make_config_filename(string(), machi_dt:coc_namespace(), machi_dt:coc_locator(), string()) ->
       string().
 make_config_filename(DataDir, CoC_Namespace, CoC_Locator, Prefix) ->
     Locator_str = int_to_hexstr(CoC_Locator, 32),
@@ -102,7 +102,7 @@ make_checksum_filename(DataDir, FileName) ->
 
 %% @doc Calculate a file data file path, by common convention.
 
--spec make_data_filename(string(), riak_dt:coc_namespace(), riak_dt:coc_locator(), string(), atom()|string()|binary(), integer()|string()) ->
+-spec make_data_filename(string(), machi_dt:coc_namespace(), machi_dt:coc_locator(), string(), atom()|string()|binary(), integer()|string()) ->
       {binary(), string()}.
 make_data_filename(DataDir, CoC_Namespace, CoC_Locator, Prefix, SequencerName, FileNum)
   when is_integer(FileNum) ->
@@ -146,40 +146,42 @@ make_projection_filename(DataDir, File) ->
 -spec is_valid_filename( Filename :: string() ) -> true | false.
 is_valid_filename(Filename) ->
     case parse_filename(Filename) of
-        [] -> false;
-        _ -> true
+        {}          -> false;
+        {_,_,_,_,_} -> true
     end.
 
 %% @doc Given a machi filename, return a set of components in a list.
 %% The components will be:
 %% <ul>
 %%      <li>Prefix</li>
+%%      <li>CoC Namespace</li>
+%%      <li>CoC locator</li>
 %%      <li>UUID</li>
 %%      <li>Sequence number</li>
 %% </ul>
 %%
 %% Invalid filenames will return an empty list.
--spec parse_filename( Filename :: string() ) -> [ string() ].
+-spec parse_filename( Filename :: string() ) -> {} | {string(), machi_dt:coc_namespace(), machi_dt:coc_locator(), string(), string() }.
 parse_filename(Filename) ->
     case string:tokens(Filename, "^") of
-        [_Prefix, _CoC_NS, _CoC_Loc, _UUID, _SeqNo] = L ->
-            L;
+        [Prefix, CoC_NS, CoC_Loc, UUID, SeqNo] ->
+            {Prefix, CoC_NS, list_to_integer(CoC_Loc), UUID, SeqNo};
         [Prefix,          CoC_Loc, UUID, SeqNo] ->
             %% string:tokens() doesn't consider "foo^^bar" as 3 tokens {sigh}
             case re:replace(Filename, "[^^]+", "x", [global,{return,binary}]) of
                 <<"x^^x^x^x">> ->
-                    [Prefix, "", CoC_Loc, UUID, SeqNo];
+                    {Prefix, <<"">>, list_to_integer(CoC_Loc), UUID, SeqNo};
                 _ ->
-                    []
+                    {}
             end;
-        _ -> []
+        _ -> {}
     end.
 
 
 %% @doc Read the file size of a config file, which is used as the
 %% basis for a minimum sequence number.
 
--spec read_max_filenum(string(), riak_dt:coc_namespace(), riak_dt:coc_locator(), string()) ->
+-spec read_max_filenum(string(), machi_dt:coc_namespace(), machi_dt:coc_locator(), string()) ->
       non_neg_integer().
 read_max_filenum(DataDir, CoC_Namespace, CoC_Locator, Prefix) ->
     case file:read_file_info(make_config_filename(DataDir, CoC_Namespace, CoC_Locator, Prefix)) of
@@ -192,7 +194,7 @@ read_max_filenum(DataDir, CoC_Namespace, CoC_Locator, Prefix) ->
 %% @doc Increase the file size of a config file, which is used as the
 %% basis for a minimum sequence number.
 
--spec increment_max_filenum(string(), riak_dt:coc_namespace(), riak_dt:coc_locator(), string()) ->
+-spec increment_max_filenum(string(), machi_dt:coc_namespace(), machi_dt:coc_locator(), string()) ->
       ok | {error, term()}.
 increment_max_filenum(DataDir, CoC_Namespace, CoC_Locator, Prefix) ->
     try

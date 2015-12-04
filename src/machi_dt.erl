@@ -30,6 +30,7 @@
 -type chunk_pos()   :: {file_offset(), chunk_size(), file_name_s()}.
 -type chunk_size()  :: non_neg_integer().
 -type coc_namespace() :: string().
+-type coc_nl()      :: {coc, coc_namespace(), coc_locator()}.
 -type coc_locator() :: non_neg_integer().
 -type error_general() :: 'bad_arg' | 'wedged' | 'bad_checksum'.
 -type epoch_csum()  :: binary().
@@ -61,6 +62,7 @@
               chunk_pos/0,
               chunk_size/0,
               coc_namespace/0,
+              coc_nl/0,
               coc_locator/0,
               error_general/0,
               epoch_csum/0,
