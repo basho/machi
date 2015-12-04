@@ -75,4 +75,11 @@
 %% create a consistent projection ranking score.
 -define(MAX_CHAIN_LENGTH, 64).
 
+-record(chain_def_v1, {
+          name           :: atom(),
+          mode           :: pv1_consistency_mode(),
+          upi            :: [pv1_server()],
+          witnesses      :: [pv1_server()]
+         }).
+
 -endif. % !MACHI_PROJECTION_HRL

@@ -62,9 +62,8 @@ init([]) ->
     ServerSup =
         {machi_flu_sup, {machi_flu_sup, start_link, []},
          Restart, Shutdown, Type, []},
+    ChainBootstrap =
+        {machi_chain_bootstrap, {machi_chain_bootstrap, start_link, []},
+         Restart, Shutdown, worker, []},
 
-    {ok, {SupFlags, [ServerSup]}}.
-
-    %% AChild = {'AName', {'AModule', start_link, []},
-    %%           Restart, Shutdown, Type, ['AModule']},
-    %% {ok, {SupFlags, [AChild]}}.
+    {ok, {SupFlags, [ServerSup, ChainBootstrap]}}.

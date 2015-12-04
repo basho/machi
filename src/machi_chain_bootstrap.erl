@@ -22,6 +22,8 @@
 
 -behaviour(gen_server).
 
+-include("machi_projection.hrl").
+
 %% API
 -export([start_link/0]).
 
@@ -52,6 +54,8 @@ handle_info(finish_init, State) ->
     FLU_Epochs = get_latest_public_epochs(FLUs),
     FLUs_at_zero = [FLU || {FLU, 0} <- FLU_Epochs],
     lager:info("FLUs at epoch 0: ~p\n", [FLUs_at_zero]),
+    ChainDefs = get_initial_chains(),
+    perhaps_bootstrap_chains(ChainDefs, FLUs),
     {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -74,3 +78,60 @@ get_latest_public_epochs(FLUs) ->
                                   PS, public),
          {FLU, Epoch}
      end || FLU <- FLUs].
+
+get_initial_chains() ->
+    DoesNotExist = "/tmp/does/not/exist",
+    ConfigDir = case application:get_env(machi, chain_config_dir, DoesNotExist) of
+                    DoesNotExist ->
+                        DoesNotExist;
+                    Dir ->
+                        ok = filelib:ensure_dir(Dir ++ "/unused"),
+                        Dir
+                end,
+    sanitize_chain_def_records(machi_flu_sup:load_rc_d_files_from_dir(ConfigDir)).
+
+sanitize_chain_def_records(Ps) ->
+    {Sane, _} = lists:foldl(fun sanitize_chain_def_rec/2, {[], dict:new()}, Ps),
+    Sane.
+
+sanitize_chain_def_rec(Whole, {Acc, D}) ->
+    try
+        #chain_def_v1{name=Name,
+                      mode=Mode,
+                      upi=UPI,
+                      witnesses=Witnesses} = Whole,
+        true = is_atom(Name),
+        NameK = {name, Name},
+        error = dict:find(NameK, D),
+        true = (Mode == ap_mode orelse Mode == cp_mode),
+        IsPSrvr = fun(X) when is_record(X, p_srvr) -> true;
+                     (_)                           -> false
+                  end,
+        true = lists:all(IsPSrvr, UPI),
+        true = lists:all(IsPSrvr, Witnesses),
+
+        %% All is sane enough.
+        D2 = dict:store(NameK, Name, D),
+        {[Whole|Acc], D2}
+    catch _:_ ->
+            _ = lager:log(error, self(),
+                          "~s: Bad chain_def record, skipping: ~P\n",
+                          [?MODULE, Whole, 15]),
+            {Acc, D}
+    end.
+
+perhaps_bootstrap_chains([], _FLUs) ->
+    ok;
+perhaps_bootstrap_chains([CD|ChainDefs], FLUs) ->
+    #chain_def_v1{upi=UPI, witnesses=Witnesses} = CD,
+    AllNames = [Name || #p_srvr{name=Name} <- UPI ++ Witnesses],
+    case ordsets:intersection(ordsets:from_list(AllNames),
+                              ordsets:from_list(FLUs)) of
+        [] ->
+            io:format(user, "TODO: no local flus in ~P\n", [CD, 10]),
+            ok;
+        [FLU1|_] ->
+            io:format(user, "TODO: config ~p as bootstrap member of ~p\n", [FLU1, CD]),
+            yoyo
+    end,
+    perhaps_bootstrap_chains(ChainDefs, FLUs).

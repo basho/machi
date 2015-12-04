@@ -44,7 +44,7 @@
 -endif. %TEST
 
 %% API
--export([start_link/0]).
+-export([start_link/0, load_rc_d_files_from_dir/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
