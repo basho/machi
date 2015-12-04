@@ -595,26 +595,22 @@ do_server_trim_chunk(File, Offset, Size, TriggerGC, #state{flu_name=FluName}) ->
 do_server_checksum_listing(File, #state{flu_name=FluName, data_dir=DataDir}=_S) ->
     case sanitize_file_string(File) of
         ok ->
-            ok = sync_checksum_file(FluName, File),
-            CSumPath = machi_util:make_checksum_filename(DataDir, File),
-            %% TODO: If this file is legitimately bigger than our
-            %% {packet_size,N} limit, then we'll have a difficult time, eh?
-            case file:read_file(CSumPath) of
-                {ok, Bin} ->
+            case machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, File}) of
+                {ok, Pid} ->
+                    {ok, List} = machi_file_proxy:checksum_list(Pid),
+                    Bin = erlang:term_to_binary(List),
                     if byte_size(Bin) > (?PB_MAX_MSG_SIZE - 1024) ->
                             %% TODO: Fix this limitation by streaming the
                             %% binary in multiple smaller PB messages.
                             %% Also, don't read the file all at once. ^_^
                             error_logger:error_msg("~s:~w oversize ~s\n",
-                                                   [?MODULE, ?LINE, CSumPath]),
+                                                   [?MODULE, ?LINE, DataDir]),
                             {error, bad_arg};
                        true ->
                             {ok, Bin}
                     end;
-                {error, enoent} ->
-                    {error, no_such_file};
-                {error, _} ->
-                    {error, bad_arg}
+                {error, trimmed} ->
+                    {error, trimmed}
             end;
         _ ->
             {error, bad_arg}
@@ -726,21 +722,6 @@ sanitize_prefix(Prefix) ->
             ok;
         _ ->
             error
-    end.
-
-sync_checksum_file(FluName, File) ->
-    %% We just lookup the pid here - we don't start a proxy server. If
-    %% there isn't a pid for this file, then we just return ok. The
-    %% csum file was synced when the proxy was shutdown.
-    %%
-    %% If there *is* a pid, we call the sync function to ensure the
-    %% csum file is sync'd before we return. (Or an error if we get
-    %% an error).
-    case machi_flu_metadata_mgr:lookup_proxy_pid(FluName, {file, File}) of
-        undefined ->
-            ok;
-        Pid ->
-          machi_file_proxy:sync(Pid, csum)
     end.
 
 make_listener_regname(BaseName) ->

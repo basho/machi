@@ -33,7 +33,11 @@
 -define(FLU_C, machi_flu1_client).
 
 verify_file_checksums_test_() ->
-    {timeout, 60, fun() -> verify_file_checksums_test2() end}.
+    {setup,
+     fun() -> os:cmd("rm -rf ./data") end,
+     fun(_) -> os:cmd("rm -rf ./data")  end,
+     {timeout, 60, fun() -> verify_file_checksums_test2() end}
+    }.
 
 verify_file_checksums_test2() ->
     Host = "localhost",
@@ -50,8 +54,9 @@ verify_file_checksums_test2() ->
                                        Prefix, <<X:(X*8)/big>>) ||
             X <- lists:seq(1, NumChunks)],
         {ok, [{_FileSize,File}]} = ?FLU_C:list_files(Sock1, ?DUMMY_PV1_EPOCH),
-        {ok, []} = machi_admin_util:verify_file_checksums_remote(
-                     Host, TcpPort, ?DUMMY_PV1_EPOCH, File),
+        ?assertEqual({ok, []},
+                     machi_admin_util:verify_file_checksums_remote(
+                       Host, TcpPort, ?DUMMY_PV1_EPOCH, File)),
 
         %% Clobber the first 3 chunks, which are sizes 1/2/3.
         {_, Path} = machi_util:make_data_filename(DataDir,binary_to_list(File)),

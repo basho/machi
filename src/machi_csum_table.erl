@@ -8,6 +8,7 @@
          all_trimmed/2,
          calc_unwritten_bytes/1,
          split_checksum_list_blob_decode/1,
+         all/1,
          close/1, delete/1,
          foldl_chunks/3]).
 
@@ -15,7 +16,6 @@
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
--export([all/1]).
 -endif.
 
 -record(machi_csum_table,
@@ -49,9 +49,8 @@ open(CSumFilename, _Opts) ->
     {ok, C0}.
 
 -spec split_checksum_list_blob_decode(binary())-> term().
-split_checksum_list_blob_decode(_Bin) ->
-    %% binary_to_term(Bin)
-    throw(not_yet).
+split_checksum_list_blob_decode(Bin) ->
+    erlang:binary_to_term(Bin).
 
 -spec find(table(), machi_dt:file_offset(), machi_dt:file_size()) ->
                   list({machi_dt:file_offset(),

@@ -57,7 +57,8 @@
     write/4,
     trim/4,
     append/2,
-    append/4
+    append/4,
+    checksum_list/1
 ]).
 
 %% gen_server callbacks
@@ -209,6 +210,10 @@ append(Pid, ClientMeta, Extra, Data) when is_pid(Pid) andalso is_list(ClientMeta
 append(_Pid, ClientMeta, Extra, _Data) ->
     lager:warning("Bad arg to append: ClientMeta ~p, Extra ~p", [ClientMeta, Extra]),
     {error, bad_arg}.
+
+-spec checksum_list(pid()) -> {ok, list()}.
+checksum_list(Pid) ->
+    gen_server:call(Pid, {checksum_list}, ?TIMEOUT).
 
 %% gen_server callbacks
 
@@ -429,6 +434,10 @@ handle_call({append, ClientMeta, Extra, Data}, _From,
                 [iolist_size(Data), EofP, F, NewEof]),
     {reply, Resp, State#state{appends = {T+1, NewErr},
                               eof_position = NewEof}};
+
+handle_call({checksum_list}, _FRom, State = #state{csum_table=T}) ->
+    All = machi_csum_table:all(T),
+    {reply, {ok, All}, State};
 
 handle_call(Req, _From, State) ->
     lager:warning("Unknown call: ~p", [Req]),
