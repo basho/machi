@@ -110,7 +110,7 @@ write(#machi_csum_table{table=T} = CsumT, Offset, Size, CSum,
                {RO, RS, RCsum} when RO =:= Offset + Size ->
                    [{put,
                      sext:encode({RO, RS}),
-                     sext:encode({RCsum})}];
+                     sext:encode(RCsum)}];
                undefined ->
                    []
            end,

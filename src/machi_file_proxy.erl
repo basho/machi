@@ -249,27 +249,22 @@ handle_call({sync, data}, _From, State = #state{ data_filehandle = FHd }) ->
     R = file:sync(FHd),
     {reply, R, State};
 
-handle_call({sync, csum}, _From, State = #state{ csum_table = T }) ->
-    R = machi_csum_table:sync(T),
-    {reply, R, State};
+handle_call({sync, csum}, _From, State) ->
+    %% machi_csum_table always writes in {sync, true} option, so here
+    %% explicit sync isn't actually needed.
+    {reply, ok, State};
 
 handle_call({sync, all}, _From, State = #state{filename = F,
                                                data_filehandle = FHd,
-                                               csum_table = T
+                                               csum_table = _T
                                               }) ->
-    R = machi_csum_table:sync(T),
-    R1 = file:sync(FHd),
-    Resp = case {R, R1} of
-        {ok, ok} -> ok;
-        {ok, O1} ->
-                   lager:error("Got ~p during a data file sync on file ~p", [O1, F]),
-                   O1;
-        {O2, ok} ->
-                   lager:error("Got ~p during a csum file sync on file ~p", [O2, F]),
-                   O2;
-        {O3, O4} ->
-                   lager:error("Got ~p ~p syncing all files for file ~p", [O3, O4, F]),
-                   {O3, O4}
+    Resp = case file:sync(FHd) of
+               ok ->
+                   ok;
+               Error ->
+                   lager:error("Got ~p syncing all files for file ~p",
+                               [Error, F]),
+                   Error
     end,
     {reply, Resp, State};
 
@@ -545,7 +540,6 @@ terminate(Reason, #state{filename = F,
         undefined ->
             noop; %% file deleted
         _ ->
-            ok = machi_csum_table:sync(T),
             ok = machi_csum_table:close(T)
     end,
     ok.
@@ -633,7 +627,11 @@ read_all_ranges(FHd, Filename, [{Offset, Size, TaggedCsum}|T], ReadChunks, Trimm
         eof ->
             read_all_ranges(FHd, Filename, T, ReadChunks, TrimmedChunks);
         {ok, Bytes} when byte_size(Bytes) == Size ->
-            {Tag, Ck} = machi_util:unmake_tagged_csum(TaggedCsum),
+            {Tag, Ck} = case TaggedCsum of
+                            none -> {?CSUM_TAG_NONE, ooops};
+                            _ ->
+                                machi_util:unmake_tagged_csum(TaggedCsum)
+                        end,
             case check_or_make_tagged_csum(Tag, Ck, Bytes) of
                 {error, Bad} ->
                     lager:error("Bad checksum; got ~p, expected ~p",

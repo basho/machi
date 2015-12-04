@@ -38,7 +38,7 @@ eqc_test_() ->
     {timeout, 60,
      {spawn,
       [
-       {timeout, 30, ?_assertEqual(true, eqc:quickcheck(eqc:testing_time(15, ?QC_OUT(prop_ok()))))}
+       ?_assertEqual(true, eqc:quickcheck(eqc:testing_time(30, ?QC_OUT(prop_ok()))))
       ]
      }}.
 
