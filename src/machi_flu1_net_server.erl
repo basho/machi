@@ -45,12 +45,12 @@
 -endif. % TEST
 
 -record(state, {
-          %% Transport related items passed from Ranch
+          %% Ranch's transport management stuff
           ref         :: ranch:ref(),
           socket      :: socket(),
           transport   :: module(),
 
-          %% Machi application related items below
+          %% Machi FLU configurations, common for low and high
           data_dir    :: string(),
           witness     :: boolean(),
           pb_mode     :: undefined | high | low,
@@ -58,14 +58,14 @@
           %% - Used in spawning CR client in high mode
           proj_store  :: pid(),
 
-          %% Low mode only
+          %% Low mode only items
           %% Current best knowledge, used for wedge_self / bad_epoch check
           epoch_id    :: undefined | machi_dt:epoch_id(),
           %% Used in dispatching append_chunk* reqs to the
           %% append serializing process
-          flu_name    :: atom(),
+          flu_name    :: pv1_server(),
           %% Used in server_wedge_status to lookup the table
-          epoch_tab   :: ets:tid(),
+          epoch_tab   :: ets:tab(),
 
           %% High mode only
           high_clnt   :: pid(),
@@ -106,15 +106,15 @@ handle_cast(_Msg, S) ->
     {noreply, S}.
 
 %% TODO: Other transport support needed?? TLS/SSL, SCTP
-handle_info({tcp, Sock, Data}=_Info, #state{socket=Sock}=S) ->
+handle_info({tcp, Socket, Data}=_Info, #state{socket=Socket}=S) ->
     lager:debug("~s:handle_info: ~w", [?MODULE, _Info]),
-    transport_received(Sock, Data, S);
-handle_info({tcp_closed, Sock}=_Info, #state{socket=Sock}=S) ->
+    transport_received(Socket, Data, S);
+handle_info({tcp_closed, Socket}=_Info, #state{socket=Socket}=S) ->
     lager:debug("~s:handle_info: ~w", [?MODULE, _Info]),
-    transport_closed(Sock, S);
-handle_info({tcp_error, Sock, Reason}=_Info, #state{socket=Sock}=S) ->
+    transport_closed(Socket, S);
+handle_info({tcp_error, Socket, Reason}=_Info, #state{socket=Socket}=S) ->
     lager:debug("~s:handle_info: ~w", [?MODULE, _Info]),
-    transport_error(Sock, Reason, S);
+    transport_error(Socket, Reason, S);
 handle_info(_Info, S) ->
     lager:warning("~s:handle_info UNKNOWN message: ~w", [?MODULE, _Info]),
     {noreply, S}.
@@ -143,17 +143,18 @@ transport_received(Socket, Bin, #state{transport=Transport}=S) ->
         case machi_pb:decode_mpb_ll_request(Bin) of
             LL_req when LL_req#mpb_ll_request.do_not_alter == 2 ->
                 {R, NewS} = do_pb_ll_request(LL_req, S),
-                {maybe_encode_response(R), mode(low, NewS)};
+                {maybe_encode_response(R), set_mode(low, NewS)};
             _ ->
                 HL_req = machi_pb:decode_mpb_request(Bin),
                 1 = HL_req#mpb_request.do_not_alter,
                 {R, NewS} = do_pb_hl_request(HL_req, make_high_clnt(S)),
-                {machi_pb:encode_mpb_response(R), mode(high, NewS)}
+                {machi_pb:encode_mpb_response(R), set_mode(high, NewS)}
         end,
-    if RespBin == async_no_response ->
+    case RespBin of
+        async_no_response ->
             Transport:setopts(Socket, [{active, once}]),
             {noreply, S2};
-       true ->
+        _ ->
             case Transport:send(Socket, RespBin) of
                 ok ->
                     Transport:setopts(Socket, [{active, once}]),
@@ -168,7 +169,7 @@ transport_closed(_Socket, S) ->
     {stop, normal, S}.
 
 -spec transport_error(socket(), term(), state()) -> no_return().
-transport_error(Sock, Reason, #state{transport=Transport}=_S) ->
+transport_error(Socket, Reason, #state{transport=Transport}=_S) ->
     Msg = io_lib:format("Socket error ~w", [Reason]),
     R = #mpb_ll_response{req_id= <<>>,
                          generic=#mpb_errorresp{code=1, msg=Msg}},
@@ -180,18 +181,20 @@ transport_error(Sock, Reason, #state{transport=Transport}=_S) ->
     %%%%       Error in process <0.545.0> with exit value: {badarg,[{erlang,port_command,.......
     %%%% TODO: is this what causes the intermittent PULSE deadlock errors?
     %%%% _ = (catch gen_tcp:send(Sock, _Resp)), timer:sleep(1000),
-    (catch Transport:close(Sock)),
-    %% TODO: better to exit with `Reason'?
+    (catch Transport:close(Socket)),
+    _ = lager:warning("Socket error (~w -> ~w): ~w",
+                      [Transport:sockname(Socket), Transport:peername(Socket), Reason]),
+    %% TODO: better to exit with `Reason' without logging?
     exit(normal).
 
-maybe_encode_response(async_no_response=X) ->
-    X;
+maybe_encode_response(async_no_response=R) ->
+    R;
 maybe_encode_response(R) ->
     machi_pb:encode_mpb_ll_response(R).
 
-mode(Mode, #state{pb_mode=undefined}=S) ->
+set_mode(Mode, #state{pb_mode=undefined}=S) ->
     S#state{pb_mode=Mode};
-mode(_, S) ->
+set_mode(_, S) ->
     S.
 
 %%%% Low PB mode %%%%
@@ -208,7 +211,6 @@ do_pb_ll_request(PB_request, S) ->
               when LowCmd =:= low_proj;
                    LowCmd =:= low_wedge_status;
                    LowCmd =:= low_list_files ->
-                %% Skip wedge check for projection commands!
                 %% Skip wedge check for these unprivileged commands
                 {Rs, NewS} = do_pb_ll_request3(Cmd0, S),
                 {RqID, Cmd0, Rs, NewS};
@@ -254,6 +256,7 @@ do_pb_ll_request3({low_wedge_status, _EpochID}, S) ->
     {do_server_wedge_status(S), S};
 do_pb_ll_request3({low_proj, PCMD}, S) ->
     {do_server_proj_request(PCMD, S), S};
+
 %% Witness status *matters* below
 do_pb_ll_request3({low_append_chunk, _EpochID, CoC_Namespace, CoC_Locator,
                    Prefix, Chunk, CSum_tag,
@@ -285,6 +288,7 @@ do_pb_ll_request3({low_delete_migration, _EpochID, File},
 do_pb_ll_request3({low_trunc_hack, _EpochID, File},
                   #state{witness=false}=S) ->
     {do_server_trunc_hack(File, S), S};
+
 do_pb_ll_request3(_, #state{witness=true}=S) ->
     {{error, bad_arg}, S}.                       % TODO: new status code??
 
@@ -361,7 +365,8 @@ do_server_append_chunk2(CoC_Namespace, CoC_Locator,
         throw:{bad_csum, _CS} ->
             {error, bad_checksum};
         error:badarg ->
-            error_logger:error_msg("Message send to ~p gave badarg, make certain server is running with correct registered name\n", [?MODULE]),
+            lager:error("badarg at ~w:do_server_append_chunk2:~w ~w",
+                        [?MODULE, ?LINE, erlang:get_stacktrace()]),
             {error, bad_arg}
     end.
 

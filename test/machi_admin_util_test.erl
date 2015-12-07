@@ -44,45 +44,46 @@ verify_file_checksums_test2() ->
     TcpPort = 32958,
     DataDir = "./data",
     W_props = [{initial_wedged, false}],
-    {ok, SupPid} = machi_sup:start_link(),
-    machi_flu1_test:start_flu_package(verify1_flu, TcpPort, DataDir,
-                                          W_props),
-    Sock1 = ?FLU_C:connect(#p_srvr{address=Host, port=TcpPort}),
     try
-        Prefix = <<"verify_prefix">>,
-        NumChunks = 10,
-        [{ok, _} = ?FLU_C:append_chunk(Sock1, ?DUMMY_PV1_EPOCH,
-                                       Prefix, <<X:(X*8)/big>>) ||
-            X <- lists:seq(1, NumChunks)],
-        {ok, [{_FileSize,File}]} = ?FLU_C:list_files(Sock1, ?DUMMY_PV1_EPOCH),
-        ?assertEqual({ok, []},
-                     machi_admin_util:verify_file_checksums_remote(
-                       Host, TcpPort, ?DUMMY_PV1_EPOCH, File)),
+        machi_test_util:start_flu_package(verify1_flu, TcpPort, DataDir,
+                                          W_props),
+        Sock1 = ?FLU_C:connect(#p_srvr{address=Host, port=TcpPort}),
+        try
+            Prefix = <<"verify_prefix">>,
+            NumChunks = 10,
+            [{ok, _} = ?FLU_C:append_chunk(Sock1, ?DUMMY_PV1_EPOCH,
+                                           Prefix, <<X:(X*8)/big>>) ||
+                X <- lists:seq(1, NumChunks)],
+            {ok, [{_FileSize,File}]} = ?FLU_C:list_files(Sock1, ?DUMMY_PV1_EPOCH),
+            ?assertEqual({ok, []},
+                         machi_admin_util:verify_file_checksums_remote(
+                           Host, TcpPort, ?DUMMY_PV1_EPOCH, File)),
 
-        %% Clobber the first 3 chunks, which are sizes 1/2/3.
-        {_, Path} = machi_util:make_data_filename(DataDir,binary_to_list(File)),
-        {ok, FH} = file:open(Path, [read,write]),
-        {ok, _} = file:position(FH, ?MINIMUM_OFFSET),
-        ok = file:write(FH, "y"),
-        ok = file:write(FH, "yo"),
-        ok = file:write(FH, "yo!"),
-        ok = file:close(FH),
+            %% Clobber the first 3 chunks, which are sizes 1/2/3.
+            {_, Path} = machi_util:make_data_filename(DataDir,binary_to_list(File)),
+            {ok, FH} = file:open(Path, [read,write]),
+            {ok, _} = file:position(FH, ?MINIMUM_OFFSET),
+            ok = file:write(FH, "y"),
+            ok = file:write(FH, "yo"),
+            ok = file:write(FH, "yo!"),
+            ok = file:close(FH),
 
-        %% Check the local flavor of the API: should be 3 bad checksums
-        {ok, Res1} = machi_admin_util:verify_file_checksums_local(
-                       Host, TcpPort, ?DUMMY_PV1_EPOCH, Path),
-        3 = length(Res1),
+            %% Check the local flavor of the API: should be 3 bad checksums
+            {ok, Res1} = machi_admin_util:verify_file_checksums_local(
+                           Host, TcpPort, ?DUMMY_PV1_EPOCH, Path),
+            3 = length(Res1),
 
-        %% Check the remote flavor of the API: should be 3 bad checksums
-        {ok, Res2} = machi_admin_util:verify_file_checksums_remote(
-                       Host, TcpPort, ?DUMMY_PV1_EPOCH, File),
-        3 = length(Res2),
+            %% Check the remote flavor of the API: should be 3 bad checksums
+            {ok, Res2} = machi_admin_util:verify_file_checksums_remote(
+                           Host, TcpPort, ?DUMMY_PV1_EPOCH, File),
+            3 = length(Res2),
 
-        ok
+            ok
+        after
+            catch ?FLU_C:quit(Sock1)
+        end
     after
-        catch ?FLU_C:quit(Sock1),
-        catch machi_flu1_test:stop_flu_package(verify1_flu),
-        exit(SupPid, normal)
+        catch machi_test_util:stop_flu_package()
     end.
 
 -endif. % !PULSE

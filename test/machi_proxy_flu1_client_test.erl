@@ -32,17 +32,14 @@
 
 api_smoke_test() ->
     RegName = api_smoke_flu,
-    Host = "localhost",
     TcpPort = 57124,
     DataDir = "./data.api_smoke_flu",
     W_props = [{active_mode, false},{initial_wedged, false}],
     Prefix = <<"prefix">>,
 
-    {ok, SupPid} = machi_sup:start_link(),
-    machi_flu1_test:start_flu_package(RegName, TcpPort, DataDir, W_props),
-
     try
-        I = #p_srvr{name=RegName, address=Host, port=TcpPort},
+        {[I], _, _} = machi_test_util:start_flu_package(
+                        RegName, TcpPort, DataDir, W_props),
         {ok, Prox1} = ?MUT:start_link(I),
         try
             FakeEpoch = ?DUMMY_PV1_EPOCH,
@@ -50,13 +47,13 @@ api_smoke_test() ->
                                           FakeEpoch, Prefix, <<"data">>,
                                           infinity) || _ <- lists:seq(1,5)],
             %% Stop the FLU, what happens?
-            machi_flu1_test:stop_flu_package(RegName),
+            machi_test_util:stop_flu_package(),
             [{error,partition} = ?MUT:append_chunk(Prox1,
                                 FakeEpoch, Prefix, <<"data-stopped1">>,
                                 infinity) || _ <- lists:seq(1,3)],
             %% Start the FLU again, we should be able to do stuff immediately
-            machi_flu1_test:start_flu_package(RegName, TcpPort, DataDir,
-                                                   [save_data_dir|W_props]),
+            machi_test_util:start_flu_package(RegName, TcpPort, DataDir,
+                                              [save_data_dir|W_props]),
             MyChunk = <<"my chunk data">>,
             {ok, {MyOff,MySize,MyFile}} =
                 ?MUT:append_chunk(Prox1, FakeEpoch, Prefix, MyChunk,
@@ -103,8 +100,7 @@ api_smoke_test() ->
             _ = (catch ?MUT:quit(Prox1))
         end
     after
-        (catch machi_flu1_test:stop_flu_package(RegName)),
-        exit(SupPid, normal)
+        (catch machi_test_util:stop_flu_package())
     end.
 
 flu_restart_test_() ->
@@ -112,15 +108,13 @@ flu_restart_test_() ->
 
 flu_restart_test2() ->
     RegName = a,
-    Host = "localhost",
     TcpPort = 57125,
     DataDir = "./data.api_smoke_flu2",
     W_props = [{initial_wedged, false}, {active_mode, false}],
-    {ok, SupPid} = machi_sup:start_link(),
-    machi_flu1_test:start_flu_package(RegName, TcpPort, DataDir, W_props),
 
     try
-        I = #p_srvr{name=RegName, address=Host, port=TcpPort},
+        {[I], _, _} = machi_test_util:start_flu_package(
+                        RegName, TcpPort, DataDir, W_props),
         {ok, Prox1} = ?MUT:start_link(I),
         try
             FakeEpoch = ?DUMMY_PV1_EPOCH,
@@ -140,7 +134,7 @@ flu_restart_test2() ->
             {ok, EpochID} = ?MUT:get_epoch_id(Prox1),
             {ok, EpochID} = ?MUT:get_latest_epochid(Prox1, public),
             {ok, EpochID} = ?MUT:get_latest_epochid(Prox1, private),
-            ok = machi_flu1_test:stop_flu_package(RegName), timer:sleep(50),
+            ok = machi_test_util:stop_flu_package(), timer:sleep(50),
 
             %% Now that the last proxy op was successful and only
             %% after did we stop the FLU, let's check that both the
@@ -296,25 +290,24 @@ flu_restart_test2() ->
                 ],
 
             [begin
-                 machi_flu1_test:start_flu_package(
+                 machi_test_util:start_flu_package(
                           RegName, TcpPort, DataDir,
                           [save_data_dir|W_props]),
                  _ = Fun(line),
                  ok = Fun(run),
                  ok = Fun(run),
-                 ok = machi_flu1_test:stop_flu_package(RegName),
+                 ok = machi_test_util:stop_flu_package(),
                  {error, partition} = Fun(stop),
                  {error, partition} = Fun(stop),
                  ok
              end || Fun <- ExpectedOps ],
             ok
         after
-            _ = (catch ?MUT:quit(Prox1)),
-            exit(SupPid, normal)
+            _ = (catch ?MUT:quit(Prox1))
         end
     after
-        (catch machi_flu1_test:stop_flu_package(RegName))
+        (catch machi_test_util:stop_flu_package())
     end.
-    
+
 -endif. % !PULSE
 -endif. % TEST

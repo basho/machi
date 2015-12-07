@@ -34,21 +34,15 @@ smoke_test_() ->
     {timeout, 5*60, fun() -> smoke_test2() end}.
 
 smoke_test2() ->
-    Port = 5720,
-    Ps = [#p_srvr{name=a, address="localhost", port=Port, props="./data.a"}
-         ],
-    D = orddict:from_list([{P#p_srvr.name, P} || P <- Ps]),
+    PortBase = 5720,
     ok = application:set_env(machi, max_file_size, 1024*1024),
-    
-    [os:cmd("rm -rf " ++ P#p_srvr.props) || P <- Ps],
-    {ok, SupPid} = machi_sup:start_link(),
     try
-        [begin
-             #p_srvr{name=Name, port=Port, props=Dir} = P,
-             {ok, _} = machi_flu_psup:start_flu_package(Name, Port, Dir, [])
-         end || P <- Ps],
-        ok = machi_chain_manager1:set_chain_members(a_chmgr, D),
-        [machi_chain_manager1:trigger_react_to_env(a_chmgr) || _ <-lists:seq(1,5)],
+        {Ps, MgrNames, Dirs} = machi_test_util:start_flu_packages(
+                                 1, PortBase, "./data.", []),
+        D = orddict:from_list([{P#p_srvr.name, P} || P <- Ps]),
+        M0 = hd(MgrNames),
+        ok = machi_chain_manager1:set_chain_members(M0, D),
+        [machi_chain_manager1:trigger_react_to_env(M0) || _ <-lists:seq(1,5)],
 
         {ok, Clnt} = ?C:start_link(Ps),
         try
@@ -94,7 +88,8 @@ smoke_test2() ->
 
             File1Bin = binary_to_list(File1),
             [begin
-                 #p_srvr{name=Name, port=Port, props=Dir} = P,
+                 #p_srvr{name=Name, props=Props} = P,
+                 Dir = proplists:get_value(data_dir, Props),
                  ?assertEqual({ok, [File1Bin]},
                               file:list_dir(filename:join([Dir, "data"]))),
                  FileListFileName = filename:join([Dir, "known_files_" ++ atom_to_list(Name)]),
@@ -122,7 +117,8 @@ smoke_test2() ->
             %% Make sure everything was trimmed
             File = binary_to_list(Filex),
             [begin
-                 #p_srvr{name=Name, port=_Port, props=Dir} = P,
+                 #p_srvr{name=Name, props=Props} = P,
+                 Dir = proplists:get_value(data_dir, Props),
                  ?assertEqual({ok, []},
                               file:list_dir(filename:join([Dir, "data"]))),
                  FileListFileName = filename:join([Dir, "known_files_" ++ atom_to_list(Name)]),
@@ -139,10 +135,7 @@ smoke_test2() ->
             (catch ?C:quit(Clnt))
         end
     after
-        exit(SupPid, normal),
-        [os:cmd("rm -rf " ++ P#p_srvr.props) || P <- Ps],
-        machi_util:wait_for_death(SupPid, 100),
-        ok
+        machi_test_util:stop_flu_packages()
     end.
 
 -endif. % !PULSE

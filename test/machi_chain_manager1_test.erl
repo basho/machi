@@ -275,14 +275,14 @@ make_prop_ets() ->
 
 smoke0_test() ->
     TcpPort = 6623,
-    {_, [Pa], [M0]} = machi_psup_test_util:start_flu_packages(
-                          1, "./data.", TcpPort, []),
+    {[Pa], [M0], _Dirs} = machi_test_util:start_flu_packages(
+                            1, TcpPort, "./data.", []),
     {ok, FLUaP} = ?FLU_PC:start_link(Pa),
     try
         pong = ?MGR:ping(M0)
     after
         ok = ?FLU_PC:quit(FLUaP),
-        machi_psup_test_util:stop_flu_packages()
+        machi_test_util:stop_flu_packages()
     end.
 
 smoke1_test_() ->
@@ -291,12 +291,13 @@ smoke1_test_() ->
 smoke1_test2() ->
     TcpPort = 62777,
     MgrOpts = [{active_mode,false}],
-    {_, Ps, MgrNames} = machi_psup_test_util:start_flu_packages(
-                          3, "./data.", TcpPort, MgrOpts),
-    MembersDict = machi_projection:make_members_dict(Ps),
-    [machi_chain_manager1:set_chain_members(M, MembersDict) || M <- MgrNames],
-    Ma = hd(MgrNames),
     try
+        {Ps, MgrNames, _Dirs} = machi_test_util:start_flu_packages(
+                                  3, TcpPort, "./data.", MgrOpts),
+        MembersDict = machi_projection:make_members_dict(Ps),
+        [machi_chain_manager1:set_chain_members(M, MembersDict) || M <- MgrNames],
+        Ma = hd(MgrNames),
+
         {ok, P1} = ?MGR:test_calc_projection(Ma, false),
         % DERP! Check for race with manager's proxy vs. proj listener
         ok = lists:foldl(
@@ -315,22 +316,23 @@ smoke1_test2() ->
 
         ok
     after
-        machi_psup_test_util:stop_flu_packages()
+        machi_test_util:stop_flu_packages()
     end.
 
 nonunanimous_setup_and_fix_test() ->
     TcpPort = 62877,
     MgrOpts = [{active_mode,false}],
-    {_, Ps, [Ma,Mb]} = machi_psup_test_util:start_flu_packages(
-                          2, "./data.", TcpPort, MgrOpts),
+    {Ps, [Ma,Mb], _Dirs} = machi_test_util:start_flu_packages(
+                             2, TcpPort, "./data.", MgrOpts),
     MembersDict = machi_projection:make_members_dict(Ps),
     [machi_chain_manager1:set_chain_members(M, MembersDict) || M <- [Ma, Mb]],
 
     [Proxy_a, Proxy_b] = Proxies =
         [element(2, ?FLU_PC:start_link(P)) || P <- Ps],
-    ok = machi_chain_manager1:set_chain_members(Ma, MembersDict, []),
-    ok = machi_chain_manager1:set_chain_members(Mb, MembersDict, []),
+
     try
+        ok = machi_chain_manager1:set_chain_members(Ma, MembersDict, []),
+        ok = machi_chain_manager1:set_chain_members(Mb, MembersDict, []),
         {ok, P1} = ?MGR:test_calc_projection(Ma, false),
 
         P1a = machi_projection:update_checksum(
@@ -374,7 +376,7 @@ nonunanimous_setup_and_fix_test() ->
         ok
     after
         [ok = ?FLU_PC:quit(X) || X <- Proxies],
-        machi_psup_test_util:stop_flu_packages()
+        machi_test_util:stop_flu_packages()
     end.
 
 unanimous_report_test() ->
