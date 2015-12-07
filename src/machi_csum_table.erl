@@ -25,6 +25,9 @@
 -type table() :: #machi_csum_table{}.
 -type byte_sequence() :: { Offset :: non_neg_integer(),
                            Size   :: pos_integer()|infinity }.
+-type chunk() :: {Offset :: machi_dt:file_offset(),
+                  Size :: machi_dt:chunk_size(),
+                  machi_dt:chunk_csum() | trimmed | none}.
 
 -export_type([table/0]).
 
@@ -48,14 +51,16 @@ open(CSumFilename, _Opts) ->
             table=T},
     {ok, C0}.
 
--spec split_checksum_list_blob_decode(binary())-> term().
+-spec split_checksum_list_blob_decode(binary())-> [chunk()].
 split_checksum_list_blob_decode(Bin) ->
     erlang:binary_to_term(Bin).
 
--spec find(table(), machi_dt:file_offset(), machi_dt:file_size()) ->
-                  list({machi_dt:file_offset(),
-                        machi_dt:file_size(),
-                        machi_dt:chunk_csum()|trimmed}).
+
+-define(has_overlap(LeftOffset, LeftSize, RightOffset, RightSize),
+        ((LeftOffset - (RightOffset+RightSize)) * (LeftOffset+LeftSize - RightOffset) < 0)).
+
+-spec find(table(), machi_dt:file_offset(), machi_dt:chunk_size())
+          -> [chunk()].
 find(#machi_csum_table{table=T}, Offset, Size) ->
     {ok, I} = eleveldb:iterator(T, [], keys_only),
     EndKey = sext:encode({Offset+Size, 0}),
@@ -75,22 +80,26 @@ find(#machi_csum_table{table=T}, Offset, Size) ->
     _ = eleveldb:iterator_close(I),
     FoldFun = fun({K, V}, Acc) ->
                       {TargetOffset, TargetSize} = sext:decode(K),
-                      case has_overlap(TargetOffset, TargetSize, Offset, Size) of
+                      case ?has_overlap(TargetOffset, TargetSize, Offset, Size) of
                           true ->
                               [{TargetOffset, TargetSize, sext:decode(V)}|Acc];
                           false ->
                               Acc
                       end;
-                 (_KV, _) ->
-                         throw(_KV)
+                 (_K, Acc) ->
+                      lager:error("~p wrong option", [_K]),
+                      Acc
               end,
     lists:reverse(eleveldb_fold(T, FirstKey, EndKey, FoldFun, [])).
 
-has_overlap(LeftOffset, LeftSize, RightOffset, RightSize) ->
-    (LeftOffset - (RightOffset+RightSize)) * (LeftOffset+LeftSize - RightOffset) < 0.
 
 %% @doc Updates all chunk info, by deleting existing entries if exists
 %% and putting new chunk info
+-spec write(table(),
+            machi_dt:file_offset(), machi_dt:chunk_size(),
+            machi_dt:chunk_csum()|'none'|'trimmed',
+            undefined|chunk(), undefined|chunk()) ->
+                   ok | {error, term()}.
 write(#machi_csum_table{table=T} = CsumT, Offset, Size, CSum,
       LeftUpdate, RightUpdate) ->
     PutOps =
@@ -120,8 +129,7 @@ write(#machi_csum_table{table=T} = CsumT, Offset, Size, CSum,
     eleveldb:write(T, DeleteOps ++ PutOps, [{sync, true}]).
 
 -spec find_leftneighbor(table(), non_neg_integer()) ->
-                               undefined |
-                               {non_neg_integer(), machi_dt:chunk_size(), trimmed|machi_dt:chunk_csum()}.
+                               undefined | chunk().
 find_leftneighbor(CsumT, Offset) ->
     case find(CsumT, Offset, 1) of
         [] -> undefined;
@@ -130,8 +138,7 @@ find_leftneighbor(CsumT, Offset) ->
     end.
 
 -spec find_rightneighbor(table(), non_neg_integer()) ->
-                                undefined |
-                                {non_neg_integer(), machi_dt:chunk_size(), trimmed|machi_dt:chunk_csum()}.
+                                undefined | chunk().
 find_rightneighbor(CsumT, Offset) ->
     case find(CsumT, Offset, 1) of
         [] -> undefined;
@@ -141,7 +148,7 @@ find_rightneighbor(CsumT, Offset) ->
     end.
 
 -spec write(table(), machi_dt:file_offset(), machi_dt:file_size(),
-            machi_dt:chunk_csum()|trimmed) ->
+            machi_dt:chunk_csum()|none|trimmed) ->
                    ok | {error, trimmed|file:posix()}.
 write(CsumT, Offset, Size, CSum) ->
     write(CsumT, Offset, Size, CSum, undefined, undefined).
@@ -212,20 +219,19 @@ delete(#machi_csum_table{table=T, file=F}) ->
     catch eleveldb:close(T),
     %% TODO change this to directory walk
     case os:cmd("rm -rf " ++ F) of
-        ok -> ok;
-        {error, enoent} -> ok;
         "" -> ok;
         E -> E
     end.
 
--spec foldl_chunks(fun(({non_neg_integer(), non_neg_integer(), term()},
-                        Acc0 :: term())
-                       -> Acc :: term()),
+-spec foldl_chunks(fun((chunk(),  Acc0 :: term()) -> Acc :: term()),
                    Acc0 :: term(), table()) -> Acc :: term().
 foldl_chunks(Fun, Acc0, #machi_csum_table{table=T}) ->
     FoldFun = fun({K, V}, Acc) ->
                       {Offset, Len} = sext:decode(K),
-                      Fun({Offset, Len, sext:decode(V)}, Acc)
+                      Fun({Offset, Len, sext:decode(V)}, Acc);
+                 (_K, Acc) ->
+                      _ = lager:error("~p: wrong option?", [_K]),
+                      Acc
               end,
     eleveldb:fold(T, FoldFun, Acc0, [{verify_checksums, true}]).
 
@@ -259,7 +265,10 @@ build_unwritten_bytes_list([{CO, CS, _Ck}|Rest], _LastOffset, Acc) ->
 %%       {'-', Offset + Size, '$1'},
 %%       {'-', Offset, {'+', '$1', '$2'}}}}.
 
-
+-spec eleveldb_fold(eleveldb:db_ref(), binary(), binary(),
+                    fun(({binary(), binary()}, AccType::term()) -> AccType::term()),
+                    AccType0::term()) ->
+                           AccType::term().
 eleveldb_fold(Ref, Start, End, FoldFun, InitAcc) ->
     {ok, Iterator} = eleveldb:iterator(Ref, []),
     try
@@ -271,6 +280,11 @@ eleveldb_fold(Ref, Start, End, FoldFun, InitAcc) ->
         eleveldb:iterator_close(Iterator)
     end.
 
+-spec eleveldb_do_fold({ok, binary(), binary()}|{error, iterator_closed|invalid_iterator}|{ok,binary()},
+                       eleveldb:itr_ref(), binary(),
+                       fun(({binary(), binary()}, AccType::term()) -> AccType::term()),
+                       AccType::term()) ->
+                              AccType::term().
 eleveldb_do_fold({ok, Key, Value}, _, End, FoldFun, Acc)
   when End < Key ->
     FoldFun({Key, Value}, Acc);
@@ -284,6 +298,3 @@ eleveldb_do_fold({error, iterator_closed}, _, _, _, Acc) ->
 eleveldb_do_fold({error, invalid_iterator}, _, _, _, Acc) ->
     %% Probably reached to end
     Acc.
-
-    
-    

@@ -180,9 +180,9 @@ checksum_list(#yessir{name=Name,chunk_size=ChunkSize}, _EpochID, File) ->
         MaxOffset ->
             C = machi_util:make_tagged_csum(client_sha,
                                             make_csum(Name, ChunkSize)),
-            Cs = [machi_csum_table:encode_csum_file_entry_bin(Offset, ChunkSize, C) ||
-                    Offset <- lists:seq(?MINIMUM_OFFSET, MaxOffset, ChunkSize)],
-            {ok, Cs}
+            Cs = [{Offset, ChunkSize, C} ||
+                     Offset <- lists:seq(?MINIMUM_OFFSET, MaxOffset, ChunkSize)],
+            {ok, term_to_binary(Cs)}
     end.
 
 %% @doc Fetch the list of chunk checksums for `File'.

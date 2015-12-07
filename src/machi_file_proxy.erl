@@ -600,7 +600,8 @@ check_or_make_tagged_csum(OtherTag, _ClientCsum, _Data) ->
               Size       :: non_neg_integer(),
               NoChunk    :: boolean(),
               NoChecksum :: boolean()
-             ) -> {ok, Chunks :: [{string(), Offset::non_neg_integer(), binary(), Csum :: binary()}]} |
+             ) -> {ok, {Chunks :: [{string(), Offset::non_neg_integer(), binary(), Csum :: binary()}],
+                        Trimmed :: [{string(), Offset::non_neg_integer(), Size::non_neg_integer()}]}} |
                   {error, bad_checksum} |
                   {error, partial_read} |
                   {error, file:posix()} |
@@ -624,6 +625,14 @@ do_read(FHd, Filename, CsumTable, Offset, Size, _, _) ->
     ChunkCsums = machi_csum_table:find(CsumTable, Offset, Size),
     read_all_ranges(FHd, Filename, ChunkCsums, [], []).
 
+-spec read_all_ranges(file:io_device(), string(),
+                      [{non_neg_integer(),non_neg_integer(),trimmed|binary()}],
+                      Chunks :: [{string(), Offset::non_neg_integer(), binary(), Csum::binary()}],
+                      Trimmed :: [{string(), Offset::non_neg_integer(), Size::non_neg_integer()}]) ->
+                             {ok, {
+                                Chunks :: [{string(), Offset::non_neg_integer(), binary(), Csum::binary()}],
+                                Trimmed :: [{string(), Offset::non_neg_integer(), Size::non_neg_integer()}]}} |
+                             {erorr, term()|partial_read}.
 read_all_ranges(_, _, [], ReadChunks, TrimmedChunks) ->
     %% TODO: currently returns empty list of trimmed chunks
     {ok, {lists:reverse(ReadChunks), lists:reverse(TrimmedChunks)}};
@@ -635,12 +644,13 @@ read_all_ranges(FHd, Filename, [{Offset, Size, TaggedCsum}|T], ReadChunks, Trimm
     case file:pread(FHd, Offset, Size) of
         eof ->
             read_all_ranges(FHd, Filename, T, ReadChunks, TrimmedChunks);
+        {ok, Bytes} when byte_size(Bytes) == Size, TaggedCsum =:= none ->
+            read_all_ranges(FHd, Filename, T,
+                            [{Filename, Offset, Bytes,
+                              machi_util:make_tagged_csum(none, <<>>)}|ReadChunks],
+                            TrimmedChunks);
         {ok, Bytes} when byte_size(Bytes) == Size ->
-            {Tag, Ck} = case TaggedCsum of
-                            none -> {?CSUM_TAG_NONE, ooops};
-                            _ ->
-                                machi_util:unmake_tagged_csum(TaggedCsum)
-                        end,
+            {Tag, Ck} = machi_util:unmake_tagged_csum(TaggedCsum),
             case check_or_make_tagged_csum(Tag, Ck, Bytes) of
                 {error, Bad} ->
                     lager:error("Bad checksum; got ~p, expected ~p",
