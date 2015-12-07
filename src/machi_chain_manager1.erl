@@ -108,7 +108,7 @@
 
 %% API
 -export([start_link/2, start_link/3, stop/1, ping/1,
-         set_chain_members/2, set_chain_members/3, set_active/2,
+         set_chain_members/2, set_chain_members/6, set_active/2,
          trigger_react_to_env/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, format_status/2, code_change/3]).
@@ -168,13 +168,22 @@ ping(Pid) ->
 %% with lowest rank, i.e. name z* first, name a* last.
 
 set_chain_members(Pid, MembersDict) ->
-    set_chain_members(Pid, MembersDict, []).
+    set_chain_members(Pid, ch0_name, 0, ap_mode, MembersDict, []).
 
-set_chain_members(Pid, MembersDict, Witness_list) ->
-    case lists:all(fun(Witness) -> orddict:is_key(Witness, MembersDict) end,
-                   Witness_list) of
+set_chain_members(Pid, ChainName, OldEpoch, CMode, MembersDict, Witness_list)
+  when is_atom(ChainName) andalso
+       is_integer(OldEpoch) andalso OldEpoch >= 0 andalso
+       (CMode == ap_mode orelse CMode == cp_mode) andalso
+       is_list(MembersDict) andalso
+       is_list(Witness_list) ->
+    case lists:all(fun({X, #p_srvr{name=X}}) -> true;
+                      (_)                    -> false
+                   end, MembersDict)
+         andalso
+         lists:all(fun(Witness) -> orddict:is_key(Witness, MembersDict) end,
+                    Witness_list) of
         true ->
-            Cmd = {set_chain_members, MembersDict, Witness_list},
+            Cmd = {set_chain_members, ChainName, OldEpoch, CMode, MembersDict, Witness_list},
             gen_server:call(Pid, Cmd, infinity);
         false ->
             {error, bad_arg}
@@ -291,7 +300,8 @@ init({MyName, InitMembersDict, MgrOpts}) ->
 
 handle_call({ping}, _From, S) ->
     {reply, pong, S};
-handle_call({set_chain_members, MembersDict, Witness_list}, _From,
+handle_call({set_chain_members, ChainName, OldEpoch, CMode,
+             MembersDict, Witness_list}, _From,
             #ch_mgr{name=MyName,
                     proj=#projection_v1{all_members=OldAll_list,
                                         epoch_number=OldEpoch,
@@ -310,10 +320,10 @@ handle_call({set_chain_members, MembersDict, Witness_list}, _From,
                                 {NUPI, All_list -- NUPI}
                         end,
     NewEpoch = OldEpoch + ?SET_CHAIN_MEMBERS_EPOCH_SKIP,
-    CMode = calc_consistency_mode(Witness_list),
     ok = set_consistency_mode(machi_flu_psup:make_proj_supname(MyName), CMode),
     NewProj = machi_projection:update_checksum(
                 OldProj#projection_v1{author_server=MyName,
+                                      chain_name=ChainName,
                                       creation_time=now(),
                                       mode=CMode,
                                       epoch_number=NewEpoch,
@@ -601,6 +611,8 @@ rank_and_sort_projections_with_extra(All_queried_list, FLUsRs, ProjectionType,
             Witness_list = CurrentProj#projection_v1.witnesses,
             NoneProj = make_none_projection(0, MyName, [], Witness_list,
                                             orddict:new()),
+            ChainName = CurrentProj#projection_v1.chain_name,
+            NoneProj2 = NoneProj#projection_v1{chain_name=ChainName},
             Extra2 = [{all_members_replied, true},
                       {all_queried_list, All_queried_list},
                       {flus_rs, FLUsRs},
@@ -723,13 +735,14 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                          runenv=RunEnv1,
                          repair_final_status=RepairFS}=S) ->
     #projection_v1{epoch_number=OldEpochNum,
+                   chain_name=ChainName,
                    members_dict=MembersDict,
                    witnesses=OldWitness_list,
                    upi=OldUPI_list,
                    repairing=OldRepairing_list
                   } = LastProj,
     LastUp = lists:usort(OldUPI_list ++ OldRepairing_list),
-    AllMembers = (S#ch_mgr.proj)#projection_v1.all_members,
+    AllMembers = CurrentProj#projection_v1.all_members,
     {Up0, Partitions, RunEnv2} = calc_up_nodes(MyName,
                                                AllMembers, RunEnv1),
     Up = Up0 -- AllHosed,
@@ -821,10 +834,11 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
         end,
     ?REACT({calc,?LINE,[{new_upi, NewUPI},{new_rep, NewRepairing}]}),
 
-    P = machi_projection:new(OldEpochNum + 1,
-                             MyName, MembersDict, Down, NewUPI, NewRepairing,
-                             D_foo ++
-                                 Dbg ++ [{ps, Partitions},{nodes_up, Up}]),
+    P0 = machi_projection:new(OldEpochNum + 1,
+                              MyName, MembersDict, Down, NewUPI, NewRepairing,
+                              D_foo ++
+                                  Dbg ++ [{ps, Partitions},{nodes_up, Up}]),
+    P1 = P0#projection_v1{chain_name=ChainName},
     P2 = if CMode == cp_mode ->
                  UpWitnesses = [W || W <- Up, lists:member(W, OldWitness_list)],
                  Majority = full_majority_size(AllMembers),
@@ -833,7 +847,7 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                  SoFar = length(NewUPI ++ NewRepairing),
                  if SoFar >= Majority ->
                          ?REACT({calc,?LINE,[]}),
-                         P;
+                         P1;
                     true ->
                          Need = Majority - SoFar,
                          UpWitnesses = [W || W <- Up,
@@ -842,7 +856,7 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                                  Ws = lists:sublist(UpWitnesses, Need),
                                  ?REACT({calc,?LINE,[{ws, Ws}]}),
                                  machi_projection:update_checksum(
-                                   P#projection_v1{upi=Ws++NewUPI});
+                                   P1#projection_v1{upi=Ws++NewUPI});
                             true ->
                                  ?REACT({calc,?LINE,[]}),
                                  P_none0 = make_none_projection(
@@ -855,6 +869,7 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                                                "Not enough witnesses are available now"
                                        end,
                                  P_none1 = P_none0#projection_v1{
+                                             chain_name=ChainName,
                                              %% Stable creation time!
                                              creation_time={1,2,3},
                                              dbg=[{none_projection,true},
@@ -875,7 +890,7 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                  end;
             CMode == ap_mode ->
                  ?REACT({calc,?LINE,[]}),
-                 P
+                 P1
          end,
     P3 = machi_projection:update_checksum(
            P2#projection_v1{mode=CMode, witnesses=OldWitness_list}),
@@ -1045,13 +1060,13 @@ do_react_to_env(#ch_mgr{name=MyName,
             {{empty_members_dict, [], Epoch}, S};
         true ->
             {_, S2} = do_set_chain_members_dict(NewMembersDict, S),
-            CMode = calc_consistency_mode(NewProj#projection_v1.witnesses),
+            CMode = NewProj#projection_v1.mode,
             {{empty_members_dict, [], Epoch},
              set_proj(S2#ch_mgr{members_dict=NewMembersDict,
                                 consistency_mode=CMode}, NewProj)}
     end;
 do_react_to_env(S) ->
-put(ttt, [?LINE]),
+    put(ttt, [?LINE]),
     %% The not_sanes manager counting dictionary is not strictly
     %% limited to flapping scenarios.  (Though the mechanism first
     %% started as a way to deal with rare flapping scenarios.)
@@ -1287,7 +1302,8 @@ react_to_env_A29(Retries, P_latest, LatestUnanimousP, _ReadExtra,
     end.
 
 react_to_env_A30(Retries, P_latest, LatestUnanimousP, P_current_calc,
-                 #ch_mgr{name=MyName, consistency_mode=CMode} = S) ->
+                 #ch_mgr{name=MyName, proj=P_current,
+                         consistency_mode=CMode} = S) ->
     V = case file:read_file("/tmp/moomoo."++atom_to_list(S#ch_mgr.name)) of {ok,_} -> true; _ -> false end,
     if V -> io:format(user, "A30: ~w: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
     ?REACT(a30),
@@ -1307,15 +1323,17 @@ react_to_env_A30(Retries, P_latest, LatestUnanimousP, P_current_calc,
             P = #projection_v1{down=Down} =
                 make_none_projection(Epoch + 1, MyName, All_list,
                                      Witness_list, MembersDict),
+            ChainName = P_current#projection_v1.chain_name,
+            P1 = P#projection_v1{chain_name=ChainName},
             P_newprop = if CMode == ap_mode ->
                                 %% Not really none proj: just myself, AP style
                                 machi_projection:update_checksum(
-                                  P#projection_v1{upi=[MyName],
+                                  P1#projection_v1{upi=[MyName],
                                                   down=Down -- [MyName],
                                                   dbg=[{hosed_list,AllHosed}]});
                            CMode == cp_mode ->
                                 machi_projection:update_checksum(
-                                  P#projection_v1{dbg=[{hosed_list,AllHosed}]})
+                                  P1#projection_v1{dbg=[{hosed_list,AllHosed}]})
                         end,
             react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                              P_current_calc, true, S);
@@ -1850,7 +1868,9 @@ react_to_env_C103(#projection_v1{epoch_number=_Epoch_newprop} = _P_newprop,
                    members_dict=MembersDict} = P_current,
     P_none0 = make_none_projection(Epoch_latest,
                                    MyName, All_list, Witness_list, MembersDict),
-    P_none1 = P_none0#projection_v1{dbg=[{none_projection,true}]},
+    ChainName = P_current#projection_v1.chain_name,
+    P_none1 = P_none0#projection_v1{chain_name=ChainName,
+                                    dbg=[{none_projection,true}]},
     P_none = machi_projection:update_checksum(P_none1),
     ?REACT({c103, ?LINE,
             [{current_epoch, P_current#projection_v1.epoch_number},
@@ -2206,6 +2226,7 @@ projection_transition_is_sane_except_si_epoch(
                  creation_time=CreationTime1,
                  mode=CMode1,
                  author_server=AuthorServer1,
+                 chain_name=ChainName1,
                  all_members=All_list1,
                  witnesses=Witness_list1,
                  down=Down_list1,
@@ -2217,6 +2238,7 @@ projection_transition_is_sane_except_si_epoch(
                  creation_time=CreationTime2,
                  mode=CMode2,
                  author_server=AuthorServer2,
+                 chain_name=ChainName2,
                  all_members=All_list2,
                  witnesses=Witness_list2,
                  down=Down_list2,
@@ -2237,7 +2259,8 @@ projection_transition_is_sane_except_si_epoch(
     true = is_binary(CSum1) andalso is_binary(CSum2),
     {_,_,_} = CreationTime1,
     {_,_,_} = CreationTime2,
-    true = is_atom(AuthorServer1) andalso is_atom(AuthorServer2), % todo type may change?
+    true = is_atom(AuthorServer1) andalso is_atom(AuthorServer2),
+    true = is_atom(ChainName1) andalso is_atom(ChainName2),
     true = is_list(All_list1) andalso is_list(All_list2),
     true = is_list(Witness_list1) andalso is_list(Witness_list2),
     true = is_list(Down_list1) andalso is_list(Down_list2),
@@ -2248,6 +2271,9 @@ projection_transition_is_sane_except_si_epoch(
     %% Don't check for strictly increasing epoch here: that's the job of
     %% projection_transition_is_sane_with_si_epoch().
     true = Epoch2 >= Epoch1,
+
+    %% Don't change chain names in the middle of the stream.
+    true = (ChainName1 == ChainName2),
 
     %% No duplicates
     true = lists:sort(Witness_list2) == lists:usort(Witness_list2),
@@ -2772,6 +2798,7 @@ full_majority_size(L) when is_list(L) ->
     full_majority_size(length(L)).
 
 make_zerf(#projection_v1{epoch_number=OldEpochNum,
+                         chain_name=ChainName,
                          all_members=AllMembers,
                          members_dict=MembersDict,
                          witnesses=OldWitness_list
@@ -2794,7 +2821,8 @@ make_zerf(#projection_v1{epoch_number=OldEpochNum,
                                      MyName, AllMembers, OldWitness_list,
                                      MembersDict),
             machi_projection:update_checksum(
-              P#projection_v1{mode=cp_mode,
+              P#projection_v1{chain_name=ChainName,
+                              mode=cp_mode,
                               dbg2=[zerf_none,{up,Up},{maj,MajoritySize}]});
         true ->
             make_zerf2(OldEpochNum, Up, MajoritySize, MyName,
@@ -2915,11 +2943,6 @@ perhaps_verbose_c111(P_latest2, S) ->
         _ ->
             ok
     end.
-
-calc_consistency_mode(_Witness_list = []) ->
-    ap_mode;
-calc_consistency_mode(_Witness_list) ->
-    cp_mode.
 
 set_proj(S, Proj) ->
     S#ch_mgr{proj=Proj, proj_unanimous=false}.

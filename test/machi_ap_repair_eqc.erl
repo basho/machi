@@ -407,8 +407,8 @@ stabilize(0, _T) ->
 stabilize(_CmdsLen, #target{flu_names=FLUNames, mgr_names=MgrNames,
                             verbose=Verbose}) ->
     machi_partition_simulator:no_partitions(),
-    wait_until_stable(chain_state_all_ok(FLUNames), FLUNames, MgrNames,
-                      100, Verbose),
+    true = wait_until_stable(chain_state_all_ok(FLUNames), FLUNames, MgrNames,
+                             100, Verbose),
     ok.
 
 chain_state_all_ok(FLUNames) ->

@@ -131,7 +131,10 @@ perhaps_bootstrap_chains([CD|ChainDefs], FLUs) ->
             io:format(user, "TODO: no local flus in ~P\n", [CD, 10]),
             ok;
         [FLU1|_] ->
-            io:format(user, "TODO: config ~p as bootstrap member of ~p\n", [FLU1, CD]),
-            yoyo
+            bootstrap_chain(CD, FLU1)
     end,
     perhaps_bootstrap_chains(ChainDefs, FLUs).
+
+bootstrap_chain(CD, FLU) ->
+    io:format(user, "TODO: config ~p as bootstrap member of ~p\n", [FLU, CD]),
+    todo.

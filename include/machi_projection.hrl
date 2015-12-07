@@ -22,10 +22,11 @@
 -define(MACHI_PROJECTION_HRL, true).
 
 -type pv1_consistency_mode() :: 'ap_mode' | 'cp_mode'.
+-type pv1_chain_name():: atom().
 -type pv1_csum()      :: binary().
 -type pv1_epoch()     :: {pv1_epoch_n(), pv1_csum()}.
 -type pv1_epoch_n()   :: non_neg_integer().
--type pv1_server()    :: atom() | binary().
+-type pv1_server()    :: atom().
 -type pv1_timestamp() :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
 
 -record(p_srvr, {
@@ -55,6 +56,7 @@
           epoch_number    :: pv1_epoch_n() | ?SPAM_PROJ_EPOCH,
           epoch_csum      :: pv1_csum(),
           author_server   :: pv1_server(),
+          chain_name = ch_not_def_yet :: pv1_chain_name(),
           all_members     :: [pv1_server()],
           witnesses = []  :: [pv1_server()],
           creation_time   :: pv1_timestamp(),

@@ -349,8 +349,8 @@ nonunanimous_setup_and_fix_test() ->
         [element(2,?FLU_PC:start_link(P)) || P <- P_s],
     MembersDict = machi_projection:make_members_dict(P_s),
     [Ma,Mb] = [a_chmgr, b_chmgr],
-    ok = machi_chain_manager1:set_chain_members(Ma, MembersDict, []),
-    ok = machi_chain_manager1:set_chain_members(Mb, MembersDict, []),
+    ok = machi_chain_manager1:set_chain_members(Ma, MembersDict),
+    ok = machi_chain_manager1:set_chain_members(Mb, MembersDict),
     try
         {ok, P1} = ?MGR:test_calc_projection(Ma, false),
 

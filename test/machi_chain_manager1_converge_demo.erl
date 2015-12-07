@@ -187,15 +187,18 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
              end || #p_srvr{name=Name}=P <- Ps],
     MembersDict = machi_projection:make_members_dict(Ps),
     Witnesses = proplists:get_value(witnesses, MgrOpts, []),
+    CMode = case {Witnesses, proplists:get_value(consistency_mode, MgrOpts,
+                                                 ap_mode)} of
+                {[_|_], _}   -> cp_mode;
+                {_, cp_mode} -> cp_mode;
+                {_, ap_mode} -> ap_mode
+            end,
     MgrNamez = [begin
                     MgrName = machi_flu_psup:make_mgr_supname(Name),
-                    ok = ?MGR:set_chain_members(MgrName,MembersDict,Witnesses),
+                    ok = ?MGR:set_chain_members(MgrName, ch_demo, 0, CMode,
+                                                MembersDict,Witnesses),
                     {Name, MgrName}
                 end || #p_srvr{name=Name} <- Ps],
-    CpApMode = case Witnesses /= [] of
-                   true  -> cp_mode;
-                   false -> ap_mode
-               end,
 
     try
       [{_, Ma}|_] = MgrNamez,
@@ -303,9 +306,9 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                [{FLU, true} = {FLU, ?MGR:projection_transitions_are_sane_retrospective(Psx, FLU)} ||
                    {FLU, Psx} <- PrivProjs]
            catch
-               _Err:_What when CpApMode == cp_mode ->
+               _Err:_What when CMode == cp_mode ->
                    io:format(user, "none proj skip detected, TODO? ", []);
-               _Err:_What when CpApMode == ap_mode ->
+               _Err:_What when CMode == ap_mode ->
                    io:format(user, "PrivProjs ~p\n", [PrivProjs]),
                    exit({line, ?LINE, _Err, _What})
            end,
@@ -371,9 +374,9 @@ timer:sleep(1234),
               {FLU, Psx} <- PrivProjs],
           io:format(user, "\nAll sanity checks pass, hooray!\n", [])
       catch
-          _Err:_What when CpApMode == cp_mode ->
+          _Err:_What when CMode == cp_mode ->
               io:format(user, "none proj skip detected, TODO? ", []);
-          _Err:_What when CpApMode == ap_mode ->
+          _Err:_What when CMode == ap_mode ->
               io:format(user, "Report ~p\n", [Report]),
               io:format(user, "PrivProjs ~p\n", [PrivProjs]),
               exit({line, ?LINE, _Err, _What})

@@ -58,9 +58,15 @@ setup_smoke_test(Host, PortBase, Os, Witness_list) ->
     %% 4. Wait until all others are using epoch id from #3.
     %%
     %% Damn, this is a pain to make 100% deterministic, bleh.
-    ok = machi_chain_manager1:set_chain_members(a_chmgr, D, Witness_list),
-    ok = machi_chain_manager1:set_chain_members(b_chmgr, D, Witness_list),
-    ok = machi_chain_manager1:set_chain_members(c_chmgr, D, Witness_list),
+    CMode = if Witness_list == [] -> ap_mode;
+               Witness_list /= [] -> cp_mode
+            end,
+    ok = machi_chain_manager1:set_chain_members(a_chmgr, ch0, 0, CMode,
+                                                D, Witness_list),
+    ok = machi_chain_manager1:set_chain_members(b_chmgr, ch0, 0, CMode,
+                                                D, Witness_list),
+    ok = machi_chain_manager1:set_chain_members(c_chmgr, ch0, 0, CMode,
+                                                D, Witness_list),
     run_ticks([a_chmgr,b_chmgr,c_chmgr]),
     %% Everyone is settled on the same damn epoch id.
     {ok, EpochID} = machi_flu1_client:get_latest_epochid(Host, PortBase+0,
