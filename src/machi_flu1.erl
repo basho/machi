@@ -207,7 +207,7 @@ append_server_loop(FluPid, #state{wedged=Wedged_p,
     receive
         {seq_append, From, _N, _L, _Prefix, _Chunk, _CSum, _Extra, _EpochID}
           when Witness_p ->
-            %% The FLU's net_server_loop() process ought to filter all
+            %% The FLU's machi_flu1_net_server process ought to filter all
             %% witness states, but we'll keep this clause for extra
             %% paranoia.
             From ! witness,

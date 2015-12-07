@@ -24,7 +24,7 @@
 %% TODO
 %% - Two modes, high and low should be separated at listener level?
 
--module(machi_pb_protocol).
+-module(machi_flu1_net_server).
 
 -behaviour(gen_server).
 -behaviour(ranch_protocol).
@@ -136,7 +136,9 @@ code_change(_OldVsn, S, _Extra) ->
 
 -spec transport_received(socket(), machi_dt:chunk(), state()) ->
                                 {noreply, state()}.
-transport_received(Sock, Bin, #state{transport=Transport}=S) ->
+transport_received(Socket, <<"QUIT\n">>, #state{socket=Socket}=S) ->
+    {stop, normal, S};
+transport_received(Socket, Bin, #state{transport=Transport}=S) ->
     {RespBin, S2} =
         case machi_pb:decode_mpb_ll_request(Bin) of
             LL_req when LL_req#mpb_ll_request.do_not_alter == 2 ->
@@ -149,15 +151,15 @@ transport_received(Sock, Bin, #state{transport=Transport}=S) ->
                 {machi_pb:encode_mpb_response(R), mode(high, NewS)}
         end,
     if RespBin == async_no_response ->
-            Transport:setopts(Sock, [{active, once}]),
+            Transport:setopts(Socket, [{active, once}]),
             {noreply, S2};
        true ->
-            case Transport:send(Sock, RespBin) of
+            case Transport:send(Socket, RespBin) of
                 ok ->
-                    Transport:setopts(Sock, [{active, once}]),
+                    Transport:setopts(Socket, [{active, once}]),
                     {noreply, S2};
                 {error, Reason} ->
-                    transport_error(Sock, Reason, S2)
+                    transport_error(Socket, Reason, S2)
             end
     end.
 

@@ -72,7 +72,7 @@ child_spec(FluName, TcpPort, Witness, DataDir, EpochTab, ProjStore) ->
     ListenerName = make_listener_name(FluName),
     NbAcceptors = 100,
     TcpOpts = [{port, TcpPort}, {backlog, ?BACKLOG}],
-    ProtoOpts = [FluName, Witness, DataDir, EpochTab, ProjStore],
+    NetServerOpts = [FluName, Witness, DataDir, EpochTab, ProjStore],
     ranch:child_spec(ListenerName, NbAcceptors,
                      ranch_tcp, TcpOpts,
-                     machi_pb_protocol, ProtoOpts).
+                     machi_flu1_net_server, NetServerOpts).
