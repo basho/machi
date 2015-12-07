@@ -390,9 +390,8 @@ nonunanimous_setup_and_fix_test() ->
         P2 = P2pb#projection_v1{dbg2=[]},
 
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        io:format(user, "\n+ Add a 3rd member to the chain.\n", []),
+        %% io:format(user, "\n+ Add a 3rd member to the chain.\n", []),
         io:format(user, "\nNOTE: One INFO REPORT will follow.\n", []),
-        timer:sleep(50),
 
         MembersDict3 = machi_projection:make_members_dict(P_s),
         ok = machi_chain_manager1:set_chain_members(
@@ -410,9 +409,8 @@ nonunanimous_setup_and_fix_test() ->
              ?FLU_PC:read_latest_projection(Pxy, private) || Pxy <- Proxies],
 
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        io:format(user, "\n+ Remove 'a' from the chain.\n", []),
-        io:format(user, "\nNOTE: One INFO REPORT will follow.\n", []),
-        timer:sleep(50),
+        %% io:format(user, "\n+ Remove 'a' from the chain.\n", []),
+        io:format(user, "NOTE: One INFO REPORT will follow.\n", []),
 
         MembersDict4 = machi_projection:make_members_dict(tl(P_s)),
         ok = machi_chain_manager1:set_chain_members(
@@ -430,7 +428,7 @@ nonunanimous_setup_and_fix_test() ->
              ?FLU_PC:read_latest_projection(Pxy, private) || Pxy <- tl(Proxies)],
 
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        io:format(user, "\n+ Add a to the chain again.\n", []),
+        %% io:format(user, "\n+ Add a to the chain again.\n", []),
 
         MembersDict5 = machi_projection:make_members_dict(P_s),
         ok = machi_chain_manager1:set_chain_members(

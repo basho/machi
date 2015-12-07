@@ -1255,7 +1255,7 @@ react_to_env_A20(Retries, #ch_mgr{name=MyName, proj=P_current}=S) ->
             P_none0 = make_none_projection(Epoch,
                                            MyName, All_list, Witness_list, MembersDict),
             P_none = P_none0#projection_v1{chain_name=ChainName},
-            {{x,y,z,42,77}, S2#ch_mgr{proj=P_none}};
+            {{x,y,z,42,77}, set_proj(S2, P_none)};
         _ ->
             react_to_env_A21(Retries, UnanimousTag, P_latest, ReadExtra, S2)
     end.
@@ -1463,6 +1463,8 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
                 not ordsets:is_disjoint(P_latest_s, Down_s)
         end,
     AmExcludedFromLatestAll_p =
+        P_latest#projection_v1.epoch_number /= 0
+        andalso
         (not lists:member(MyName, P_latest#projection_v1.all_members)),
     ?REACT({a40, ?LINE,
             [{latest_author, P_latest#projection_v1.author_server},
@@ -1473,7 +1475,7 @@ react_to_env_A40(Retries, P_newprop, P_latest, LatestUnanimousP,
 
     if
         AmExcludedFromLatestAll_p ->
-            ?REACT({a40, ?LINE, []}),
+            ?REACT({a40, ?LINE, [{latest,machi_projection:make_summary(P_latest)}]}),
             react_to_env_A50(P_latest, [], S);
 
         AmHosedP ->
