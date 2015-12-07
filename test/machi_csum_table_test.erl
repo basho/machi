@@ -113,3 +113,19 @@ smoke3_test() ->
     ok = machi_csum_table:delete(MC).
 
 %% TODO: add quickcheck test here
+
+%% Previous implementation
+-spec all_trimmed2(machi_csum_table:table(),
+                   non_neg_integer(), non_neg_integer()) -> boolean().
+all_trimmed2(CsumT, Left, Right) ->
+    Chunks = machi_csum_table:find(CsumT, Left, Right),
+    runthru(Chunks, Left, Right).
+
+%% @doc make sure all trimmed chunks are continously chained
+%% TODO: test with EQC
+runthru([], Pos, Pos) -> true;
+runthru([], Pos0, Pos) when Pos0 < Pos -> false;
+runthru([{Offset0, Size0, trimmed}|T], Offset, Pos) when Offset0 =< Offset ->
+    runthru(T, Offset0+Size0, Pos);
+runthru(_L, _O, _P) ->
+    false.

@@ -834,7 +834,7 @@ maybe_gc(Reply, S = #state{fluname=FluName,
                            filename = Filename,
                            eof_position = Eof,
                            csum_table=CsumTable}) ->
-    case machi_csum_table:all_trimmed(CsumTable, Eof) of
+    case machi_csum_table:all_trimmed(CsumTable, ?MINIMUM_OFFSET, Eof) of
         true ->
             lager:debug("GC? Let's do it: ~p.~n", [Filename]),
             %% Before unlinking a file, it should inform

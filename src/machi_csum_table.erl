@@ -154,32 +154,33 @@ trim(CsumT, Offset, Size, LeftUpdate, RightUpdate) ->
 %% @doc returns whether all bytes in a specific window is continously
 %% trimmed or not
 -spec all_trimmed(table(), non_neg_integer(), non_neg_integer()) -> boolean().
-all_trimmed(CsumT, Left, Right) ->
-    Chunks = find(CsumT, Left, Right),
-    runthru(Chunks, Left, Right).
+all_trimmed(#machi_csum_table{table=T}, Left, Right) ->
+    FoldFun = fun({_, _}, false) ->
+                      false;
+                 ({K, V}, Pos) when is_integer(Pos) andalso Pos =< Right ->
+                      case {sext:decode(K), sext:decode(V)} of
+                          {{Pos, Size}, trimmed} ->
+                              Pos + Size;
+                          {{Offset, Size}, _}
+                            when Offset + Size =< Left ->
+                              Left;
+                          _Eh ->
+                              false
+                      end
+              end,
+    case eleveldb:fold(T, FoldFun, Left, [{verify_checksums, true}]) of
+        false -> false;
+        Right -> true;
+        LastTrimmed when LastTrimmed < Right -> false;
+        _ -> %% LastTrimmed > Pos0, which is a irregular case but ok
+            true
+    end.
 
 %% @doc returns whether all bytes 0-Pos0 is continously trimmed or
 %% not, including header.
 -spec all_trimmed(table(), non_neg_integer()) -> boolean().
-all_trimmed(#machi_csum_table{table=T}, Pos0) ->
-    FoldFun = fun({_, _}, false) ->
-                      false;
-                 ({K, V}, Pos) when is_integer(Pos) andalso Pos =< Pos0 ->
-                      case {sext:decode(K), sext:decode(V)} of
-                          {{Pos, Size}, trimmed} ->
-                              Pos + Size;
-                          _Eh ->
-                              %% ?debugVal({_Eh, Pos}),
-                              false
-                      end
-              end,
-    case eleveldb:fold(T, FoldFun, 0, [{verify_checksums, true}]) of
-        false -> false;
-        Pos0 -> true;
-        LastTrimmed when LastTrimmed < Pos0 -> false;
-        _ -> %% LastTrimmed > Pos0, which is a irregular case but ok
-            true
-    end.
+all_trimmed(CsumT, Pos0) ->
+    all_trimmed(CsumT, 0, Pos0).
 
 -spec any_trimmed(table(),
                   pos_integer(),
@@ -247,15 +248,6 @@ build_unwritten_bytes_list([{CurrentOffset, CurrentSize, _Csum}|Rest], LastOffse
     build_unwritten_bytes_list(Rest, (CurrentOffset+CurrentSize), [{LastOffset, Hole}|Acc]);
 build_unwritten_bytes_list([{CO, CS, _Ck}|Rest], _LastOffset, Acc) ->
     build_unwritten_bytes_list(Rest, CO + CS, Acc).
-
-%% @doc make sure all trimmed chunks are continously chained
-%% TODO: test with EQC
-runthru([], Pos, Pos) -> true;
-runthru([], Pos0, Pos) when Pos0 < Pos -> false;
-runthru([{Offset0, Size0, trimmed}|T], Offset, Pos) when Offset0 =< Offset ->
-    runthru(T, Offset0+Size0, Pos);
-runthru(_L, _O, _P) ->
-    false.
 
 %% @doc If you want to find an overlap among two areas [x, y] and [a,
 %% b] where x < y and a < b; if (a-y)*(b-x) < 0 then there's a
