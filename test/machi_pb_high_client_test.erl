@@ -64,11 +64,13 @@ smoke_test2() ->
             PK = <<>>,
             Prefix = <<"prefix">>,
             Chunk1 = <<"Hello, chunk!">>,
+io:format(user, "~s LINE ~p\n", [?MODULE, ?LINE]),
             {ok, {Off1, Size1, File1}} =
                 ?C:append_chunk(Clnt, PK, Prefix, Chunk1, none, 0),
             true = is_binary(File1),
             Chunk2 = "It's another chunk",
             CSum2 = {client_sha, machi_util:checksum_chunk(Chunk2)},
+io:format(user, "~s LINE ~p\n", [?MODULE, ?LINE]),
             {ok, {Off2, Size2, File2}} =
                 ?C:append_chunk(Clnt, PK, Prefix, Chunk2, CSum2, 1024),
             Chunk3 = ["This is a ", <<"test,">>, 32, [["Hello, world!"]]],
@@ -113,6 +115,7 @@ smoke_test2() ->
 
             LargeBytes = binary:copy(<<"x">>, 1024*1024),
             LBCsum = {client_sha, machi_util:checksum_chunk(LargeBytes)},
+io:format(user, "~s LINE ~p\n", [?MODULE, ?LINE]),
             {ok, {Offx, Sizex, Filex}} =
                 ?C:append_chunk(Clnt, PK, Prefix, LargeBytes, LBCsum, 0),
             ok = ?C:trim_chunk(Clnt, Filex, Offx, Sizex),

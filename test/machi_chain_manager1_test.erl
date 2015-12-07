@@ -335,7 +335,8 @@ smoke1_test2() ->
 nonunanimous_setup_and_fix_test() ->
     machi_partition_simulator:start_link({1,2,3}, 100, 0),
     TcpPort = 62877,
-    FluInfo = [{a,TcpPort+0,"./data.a"}, {b,TcpPort+1,"./data.b"}],
+    FluInfo = [{a,TcpPort+0,"./data.a"}, {b,TcpPort+1,"./data.b"},
+               {c,TcpPort+2,"./data.c"}],
     P_s = [#p_srvr{name=Name, address="localhost", port=Port} ||
               {Name,Port,_Dir} <- FluInfo],
     
@@ -345,10 +346,11 @@ nonunanimous_setup_and_fix_test() ->
     %% {ok, Mb} = ?MGR:start_link(b, MembersDict, [{active_mode, false}]++XX),
     [{ok,_}=machi_flu_psup:start_flu_package(Name, Port, Dir, Opts) ||
                {Name,Port,Dir} <- FluInfo],
-    [Proxy_a, Proxy_b] = Proxies =
+    Proxies = [Proxy_a, Proxy_b, Proxy_c] =
         [element(2,?FLU_PC:start_link(P)) || P <- P_s],
-    MembersDict = machi_projection:make_members_dict(P_s),
-    [Ma,Mb] = [a_chmgr, b_chmgr],
+    %% MembersDict = machi_projection:make_members_dict(P_s),
+    MembersDict = machi_projection:make_members_dict(lists:sublist(P_s, 2)),
+    Mgrs = [Ma,Mb,Mc] = [a_chmgr, b_chmgr, c_chmgr],
     ok = machi_chain_manager1:set_chain_members(Ma, MembersDict),
     ok = machi_chain_manager1:set_chain_members(Mb, MembersDict),
     try
@@ -387,10 +389,63 @@ nonunanimous_setup_and_fix_test() ->
         {ok, P2pb} = ?FLU_PC:read_latest_projection(Proxy_b, private),
         P2 = P2pb#projection_v1{dbg2=[]},
 
-        %% Pspam = machi_projection:update_checksum(
-        %%           P1b#projection_v1{epoch_number=?SPAM_PROJ_EPOCH,
-        %%                             dbg=[hello_spam]}),
-        %% ok = ?FLU_PC:write_projection(Proxy_b, public, Pspam),
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        io:format(user, "\n+ Add a 3rd member to the chain.\n", []),
+        io:format(user, "\nNOTE: One INFO REPORT will follow.\n", []),
+        timer:sleep(50),
+
+        MembersDict3 = machi_projection:make_members_dict(P_s),
+        ok = machi_chain_manager1:set_chain_members(
+               Ma, ch_not_def_yet, EpochNum_a, ap_mode, MembersDict3, []),
+
+        [begin
+             {_rr1, _rr2, TheEpoch} = ?MGR:trigger_react_to_env(Mgr),
+             ok
+         end || _ <- lists:seq(1, 7),
+                {Mgr,Proxy} <- [{Ma, Proxy_a}, {Mb, Proxy_b}, {Mc, Proxy_c}]],
+        {_, _, TheEpoch_3} = ?MGR:trigger_react_to_env(Ma),
+        {_, _, TheEpoch_3} = ?MGR:trigger_react_to_env(Mb),
+        {_, _, TheEpoch_3} = ?MGR:trigger_react_to_env(Mc),
+        [{ok, #projection_v1{upi=[a,b], repairing=[c]}} =
+             ?FLU_PC:read_latest_projection(Pxy, private) || Pxy <- Proxies],
+
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        io:format(user, "\n+ Remove 'a' from the chain.\n", []),
+        io:format(user, "\nNOTE: One INFO REPORT will follow.\n", []),
+        timer:sleep(50),
+
+        MembersDict4 = machi_projection:make_members_dict(tl(P_s)),
+        ok = machi_chain_manager1:set_chain_members(
+               Mb, ch_not_def_yet, TheEpoch_3, ap_mode, MembersDict4, []),
+
+        [begin
+             _ = ?MGR:trigger_react_to_env(Mgr),
+             ok
+         end || _ <- lists:seq(1, 7),
+                {Mgr,Proxy} <- [{Ma, Proxy_a}, {Mb, Proxy_b}, {Mc, Proxy_c}]],
+        %% {_, _, TheEpoch_4} = ?MGR:trigger_react_to_env(Ma),
+        {_, _, TheEpoch_4} = ?MGR:trigger_react_to_env(Mb),
+        {_, _, TheEpoch_4} = ?MGR:trigger_react_to_env(Mc),
+        [{ok, #projection_v1{upi=[b], repairing=[c]}} =
+             ?FLU_PC:read_latest_projection(Pxy, private) || Pxy <- tl(Proxies)],
+
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        io:format(user, "\n+ Add a to the chain again.\n", []),
+
+        MembersDict5 = machi_projection:make_members_dict(P_s),
+        ok = machi_chain_manager1:set_chain_members(
+               Mb, ch_not_def_yet, TheEpoch_4, ap_mode, MembersDict5, []),
+
+        [begin
+             {_rr1, _rr2, TheEpoch} = ?MGR:trigger_react_to_env(Mgr),
+             ok
+         end || _ <- lists:seq(1, 7),
+                {Mgr,Proxy} <- [{Ma, Proxy_a}, {Mb, Proxy_b}, {Mc, Proxy_c}]],
+        {_, _, TheEpoch_5} = ?MGR:trigger_react_to_env(Ma),
+        {_, _, TheEpoch_5} = ?MGR:trigger_react_to_env(Mb),
+        {_, _, TheEpoch_5} = ?MGR:trigger_react_to_env(Mc),
+        [{ok, #projection_v1{upi=[b], repairing=[a,c]}} =
+             ?FLU_PC:read_latest_projection(Pxy, private) || Pxy <- Proxies],
 
         ok
     after
