@@ -337,6 +337,7 @@ nonunanimous_setup_and_fix_test_() ->
     {timeout, 1*60, fun() -> nonunanimous_setup_and_fix_test2() end}.
 
 nonunanimous_setup_and_fix_test2() ->
+    error_logger:tty(false),
     machi_partition_simulator:start_link({1,2,3}, 100, 0),
     TcpPort = 62877,
     FluInfo = [{a,TcpPort+0,"./data.a"}, {b,TcpPort+1,"./data.b"},
@@ -405,8 +406,7 @@ nonunanimous_setup_and_fix_test2() ->
         P2 = P2pb#projection_v1{dbg2=[]},
 
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        %% io:format(user, "\nSTEP: Add a 3rd member to the chain.\n", []),
-        io:format(user, "\nNOTE: One INFO REPORT will follow.\n", []),
+        io:format("\nSTEP: Add a 3rd member to the chain.\n", []),
 
         MembersDict3 = machi_projection:make_members_dict(P_s),
         ok = machi_chain_manager1:set_chain_members(
@@ -420,8 +420,7 @@ nonunanimous_setup_and_fix_test2() ->
              ?FLU_PC:read_latest_projection(Pxy, private) || Pxy <- Proxies],
 
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        %% io:format(user, "STEP: Remove 'a' from the chain.\n", []),
-        io:format(user, "NOTE: One INFO REPORT will follow.\n", []),
+        io:format("STEP: Remove 'a' from the chain.\n", []),
 
         MembersDict4 = machi_projection:make_members_dict(tl(P_s)),
         ok = machi_chain_manager1:set_chain_members(
@@ -435,7 +434,7 @@ nonunanimous_setup_and_fix_test2() ->
              ?FLU_PC:read_latest_projection(Pxy, private) || Pxy <- tl(Proxies)],
 
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        %% io:format(user, "STEP: Add a to the chain again (a is running).\n", []),
+        io:format("STEP: Add a to the chain again (a is running).\n", []),
 
         MembersDict5 = machi_projection:make_members_dict(P_s),
         ok = machi_chain_manager1:set_chain_members(
@@ -449,7 +448,7 @@ nonunanimous_setup_and_fix_test2() ->
              ?FLU_PC:read_latest_projection(Pxy, private) || Pxy <- Proxies],
 
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        io:format(user, "STEP: Stop a while a chain member, advance b&c.\n", []),
+        io:format("STEP: Stop a while a chain member, advance b&c.\n", []),
 
         ok = machi_flu_psup:stop_flu_package(a),
         Advance(),
@@ -459,8 +458,7 @@ nonunanimous_setup_and_fix_test2() ->
              ?FLU_PC:read_latest_projection(Pxy, private) || Pxy <- tl(Proxies)],
 
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        io:format(user, "STEP: Remove 'a' from the chain.\n", []),
-        io:format(user, "NOTE: One INFO REPORT will follow.\n", []),
+        io:format("STEP: Remove 'a' from the chain.\n", []),
 
         MembersDict7 = machi_projection:make_members_dict(tl(P_s)),
         ok = machi_chain_manager1:set_chain_members(
@@ -473,7 +471,7 @@ nonunanimous_setup_and_fix_test2() ->
              ?FLU_PC:read_latest_projection(Pxy, private) || Pxy <- tl(Proxies)],
 
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        io:format(user, "STEP: Start a, advance.\n", []),
+        io:format("STEP: Start a, advance.\n", []),
 
         [{ok,_}=machi_flu_psup:start_flu_package(Name, Port, Dir, Opts) ||
             {Name,Port,Dir} <- [hd(FluInfo)]],
@@ -485,7 +483,8 @@ nonunanimous_setup_and_fix_test2() ->
              ?FLU_PC:read_latest_projection(Pxy, private) || Pxy <- tl(Proxies)],
 
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        io:format(user, "STEP: Stop a, delete a's data, leave it stopped\n", []),
+        io:format("STEP: Stop a, delete a's data, leave it stopped\n", []),
+
         ok = machi_flu_psup:stop_flu_package(a),
         Advance(),
         {_,_,Dir_a} = hd(FluInfo),
@@ -494,7 +493,7 @@ nonunanimous_setup_and_fix_test2() ->
         {ok, {false, _}} = ?FLU_PC:wedge_status(Proxy_c),
 
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        io:format(user, "STEP: Add a to the chain again (a is stopped).\n", []),
+        io:format("STEP: Add a to the chain again (a is stopped).\n", []),
 
         MembersDict9 = machi_projection:make_members_dict(P_s),
         {_, _, TheEpoch_9} = ?MGR:trigger_react_to_env(Mb),
@@ -505,7 +504,7 @@ nonunanimous_setup_and_fix_test2() ->
         true = (TheEpoch_9b > TheEpoch_9),
 
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        io:format(user, "STEP: Start a, and it joins like it ought to\n", []),
+        io:format("STEP: Start a, and it joins like it ought to\n", []),
 
         [{ok,_}=machi_flu_psup:start_flu_package(Name, Port, Dir, Opts) ||
             {Name,Port,Dir} <- [hd(FluInfo)]],
@@ -519,7 +518,8 @@ nonunanimous_setup_and_fix_test2() ->
     after
         exit(SupPid, normal),
         [ok = ?FLU_PC:quit(X) || X <- Proxies],
-        ok = machi_partition_simulator:stop()
+        ok = machi_partition_simulator:stop(),
+        error_logger:tty(true)
     end.
 
 unanimous_report_test() ->
