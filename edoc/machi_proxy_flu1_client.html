@@ -57,14 +57,18 @@ TCP communication problems with the remote server.</p>
 <tr><td valign="top"><a href="#handle_cast-2">handle_cast/2</a></td><td></td></tr>
 <tr><td valign="top"><a href="#handle_info-2">handle_info/2</a></td><td></td></tr>
 <tr><td valign="top"><a href="#init-1">init/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#kick_projection_reaction-2">kick_projection_reaction/2</a></td><td>Kick (politely) the remote chain manager to react to a
+  projection change.</td></tr>
+<tr><td valign="top"><a href="#kick_projection_reaction-3">kick_projection_reaction/3</a></td><td>Kick (politely) the remote chain manager to react to a
+  projection change.</td></tr>
 <tr><td valign="top"><a href="#list_all_projections-2">list_all_projections/2</a></td><td>Get all epoch numbers from the FLU's projection store.</td></tr>
 <tr><td valign="top"><a href="#list_all_projections-3">list_all_projections/3</a></td><td>Get all epoch numbers from the FLU's projection store.</td></tr>
 <tr><td valign="top"><a href="#list_files-2">list_files/2</a></td><td>Fetch the list of all files on the remote FLU.</td></tr>
 <tr><td valign="top"><a href="#list_files-3">list_files/3</a></td><td>Fetch the list of all files on the remote FLU.</td></tr>
 <tr><td valign="top"><a href="#quit-1">quit/1</a></td><td>Quit &amp; close the connection to remote FLU and stop our
   proxy process.</td></tr>
-<tr><td valign="top"><a href="#read_chunk-5">read_chunk/5</a></td><td>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</td></tr>
 <tr><td valign="top"><a href="#read_chunk-6">read_chunk/6</a></td><td>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</td></tr>
+<tr><td valign="top"><a href="#read_chunk-7">read_chunk/7</a></td><td>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</td></tr>
 <tr><td valign="top"><a href="#read_latest_projection-2">read_latest_projection/2</a></td><td>Get the latest projection from the FLU's projection store for <code>ProjType</code></td></tr>
 <tr><td valign="top"><a href="#read_latest_projection-3">read_latest_projection/3</a></td><td>Get the latest projection from the FLU's projection store for <code>ProjType</code></td></tr>
 <tr><td valign="top"><a href="#read_projection-3">read_projection/3</a></td><td>Read a projection <code>Proj</code> of type <code>ProjType</code>.</td></tr>
@@ -75,6 +79,9 @@ TCP communication problems with the remote server.</p>
 <tr><td valign="top"><a href="#start_proxies-1">start_proxies/1</a></td><td></td></tr>
 <tr><td valign="top"><a href="#stop_proxies-1">stop_proxies/1</a></td><td></td></tr>
 <tr><td valign="top"><a href="#terminate-2">terminate/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#trim_chunk-5">trim_chunk/5</a></td><td></td></tr>
+<tr><td valign="top"><a href="#trim_chunk-6">trim_chunk/6</a></td><td>Write a chunk (binary- or iolist-style) of data to a file
+  with <code>Prefix</code> at <code>Offset</code>.</td></tr>
 <tr><td valign="top"><a href="#wedge_status-1">wedge_status/1</a></td><td>Fetch the wedge status from the remote FLU.</td></tr>
 <tr><td valign="top"><a href="#wedge_status-2">wedge_status/2</a></td><td>Fetch the wedge status from the remote FLU.</td></tr>
 <tr><td valign="top"><a href="#write_chunk-5">write_chunk/5</a></td><td>Write a chunk (binary- or iolist-style) of data to a file
@@ -176,6 +183,18 @@ TCP communication problems with the remote server.</p>
 <p><tt>init(X1) -&gt; any()</tt></p>
 </div>
 
+<h3 class="function"><a name="kick_projection_reaction-2">kick_projection_reaction/2</a></h3>
+<div class="spec">
+<p><tt>kick_projection_reaction(PidSpec, Options) -&gt; any()</tt></p>
+</div><p>Kick (politely) the remote chain manager to react to a
+  projection change.</p>
+
+<h3 class="function"><a name="kick_projection_reaction-3">kick_projection_reaction/3</a></h3>
+<div class="spec">
+<p><tt>kick_projection_reaction(PidSpec, Options, Timeout) -&gt; any()</tt></p>
+</div><p>Kick (politely) the remote chain manager to react to a
+  projection change.</p>
+
 <h3 class="function"><a name="list_all_projections-2">list_all_projections/2</a></h3>
 <div class="spec">
 <p><tt>list_all_projections(PidSpec, ProjType) -&gt; any()</tt></p>
@@ -202,14 +221,14 @@ TCP communication problems with the remote server.</p>
 </div><p>Quit &amp; close the connection to remote FLU and stop our
   proxy process.</p>
 
-<h3 class="function"><a name="read_chunk-5">read_chunk/5</a></h3>
-<div class="spec">
-<p><tt>read_chunk(PidSpec, EpochID, File, Offset, Size) -&gt; any()</tt></p>
-</div><p>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</p>
-
 <h3 class="function"><a name="read_chunk-6">read_chunk/6</a></h3>
 <div class="spec">
-<p><tt>read_chunk(PidSpec, EpochID, File, Offset, Size, Timeout) -&gt; any()</tt></p>
+<p><tt>read_chunk(PidSpec, EpochID, File, Offset, Size, Opts) -&gt; any()</tt></p>
+</div><p>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</p>
+
+<h3 class="function"><a name="read_chunk-7">read_chunk/7</a></h3>
+<div class="spec">
+<p><tt>read_chunk(PidSpec, EpochID, File, Offset, Size, Opts, Timeout) -&gt; any()</tt></p>
 </div><p>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</p>
 
 <h3 class="function"><a name="read_latest_projection-2">read_latest_projection/2</a></h3>
@@ -254,6 +273,17 @@ TCP communication problems with the remote server.</p>
 <p><tt>terminate(Reason, S) -&gt; any()</tt></p>
 </div>
 
+<h3 class="function"><a name="trim_chunk-5">trim_chunk/5</a></h3>
+<div class="spec">
+<p><tt>trim_chunk(PidSpec, EpochID, File, Offset, Size) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="trim_chunk-6">trim_chunk/6</a></h3>
+<div class="spec">
+<p><tt>trim_chunk(PidSpec, EpochID, File, Offset, Chunk, Timeout) -&gt; any()</tt></p>
+</div><p>Write a chunk (binary- or iolist-style) of data to a file
+  with <code>Prefix</code> at <code>Offset</code>.</p>
+
 <h3 class="function"><a name="wedge_status-1">wedge_status/1</a></h3>
 <div class="spec">
 <p><tt>wedge_status(PidSpec) -&gt; any()</tt></p>
@@ -288,6 +318,6 @@ TCP communication problems with the remote server.</p>
 <hr>
 
 <div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
-<p><i>Generated by EDoc, Jul 1 2015, 18:32:19.</i></p>
+<p><i>Generated by EDoc, Dec 8 2015, 21:33:07.</i></p>
 </body>
 </html>

@@ -115,12 +115,15 @@ function name.)</p>
 <tr><td valign="top"><a href="#list_files-2">list_files/2</a></td><td>Fetch the list of all files on the remote FLU.</td></tr>
 <tr><td valign="top"><a href="#quit-1">quit/1</a></td><td>Quit &amp; close the connection to remote FLU and stop our
   proxy process.</td></tr>
-<tr><td valign="top"><a href="#read_chunk-4">read_chunk/4</a></td><td>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</td></tr>
 <tr><td valign="top"><a href="#read_chunk-5">read_chunk/5</a></td><td>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</td></tr>
+<tr><td valign="top"><a href="#read_chunk-6">read_chunk/6</a></td><td>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</td></tr>
 <tr><td valign="top"><a href="#start_link-1">start_link/1</a></td><td>Start a local, long-lived process that will be our steady
   &amp; reliable communication proxy with the fickle &amp; flaky
   remote Machi server.</td></tr>
+<tr><td valign="top"><a href="#start_link-2">start_link/2</a></td><td></td></tr>
 <tr><td valign="top"><a href="#terminate-2">terminate/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#trim_chunk-4">trim_chunk/4</a></td><td>Trim a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</td></tr>
+<tr><td valign="top"><a href="#trim_chunk-5">trim_chunk/5</a></td><td>Trim a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</td></tr>
 <tr><td valign="top"><a href="#write_chunk-4">write_chunk/4</a></td><td>Write a chunk of data (that has already been
   allocated/sequenced by an earlier append_chunk_extra() call) to
   <code>File</code> at <code>Offset</code>.</td></tr>
@@ -149,7 +152,7 @@ function name.)</p>
 
 <h3 class="function"><a name="append_chunk_extra-5">append_chunk_extra/5</a></h3>
 <div class="spec">
-<p><tt>append_chunk_extra(PidSpec, Prefix, Chunk, ChunkExtra, Timeout) -&gt; any()</tt></p>
+<p><tt>append_chunk_extra(PidSpec, Prefix, Chunk, ChunkExtra, Timeout0) -&gt; any()</tt></p>
 </div><p>Append a chunk (binary- or iolist-style) of data to a file
   with <code>Prefix</code>.</p>
 
@@ -160,7 +163,7 @@ function name.)</p>
 
 <h3 class="function"><a name="checksum_list-3">checksum_list/3</a></h3>
 <div class="spec">
-<p><tt>checksum_list(PidSpec, File, Timeout) -&gt; any()</tt></p>
+<p><tt>checksum_list(PidSpec, File, Timeout0) -&gt; any()</tt></p>
 </div><p>Fetch the list of chunk checksums for <code>File</code>.</p>
 
 <h3 class="function"><a name="code_change-3">code_change/3</a></h3>
@@ -195,7 +198,7 @@ function name.)</p>
 
 <h3 class="function"><a name="list_files-2">list_files/2</a></h3>
 <div class="spec">
-<p><tt>list_files(PidSpec, Timeout) -&gt; any()</tt></p>
+<p><tt>list_files(PidSpec, Timeout0) -&gt; any()</tt></p>
 </div><p>Fetch the list of all files on the remote FLU.</p>
 
 <h3 class="function"><a name="quit-1">quit/1</a></h3>
@@ -204,14 +207,14 @@ function name.)</p>
 </div><p>Quit &amp; close the connection to remote FLU and stop our
   proxy process.</p>
 
-<h3 class="function"><a name="read_chunk-4">read_chunk/4</a></h3>
-<div class="spec">
-<p><tt>read_chunk(PidSpec, File, Offset, Size) -&gt; any()</tt></p>
-</div><p>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</p>
-
 <h3 class="function"><a name="read_chunk-5">read_chunk/5</a></h3>
 <div class="spec">
-<p><tt>read_chunk(PidSpec, File, Offset, Size, Timeout) -&gt; any()</tt></p>
+<p><tt>read_chunk(PidSpec, File, Offset, Size, Opts) -&gt; any()</tt></p>
+</div><p>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</p>
+
+<h3 class="function"><a name="read_chunk-6">read_chunk/6</a></h3>
+<div class="spec">
+<p><tt>read_chunk(PidSpec, File, Offset, Size, Opts, Timeout0) -&gt; any()</tt></p>
 </div><p>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</p>
 
 <h3 class="function"><a name="start_link-1">start_link/1</a></h3>
@@ -221,10 +224,25 @@ function name.)</p>
   &amp; reliable communication proxy with the fickle &amp; flaky
   remote Machi server.</p>
 
+<h3 class="function"><a name="start_link-2">start_link/2</a></h3>
+<div class="spec">
+<p><tt>start_link(P_srvr_list, Opts) -&gt; any()</tt></p>
+</div>
+
 <h3 class="function"><a name="terminate-2">terminate/2</a></h3>
 <div class="spec">
 <p><tt>terminate(Reason, State) -&gt; any()</tt></p>
 </div>
+
+<h3 class="function"><a name="trim_chunk-4">trim_chunk/4</a></h3>
+<div class="spec">
+<p><tt>trim_chunk(PidSpec, File, Offset, Size) -&gt; any()</tt></p>
+</div><p>Trim a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</p>
+
+<h3 class="function"><a name="trim_chunk-5">trim_chunk/5</a></h3>
+<div class="spec">
+<p><tt>trim_chunk(PidSpec, File, Offset, Size, Timeout0) -&gt; any()</tt></p>
+</div><p>Trim a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</p>
 
 <h3 class="function"><a name="write_chunk-4">write_chunk/4</a></h3>
 <div class="spec">
@@ -235,11 +253,11 @@ function name.)</p>
 
 <h3 class="function"><a name="write_chunk-5">write_chunk/5</a></h3>
 <div class="spec">
-<p><tt>write_chunk(PidSpec, File, Offset, Chunk, Timeout) -&gt; any()</tt></p>
+<p><tt>write_chunk(PidSpec, File, Offset, Chunk, Timeout0) -&gt; any()</tt></p>
 </div><p>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</p>
 <hr>
 
 <div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
-<p><i>Generated by EDoc, Jul 1 2015, 18:32:19.</i></p>
+<p><i>Generated by EDoc, Dec 8 2015, 21:33:07.</i></p>
 </body>
 </html>

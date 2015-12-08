@@ -25,58 +25,25 @@ as a sequencer + file server + chain manager group of processes.</p>
  
   <h4><a name="Protocol_origins">Protocol origins</a></h4>
  
-  <p>The protocol implemented here is an artisanal, hand-crafted, silly  
-thing that was very quick to put together for a "demo day" proof of  
-concept.  It will almost certainly be replaced with something else,  
-both in terms of wire format and better code separation of  
-serialization/deserialization vs. network transport management,  
-etc.</p>
- 
-  <p>For the moment, this module implements a rudimentary TCP-based  
-protocol as the sole supported access method to the server,  
-sequencer, and projection store.  Conceptually, those three  
-services are independent and ought to have their own protocols.  As  
-a practical matter, there is no need for wire protocol  
-compatibility.  Furthermore, from the perspective of failure  
-detection, it is very convenient that all three FLU-related  
-services are accessed using the same single TCP port.</p>
+  <p>Today's FLU fully supports a protocol that is based on Protocol
+  Buffers.  Please see the <code>src/machi.proto</code> file for details.</p>
  
   <h4><a name="TODO_items">TODO items</a></h4>
  
-  <p>TODO There is a major missing feature in this FLU implementation:
-  there is no "write-once" enforcement for any position in a Machi
-  file.  At the moment, we rely on correct behavior of the client
-  &amp; the sequencer to avoid overwriting data.  In the Real World,  
-however, all Machi file data is supposed to be exactly write-once  
-to avoid problems with bugs, wire protocol corruption, malicious  
-clients, etc.</p>
- 
   <p>TODO The per-file metadata tuple store is missing from this implementation.</p>
  
-  <p>TODO Section 4.1 ("The FLU") of the Machi design doc suggests that  
-the FLU keep track of the epoch number of the last file write (and  
-perhaps last metadata write), as an optimization for inter-FLU data  
-replication/chain repair.</p>
- 
-  TODO Section 4.2 ("The Sequencer") says that the sequencer must
-  change its file assignments to new &amp; unique names whenever we move
-  to wedge state.  This is not yet implemented.  In the current
-  Erlang process scheme (which will probably be changing soon), a
-  simple implementation would stop all existing processes that are
-  running run_seq_append_server().
+  TODO Section 4.1 ("The FLU") of the Machi design doc suggests that
+  the FLU keep track of the epoch number of the last file write (and
+  perhaps last metadata write), as an optimization for inter-FLU data
+  replication/chain repair.
 <h2><a name="index">Function Index</a></h2>
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#decode_csum_file_entry-1">decode_csum_file_entry/1</a></td><td>Decode a single <code>binary()</code> blob into an
-       <code>{Offset,Size,TaggedCSum}</code> tuple.</td></tr>
-<tr><td valign="top"><a href="#encode_csum_file_entry-3">encode_csum_file_entry/3</a></td><td>Encode <code>Offset + Size + TaggedCSum</code> into an <code>iolist()</code> type for
-  internal storage by the FLU.</td></tr>
-<tr><td valign="top"><a href="#encode_csum_file_entry_bin-3">encode_csum_file_entry_bin/3</a></td><td>Encode <code>Offset + Size + TaggedCSum</code> into an <code>binary()</code> type for
-  internal storage by the FLU.</td></tr>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#current_state-1">current_state/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#format_state-1">format_state/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#main2-4">main2/4</a></td><td></td></tr>
 <tr><td valign="top"><a href="#make_listener_regname-1">make_listener_regname/1</a></td><td></td></tr>
 <tr><td valign="top"><a href="#make_projection_server_regname-1">make_projection_server_regname/1</a></td><td></td></tr>
-<tr><td valign="top"><a href="#split_checksum_list_blob-1">split_checksum_list_blob/1</a></td><td>Split a <code>binary()</code> blob of <code>checksum_list</code> data into a list of
-  unparsed <code>binary()</code> blobs, one per entry.</td></tr>
-<tr><td valign="top"><a href="#split_checksum_list_blob_decode-1">split_checksum_list_blob_decode/1</a></td><td>Split a <code>binary()</code> blob of <code>checksum_list</code> data into a list of
-  <code>{Offset,Size,TaggedCSum}</code> tuples.</td></tr>
+<tr><td valign="top"><a href="#run_append_server-2">run_append_server/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#run_listen_server-1">run_listen_server/1</a></td><td></td></tr>
 <tr><td valign="top"><a href="#start_link-1">start_link/1</a></td><td></td></tr>
 <tr><td valign="top"><a href="#stop-1">stop/1</a></td><td></td></tr>
 <tr><td valign="top"><a href="#update_wedge_state-3">update_wedge_state/3</a></td><td></td></tr>
@@ -85,40 +52,20 @@ replication/chain repair.</p>
 
 <h2><a name="functions">Function Details</a></h2>
 
-<h3 class="function"><a name="decode_csum_file_entry-1">decode_csum_file_entry/1</a></h3>
+<h3 class="function"><a name="current_state-1">current_state/1</a></h3>
 <div class="spec">
-<p><tt>decode_csum_file_entry(Else::binary()) -&gt; error | {<a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>, <a href="machi_dt.html#type-chunk_size">machi_dt:chunk_size()</a>, <a href="machi_dt.html#type-chunk_s">machi_dt:chunk_s()</a>}</tt><br></p>
-</div><p><p>Decode a single <code>binary()</code> blob into an
-       <code>{Offset,Size,TaggedCSum}</code> tuple.</p>
- 
-  <p>The internal encoding (which is currently exposed to the outside world  
-via this function and related ones) is:</p>
- 
-  <ul>
-  <li> 1 byte: record length
-  </li>
-  <li> 8 bytes (unsigned big-endian): byte offset
-  </li>
-  <li> 4 bytes (unsigned big-endian): chunk size
-  </li>
-  <li> all remaining bytes: tagged checksum (1st byte = type tag)
-  </li>
-  </ul>
- 
-  See <code>machi.hrl</code> for the tagged checksum types, e.g.,
-  <code>?CSUM_TAG_NONE</code>.</p>
+<p><tt>current_state(PidSpec) -&gt; any()</tt></p>
+</div>
 
-<h3 class="function"><a name="encode_csum_file_entry-3">encode_csum_file_entry/3</a></h3>
+<h3 class="function"><a name="format_state-1">format_state/1</a></h3>
 <div class="spec">
-<p><tt>encode_csum_file_entry(Offset::<a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>, Size::<a href="machi_dt.html#type-chunk_size">machi_dt:chunk_size()</a>, TaggedCSum::<a href="machi_dt.html#type-chunk_s">machi_dt:chunk_s()</a>) -&gt; iolist()</tt><br></p>
-</div><p>Encode <code>Offset + Size + TaggedCSum</code> into an <code>iolist()</code> type for
-  internal storage by the FLU.</p>
+<p><tt>format_state(State) -&gt; any()</tt></p>
+</div>
 
-<h3 class="function"><a name="encode_csum_file_entry_bin-3">encode_csum_file_entry_bin/3</a></h3>
+<h3 class="function"><a name="main2-4">main2/4</a></h3>
 <div class="spec">
-<p><tt>encode_csum_file_entry_bin(Offset::<a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>, Size::<a href="machi_dt.html#type-chunk_size">machi_dt:chunk_size()</a>, TaggedCSum::<a href="machi_dt.html#type-chunk_s">machi_dt:chunk_s()</a>) -&gt; binary()</tt><br></p>
-</div><p>Encode <code>Offset + Size + TaggedCSum</code> into an <code>binary()</code> type for
-  internal storage by the FLU.</p>
+<p><tt>main2(FluName, TcpPort, DataDir, Props) -&gt; any()</tt></p>
+</div>
 
 <h3 class="function"><a name="make_listener_regname-1">make_listener_regname/1</a></h3>
 <div class="spec">
@@ -130,23 +77,15 @@ via this function and related ones) is:</p>
 <p><tt>make_projection_server_regname(BaseName) -&gt; any()</tt></p>
 </div>
 
-<h3 class="function"><a name="split_checksum_list_blob-1">split_checksum_list_blob/1</a></h3>
+<h3 class="function"><a name="run_append_server-2">run_append_server/2</a></h3>
 <div class="spec">
-<p><tt>split_checksum_list_blob(Bin::binary()) -&gt; {[binary()], TrailingJunk::binary()}</tt><br></p>
-</div><p><p>Split a <code>binary()</code> blob of <code>checksum_list</code> data into a list of
-  unparsed <code>binary()</code> blobs, one per entry.</p>
- 
-  <p>Decode the unparsed blobs with <a href="#decode_csum_file_entry-1"><code>decode_csum_file_entry/1</code></a>, if  
-desired.</p>
- 
-  The return value <code>TrailingJunk</code> is unparseable bytes at the end of
-  the checksum list blob.</p>
+<p><tt>run_append_server(FluPid, State) -&gt; any()</tt></p>
+</div>
 
-<h3 class="function"><a name="split_checksum_list_blob_decode-1">split_checksum_list_blob_decode/1</a></h3>
+<h3 class="function"><a name="run_listen_server-1">run_listen_server/1</a></h3>
 <div class="spec">
-<p><tt>split_checksum_list_blob_decode(Bin::binary()) -&gt; {[{<a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>, <a href="machi_dt.html#type-chunk_size">machi_dt:chunk_size()</a>, <a href="machi_dt.html#type-chunk_s">machi_dt:chunk_s()</a>}], TrailingJunk::binary()}</tt><br></p>
-</div><p>Split a <code>binary()</code> blob of <code>checksum_list</code> data into a list of
-  <code>{Offset,Size,TaggedCSum}</code> tuples.</p>
+<p><tt>run_listen_server(State) -&gt; any()</tt></p>
+</div>
 
 <h3 class="function"><a name="start_link-1">start_link/1</a></h3>
 <div class="spec">
@@ -170,6 +109,6 @@ desired.</p>
 <hr>
 
 <div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
-<p><i>Generated by EDoc, Jul 1 2015, 18:32:19.</i></p>
+<p><i>Generated by EDoc, Dec 8 2015, 21:33:07.</i></p>
 </body>
 </html>

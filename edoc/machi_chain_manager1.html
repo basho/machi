@@ -36,39 +36,74 @@ distributed state of a single Machi Chain Replication chain.</p>
   independently; each is constrained so that it will reach consensus
   via independent computation &amp; action.
 <h2><a name="index">Function Index</a></h2>
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#code_change-3">code_change/3</a></td><td></td></tr>
-<tr><td valign="top"><a href="#get_all_hosed-1">get_all_hosed/1</a></td><td></td></tr>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#chain_state_transition_is_sane-6">chain_state_transition_is_sane/6</a></td><td>Check if a projection transition is sane &amp; safe: we assume  
+that the caller has checked basic projection data structure contents.</td></tr>
+<tr><td valign="top"><a href="#code_change-3">code_change/3</a></td><td></td></tr>
+<tr><td valign="top"><a href="#format_status-2">format_status/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#get_ps-2">get_ps/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#get_remember_down_list-0">get_remember_down_list/0</a></td><td></td></tr>
 <tr><td valign="top"><a href="#handle_call-3">handle_call/3</a></td><td></td></tr>
 <tr><td valign="top"><a href="#handle_cast-2">handle_cast/2</a></td><td></td></tr>
 <tr><td valign="top"><a href="#handle_info-2">handle_info/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#has_not_sane-2">has_not_sane/2</a></td><td></td></tr>
 <tr><td valign="top"><a href="#init-1">init/1</a></td><td></td></tr>
-<tr><td valign="top"><a href="#inner_projection_exists-1">inner_projection_exists/1</a></td><td></td></tr>
-<tr><td valign="top"><a href="#inner_projection_or_self-1">inner_projection_or_self/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#init_remember_down_list-0">init_remember_down_list/0</a></td><td></td></tr>
 <tr><td valign="top"><a href="#make_chmgr_regname-1">make_chmgr_regname/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#mk-3">mk/3</a></td><td>Create a 2-tuple that describes how <code>UPI1</code> + <code>Repair1</code> are
+       transformed into <code>UPI2</code> in a chain state change.</td></tr>
+<tr><td valign="top"><a href="#perhaps_call-5">perhaps_call/5</a></td><td></td></tr>
 <tr><td valign="top"><a href="#ping-1">ping/1</a></td><td></td></tr>
 <tr><td valign="top"><a href="#projection_transitions_are_sane-2">projection_transitions_are_sane/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#scan_dir-4">scan_dir/4</a></td><td></td></tr>
 <tr><td valign="top"><a href="#set_active-2">set_active/2</a></td><td></td></tr>
 <tr><td valign="top"><a href="#set_chain_members-2">set_chain_members/2</a></td><td>Set chain members list.</td></tr>
+<tr><td valign="top"><a href="#set_chain_members-6">set_chain_members/6</a></td><td></td></tr>
+<tr><td valign="top"><a href="#simple_chain_state_transition_is_sane-3">simple_chain_state_transition_is_sane/3</a></td><td>A simple technique for checking chain state transition safety.</td></tr>
+<tr><td valign="top"><a href="#simple_chain_state_transition_is_sane-5">simple_chain_state_transition_is_sane/5</a></td><td>Simple check if a projection transition is sane &amp; safe: we assume  
+that the caller has checked basic projection data structure contents.</td></tr>
 <tr><td valign="top"><a href="#start_link-2">start_link/2</a></td><td></td></tr>
 <tr><td valign="top"><a href="#start_link-3">start_link/3</a></td><td></td></tr>
 <tr><td valign="top"><a href="#stop-1">stop/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#strip_dbg2-1">strip_dbg2/1</a></td><td></td></tr>
 <tr><td valign="top"><a href="#terminate-2">terminate/2</a></td><td></td></tr>
 <tr><td valign="top"><a href="#test_calc_projection-2">test_calc_projection/2</a></td><td></td></tr>
-<tr><td valign="top"><a href="#test_react_to_env-1">test_react_to_env/1</a></td><td></td></tr>
 <tr><td valign="top"><a href="#test_read_latest_public_projection-2">test_read_latest_public_projection/2</a></td><td></td></tr>
 <tr><td valign="top"><a href="#test_write_public_projection-2">test_write_public_projection/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#trigger_react_to_env-1">trigger_react_to_env/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#update_remember_down_list-1">update_remember_down_list/1</a></td><td></td></tr>
 </table>
 
 <h2><a name="functions">Function Details</a></h2>
+
+<h3 class="function"><a name="chain_state_transition_is_sane-6">chain_state_transition_is_sane/6</a></h3>
+<div class="spec">
+<p><tt>chain_state_transition_is_sane(Author1, UPI1, Repair1, Author2, UPI2, RelativeToServer) -&gt; any()</tt></p>
+</div><p><p>Check if a projection transition is sane &amp; safe: we assume  
+that the caller has checked basic projection data structure contents.</p>
+ 
+  NOTE: The return value convention is <code>true</code> for sane/safe and <code>term() /=
+  true</code> for any unsafe/insane value.  This function (and its callee
+  functions) are the only functions (throughout all of the chain state
+  transition sanity checking functions) that is allowed to return <code>false</code>.</p>
 
 <h3 class="function"><a name="code_change-3">code_change/3</a></h3>
 <div class="spec">
 <p><tt>code_change(OldVsn, S, Extra) -&gt; any()</tt></p>
 </div>
 
-<h3 class="function"><a name="get_all_hosed-1">get_all_hosed/1</a></h3>
+<h3 class="function"><a name="format_status-2">format_status/2</a></h3>
 <div class="spec">
-<p><tt>get_all_hosed(P) -&gt; any()</tt></p>
+<p><tt>format_status(Opt, X2) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="get_ps-2">get_ps/2</a></h3>
+<div class="spec">
+<p><tt>get_ps(Projection_v1, Acc) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="get_remember_down_list-0">get_remember_down_list/0</a></h3>
+<div class="spec">
+<p><tt>get_remember_down_list() -&gt; any()</tt></p>
 </div>
 
 <h3 class="function"><a name="handle_call-3">handle_call/3</a></h3>
@@ -86,24 +121,44 @@ distributed state of a single Machi Chain Replication chain.</p>
 <p><tt>handle_info(Msg, Ch_mgr) -&gt; any()</tt></p>
 </div>
 
+<h3 class="function"><a name="has_not_sane-2">has_not_sane/2</a></h3>
+<div class="spec">
+<p><tt>has_not_sane(Projection_v1, Acc) -&gt; any()</tt></p>
+</div>
+
 <h3 class="function"><a name="init-1">init/1</a></h3>
 <div class="spec">
 <p><tt>init(X1) -&gt; any()</tt></p>
 </div>
 
-<h3 class="function"><a name="inner_projection_exists-1">inner_projection_exists/1</a></h3>
+<h3 class="function"><a name="init_remember_down_list-0">init_remember_down_list/0</a></h3>
 <div class="spec">
-<p><tt>inner_projection_exists(Projection_v1) -&gt; any()</tt></p>
-</div>
-
-<h3 class="function"><a name="inner_projection_or_self-1">inner_projection_or_self/1</a></h3>
-<div class="spec">
-<p><tt>inner_projection_or_self(P) -&gt; any()</tt></p>
+<p><tt>init_remember_down_list() -&gt; any()</tt></p>
 </div>
 
 <h3 class="function"><a name="make_chmgr_regname-1">make_chmgr_regname/1</a></h3>
 <div class="spec">
 <p><tt>make_chmgr_regname(A) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="mk-3">mk/3</a></h3>
+<div class="spec">
+<p><tt>mk(UPI1, Repair1, UPI2) -&gt; any()</tt></p>
+</div><p><p>Create a 2-tuple that describes how <code>UPI1</code> + <code>Repair1</code> are
+       transformed into <code>UPI2</code> in a chain state change.</p>
+ 
+  <p>The 1st part of the 2-tuple is a list of <code>keep</code> and <code>del</code> instructions,
+  relative to the items in UPI1 and whether they are present (<code>keep</code>) or
+  absent (<code>del</code>) in <code>UPI2</code>.</p>
+ 
+  The 2nd part of the 2-tuple is <code>list(non_neg_integer()|error)</code> that
+  describes the relative order of items in <code>Repair1</code> that appear in
+  <code>UPI2</code>.  The <code>error</code> atom is used to denote items not present in
+  <code>Repair1</code>.</p>
+
+<h3 class="function"><a name="perhaps_call-5">perhaps_call/5</a></h3>
+<div class="spec">
+<p><tt>perhaps_call(ProxyPid, MyName, Partitions, FLU, DoIt) -&gt; any()</tt></p>
 </div>
 
 <h3 class="function"><a name="ping-1">ping/1</a></h3>
@@ -114,6 +169,11 @@ distributed state of a single Machi Chain Replication chain.</p>
 <h3 class="function"><a name="projection_transitions_are_sane-2">projection_transitions_are_sane/2</a></h3>
 <div class="spec">
 <p><tt>projection_transitions_are_sane(Ps, RelativeToServer) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="scan_dir-4">scan_dir/4</a></h3>
+<div class="spec">
+<p><tt>scan_dir(Dir, FileFilterFun, FoldEachFun, FoldEachAcc) -&gt; any()</tt></p>
 </div>
 
 <h3 class="function"><a name="set_active-2">set_active/2</a></h3>
@@ -132,6 +192,46 @@ distributed state of a single Machi Chain Replication chain.</p>
   set_chain_members() first on the author of highest rank and finish
   with lowest rank, i.e. name z* first, name a* last.</p>
 
+<h3 class="function"><a name="set_chain_members-6">set_chain_members/6</a></h3>
+<div class="spec">
+<p><tt>set_chain_members(Pid, ChainName, OldEpoch, CMode, MembersDict, Witness_list) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="simple_chain_state_transition_is_sane-3">simple_chain_state_transition_is_sane/3</a></h3>
+<div class="spec">
+<p><tt>simple_chain_state_transition_is_sane(UPI1, Repair1, UPI2) -&gt; any()</tt></p>
+</div><p><p>A simple technique for checking chain state transition safety.</p>
+ 
+  <p>Math tells us that any change state <code>UPI1</code> plus <code>Repair1</code> to state
+  <code>UPI2</code> is OK as long as <code>UPI2</code> is a concatenation of some
+  order-preserving combination from <code>UPI1</code> with some order-preserving
+  combination from <code>Repair1</code>.</p>
+ 
+  <pre>    Good_UPI2s = [ X ++ Y || X &lt;- machi_util:ordered_combinations(UPI1),
+                             Y &lt;- machi_util:ordered_combinations(Repair1)]</pre>
+ 
+  <p>Rather than creating that list and then checking if <code>UPI2</code> is in
+  it, we try a <code>diff</code>-like technique to check for basic state
+  transition safety.  See docs for <a href="#mk-3"><code>mk/3</code></a> for more detail.</p>
+ 
+  <pre>  2&gt; machi_chain_manager1:mk([a,b], [], [a]).
+  {[keep,del],[]}        %% good transition
+  3&gt; machi_chain_manager1:mk([a,b], [], [b,a]).
+  {[del,keep],[]}        %% bad transition: too few 'keep' for UPI2's length 2
+  4&gt; machi_chain_manager1:mk([a,b], [c,d,e], [a,d]).
+  {[keep,del],[2]}       %% good transition
+  5&gt; machi_chain_manager1:mk([a,b], [c,d,e], [a,bogus]).
+  {[keep,del],[error]}   %% bad transition: 'bogus' not in Repair1</pre></p>
+
+<h3 class="function"><a name="simple_chain_state_transition_is_sane-5">simple_chain_state_transition_is_sane/5</a></h3>
+<div class="spec">
+<p><tt>simple_chain_state_transition_is_sane(Author1, UPI1, Repair1, Author2, UPI2) -&gt; any()</tt></p>
+</div><p><p>Simple check if a projection transition is sane &amp; safe: we assume  
+that the caller has checked basic projection data structure contents.</p>
+ 
+  NOTE: The return value convention is <code>true</code> for sane/safe and
+  <code>term() /= true</code> for any unsafe/insane value.</p>
+
 <h3 class="function"><a name="start_link-2">start_link/2</a></h3>
 <div class="spec">
 <p><tt>start_link(MyName, MembersDict) -&gt; any()</tt></p>
@@ -147,6 +247,11 @@ distributed state of a single Machi Chain Replication chain.</p>
 <p><tt>stop(Pid) -&gt; any()</tt></p>
 </div>
 
+<h3 class="function"><a name="strip_dbg2-1">strip_dbg2/1</a></h3>
+<div class="spec">
+<p><tt>strip_dbg2(P) -&gt; any()</tt></p>
+</div>
+
 <h3 class="function"><a name="terminate-2">terminate/2</a></h3>
 <div class="spec">
 <p><tt>terminate(Reason, S) -&gt; any()</tt></p>
@@ -155,11 +260,6 @@ distributed state of a single Machi Chain Replication chain.</p>
 <h3 class="function"><a name="test_calc_projection-2">test_calc_projection/2</a></h3>
 <div class="spec">
 <p><tt>test_calc_projection(Pid, KeepRunenvP) -&gt; any()</tt></p>
-</div>
-
-<h3 class="function"><a name="test_react_to_env-1">test_react_to_env/1</a></h3>
-<div class="spec">
-<p><tt>test_react_to_env(Pid) -&gt; any()</tt></p>
 </div>
 
 <h3 class="function"><a name="test_read_latest_public_projection-2">test_read_latest_public_projection/2</a></h3>
@@ -171,9 +271,19 @@ distributed state of a single Machi Chain Replication chain.</p>
 <div class="spec">
 <p><tt>test_write_public_projection(Pid, Proj) -&gt; any()</tt></p>
 </div>
+
+<h3 class="function"><a name="trigger_react_to_env-1">trigger_react_to_env/1</a></h3>
+<div class="spec">
+<p><tt>trigger_react_to_env(Pid) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="update_remember_down_list-1">update_remember_down_list/1</a></h3>
+<div class="spec">
+<p><tt>update_remember_down_list(FLU) -&gt; any()</tt></p>
+</div>
 <hr>
 
 <div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
-<p><i>Generated by EDoc, Jul 1 2015, 18:32:19.</i></p>
+<p><i>Generated by EDoc, Dec 8 2015, 21:33:07.</i></p>
 </body>
 </html>

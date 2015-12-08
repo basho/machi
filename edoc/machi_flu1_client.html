@@ -62,17 +62,23 @@ services are accessed using the same single TCP port.</p>
 <tr><td valign="top"><a href="#get_all_projections-3">get_all_projections/3</a></td><td>Get all projections from the FLU's projection store.</td></tr>
 <tr><td valign="top"><a href="#get_latest_epochid-2">get_latest_epochid/2</a></td><td>Get the latest epoch number + checksum from the FLU's projection store.</td></tr>
 <tr><td valign="top"><a href="#get_latest_epochid-3">get_latest_epochid/3</a></td><td>Get the latest epoch number + checksum from the FLU's projection store.</td></tr>
+<tr><td valign="top"><a href="#kick_projection_reaction-2">kick_projection_reaction/2</a></td><td>Kick (politely) the remote chain manager to react to a
+  projection change.</td></tr>
+<tr><td valign="top"><a href="#kick_projection_reaction-3">kick_projection_reaction/3</a></td><td>Kick (politely) the remote chain manager to react to a
+  projection change.</td></tr>
 <tr><td valign="top"><a href="#list_all_projections-2">list_all_projections/2</a></td><td>Get all epoch numbers from the FLU's projection store.</td></tr>
 <tr><td valign="top"><a href="#list_all_projections-3">list_all_projections/3</a></td><td>Get all epoch numbers from the FLU's projection store.</td></tr>
 <tr><td valign="top"><a href="#list_files-2">list_files/2</a></td><td>Fetch the list of all files on the remote FLU.</td></tr>
 <tr><td valign="top"><a href="#list_files-3">list_files/3</a></td><td>Fetch the list of all files on the remote FLU.</td></tr>
 <tr><td valign="top"><a href="#quit-1">quit/1</a></td><td>Quit &amp; close the connection to remote FLU.</td></tr>
-<tr><td valign="top"><a href="#read_chunk-5">read_chunk/5</a></td><td>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</td></tr>
 <tr><td valign="top"><a href="#read_chunk-6">read_chunk/6</a></td><td>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</td></tr>
+<tr><td valign="top"><a href="#read_chunk-7">read_chunk/7</a></td><td>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</td></tr>
 <tr><td valign="top"><a href="#read_latest_projection-2">read_latest_projection/2</a></td><td>Get the latest projection from the FLU's projection store for <code>ProjType</code></td></tr>
 <tr><td valign="top"><a href="#read_latest_projection-3">read_latest_projection/3</a></td><td>Get the latest projection from the FLU's projection store for <code>ProjType</code></td></tr>
 <tr><td valign="top"><a href="#read_projection-3">read_projection/3</a></td><td>Read a projection <code>Proj</code> of type <code>ProjType</code>.</td></tr>
 <tr><td valign="top"><a href="#read_projection-4">read_projection/4</a></td><td>Read a projection <code>Proj</code> of type <code>ProjType</code>.</td></tr>
+<tr><td valign="top"><a href="#trim_chunk-5">trim_chunk/5</a></td><td>Restricted API: Write a chunk of already-sequenced data to
+  <code>File</code> at <code>Offset</code>.</td></tr>
 <tr><td valign="top"><a href="#trunc_hack-3">trunc_hack/3</a></td><td>Restricted API: Truncate a file after it has been successfully
   erasure coded.</td></tr>
 <tr><td valign="top"><a href="#trunc_hack-4">trunc_hack/4</a></td><td>Restricted API: Truncate a file after it has been successfully
@@ -210,6 +216,18 @@ blob.</p>
 <p><tt>get_latest_epochid(Host::<a href="machi_dt.html#type-inet_host">machi_dt:inet_host()</a>, TcpPort::<a href="machi_dt.html#type-inet_port">machi_dt:inet_port()</a>, ProjType::<a href="machi_dt.html#type-projection_type">machi_dt:projection_type()</a>) -&gt; {ok, <a href="machi_dt.html#type-epoch_id">machi_dt:epoch_id()</a>} | {error, term()}</tt><br></p>
 </div><p>Get the latest epoch number + checksum from the FLU's projection store.</p>
 
+<h3 class="function"><a name="kick_projection_reaction-2">kick_projection_reaction/2</a></h3>
+<div class="spec">
+<p><tt>kick_projection_reaction(Sock::<a href="#type-port_wrap">port_wrap()</a>, Options::list()) -&gt; ok</tt><br></p>
+</div><p>Kick (politely) the remote chain manager to react to a
+  projection change.</p>
+
+<h3 class="function"><a name="kick_projection_reaction-3">kick_projection_reaction/3</a></h3>
+<div class="spec">
+<p><tt>kick_projection_reaction(Host::<a href="machi_dt.html#type-inet_host">machi_dt:inet_host()</a>, TcpPort::<a href="machi_dt.html#type-inet_port">machi_dt:inet_port()</a>, Options::list()) -&gt; ok</tt><br></p>
+</div><p>Kick (politely) the remote chain manager to react to a
+  projection change.</p>
+
 <h3 class="function"><a name="list_all_projections-2">list_all_projections/2</a></h3>
 <div class="spec">
 <p><tt>list_all_projections(Sock::<a href="#type-port_wrap">port_wrap()</a>, ProjType::<a href="machi_dt.html#type-projection_type">machi_dt:projection_type()</a>) -&gt; {ok, [non_neg_integer()]} | {error, term()}</tt><br></p>
@@ -235,14 +253,14 @@ blob.</p>
 <p><tt>quit(Sock::<a href="#type-port_wrap">port_wrap()</a>) -&gt; ok</tt><br></p>
 </div><p>Quit &amp; close the connection to remote FLU.</p>
 
-<h3 class="function"><a name="read_chunk-5">read_chunk/5</a></h3>
-<div class="spec">
-<p><tt>read_chunk(Sock::<a href="#type-port_wrap">port_wrap()</a>, EpochID::<a href="machi_dt.html#type-epoch_id">machi_dt:epoch_id()</a>, File::<a href="machi_dt.html#type-file_name">machi_dt:file_name()</a>, Offset::<a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>, Size::<a href="machi_dt.html#type-chunk_size">machi_dt:chunk_size()</a>) -&gt; {ok, <a href="machi_dt.html#type-chunk_s">machi_dt:chunk_s()</a>} | {error, <a href="machi_dt.html#type-error_general">machi_dt:error_general()</a> | not_written | partial_read} | {error, term()}</tt><br></p>
-</div><p>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</p>
-
 <h3 class="function"><a name="read_chunk-6">read_chunk/6</a></h3>
 <div class="spec">
-<p><tt>read_chunk(Host::<a href="machi_dt.html#type-inet_host">machi_dt:inet_host()</a>, TcpPort::<a href="machi_dt.html#type-inet_port">machi_dt:inet_port()</a>, EpochID::<a href="machi_dt.html#type-epoch_id">machi_dt:epoch_id()</a>, File::<a href="machi_dt.html#type-file_name">machi_dt:file_name()</a>, Offset::<a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>, Size::<a href="machi_dt.html#type-chunk_size">machi_dt:chunk_size()</a>) -&gt; {ok, <a href="machi_dt.html#type-chunk_s">machi_dt:chunk_s()</a>} | {error, <a href="machi_dt.html#type-error_general">machi_dt:error_general()</a> | not_written | partial_read} | {error, term()}</tt><br></p>
+<p><tt>read_chunk(Sock::<a href="#type-port_wrap">port_wrap()</a>, EpochID::<a href="machi_dt.html#type-epoch_id">machi_dt:epoch_id()</a>, File::<a href="machi_dt.html#type-file_name">machi_dt:file_name()</a>, Offset::<a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>, Size::<a href="machi_dt.html#type-chunk_size">machi_dt:chunk_size()</a>, Opts::<a href="proplists.html#type-proplist">proplists:proplist()</a>) -&gt; {ok, <a href="machi_dt.html#type-chunk_s">machi_dt:chunk_s()</a>} | {error, <a href="machi_dt.html#type-error_general">machi_dt:error_general()</a> | not_written | partial_read} | {error, term()}</tt><br></p>
+</div><p>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</p>
+
+<h3 class="function"><a name="read_chunk-7">read_chunk/7</a></h3>
+<div class="spec">
+<p><tt>read_chunk(Host::<a href="machi_dt.html#type-inet_host">machi_dt:inet_host()</a>, TcpPort::<a href="machi_dt.html#type-inet_port">machi_dt:inet_port()</a>, EpochID::<a href="machi_dt.html#type-epoch_id">machi_dt:epoch_id()</a>, File::<a href="machi_dt.html#type-file_name">machi_dt:file_name()</a>, Offset::<a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>, Size::<a href="machi_dt.html#type-chunk_size">machi_dt:chunk_size()</a>, Opts::<a href="proplists.html#type-proplist">proplists:proplist()</a>) -&gt; {ok, <a href="machi_dt.html#type-chunk_s">machi_dt:chunk_s()</a>} | {error, <a href="machi_dt.html#type-error_general">machi_dt:error_general()</a> | not_written | partial_read} | {error, term()}</tt><br></p>
 </div><p>Read a chunk of data of size <code>Size</code> from <code>File</code> at <code>Offset</code>.</p>
 
 <h3 class="function"><a name="read_latest_projection-2">read_latest_projection/2</a></h3>
@@ -264,6 +282,12 @@ blob.</p>
 <div class="spec">
 <p><tt>read_projection(Host::<a href="machi_dt.html#type-inet_host">machi_dt:inet_host()</a>, TcpPort::<a href="machi_dt.html#type-inet_port">machi_dt:inet_port()</a>, ProjType::<a href="machi_dt.html#type-projection_type">machi_dt:projection_type()</a>, Epoch::<a href="machi_dt.html#type-epoch_num">machi_dt:epoch_num()</a>) -&gt; {ok, <a href="machi_dt.html#type-projection">machi_dt:projection()</a>} | {error, not_written} | {error, term()}</tt><br></p>
 </div><p>Read a projection <code>Proj</code> of type <code>ProjType</code>.</p>
+
+<h3 class="function"><a name="trim_chunk-5">trim_chunk/5</a></h3>
+<div class="spec">
+<p><tt>trim_chunk(Sock::<a href="#type-port_wrap">port_wrap()</a>, EpochID::<a href="machi_dt.html#type-epoch_id">machi_dt:epoch_id()</a>, File0::<a href="machi_dt.html#type-file_name">machi_dt:file_name()</a>, Offset::<a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>, Size::<a href="machi_dt.html#type-chunk_size">machi_dt:chunk_size()</a>) -&gt; ok | {error, <a href="machi_dt.html#type-error_general">machi_dt:error_general()</a>} | {error, term()}</tt><br></p>
+</div><p>Restricted API: Write a chunk of already-sequenced data to
+  <code>File</code> at <code>Offset</code>.</p>
 
 <h3 class="function"><a name="trunc_hack-3">trunc_hack/3</a></h3>
 <div class="spec">
@@ -311,6 +335,6 @@ blob.</p>
 <hr>
 
 <div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
-<p><i>Generated by EDoc, Jul 1 2015, 18:32:19.</i></p>
+<p><i>Generated by EDoc, Dec 8 2015, 21:33:07.</i></p>
 </body>
 </html>

@@ -16,7 +16,9 @@
 <h2><a name="description">Description</a></h2>Miscellaneous utility functions.
 <h2><a name="index">Function Index</a></h2>
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#bin_to_hexstr-1">bin_to_hexstr/1</a></td><td>Convert a <code>binary()</code> to a hexadecimal string.</td></tr>
+<tr><td valign="top"><a href="#bool2int-1">bool2int/1</a></td><td></td></tr>
 <tr><td valign="top"><a href="#checksum_chunk-1">checksum_chunk/1</a></td><td>Calculate a checksum for a chunk of file data.</td></tr>
+<tr><td valign="top"><a href="#combinations-1">combinations/1</a></td><td></td></tr>
 <tr><td valign="top"><a href="#connect-2">connect/2</a></td><td>Create a TCP connection to a remote Machi server.</td></tr>
 <tr><td valign="top"><a href="#connect-3">connect/3</a></td><td>Create a TCP connection to a remote Machi server.</td></tr>
 <tr><td valign="top"><a href="#hexstr_to_bin-1">hexstr_to_bin/1</a></td><td>Convert a hexadecimal string to a <code>binary()</code>.</td></tr>
@@ -24,10 +26,13 @@
 <tr><td valign="top"><a href="#increment_max_filenum-2">increment_max_filenum/2</a></td><td>Increase the file size of a config file, which is used as the
   basis for a minimum sequence number.</td></tr>
 <tr><td valign="top"><a href="#info_msg-2">info_msg/2</a></td><td>Log an 'info' level message.</td></tr>
+<tr><td valign="top"><a href="#int2bool-1">int2bool/1</a></td><td></td></tr>
 <tr><td valign="top"><a href="#int_to_hexbin-2">int_to_hexbin/2</a></td><td>Convert an integer into a hexadecimal string (in <code>binary()</code>
   form) whose length is based on <code>I_size</code>.</td></tr>
 <tr><td valign="top"><a href="#int_to_hexstr-2">int_to_hexstr/2</a></td><td>Convert an integer into a hexadecimal string whose length is
   based on <code>I_size</code>.</td></tr>
+<tr><td valign="top"><a href="#is_valid_filename-1">is_valid_filename/1</a></td><td>Given a filename, return true if it is a valid machi filename,
+  false otherwise.</td></tr>
 <tr><td valign="top"><a href="#make_binary-1">make_binary/1</a></td><td>Convert a compatible Erlang data type into a <code>binary()</code> equivalent.</td></tr>
 <tr><td valign="top"><a href="#make_checksum_filename-2">make_checksum_filename/2</a></td><td>Calculate a checksum file path, by common convention.</td></tr>
 <tr><td valign="top"><a href="#make_checksum_filename-4">make_checksum_filename/4</a></td><td>Calculate a checksum file path, by common convention.</td></tr>
@@ -39,13 +44,22 @@
   rendezvous/message passing use.</td></tr>
 <tr><td valign="top"><a href="#make_string-1">make_string/1</a></td><td>Convert a compatible Erlang data type into a <code>string()</code> equivalent.</td></tr>
 <tr><td valign="top"><a href="#make_tagged_csum-1">make_tagged_csum/1</a></td><td>Create a tagged checksum.</td></tr>
-<tr><td valign="top"><a href="#make_tagged_csum-2">make_tagged_csum/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#make_tagged_csum-2">make_tagged_csum/2</a></td><td>Makes tagged csum.</td></tr>
 <tr><td valign="top"><a href="#mbytes-1">mbytes/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#mk_order-2">mk_order/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#ordered_combinations-1">ordered_combinations/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#parse_filename-1">parse_filename/1</a></td><td>Given a machi filename, return a set of components in a list.</td></tr>
+<tr><td valign="top"><a href="#perms-1">perms/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#permutations-1">permutations/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#pretty_time-0">pretty_time/0</a></td><td></td></tr>
+<tr><td valign="top"><a href="#pretty_time-2">pretty_time/2</a></td><td></td></tr>
 <tr><td valign="top"><a href="#read_max_filenum-2">read_max_filenum/2</a></td><td>Read the file size of a config file, which is used as the
   basis for a minimum sequence number.</td></tr>
 <tr><td valign="top"><a href="#unmake_tagged_csum-1">unmake_tagged_csum/1</a></td><td></td></tr>
 <tr><td valign="top"><a href="#verb-1">verb/1</a></td><td>Log a verbose message.</td></tr>
 <tr><td valign="top"><a href="#verb-2">verb/2</a></td><td>Log a verbose message.</td></tr>
+<tr><td valign="top"><a href="#wait_for_death-2">wait_for_death/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#wait_for_life-2">wait_for_life/2</a></td><td></td></tr>
 </table>
 
 <h2><a name="functions">Function Details</a></h2>
@@ -55,10 +69,20 @@
 <p><tt>bin_to_hexstr(X1::binary()) -&gt; string()</tt><br></p>
 </div><p>Convert a <code>binary()</code> to a hexadecimal string.</p>
 
+<h3 class="function"><a name="bool2int-1">bool2int/1</a></h3>
+<div class="spec">
+<p><tt>bool2int(X1) -&gt; any()</tt></p>
+</div>
+
 <h3 class="function"><a name="checksum_chunk-1">checksum_chunk/1</a></h3>
 <div class="spec">
 <p><tt>checksum_chunk(Chunk::binary() | iolist()) -&gt; binary()</tt><br></p>
 </div><p>Calculate a checksum for a chunk of file data.</p>
+
+<h3 class="function"><a name="combinations-1">combinations/1</a></h3>
+<div class="spec">
+<p><tt>combinations(L) -&gt; any()</tt></p>
+</div>
 
 <h3 class="function"><a name="connect-2">connect/2</a></h3>
 <div class="spec">
@@ -91,6 +115,11 @@
 <p><tt>info_msg(Fmt::string(), Args::list()) -&gt; term()</tt><br></p>
 </div><p>Log an 'info' level message.</p>
 
+<h3 class="function"><a name="int2bool-1">int2bool/1</a></h3>
+<div class="spec">
+<p><tt>int2bool(I) -&gt; any()</tt></p>
+</div>
+
 <h3 class="function"><a name="int_to_hexbin-2">int_to_hexbin/2</a></h3>
 <div class="spec">
 <p><tt>int_to_hexbin(I::non_neg_integer(), I_size::non_neg_integer()) -&gt; binary()</tt><br></p>
@@ -102,6 +131,12 @@
 <p><tt>int_to_hexstr(I::non_neg_integer(), I_size::non_neg_integer()) -&gt; string()</tt><br></p>
 </div><p>Convert an integer into a hexadecimal string whose length is
   based on <code>I_size</code>.</p>
+
+<h3 class="function"><a name="is_valid_filename-1">is_valid_filename/1</a></h3>
+<div class="spec">
+<p><tt>is_valid_filename(Filename::string()) -&gt; true | false</tt><br></p>
+</div><p>Given a filename, return true if it is a valid machi filename,
+  false otherwise.</p>
 
 <h3 class="function"><a name="make_binary-1">make_binary/1</a></h3>
 <div class="spec">
@@ -130,7 +165,7 @@
 
 <h3 class="function"><a name="make_data_filename-4">make_data_filename/4</a></h3>
 <div class="spec">
-<p><tt>make_data_filename(DataDir::string(), Prefix::string(), SequencerName::atom() | string() | binary(), FileNum::integer()) -&gt; {binary(), string()}</tt><br></p>
+<p><tt>make_data_filename(DataDir::string(), Prefix::string(), SequencerName::atom() | string() | binary(), FileNum::integer() | string()) -&gt; {binary(), string()}</tt><br></p>
 </div><p>Calculate a file data file path, by common convention.</p>
 
 <h3 class="function"><a name="make_projection_filename-2">make_projection_filename/2</a></h3>
@@ -156,12 +191,63 @@
 
 <h3 class="function"><a name="make_tagged_csum-2">make_tagged_csum/2</a></h3>
 <div class="spec">
-<p><tt>make_tagged_csum(X1, SHA) -&gt; any()</tt></p>
-</div>
+<p><tt>make_tagged_csum(X1::<a href="machi_dt.html#type-csum_tag">machi_dt:csum_tag()</a>, SHA::binary()) -&gt; <a href="machi_dt.html#type-chunk_csum">machi_dt:chunk_csum()</a></tt><br></p>
+</div><p>Makes tagged csum. Each meanings are:
+  none / ?CSUM_TAG_NONE
+   - a suspicious and nonsense checksum
+  client_sha / ?CSUM_TAG_CLIENT_SHA
+   - a valid checksum given by client and stored in server
+  server_sha / ?CSUM_TAG_SERVER_SHA
+   - a valid checksum generated by and stored in server
+  server_regen_sha / ?CSUM_TAG_SERVER_REGEN_SHA
+   - a valid checksum generated by server in an ad hoc manner, not stored in server</p>
 
 <h3 class="function"><a name="mbytes-1">mbytes/1</a></h3>
 <div class="spec">
 <p><tt>mbytes(Size) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="mk_order-2">mk_order/2</a></h3>
+<div class="spec">
+<p><tt>mk_order(UPI2, Repair1) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="ordered_combinations-1">ordered_combinations/1</a></h3>
+<div class="spec">
+<p><tt>ordered_combinations(Master) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="parse_filename-1">parse_filename/1</a></h3>
+<div class="spec">
+<p><tt>parse_filename(Filename::string()) -&gt; [string()]</tt><br></p>
+</div><p>Given a machi filename, return a set of components in a list.
+  The components will be:
+  <ul>
+       <li>Prefix</li>
+       <li>UUID</li>
+       <li>Sequence number</li>
+  </ul>
+ 
+  Invalid filenames will return an empty list.</p>
+
+<h3 class="function"><a name="perms-1">perms/1</a></h3>
+<div class="spec">
+<p><tt>perms(L) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="permutations-1">permutations/1</a></h3>
+<div class="spec">
+<p><tt>permutations(L) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="pretty_time-0">pretty_time/0</a></h3>
+<div class="spec">
+<p><tt>pretty_time() -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="pretty_time-2">pretty_time/2</a></h3>
+<div class="spec">
+<p><tt>pretty_time(X1, MSec) -&gt; any()</tt></p>
 </div>
 
 <h3 class="function"><a name="read_max_filenum-2">read_max_filenum/2</a></h3>
@@ -184,9 +270,19 @@
 <div class="spec">
 <p><tt>verb(Fmt::string(), Args::list()) -&gt; ok</tt><br></p>
 </div><p>Log a verbose message.</p>
+
+<h3 class="function"><a name="wait_for_death-2">wait_for_death/2</a></h3>
+<div class="spec">
+<p><tt>wait_for_death(Pid, Iters) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="wait_for_life-2">wait_for_life/2</a></h3>
+<div class="spec">
+<p><tt>wait_for_life(Reg, Iters) -&gt; any()</tt></p>
+</div>
 <hr>
 
 <div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
-<p><i>Generated by EDoc, Jul 1 2015, 18:32:19.</i></p>
+<p><i>Generated by EDoc, Dec 8 2015, 21:33:07.</i></p>
 </body>
 </html>

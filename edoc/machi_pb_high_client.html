@@ -10,7 +10,7 @@
 <hr>
 
 <h1>Module machi_pb_high_client</h1>
-<ul class="index"><li><a href="#description">Description</a></li><li><a href="#index">Function Index</a></li><li><a href="#functions">Function Details</a></li></ul>Machi PB (Protocol Buffers) high-level client (prototype, API TBD).
+<ul class="index"><li><a href="#description">Description</a></li><li><a href="#types">Data Types</a></li><li><a href="#index">Function Index</a></li><li><a href="#functions">Function Details</a></li></ul>Machi PB (Protocol Buffers) high-level client (prototype, API TBD).
 
 
 <h2><a name="description">Description</a></h2><p>Machi PB (Protocol Buffers) high-level client (prototype, API TBD)</p>
@@ -20,12 +20,19 @@
   to a single socket connection, and there is no code to deal with
   multiple connections/load balancing/error handling to several/all
   Machi cluster servers.
+<h2><a name="types">Data Types</a></h2>
+
+<h3 class="typedecl"><a name="type-machi_client_error_reason">machi_client_error_reason()</a></h3>
+<p><tt>machi_client_error_reason() = bad_arg | wedged | bad_checksum | partition | not_written | written | trimmed | no_such_file | partial_read | bad_epoch | <a href="inet.html#type-posix">inet:posix()</a></tt></p>
+
+
 <h2><a name="index">Function Index</a></h2>
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#append_chunk-6">append_chunk/6</a></td><td></td></tr>
 <tr><td valign="top"><a href="#append_chunk-7">append_chunk/7</a></td><td></td></tr>
 <tr><td valign="top"><a href="#auth-3">auth/3</a></td><td></td></tr>
 <tr><td valign="top"><a href="#auth-4">auth/4</a></td><td></td></tr>
-<tr><td valign="top"><a href="#checksum_list-2">checksum_list/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#checksum_list-2">checksum_list/2</a></td><td>Returns a binary that has checksums and chunks encoded inside
+  (This is because encoding-decoding them are inefficient).</td></tr>
 <tr><td valign="top"><a href="#checksum_list-3">checksum_list/3</a></td><td></td></tr>
 <tr><td valign="top"><a href="#code_change-3">code_change/3</a></td><td></td></tr>
 <tr><td valign="top"><a href="#connected_p-1">connected_p/1</a></td><td></td></tr>
@@ -38,11 +45,13 @@
 <tr><td valign="top"><a href="#init-1">init/1</a></td><td></td></tr>
 <tr><td valign="top"><a href="#list_files-1">list_files/1</a></td><td></td></tr>
 <tr><td valign="top"><a href="#list_files-2">list_files/2</a></td><td></td></tr>
-<tr><td valign="top"><a href="#quit-1">quit/1</a></td><td></td></tr>
-<tr><td valign="top"><a href="#read_chunk-4">read_chunk/4</a></td><td></td></tr>
-<tr><td valign="top"><a href="#read_chunk-5">read_chunk/5</a></td><td></td></tr>
-<tr><td valign="top"><a href="#start_link-1">start_link/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#quit-1">quit/1</a></td><td>Stops a client process.</td></tr>
+<tr><td valign="top"><a href="#read_chunk-5">read_chunk/5</a></td><td>Tries to read a chunk of a specified file.</td></tr>
+<tr><td valign="top"><a href="#read_chunk-6">read_chunk/6</a></td><td></td></tr>
+<tr><td valign="top"><a href="#start_link-1">start_link/1</a></td><td>Creates a client process.</td></tr>
 <tr><td valign="top"><a href="#terminate-2">terminate/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#trim_chunk-4">trim_chunk/4</a></td><td>Trims arbitrary binary range of any file.</td></tr>
+<tr><td valign="top"><a href="#trim_chunk-5">trim_chunk/5</a></td><td></td></tr>
 <tr><td valign="top"><a href="#write_chunk-5">write_chunk/5</a></td><td></td></tr>
 <tr><td valign="top"><a href="#write_chunk-6">write_chunk/6</a></td><td></td></tr>
 </table>
@@ -51,28 +60,30 @@
 
 <h3 class="function"><a name="append_chunk-6">append_chunk/6</a></h3>
 <div class="spec">
-<p><tt>append_chunk(PidSpec, PlacementKey, Prefix, Chunk, CSum, ChunkExtra) -&gt; any()</tt></p>
+<p><tt>append_chunk(PidSpec::pid(), PlacementKey::binary(), Prefix::binary(), Chunk::binary(), CSum::binary(), ChunkExtra::non_neg_integer()) -&gt; {ok, Filename::string(), Offset::<a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>} | {error, <a href="#type-machi_client_error_reason">machi_client_error_reason()</a>}</tt><br></p>
 </div>
 
 <h3 class="function"><a name="append_chunk-7">append_chunk/7</a></h3>
 <div class="spec">
-<p><tt>append_chunk(PidSpec, PlacementKey, Prefix, Chunk, CSum, ChunkExtra, Timeout) -&gt; any()</tt></p>
+<p><tt>append_chunk(PidSpec::pid(), PlacementKey::binary(), Prefix::binary(), Chunk::binary(), CSum::binary(), ChunkExtra::non_neg_integer(), Timeout::non_neg_integer()) -&gt; {ok, Filename::string(), Offset::<a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>} | {error, <a href="#type-machi_client_error_reason">machi_client_error_reason()</a>}</tt><br></p>
 </div>
 
 <h3 class="function"><a name="auth-3">auth/3</a></h3>
 <div class="spec">
-<p><tt>auth(PidSpec, User, Pass) -&gt; any()</tt></p>
+<p><tt>auth(PidSpec::pid(), User::string(), Pass::string()) -&gt; ok | {error, <a href="#type-machi_client_error_reason">machi_client_error_reason()</a>}</tt><br></p>
 </div>
 
 <h3 class="function"><a name="auth-4">auth/4</a></h3>
 <div class="spec">
-<p><tt>auth(PidSpec, User, Pass, Timeout) -&gt; any()</tt></p>
+<p><tt>auth(PidSpec::pid(), User::string(), Pass::string(), Timeout::non_neg_integer()) -&gt; ok | {error, <a href="#type-machi_client_error_reason">machi_client_error_reason()</a>}</tt><br></p>
 </div>
 
 <h3 class="function"><a name="checksum_list-2">checksum_list/2</a></h3>
 <div class="spec">
-<p><tt>checksum_list(PidSpec, File) -&gt; any()</tt></p>
-</div>
+<p><tt>checksum_list(PidSpec::pid(), File::string()) -&gt; {ok, binary()} | {error, <a href="#type-machi_client_error_reason">machi_client_error_reason()</a>}</tt><br></p>
+</div><p>Returns a binary that has checksums and chunks encoded inside
+  (This is because encoding-decoding them are inefficient). TODO:
+  return a structured list of them.</p>
 
 <h3 class="function"><a name="checksum_list-3">checksum_list/3</a></h3>
 <div class="spec">
@@ -96,12 +107,12 @@
 
 <h3 class="function"><a name="echo-2">echo/2</a></h3>
 <div class="spec">
-<p><tt>echo(PidSpec, String) -&gt; any()</tt></p>
+<p><tt>echo(PidSpec::pid(), String::string()) -&gt; {ok, string()} | {error, <a href="#type-machi_client_error_reason">machi_client_error_reason()</a>}</tt><br></p>
 </div>
 
 <h3 class="function"><a name="echo-3">echo/3</a></h3>
 <div class="spec">
-<p><tt>echo(PidSpec, String, Timeout) -&gt; any()</tt></p>
+<p><tt>echo(PidSpec::pid(), String::string(), Timeout::non_neg_integer()) -&gt; {ok, string()} | {error, <a href="#type-machi_client_error_reason">machi_client_error_reason()</a>}</tt><br></p>
 </div>
 
 <h3 class="function"><a name="handle_call-3">handle_call/3</a></h3>
@@ -136,41 +147,58 @@
 
 <h3 class="function"><a name="quit-1">quit/1</a></h3>
 <div class="spec">
-<p><tt>quit(PidSpec) -&gt; any()</tt></p>
-</div>
-
-<h3 class="function"><a name="read_chunk-4">read_chunk/4</a></h3>
-<div class="spec">
-<p><tt>read_chunk(PidSpec, File, Offset, Size) -&gt; any()</tt></p>
-</div>
+<p><tt>quit(PidSpec::pid()) -&gt; ok</tt><br></p>
+</div><p>Stops a client process.</p>
 
 <h3 class="function"><a name="read_chunk-5">read_chunk/5</a></h3>
 <div class="spec">
-<p><tt>read_chunk(PidSpec, File, Offset, Size, Timeout) -&gt; any()</tt></p>
+<p><tt>read_chunk(PidSpec::pid(), File::string(), Offset::<a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>, Size::<a href="machi_dt.html#type-chunk_size">machi_dt:chunk_size()</a>, Options::[{flag_no_checksum | flag_no_chunk | needs_trimmed, boolean()}]) -&gt; {ok, {Chunks::[{File::string(), <a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>, <a href="machi_dt.html#type-chunk_size">machi_dt:chunk_size()</a>, binary()}], Trimmed::[{File::string(), <a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>, <a href="machi_dt.html#type-chunk_size">machi_dt:chunk_size()</a>}]}} | {error, <a href="#type-machi_client_error_reason">machi_client_error_reason()</a>}</tt><br></p>
+</div><p>Tries to read a chunk of a specified file. It returns <code>{ok,
+  {Chunks, TrimmedChunks}}</code> for live file while it returns <code>{error,
+  trimmed}</code> if all bytes of the file was trimmed.</p>
+
+<h3 class="function"><a name="read_chunk-6">read_chunk/6</a></h3>
+<div class="spec">
+<p><tt>read_chunk(PidSpec::pid(), File::string(), Offset::<a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>, Size::<a href="machi_dt.html#type-chunk_size">machi_dt:chunk_size()</a>, Options::[{flag_no_checksum | flag_no_chunk | needs_trimmed, boolean()}], Timeout::non_neg_integer()) -&gt; {ok, {Chunks::[{File::string(), <a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>, <a href="machi_dt.html#type-chunk_size">machi_dt:chunk_size()</a>, binary()}], Trimmed::[{File::string(), <a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>, <a href="machi_dt.html#type-chunk_size">machi_dt:chunk_size()</a>}]}} | {error, <a href="#type-machi_client_error_reason">machi_client_error_reason()</a>}</tt><br></p>
 </div>
 
 <h3 class="function"><a name="start_link-1">start_link/1</a></h3>
 <div class="spec">
-<p><tt>start_link(P_srvr_list) -&gt; any()</tt></p>
-</div>
+<p><tt>start_link(P_srvr_list::<a href="#type-p_srvr_dict">p_srvr_dict()</a>) -&gt; {ok, pid()} | {error, <a href="#type-machi_client_error_reason">machi_client_error_reason()</a>}</tt><br></p>
+</div><p>Creates a client process</p>
 
 <h3 class="function"><a name="terminate-2">terminate/2</a></h3>
 <div class="spec">
 <p><tt>terminate(Reason, S) -&gt; any()</tt></p>
 </div>
 
+<h3 class="function"><a name="trim_chunk-4">trim_chunk/4</a></h3>
+<div class="spec">
+<p><tt>trim_chunk(PidSpec::pid(), File::string(), Offset::non_neg_integer(), Size::<a href="machi_dt.html#type-chunk_size">machi_dt:chunk_size()</a>) -&gt; ok | {error, <a href="#type-machi_client_error_reason">machi_client_error_reason()</a>}</tt><br></p>
+</div><p>Trims arbitrary binary range of any file. If a specified range
+  has any byte trimmed, it fails and returns <code>{error, trimmed}</code>.
+  Otherwise it trims all bytes in that range. If there are
+  overlapping chunks with client-specified checksum, they will cut
+  off and checksum are re-calculated in server side.  TODO: Add
+  option specifying whether to trigger GC.</p>
+
+<h3 class="function"><a name="trim_chunk-5">trim_chunk/5</a></h3>
+<div class="spec">
+<p><tt>trim_chunk(PidSpec, File, Offset, Size, Timeout) -&gt; any()</tt></p>
+</div>
+
 <h3 class="function"><a name="write_chunk-5">write_chunk/5</a></h3>
 <div class="spec">
-<p><tt>write_chunk(PidSpec, File, Offset, Chunk, CSum) -&gt; any()</tt></p>
+<p><tt>write_chunk(PidSpec::pid(), File::string(), Offset::<a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>, Chunk::binary(), CSum::binary()) -&gt; ok | {error, <a href="#type-machi_client_error_reason">machi_client_error_reason()</a>}</tt><br></p>
 </div>
 
 <h3 class="function"><a name="write_chunk-6">write_chunk/6</a></h3>
 <div class="spec">
-<p><tt>write_chunk(PidSpec, File, Offset, Chunk, CSum, Timeout) -&gt; any()</tt></p>
+<p><tt>write_chunk(PidSpec::pid(), File::string(), Offset::<a href="machi_dt.html#type-file_offset">machi_dt:file_offset()</a>, Chunk::binary(), CSum::binary(), Timeout::non_neg_integer()) -&gt; ok | {error, <a href="#type-machi_client_error_reason">machi_client_error_reason()</a>}</tt><br></p>
 </div>
 <hr>
 
 <div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
-<p><i>Generated by EDoc, Jul 1 2015, 18:32:19.</i></p>
+<p><i>Generated by EDoc, Dec 8 2015, 21:33:07.</i></p>
 </body>
 </html>
