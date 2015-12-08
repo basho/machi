@@ -1,0 +1,229 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Module machi_lifecycle_mgr</title>
+<link rel="stylesheet" type="text/css" href="stylesheet.css" title="EDoc">
+</head>
+<body bgcolor="white">
+<div class="navbar"><a name="#navbar_top"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<hr>
+
+<h1>Module machi_lifecycle_mgr</h1>
+<ul class="index"><li><a href="#description">Description</a></li><li><a href="#index">Function Index</a></li><li><a href="#functions">Function Details</a></li></ul>Lifecycle manager for Machi FLUs and chains.
+
+<p><b>Behaviours:</b> <a href="gen_server.html"><tt>gen_server</tt></a>.</p>
+
+<h2><a name="description">Description</a></h2><p>Lifecycle manager for Machi FLUs and chains.</p>
+ 
+  <p>Over the lifetime of a Machi cluster, both the number and types of  
+FLUs and chains may change.  The lifecycle manager is responsible  
+for implementing the lifecycle changes as expressed by "policy".  
+In our case, "policy" is created by an external administrative  
+entity that creates and deletes configuration files that define  
+FLUs and chains relative to this local machine.</p>
+ 
+  <p>The "master configuration" for deciding which FLUs should be
+  running on this machine was inspired by BSD UNIX's <code>init(8)</code> and the  
+"rc.d" scheme.  FLU definitions are found in a single directory,  
+with one file per FLU.  Chains are defined similarly, with one  
+definition file per chain.</p>
+ 
+  <p>If a definition file for a FLU (or chain) exists, then that
+  FLU/chain ought to be configured into being and running.  If a
+  definition file for a FLU/chain is removed, then that FLU/chain
+  should be stopped gracefully.  However, deleting of a file destroys
+  information that is stored inside of that file.  Therefore, we will
+  <b>not allow arbitrary unlinking of lifecycle config files</b>.  If
+  the administrator deletes these config files using <code>unlink(8)</code>  
+directly, then "the warranty has been broken".</p>
+ 
+  <p>We will rely on using an administrative command to inform the  
+running system to stop and/or delete lifecycle resources.  If the  
+Machi application is not running, sorry, please start Machi first.</p>
+ 
+  <h3><a name="Wheel_reinvention">Wheel reinvention</a></h3>
+ 
+  <p>There's a whole mess of configuration management research &amp;
+  libraries out there.  I hope to ignore them all by doing something
+  quick &amp; dirty &amp; good enough here.  If I fail, then I'll go  
+pay attention to That Other Stuff.</p>
+ 
+  <h3><a name="A_note_about_policy">A note about policy</a></h3>
+ 
+  <p>It is outside of the scope of this local lifecycle manager to make  
+decisions about policy or to distribute policy info/files/whatever  
+to other machines.  This is our machine.  There are many like it,  
+but this one is ours.</p>
+ 
+  <h3><a name="Machi_Application_Variables">Machi Application Variables</a></h3>
+ 
+  <p>All OTP application environment variables below are defined in the
+  <code>machi</code> application.</p>
+ 
+  <ul>
+   <li> <tt>flu_config_dir</tt>: Stores the <code>rc.d-</code>like config files for
+        FLU runtime policy.
+  </li>
+   <li> <tt>flu_data_dir</tt>: Stores the file data and metadata for
+        all FLUs.
+  </li>
+   <li> <tt>chain_config_dir</tt>: Stores the <code>rc.d</code>-like config files for
+        chain runtime policy.
+  </li>
+  </ul>
+ 
+  <h3><a name="The_FLU_Lifecycle">The FLU Lifecycle</a></h3>
+ 
+  <p>FLUs on the local machine may be started and stopped, as defined by  
+administrative policy.  In order to do any useful work, however, a  
+running FLU must also be configured to be a member of a replication  
+chain.  Thus, as a practical matter, both a FLU and the chain that  
+the FLU participates in must both be managed by this manager.</p>
+ 
+  <p>When a new <code>rc.d</code>-style config file is written to the FLU  
+definition directory, a Machi server process will discover the file  
+within a certain period of time, e.g. 15 seconds.  The FLU will be  
+started with the file's specified parameters.  A FLU should be  
+defined and started before configuring its chain membership.</p>
+ 
+  <p>Usually a FLU is removed implicitly by removing that FLU from the a
+  newer definition file for the chain, or by deleting the entire
+  chain definition.  If a FLU has been started but never been a chain
+  member, then the FLU can be stopped &amp; removed explicitly.</p>
+ 
+  <p>When a FLU has been removed by policy, the FLU's data files are set  
+aside into a temporary area.  An additional policy command may be  
+used to permanently delete such FLUs' data files, i.e. to reclaim  
+disk space.</p>
+ 
+  <p>Resources for the FLU are defined in <code>machi_projection.hrl</code>
+  in the <code>p_srvr{}</code> record.  The major elements of this record are:</p>
+ 
+  <ul>
+ 
+   <li> <tt>name :: atom()</tt>: The name of the FLU.  This name
+        should be unique over the lifetime of the administrative
+        domain and thus managed by outside policy.  This name must be
+        the same as the name of the <code>rc.d</code>-style config file that
+        defines the FLU.
+  </li>
+   <li> <tt>address :: string()</tt>: The DNS hostname or IP address
+        used by other servers to communicate with this FLU.
+  </li>
+   <li> <tt>port :: non_neg_integer() </tt>: The TCP port number that
+        the FLU listens to for incoming Protocol Buffers-serialized
+        communication.
+  </li>
+   <li> <tt>props :: property_list()</tt>: A general-purpose property
+        list.  Its use is currently fluid &amp; not well-defined yet.
+  </li>
+  </ul>
+ 
+  <h3><a name="The_Chain_Lifecycle">The Chain Lifecycle</a></h3>
+ 
+  <p>If a FLU on the local machine is expected to participate in a
+  replication chain, then an <code>rc.d</code>-style chain definition file must  
+also be present on each machine that runs a FLU in the chain.</p>
+ 
+  <p>Machi's chains are self-managing, via Humming Consensus; see the
+  <a href="https://github.com/basho/machi/tree/master/doc/" target="_top"><tt>https://github.com/basho/machi/tree/master/doc/</tt></a> directory for  
+much more detail about Humming Consensus.  After FLUs have received  
+their initial chain configuration for Humming Consensus, the FLUs  
+will manage each other (and the chain) themselves.</p>
+ 
+  <p>However, Humming Consensus does not handle three chain management  
+problems: 1. specifying the very first chain configuration,  
+2. altering the membership of the chain (adding/removing FLUs from  
+the chain), or 3. stopping the chain permanently.</p>
+ 
+  <p>FLUs in a new chain should have definition files created on each  
+FLU's respective machine prior to defining their chain.  Similarly,  
+on each machine that hosts a chain member, a chain definition file  
+created.  External policy is responsible for creating each of these  
+files.</p>
+ 
+  <p>Resources for the chain are defined in <code>machi_projection.hrl</code>
+  in the <code>chain_def_v1{}</code> record.  The major elements of this record are:</p>
+ 
+  <ul>
+ 
+   <li> <tt>name :: atom()</tt>: The name of the chain.  This name
+        should be unique over the lifetime of the administrative
+        domain and thus managed by outside policy.  This name must be
+        the same as the name of the <code>rc.d</code>-style config file that
+        defines the chain.
+  </li>
+   <li> <tt>mode :: 'ap_mode' | 'cp_mode'</tt>: This is the consistency
+        to be used for managing the chain's replicated data: eventual
+        consistency and strong consistency, respectively.
+  </li>
+   <li> <tt>full :: [#p_srvr{}] </tt>: A list of <code>#p_srvr{}</code> records
+        to define the full-service members of the chain.
+  </li>
+   <li> <tt>witnesses :: [#p_srvr{}] </tt>: A list of <code>#p_srvr{}</code> records
+        to define the witness-only members of the chain.  Witness servers
+        may only be used with strong consistency mode.
+  </li>
+   <li> <tt>props :: property_list()</tt>: A general-purpose property
+        list.  Its use is currently fluid &amp; not well-defined yet.
+  </li>
+  </ul>
+ 
+  <h3><a name="Conflicts_with_TCP_ports,_FLU_&amp;_chain_names,_etc">Conflicts with TCP ports, FLU &amp; chain names, etc</a></h3>
+ 
+  This manager is not responsible for managing conflicts in resource
+  namespaces, e.g., TCP port numbers, FLU names, chain names, etc.
+  Managing these namespaces is external policy's responsibility.
+<h2><a name="index">Function Index</a></h2>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#code_change-3">code_change/3</a></td><td></td></tr>
+<tr><td valign="top"><a href="#handle_call-3">handle_call/3</a></td><td></td></tr>
+<tr><td valign="top"><a href="#handle_cast-2">handle_cast/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#handle_info-2">handle_info/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#init-1">init/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#start_link-0">start_link/0</a></td><td></td></tr>
+<tr><td valign="top"><a href="#terminate-2">terminate/2</a></td><td></td></tr>
+</table>
+
+<h2><a name="functions">Function Details</a></h2>
+
+<h3 class="function"><a name="code_change-3">code_change/3</a></h3>
+<div class="spec">
+<p><tt>code_change(OldVsn, State, Extra) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="handle_call-3">handle_call/3</a></h3>
+<div class="spec">
+<p><tt>handle_call(Request, From, State) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="handle_cast-2">handle_cast/2</a></h3>
+<div class="spec">
+<p><tt>handle_cast(Msg, State) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="handle_info-2">handle_info/2</a></h3>
+<div class="spec">
+<p><tt>handle_info(Info, State) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="init-1">init/1</a></h3>
+<div class="spec">
+<p><tt>init(X1) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="start_link-0">start_link/0</a></h3>
+<div class="spec">
+<p><tt>start_link() -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="terminate-2">terminate/2</a></h3>
+<div class="spec">
+<p><tt>terminate(Reason, State) -&gt; any()</tt></p>
+</div>
+<hr>
+
+<div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<p><i>Generated by EDoc, Dec 8 2015, 21:37:38.</i></p>
+</body>
+</html>

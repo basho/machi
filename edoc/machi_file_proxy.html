@@ -1,0 +1,118 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Module machi_file_proxy</title>
+<link rel="stylesheet" type="text/css" href="stylesheet.css" title="EDoc">
+</head>
+<body bgcolor="white">
+<div class="navbar"><a name="#navbar_top"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<hr>
+
+<h1>Module machi_file_proxy</h1>
+<ul class="index"><li><a href="#description">Description</a></li><li><a href="#index">Function Index</a></li><li><a href="#functions">Function Details</a></li></ul>This is a proxy process which mediates access to Machi FLU  
+controlled files.
+
+<p><b>Behaviours:</b> <a href="gen_server.html"><tt>gen_server</tt></a>.</p>
+
+<h2><a name="description">Description</a></h2><p>This is a proxy process which mediates access to Machi FLU  
+controlled files.  In particular, it manages the "write-once register"  
+conceit at the heart of Machi's design.</p>
+ 
+  <p>Read, write and append requests for a single file will be managed  
+through this proxy.  Clients can also request syncs for specific  
+types of filehandles.</p>
+ 
+  As operations are requested, the proxy keeps track of how many
+  operations it has performed (and how many errors were generated.)
+  After a sufficient number of inactivity, the server terminates
+  itself.
+ 
+<h2><a name="index">Function Index</a></h2>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#append-2">append/2</a></td><td>Append data.</td></tr>
+<tr><td valign="top"><a href="#append-4">append/4</a></td><td>Append data to file, supplying client metadata and (if desired) a
+ reservation for additional space.</td></tr>
+<tr><td valign="top"><a href="#read-3">read/3</a></td><td>Read file at offset for length.</td></tr>
+<tr><td valign="top"><a href="#read-4">read/4</a></td><td></td></tr>
+<tr><td valign="top"><a href="#start_link-3">start_link/3</a></td><td>Start a new instance of the file proxy service.</td></tr>
+<tr><td valign="top"><a href="#stop-1">stop/1</a></td><td>Request to stop an instance of the file proxy service.</td></tr>
+<tr><td valign="top"><a href="#sync-1">sync/1</a></td><td>Force a sync of all filehandles.</td></tr>
+<tr><td valign="top"><a href="#sync-2">sync/2</a></td><td>Force a sync of a specific filehandle type.</td></tr>
+<tr><td valign="top"><a href="#trim-4">trim/4</a></td><td></td></tr>
+<tr><td valign="top"><a href="#write-3">write/3</a></td><td>Write data at offset.</td></tr>
+<tr><td valign="top"><a href="#write-4">write/4</a></td><td>Write data at offset, including the client metadata.</td></tr>
+</table>
+
+<h2><a name="functions">Function Details</a></h2>
+
+<h3 class="function"><a name="append-2">append/2</a></h3>
+<div class="spec">
+<p><tt>append(Pid::pid(), Data::binary()) -&gt; {ok, File::string(), Offset::non_neg_integer()} | {error, term()}</tt><br></p>
+</div><p>Append data</p>
+
+<h3 class="function"><a name="append-4">append/4</a></h3>
+<div class="spec">
+<p><tt>append(Pid::pid(), ClientMeta::<a href="proplists.html#type-proplist">proplists:proplist()</a>, Extra::non_neg_integer(), Data::binary()) -&gt; {ok, File::string(), Offset::non_neg_integer()} | {error, term()}</tt><br></p>
+</div><p>Append data to file, supplying client metadata and (if desired) a
+ reservation for additional space.  ClientMeta is a proplist and expects the
+ same keys as write/4.</p>
+
+<h3 class="function"><a name="read-3">read/3</a></h3>
+<div class="spec">
+<p><tt>read(Pid::pid(), Offset::non_neg_integer(), Length::non_neg_integer()) -&gt; {ok, [{Filename::string(), Offset::non_neg_integer(), Data::binary(), Checksum::binary()}]} | {error, Reason::term()}</tt><br></p>
+</div><p>Read file at offset for length. This returns a sequence of all
+ written and trimmed (optional) bytes that overlaps with requested
+ offset and length. Borders are not aligned.</p>
+
+<h3 class="function"><a name="read-4">read/4</a></h3>
+<div class="spec">
+<p><tt>read(Pid::pid(), Offset::non_neg_integer(), Length::non_neg_integer(), Opts::[{no_checksum | no_chunk | needs_trimmed, boolean()}]) -&gt; {ok, [{Filename::string(), Offset::non_neg_integer(), Data::binary(), Checksum::binary()}]} | {error, Reason::term()}</tt><br></p>
+</div>
+
+<h3 class="function"><a name="start_link-3">start_link/3</a></h3>
+<div class="spec">
+<p><tt>start_link(FluName::atom(), Filename::string(), DataDir::string()) -&gt; any()</tt><br></p>
+</div><p>Start a new instance of the file proxy service. Takes the filename
+ and data directory as arguments. This function is typically called by the
+ <code>machi_file_proxy_sup:start_proxy/2</code> function.</p>
+
+<h3 class="function"><a name="stop-1">stop/1</a></h3>
+<div class="spec">
+<p><tt>stop(Pid::pid()) -&gt; ok</tt><br></p>
+</div><p>Request to stop an instance of the file proxy service.</p>
+
+<h3 class="function"><a name="sync-1">sync/1</a></h3>
+<div class="spec">
+<p><tt>sync(Pid::pid()) -&gt; ok | {error, term()}</tt><br></p>
+</div><p>Force a sync of all filehandles</p>
+
+<h3 class="function"><a name="sync-2">sync/2</a></h3>
+<div class="spec">
+<p><tt>sync(Pid::pid(), Type::all | data | csum) -&gt; ok | {error, term()}</tt><br></p>
+</div><p>Force a sync of a specific filehandle type. Valid types are <code>all</code>, <code>csum</code> and <code>data</code>.</p>
+
+<h3 class="function"><a name="trim-4">trim/4</a></h3>
+<div class="spec">
+<p><tt>trim(Pid, Offset, Size, TriggerGC) -&gt; any()</tt></p>
+</div>
+
+<h3 class="function"><a name="write-3">write/3</a></h3>
+<div class="spec">
+<p><tt>write(Pid::pid(), Offset::non_neg_integer(), Data::binary()) -&gt; ok | {error, term()}</tt><br></p>
+</div><p>Write data at offset</p>
+
+<h3 class="function"><a name="write-4">write/4</a></h3>
+<div class="spec">
+<p><tt>write(Pid::pid(), Offset::non_neg_integer(), ClientMeta::<a href="proplists.html#type-proplist">proplists:proplist()</a>, Data::binary()) -&gt; ok | {error, term()}</tt><br></p>
+</div><p>Write data at offset, including the client metadata. ClientMeta is a proplist
+ that expects the following keys and values:
+ <ul>
+       <li><code>client_csum_tag</code> - the type of checksum from the client as defined in the machi.hrl file</li>
+       <li><code>client_csum</code> - the checksum value from the client</li>
+ </ul></p>
+<hr>
+
+<div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<p><i>Generated by EDoc, Dec 8 2015, 21:37:38.</i></p>
+</body>
+</html>
