@@ -103,7 +103,8 @@ repair(ap_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
     Add = fun(Name, Pid) -> put(proxies_dict, orddict:store(Name, Pid, get(proxies_dict))) end,
     OurFLUs = lists:usort([Src] ++ Repairing ++ UPI), % AP assumption!
     RepairMode = proplists:get_value(repair_mode, Opts, repair),
-    Verb = proplists:get_value(verbose, Opts, true),
+    Verb = proplists:get_value(verbose, Opts, false),
+    RepairId = proplists:get_value(repair_id, Opts, id1),
     Res = try
               _ = [begin
                        {ok, Proxy} = machi_proxy_flu1_client:start_link(P),
@@ -116,31 +117,38 @@ repair(ap_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
                                        get_file_lists(Proxy, FLU, Dict)
                                end, D, ProxiesDict),
               MissingFileSummary = make_missing_file_summary(D2, OurFLUs),
-              ?VERB("MissingFileSummary ~p\n", [MissingFileSummary]),
+              %% ?VERB("~w MissingFileSummary ~p\n",[RepairId,MissingFileSummary]),
+              lager:info("Repair ~w MissingFileSummary ~p\n",
+                         [RepairId, MissingFileSummary]),
 
               [ets:insert(ETS, {{directive_bytes, FLU}, 0}) || FLU <- OurFLUs],
               %% Repair files from perspective of Src, i.e. tail(UPI).
               SrcProxy = orddict:fetch(Src, ProxiesDict),
               {ok, EpochID} = machi_proxy_flu1_client:get_epoch_id(
                                 SrcProxy, ?SHORT_TIMEOUT),
-              ?VERB("Make repair directives: "),
+              %% ?VERB("Make repair directives: "),
               Ds =
                   [{File, make_repair_directives(
                             ConsistencyMode, RepairMode, File, Size, EpochID,
                             Verb,
                             Src, OurFLUs, ProxiesDict, ETS)} ||
                       {File, {Size, _MissingList}} <- MissingFileSummary],
-              ?VERB(" done\n"),
+              %% ?VERB(" done\n"),
+              lager:info("Repair ~w repair directives finished\n", [RepairId]),
               [begin
                    [{_, Bytes}] = ets:lookup(ETS, {directive_bytes, FLU}),
-                   ?VERB("Out-of-sync data for FLU ~p: ~s MBytes\n",
-                         [FLU, mbytes(Bytes)])
+                   %% ?VERB("Out-of-sync data for FLU ~p: ~s MBytes\n",
+                   %%       [FLU, mbytes(Bytes)]),
+                   lager:info("Repair ~w "
+                              "Out-of-sync data for FLU ~p: ~s MBytes\n",
+                         [RepairId, FLU, mbytes(Bytes)])
                end || FLU <- OurFLUs],
 
-              ?VERB("Execute repair directives: "),
+              %% ?VERB("Execute repair directives: "),
               ok = execute_repair_directives(ConsistencyMode, Ds, Src, EpochID,
                                              Verb, OurFLUs, ProxiesDict, ETS),
-              ?VERB(" done\n"),
+              %% ?VERB(" done\n"),
+              lager:info("Repair ~w repair directives finished\n", [RepairId]),
               ok
           catch
               What:Why ->

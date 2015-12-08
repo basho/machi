@@ -2598,8 +2598,8 @@ do_repair(#ch_mgr{name=MyName,
             T1 = os:timestamp(),
             RepairId = proplists:get_value(repair_id, Opts, id1),
             error_logger:info_msg(
-              "Repair start: tail ~p of ~p -> ~p, ~p ID ~w\n",
-              [MyName, UPI0, Repairing, RepairMode, RepairId]),
+              "Repair ~w start: tail ~p of ~p -> ~p, ~p\n",
+              [RepairId, MyName, UPI0, Repairing, RepairMode]),
 
             UPI = UPI0 -- Witness_list,
             Res = machi_chain_repair:repair(RepairMode, MyName, Repairing, UPI,
@@ -2612,10 +2612,9 @@ do_repair(#ch_mgr{name=MyName,
                       end,
             Stats = [{K, ets:lookup_element(ETS, K, 2)} || K <- ETS_T_Keys],
             error_logger:info_msg(
-              "Repair ~s: tail ~p of ~p finished ~p repair ID ~w: "
-              "~p\nStats ~p\n",
-              [Summary, MyName, UPI0, RepairMode, RepairId,
-               Res, Stats]),
+              "Repair ~w ~s: tail ~p of ~p finished ~p: "
+              "~p Stats: ~p\n",
+              [RepairId, Summary, MyName, UPI0, RepairMode, Res, Stats]),
             ets:delete(ETS),
             exit({repair_final_status, Res});
         _ ->

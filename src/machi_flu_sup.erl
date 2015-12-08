@@ -21,6 +21,9 @@
 %% @doc Supervisor for Machi FLU servers and their related support
 %% servers.
 %%
+%% Responsibility for managing FLU & chain lifecycle after the initial
+%% application startup is delegated to {@link machi_lifecycle_mgr}.
+%%
 %% See {@link machi_flu_psup} for an illustration of the entire Machi
 %% application process structure.
 
@@ -87,8 +90,12 @@ get_initial_flus() ->
 load_rc_d_files_from_dir(Dir) ->
     Files = filelib:wildcard(Dir ++ "/*"),
     lists:append([case file:consult(File) of
-                      {ok, X} -> X;
-                      _       -> []
+                      {ok, X} ->
+                          X;
+                      _ ->
+                          lager:warning("Error parsing file '~s', ignoring",
+                                        [File]),
+                          []
                   end || File <- Files]).
 
 sanitize_p_srvr_records(Ps) ->

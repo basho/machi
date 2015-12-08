@@ -62,8 +62,8 @@ init([]) ->
     ServerSup =
         {machi_flu_sup, {machi_flu_sup, start_link, []},
          Restart, Shutdown, Type, []},
-    ChainBootstrap =
-        {machi_chain_bootstrap, {machi_chain_bootstrap, start_link, []},
+    LifecycleMgr =
+        {machi_lifecycle_mgr, {machi_lifecycle_mgr, start_link, []},
          Restart, Shutdown, worker, []},
 
-    {ok, {SupFlags, [ServerSup, ChainBootstrap]}}.
+    {ok, {SupFlags, [ServerSup, LifecycleMgr]}}.

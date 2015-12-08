@@ -80,8 +80,9 @@
 -record(chain_def_v1, {
           name           :: atom(),
           mode           :: pv1_consistency_mode(),
-          upi            :: [p_srvr()],
-          witnesses      :: [p_srvr()]
+          full           :: [p_srvr()],
+          witnesses      :: [p_srvr()],
+          props = []      :: list()  % proplist for other related info
          }).
 
 -endif. % !MACHI_PROJECTION_HRL
