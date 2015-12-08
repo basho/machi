@@ -53,7 +53,7 @@ api_smoke_test() ->
                                 infinity) || _ <- lists:seq(1,3)],
             %% Start the FLU again, we should be able to do stuff immediately
             machi_test_util:start_flu_package(RegName, TcpPort, DataDir,
-                                              [save_data_dir|W_props]),
+                                              [no_cleanup|W_props]),
             MyChunk = <<"my chunk data">>,
             {ok, {MyOff,MySize,MyFile}} =
                 ?MUT:append_chunk(Prox1, FakeEpoch, Prefix, MyChunk,
@@ -148,7 +148,7 @@ flu_restart_test2() ->
 
             ExpectedOps = 
                 [
-                 fun(run) -> {ok, EpochID} = ?MUT:get_epoch_id(Prox1),
+                 fun(run) -> ?assertEqual({ok, EpochID}, ?MUT:get_epoch_id(Prox1)),
                              ok;
                     (line) -> io:format("line ~p, ", [?LINE]);
                     (stop) -> ?MUT:get_epoch_id(Prox1) end,
@@ -292,7 +292,7 @@ flu_restart_test2() ->
             [begin
                  machi_test_util:start_flu_package(
                           RegName, TcpPort, DataDir,
-                          [save_data_dir|W_props]),
+                          [no_cleanup|W_props]),
                  _ = Fun(line),
                  ok = Fun(run),
                  ok = Fun(run),

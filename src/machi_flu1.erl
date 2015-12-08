@@ -82,7 +82,12 @@ start_link([{FluName, TcpPort, DataDir}|Rest])
     proc_lib:start_link(?MODULE, main2, [FluName, TcpPort, DataDir, Rest],
                         ?INIT_TIMEOUT).
 
-stop(Pid) ->
+stop(RegName) when is_atom(RegName) ->
+    case whereis(RegName) of
+        undefined -> ok;
+        Pid -> stop(Pid)
+    end;
+stop(Pid) when is_pid(Pid) ->
     case erlang:is_process_alive(Pid) of
         true ->
             Pid ! killme,

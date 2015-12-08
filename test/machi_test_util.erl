@@ -54,7 +54,7 @@ start_flu_packages(FluCount, BaseTcpPort, DirPrefix, Props) ->
 
 start_flu_packages(FluInfo) ->
     _ = stop_machi_sup(),
-    clean_up_data_dirs(FluInfo),
+    clean_up(FluInfo),
     {ok, _SupPid} = machi_sup:start_link(),
     [{ok, _} = machi_flu_psup:start_flu_package(Name, Port, Dir, Props) ||
         {#p_srvr{name=Name, port=Port, props=Props}, Dir, _} <- FluInfo],
@@ -86,11 +86,15 @@ stop_machi_sup() ->
             machi_util:wait_for_death(Pid, 30)
     end.
 
-clean_up_data_dirs(FluInfo) ->
-    _ = [case proplists:get_value(save_data_dir, Propx) of
-             true -> ok;
-             _ -> clean_up_dir(Dir)
-         end || {#p_srvr{props=Propx}, Dir, _} <- FluInfo],
+clean_up(FluInfo) ->
+    _ = [begin
+             case proplists:get_value(no_cleanup, Props) of
+                 true -> ok;
+                 _ ->
+                     _ = machi_flu1:stop(FLUName),
+                     clean_up_dir(Dir)
+             end
+         end || {#p_srvr{name=FLUName, props=Props}, Dir, _} <- FluInfo],
     ok.
 
 clean_up_dir(Dir) ->
