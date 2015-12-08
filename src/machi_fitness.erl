@@ -39,7 +39,8 @@
          get_unfit_list/1, update_local_down_list/3,
          add_admin_down/3, delete_admin_down/2,
          send_fitness_update_spam/3,
-         send_spam_to_everyone/1]).
+         send_spam_to_everyone/1,
+         trigger_early_adjustment/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -81,6 +82,13 @@ send_fitness_update_spam(Pid, FromName, Dict) ->
 send_spam_to_everyone(Pid) ->
     gen_server:call(Pid, {send_spam_to_everyone}, infinity).
 
+%% @doc For testing purposes, we don't want a test to wait for
+%%      wall-clock time to elapse before the fitness server makes a
+%%      down->up status decision.
+
+trigger_early_adjustment(Pid, FLU) ->
+    Pid ! {adjust_down_list, FLU}.
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init([{MyFluName}|Args]) ->
@@ -95,13 +103,11 @@ init([{MyFluName}|Args]) ->
 
 handle_call({get_unfit_list}, _From, #state{active_unfit=ActiveUnfit}=S) ->
     Reply = ActiveUnfit,
-io:format(user, "get_unfit_list ~p: ~p\n", [S#state.my_flu_name, Reply]),
     {reply, Reply, S};
 handle_call({update_local_down_list, Down, MembersDict}, _From,
             #state{my_flu_name=MyFluName, pending_map=OldMap,
                    local_down=OldDown, members_dict=OldMembersDict,
                    admin_down=AdminDown}=S) ->
-io:format(user, "update_local_down_list: ~w: down ~w md ~W\n", [S#state.my_flu_name, Down, MembersDict, 10]),
     NewMap = store_in_map(OldMap, MyFluName, erlang:now(), Down,
                           AdminDown, [props_yo]),
     S2 = if Down == OldDown, MembersDict == OldMembersDict ->

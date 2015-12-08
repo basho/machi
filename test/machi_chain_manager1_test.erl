@@ -356,11 +356,14 @@ nonunanimous_setup_and_fix_test2() ->
     Mgrs = [Ma,Mb,Mc] = [a_chmgr, b_chmgr, c_chmgr],
     MgrProxies = [{Ma, Proxy_a}, {Mb, Proxy_b}, {Mc, Proxy_c}],
     Advance = fun() ->
-                      [begin
-                           catch ?MGR:trigger_react_to_env(Mgr),
-                           ok
-                       end || _ <- lists:seq(1, 7),
-                              {Mgr,Proxy} <- MgrProxies]
+                 [begin
+                      [catch machi_fitness:trigger_early_adjustment(Fit, Tgt) ||
+                          Fit <- [a_fitness,b_fitness,c_fitness],
+                          Tgt <- [a,b,c] ],
+                      [catch ?MGR:trigger_react_to_env(Mgr) ||
+                          {Mgr,_Proxy} <- MgrProxies],
+                      ok
+                  end || _ <- lists:seq(1, 3)]
               end,
     ok = machi_chain_manager1:set_chain_members(Ma, MembersDict),
     ok = machi_chain_manager1:set_chain_members(Mb, MembersDict),
@@ -498,32 +501,19 @@ nonunanimous_setup_and_fix_test2() ->
         ok = machi_chain_manager1:set_chain_members(
                Mb, ch_not_def_yet, TheEpoch_9, ap_mode, MembersDict9, []),
         Advance(),
-        [begin
-             {ok, Pqq} = ?FLU_PC:read_latest_projection(Pxy, private),
-             io:format(user, "At ~w: ~w\n", [Pxy, machi_projection:make_summary(Pqq#projection_v1{dbg2=[]})])
-         end || Pxy <- tl(Proxies)],
         {_, _, TheEpoch_9b} = ?MGR:trigger_react_to_env(Mb),
         true = (TheEpoch_9b > TheEpoch_9),
+
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        io:format(user, "STEP: Start a, and it joins like it ought to\n", []),
+
         [{ok,_}=machi_flu_psup:start_flu_package(Name, Port, Dir, Opts) ||
             {Name,Port,Dir} <- [hd(FluInfo)]],
         Advance(),
-        os:cmd("touch /tmp/moomoo.c"),
-        [begin
-             Qzx = ?MGR:trigger_react_to_env(Mgr),
-             io:format(user, "dbg: ~w: ~w\n", [Mgr, Qzx]),
-             ok
-         end || _ <- lists:seq(1,1),
-                {Mgr,Proxy} <- MgrProxies],
-        [begin
-             {ok, Pqq} = ?FLU_PC:read_latest_projection(Pxy, private),
-             io:format(user, "At ~w: ~w\n", [Pxy, machi_projection:make_summary(Pqq#projection_v1{dbg2=[]})])
-         end || Pxy <- Proxies],
-        [io:format(user, "Unfit @ ~w: ~p\n", [Xii, machi_fitness:get_unfit_list(machi_fitness)]) || Xii <- [a_fitness, b_fitness, c_fitness] ],
-        {ok, {true, {0,_}}} = ?FLU_PC:wedge_status(Proxy_a),
-        {_, _, TheEpoch_9c} = ?MGR:trigger_react_to_env(Ma),
-        {_, _, TheEpoch_9c} = ?MGR:trigger_react_to_env(Mb),
-        {_, _, TheEpoch_9c} = ?MGR:trigger_react_to_env(Mc),
-        [{ok, #projection_v1{upi=[b], repairing=[a,c]}} =
+        {ok, {false, {TheEpoch10,_}}} = ?FLU_PC:wedge_status(Proxy_a),
+        {ok, {false, {TheEpoch10,_}}} = ?FLU_PC:wedge_status(Proxy_b),
+        {ok, {false, {TheEpoch10,_}}} = ?FLU_PC:wedge_status(Proxy_c),
+        [{ok, #projection_v1{upi=[b], repairing=[c,a]}} =
              ?FLU_PC:read_latest_projection(Pxy, private) || Pxy <- Proxies],
         ok
     after
