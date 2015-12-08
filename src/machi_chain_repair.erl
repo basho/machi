@@ -209,9 +209,7 @@ make_repair_directives(ConsistencyMode, RepairMode, File, Size, EpochID,
                   case machi_proxy_flu1_client:checksum_list(
                          Proxy, EpochID, File, ?LONG_TIMEOUT) of
                       {ok, InfoBin} ->
-                          {Info, _} =
-                            machi_csum_table:split_checksum_list_blob_decode(InfoBin),
-                          Info;
+                          machi_csum_table:split_checksum_list_blob_decode(InfoBin);
                       {error, no_such_file} ->
                           []
                   end,

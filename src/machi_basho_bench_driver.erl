@@ -136,7 +136,7 @@ load_ets_table(Conn, ETS) ->
     {ok, Fs} = machi_cr_client:list_files(Conn),
     [begin
          {ok, InfoBin} = machi_cr_client:checksum_list(Conn, File),
-         {PosList, _} = machi_csum_table:split_checksum_list_blob_decode(InfoBin),
+         PosList = machi_csum_table:split_checksum_list_blob_decode(InfoBin),
          StartKey = ets:update_counter(ETS, max_key, 0),
          %% _EndKey = lists:foldl(fun({Off,Sz,CSum}, K) ->
          %%                               V = {File, Off, Sz, CSum},

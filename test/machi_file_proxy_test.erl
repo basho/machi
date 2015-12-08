@@ -76,54 +76,66 @@ random_binary(Start, End) ->
             binary:part(random_binary_single(), Start, End)
     end.
 
+setup() ->
+    {ok, Pid} = machi_file_proxy:start_link(fluname, "test", ?TESTDIR),
+    Pid.
+
+teardown(Pid) ->
+    catch machi_file_proxy:stop(Pid).
+
 machi_file_proxy_test_() ->
     clean_up_data_dir(?TESTDIR),
-    {ok, Pid} = machi_file_proxy:start_link(fluname, "test", ?TESTDIR),
-    [
-     ?_assertEqual({error, bad_arg}, machi_file_proxy:read(Pid, -1, -1)),
-     ?_assertEqual({error, bad_arg}, machi_file_proxy:write(Pid, -1, <<"yo">>)),
-     ?_assertEqual({error, bad_arg}, machi_file_proxy:append(Pid, [], -1, <<"krep">>)),
-     ?_assertMatch({ok, {_, []}}, machi_file_proxy:read(Pid, 1, 1)),
-     ?_assertEqual({error, not_written}, machi_file_proxy:read(Pid, 1024, 1)),
-     ?_assertMatch({ok, {_, []}}, machi_file_proxy:read(Pid, 1, 1024)),
-     ?_assertEqual({error, not_written}, machi_file_proxy:read(Pid, 1024, ?HYOOGE)),
-     ?_assertEqual({error, not_written}, machi_file_proxy:read(Pid, ?HYOOGE, 1)),
-     ?_assertEqual({error, written}, machi_file_proxy:write(Pid, 1, random_binary(0, ?HYOOGE))),
-     ?_assertMatch({ok, "test", _}, machi_file_proxy:append(Pid, random_binary(0, 1024))),
-     ?_assertEqual({error, written}, machi_file_proxy:write(Pid, 1024, <<"fail">>)),
-     ?_assertEqual({error, written}, machi_file_proxy:write(Pid, 1, <<"fail">>)),
-     ?_assertMatch({ok, {[{_, _, _, _}], []}}, machi_file_proxy:read(Pid, 1025, 1000)),
-     ?_assertMatch({ok, "test", _}, machi_file_proxy:append(Pid, [], 1024, <<"mind the gap">>)),
-     ?_assertEqual(ok, machi_file_proxy:write(Pid, 2060, [], random_binary(0, 1024))),
-     ?_assertException(exit, {normal, _}, machi_file_proxy:stop(Pid))
-    ].
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(Pid) ->
+             [
+              ?_assertEqual({error, bad_arg}, machi_file_proxy:read(Pid, -1, -1)),
+              ?_assertEqual({error, bad_arg}, machi_file_proxy:write(Pid, -1, <<"yo">>)),
+              ?_assertEqual({error, bad_arg}, machi_file_proxy:append(Pid, [], -1, <<"krep">>)),
+              ?_assertMatch({ok, {_, []}}, machi_file_proxy:read(Pid, 1, 1)),
+              ?_assertEqual({error, not_written}, machi_file_proxy:read(Pid, 1024, 1)),
+              ?_assertMatch({ok, {_, []}}, machi_file_proxy:read(Pid, 1, 1024)),
+              ?_assertEqual({error, not_written}, machi_file_proxy:read(Pid, 1024, ?HYOOGE)),
+              ?_assertEqual({error, not_written}, machi_file_proxy:read(Pid, ?HYOOGE, 1)),
+              ?_assertEqual({error, written}, machi_file_proxy:write(Pid, 1, random_binary(0, ?HYOOGE))),
+              ?_assertMatch({ok, "test", _}, machi_file_proxy:append(Pid, random_binary(0, 1024))),
+              ?_assertEqual({error, written}, machi_file_proxy:write(Pid, 1024, <<"fail">>)),
+              ?_assertEqual({error, written}, machi_file_proxy:write(Pid, 1, <<"fail">>)),
+              ?_assertMatch({ok, {[{_, _, _, _}], []}}, machi_file_proxy:read(Pid, 1025, 1000)),
+              ?_assertMatch({ok, "test", _}, machi_file_proxy:append(Pid, [], 1024, <<"mind the gap">>)),
+              ?_assertEqual(ok, machi_file_proxy:write(Pid, 2060, [], random_binary(0, 1024)))
+             ]
+     end}.
 
 multiple_chunks_read_test_() ->
     clean_up_data_dir(?TESTDIR),
-    {ok, Pid} = machi_file_proxy:start_link(fluname, "test", ?TESTDIR),
-    [
-     ?_assertEqual(ok, machi_file_proxy:trim(Pid, 0, 1, false)),
-     ?_assertMatch({ok, {[], [{"test", 0, 1}]}},
-                   machi_file_proxy:read(Pid, 0, 1,
-                                         [{needs_trimmed, true}])),
-     ?_assertMatch({ok, "test", _}, machi_file_proxy:append(Pid, random_binary(0, 1024))),
-     ?_assertEqual(ok, machi_file_proxy:write(Pid, 10000, <<"fail">>)),
-     ?_assertEqual(ok, machi_file_proxy:write(Pid, 20000, <<"fail">>)),
-     ?_assertEqual(ok, machi_file_proxy:write(Pid, 30000, <<"fail">>)),
-     %% Freeza
-     ?_assertEqual(ok, machi_file_proxy:write(Pid, 530000, <<"fail">>)),
-     ?_assertMatch({ok, {[{"test", 1024, _, _},
-                          {"test", 10000, <<"fail">>, _},
-                          {"test", 20000, <<"fail">>, _},
-                          {"test", 30000, <<"fail">>, _},
-                          {"test", 530000, <<"fail">>, _}], []}},
-                   machi_file_proxy:read(Pid, 1024, 530000)),
-     ?_assertMatch({ok, {[{"test", 1, _, _}], [{"test", 0, 1}]}},
-                   machi_file_proxy:read(Pid, 0, 1024,
-                                         [{needs_trimmed, true}])),
-     ?_assertException(exit, {normal, _}, machi_file_proxy:stop(Pid))
-    ].
-
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(Pid) ->
+             [
+              ?_assertEqual(ok, machi_file_proxy:trim(Pid, 0, 1, false)),
+              ?_assertMatch({ok, {[], [{"test", 0, 1}]}},
+                            machi_file_proxy:read(Pid, 0, 1,
+                                                  [{needs_trimmed, true}])),
+              ?_assertMatch({ok, "test", _}, machi_file_proxy:append(Pid, random_binary(0, 1024))),
+              ?_assertEqual(ok, machi_file_proxy:write(Pid, 10000, <<"fail">>)),
+              ?_assertEqual(ok, machi_file_proxy:write(Pid, 20000, <<"fail">>)),
+              ?_assertEqual(ok, machi_file_proxy:write(Pid, 30000, <<"fail">>)),
+              %% Freeza
+              ?_assertEqual(ok, machi_file_proxy:write(Pid, 530000, <<"fail">>)),
+              ?_assertMatch({ok, {[{"test", 1024, _, _},
+                                   {"test", 10000, <<"fail">>, _},
+                                   {"test", 20000, <<"fail">>, _},
+                                   {"test", 30000, <<"fail">>, _},
+                                   {"test", 530000, <<"fail">>, _}], []}},
+                            machi_file_proxy:read(Pid, 1024, 530000)),
+              ?_assertMatch({ok, {[{"test", 1, _, _}], [{"test", 0, 1}]}},
+                            machi_file_proxy:read(Pid, 0, 1024,
+                                                  [{needs_trimmed, true}]))
+             ]
+     end}.
 
 -endif. % !PULSE
 -endif. % TEST.

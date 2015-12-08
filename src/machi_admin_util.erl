@@ -100,7 +100,7 @@ verify_file_checksums_common(Sock1, EpochID, File, ReadChunk) ->
     try
         case ?FLU_C:checksum_list(Sock1, EpochID, File) of
             {ok, InfoBin} ->
-                {Info, _} = machi_csum_table:split_checksum_list_blob_decode(InfoBin),
+                Info = machi_csum_table:split_checksum_list_blob_decode(InfoBin),
                 Res = lists:foldl(verify_chunk_checksum(File, ReadChunk),
                                   [], Info),
                 {ok, Res};
@@ -115,7 +115,9 @@ verify_file_checksums_common(Sock1, EpochID, File, ReadChunk) ->
     end.
 
 verify_chunk_checksum(File, ReadChunk) ->
-    fun({Offset, Size, <<_Tag:1/binary, CSum/binary>>}, Acc) ->
+    fun({0, ?MINIMUM_OFFSET, none}, []) ->
+            [];
+       ({Offset, Size, <<_Tag:1/binary, CSum/binary>>}, Acc) ->
             case ReadChunk(File, Offset, Size) of
                 {ok, {[{_, Offset, Chunk, _}], _}} ->
                     CSum2 = machi_util:checksum_chunk(Chunk),

@@ -57,7 +57,8 @@
     write/4,
     trim/4,
     append/2,
-    append/4
+    append/4,
+    checksum_list/1
 ]).
 
 %% gen_server callbacks
@@ -210,6 +211,10 @@ append(_Pid, ClientMeta, Extra, _Data) ->
     lager:warning("Bad arg to append: ClientMeta ~p, Extra ~p", [ClientMeta, Extra]),
     {error, bad_arg}.
 
+-spec checksum_list(pid()) -> {ok, list()}.
+checksum_list(Pid) ->
+    gen_server:call(Pid, {checksum_list}, ?TIMEOUT).
+
 %% gen_server callbacks
 
 % @private
@@ -249,27 +254,22 @@ handle_call({sync, data}, _From, State = #state{ data_filehandle = FHd }) ->
     R = file:sync(FHd),
     {reply, R, State};
 
-handle_call({sync, csum}, _From, State = #state{ csum_table = T }) ->
-    R = machi_csum_table:sync(T),
-    {reply, R, State};
+handle_call({sync, csum}, _From, State) ->
+    %% machi_csum_table always writes in {sync, true} option, so here
+    %% explicit sync isn't actually needed.
+    {reply, ok, State};
 
 handle_call({sync, all}, _From, State = #state{filename = F,
                                                data_filehandle = FHd,
-                                               csum_table = T
+                                               csum_table = _T
                                               }) ->
-    R = machi_csum_table:sync(T),
-    R1 = file:sync(FHd),
-    Resp = case {R, R1} of
-        {ok, ok} -> ok;
-        {ok, O1} ->
-                   lager:error("Got ~p during a data file sync on file ~p", [O1, F]),
-                   O1;
-        {O2, ok} ->
-                   lager:error("Got ~p during a csum file sync on file ~p", [O2, F]),
-                   O2;
-        {O3, O4} ->
-                   lager:error("Got ~p ~p syncing all files for file ~p", [O3, O4, F]),
-                   {O3, O4}
+    Resp = case file:sync(FHd) of
+               ok ->
+                   ok;
+               Error ->
+                   lager:error("Got ~p syncing all files for file ~p",
+                               [Error, F]),
+                   Error
     end,
     {reply, Resp, State};
 
@@ -435,6 +435,10 @@ handle_call({append, ClientMeta, Extra, Data}, _From,
     {reply, Resp, State#state{appends = {T+1, NewErr},
                               eof_position = NewEof}};
 
+handle_call({checksum_list}, _FRom, State = #state{csum_table=T}) ->
+    All = machi_csum_table:all(T),
+    {reply, {ok, All}, State};
+
 handle_call(Req, _From, State) ->
     lager:warning("Unknown call: ~p", [Req]),
     {reply, whoaaaaaaaaaaaa, State}.
@@ -545,7 +549,6 @@ terminate(Reason, #state{filename = F,
         undefined ->
             noop; %% file deleted
         _ ->
-            ok = machi_csum_table:sync(T),
             ok = machi_csum_table:close(T)
     end,
     ok.
@@ -597,7 +600,8 @@ check_or_make_tagged_csum(OtherTag, _ClientCsum, _Data) ->
               Size       :: non_neg_integer(),
               NoChunk    :: boolean(),
               NoChecksum :: boolean()
-             ) -> {ok, Chunks :: [{string(), Offset::non_neg_integer(), binary(), Csum :: binary()}]} |
+             ) -> {ok, {Chunks :: [{string(), Offset::non_neg_integer(), binary(), Csum :: binary()}],
+                        Trimmed :: [{string(), Offset::non_neg_integer(), Size::non_neg_integer()}]}} |
                   {error, bad_checksum} |
                   {error, partial_read} |
                   {error, file:posix()} |
@@ -621,6 +625,14 @@ do_read(FHd, Filename, CsumTable, Offset, Size, _, _) ->
     ChunkCsums = machi_csum_table:find(CsumTable, Offset, Size),
     read_all_ranges(FHd, Filename, ChunkCsums, [], []).
 
+-spec read_all_ranges(file:io_device(), string(),
+                      [{non_neg_integer(),non_neg_integer(),trimmed|binary()}],
+                      Chunks :: [{string(), Offset::non_neg_integer(), binary(), Csum::binary()}],
+                      Trimmed :: [{string(), Offset::non_neg_integer(), Size::non_neg_integer()}]) ->
+                             {ok, {
+                                Chunks :: [{string(), Offset::non_neg_integer(), binary(), Csum::binary()}],
+                                Trimmed :: [{string(), Offset::non_neg_integer(), Size::non_neg_integer()}]}} |
+                             {erorr, term()|partial_read}.
 read_all_ranges(_, _, [], ReadChunks, TrimmedChunks) ->
     %% TODO: currently returns empty list of trimmed chunks
     {ok, {lists:reverse(ReadChunks), lists:reverse(TrimmedChunks)}};
@@ -632,6 +644,11 @@ read_all_ranges(FHd, Filename, [{Offset, Size, TaggedCsum}|T], ReadChunks, Trimm
     case file:pread(FHd, Offset, Size) of
         eof ->
             read_all_ranges(FHd, Filename, T, ReadChunks, TrimmedChunks);
+        {ok, Bytes} when byte_size(Bytes) == Size, TaggedCsum =:= none ->
+            read_all_ranges(FHd, Filename, T,
+                            [{Filename, Offset, Bytes,
+                              machi_util:make_tagged_csum(none, <<>>)}|ReadChunks],
+                            TrimmedChunks);
         {ok, Bytes} when byte_size(Bytes) == Size ->
             {Tag, Ck} = machi_util:unmake_tagged_csum(TaggedCsum),
             case check_or_make_tagged_csum(Tag, Ck, Bytes) of
@@ -827,7 +844,7 @@ maybe_gc(Reply, S = #state{fluname=FluName,
                            filename = Filename,
                            eof_position = Eof,
                            csum_table=CsumTable}) ->
-    case machi_csum_table:all_trimmed(CsumTable, Eof) of
+    case machi_csum_table:all_trimmed(CsumTable, ?MINIMUM_OFFSET, Eof) of
         true ->
             lager:debug("GC? Let's do it: ~p.~n", [Filename]),
             %% Before unlinking a file, it should inform
