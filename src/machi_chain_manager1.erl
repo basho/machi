@@ -327,7 +327,7 @@ handle_call({set_chain_members, SetChainName, SetOldEpoch, CMode,
     ok = set_consistency_mode(machi_flu_psup:make_proj_supname(MyName), CMode),
     NewProj = machi_projection:update_checksum(
                 OldProj#projection_v1{author_server=MyName,
-                                      chain_name=ChainName,
+                                      chain_name=SetChainName,
                                       creation_time=now(),
                                       mode=CMode,
                                       epoch_number=NewEpoch,
