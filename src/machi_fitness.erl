@@ -95,11 +95,13 @@ init([{MyFluName}|Args]) ->
 
 handle_call({get_unfit_list}, _From, #state{active_unfit=ActiveUnfit}=S) ->
     Reply = ActiveUnfit,
+io:format(user, "get_unfit_list ~p: ~p\n", [S#state.my_flu_name, Reply]),
     {reply, Reply, S};
 handle_call({update_local_down_list, Down, MembersDict}, _From,
             #state{my_flu_name=MyFluName, pending_map=OldMap,
                    local_down=OldDown, members_dict=OldMembersDict,
                    admin_down=AdminDown}=S) ->
+io:format(user, "update_local_down_list: ~w: down ~w md ~W\n", [S#state.my_flu_name, Down, MembersDict, 10]),
     NewMap = store_in_map(OldMap, MyFluName, erlang:now(), Down,
                           AdminDown, [props_yo]),
     S2 = if Down == OldDown, MembersDict == OldMembersDict ->

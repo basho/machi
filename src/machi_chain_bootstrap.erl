@@ -120,20 +120,20 @@ sanitize_chain_def_rec(Whole, {Acc, D}) ->
             {Acc, D}
     end.
 
-perhaps_bootstrap_chains([], _FLUs) ->
+perhaps_bootstrap_chains([], _LocalFLUs_at_zero) ->
     ok;
-perhaps_bootstrap_chains([CD|ChainDefs], FLUs) ->
+perhaps_bootstrap_chains([CD|ChainDefs], LocalFLUs_at_zero) ->
     #chain_def_v1{upi=UPI, witnesses=Witnesses} = CD,
     AllNames = [Name || #p_srvr{name=Name} <- UPI ++ Witnesses],
     case ordsets:intersection(ordsets:from_list(AllNames),
-                              ordsets:from_list(FLUs)) of
+                              ordsets:from_list(LocalFLUs_at_zero)) of
         [] ->
             io:format(user, "TODO: no local flus in ~P\n", [CD, 10]),
             ok;
         [FLU1|_] ->
             bootstrap_chain(CD, FLU1)
     end,
-    perhaps_bootstrap_chains(ChainDefs, FLUs).
+    perhaps_bootstrap_chains(ChainDefs, LocalFLUs_at_zero).
 
 bootstrap_chain(CD, FLU) ->
     io:format(user, "TODO: config ~p as bootstrap member of ~p\n", [FLU, CD]),
