@@ -101,7 +101,7 @@
 %% used to permanently delete such FLUs' data files, i.e. to reclaim
 %% disk space.
 %%
-%% Resources for the FLU are defined in {@link machi_projection.hrl}
+%% Resources for the FLU are defined in `machi_projection.hrl'
 %% in the `p_srvr{}' record.  The major elements of this record are:
 %%
 %% <ul>
@@ -147,7 +147,7 @@
 %% created.  External policy is responsible for creating each of these
 %% files.
 %%
-%% Resources for the chain are defined in {@link machi_projection.hrl}
+%% Resources for the chain are defined in `machi_projection.hrl'
 %% in the `chain_def_v1{}' record.  The major elements of this record are:
 %%
 %% <ul>
@@ -174,7 +174,7 @@
 %% </li>
 %% </ul>
 %%
-%% == Conflicts with TCP ports, FLU & chain names, etc ==
+%% == Conflicts with TCP ports, FLU &amp; chain names, etc ==
 %%
 %% This manager is not responsible for managing conflicts in resource
 %% namespaces, e.g., TCP port numbers, FLU names, chain names, etc.

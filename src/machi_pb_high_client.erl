@@ -58,7 +58,7 @@
           count=0     :: non_neg_integer()
          }).
 
-%% @doc official error types that is specific in Machi
+%% Official error types that is specific in Machi
 -type machi_client_error_reason() :: bad_arg | wedged | bad_checksum |
                                      partition | not_written | written |
                                      trimmed | no_such_file | partial_read |
@@ -145,7 +145,7 @@ read_chunk(PidSpec, File, Offset, Size, Options, Timeout) ->
     send_sync(PidSpec, {read_chunk, File, Offset, Size, Options}, Timeout).
 
 %% @doc Trims arbitrary binary range of any file. If a specified range
-%% has any byte trimmed, it fails and returns `{error, trimmed}`.
+%% has any byte trimmed, it fails and returns `{error, trimmed}'.
 %% Otherwise it trims all bytes in that range. If there are
 %% overlapping chunks with client-specified checksum, they will cut
 %% off and checksum are re-calculated in server side.  TODO: Add

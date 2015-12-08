@@ -21,7 +21,7 @@
 %% @doc Supervisor for Machi FLU servers and their related support
 %% servers.
 %%
-%% Responsibility for managing FLU & chain lifecycle after the initial
+%% Responsibility for managing FLU and chain lifecycle after the initial
 %% application startup is delegated to {@link machi_lifecycle_mgr}.
 %%
 %% See {@link machi_flu_psup} for an illustration of the entire Machi

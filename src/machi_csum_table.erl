@@ -332,7 +332,7 @@ runthru(_L, _O, _P) ->
     false.
 
 %% @doc If you want to find an overlap among two areas [x, y] and [a,
-%% b] where x < y and a < b; if (a-y)*(b-x) < 0 then there's a
+%% b] where x &lt; y and a &lt; b; if (a-y)*(b-x) &lt; 0 then there's a
 %% overlap, else, > 0 then there're no overlap. border condition = 0
 %% is not overlap in this offset-size case.
 inclusion_match_spec(Offset, Size) ->
