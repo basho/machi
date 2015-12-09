@@ -47,7 +47,9 @@
 -endif. %TEST
 
 %% API
--export([start_link/0, load_rc_d_files_from_dir/1]).
+-export([start_link/0,
+         get_initial_flus/0, load_rc_d_files_from_dir/1,
+         sanitize_p_srvr_records/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -81,22 +83,22 @@ get_initial_flus() ->
                     DoesNotExist ->
                         DoesNotExist;
                     Dir ->
-                        ok = filelib:ensure_dir(Dir ++ "/unused"),
                         Dir
                 end,
-    sanitize_p_srvr_records(load_rc_d_files_from_dir(ConfigDir)).
+    Ps = [P || {_File, P} <- load_rc_d_files_from_dir(ConfigDir)],
+    sanitize_p_srvr_records(Ps).
 -endif. % PULSE
 
 load_rc_d_files_from_dir(Dir) ->
     Files = filelib:wildcard(Dir ++ "/*"),
-    lists:append([case file:consult(File) of
-                      {ok, X} ->
-                          X;
-                      _ ->
-                          lager:warning("Error parsing file '~s', ignoring",
-                                        [File]),
-                          []
-                  end || File <- Files]).
+    [case file:consult(File) of
+         {ok, [X]} ->
+             {File, X};
+         _ ->
+             lager:warning("Error parsing file '~s', ignoring",
+                           [File]),
+             {File, []}
+     end || File <- Files].
 
 sanitize_p_srvr_records(Ps) ->
     {Sane, _} = lists:foldl(fun sanitize_p_srvr_rec/2, {[], dict:new()}, Ps),

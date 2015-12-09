@@ -180,5 +180,8 @@ get_env(Setting, Default) ->
 get_data_dir(Props) ->
     case proplists:get_value(data_dir, Props) of
         Path when is_list(Path) ->
-            Path
+            Path;
+        undefined ->
+            {ok, Dir} = application:get_env(machi, flu_data_dir),
+            Dir
     end.
