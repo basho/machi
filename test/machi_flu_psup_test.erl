@@ -38,9 +38,9 @@ smoke_test_() ->
     {timeout, 5*60, fun() -> smoke_test2() end}.
 
 smoke_test2() ->
-    Ps = [{a,#p_srvr{name=a, address="localhost", port=5555, props="./data.a"}},
-          {b,#p_srvr{name=b, address="localhost", port=5556, props="./data.b"}},
-          {c,#p_srvr{name=c, address="localhost", port=5557, props="./data.c"}}
+    Ps = [{a,#p_srvr{name=a, address="localhost", port=5550, props="./data.a"}},
+          {b,#p_srvr{name=b, address="localhost", port=5551, props="./data.b"}},
+          {c,#p_srvr{name=c, address="localhost", port=5552, props="./data.c"}}
          ],
     [os:cmd("rm -rf " ++ P#p_srvr.props) || {_,P} <- Ps],
     {ok, SupPid} = machi_flu_sup:start_link(),
@@ -66,9 +66,9 @@ partial_stop_restart_test_() ->
     {timeout, 5*60, fun() -> partial_stop_restart2() end}.
 
 partial_stop_restart2() ->
-    Ps = [{a,#p_srvr{name=a, address="localhost", port=5555, props="./data.a"}},
-          {b,#p_srvr{name=b, address="localhost", port=5556, props="./data.b"}},
-          {c,#p_srvr{name=c, address="localhost", port=5557, props="./data.c"}}
+    Ps = [{a,#p_srvr{name=a, address="localhost", port=5560, props="./data.a"}},
+          {b,#p_srvr{name=b, address="localhost", port=5561, props="./data.b"}},
+          {c,#p_srvr{name=c, address="localhost", port=5562, props="./data.c"}}
          ],
     ChMgrs = [machi_flu_psup:make_mgr_supname(P#p_srvr.name) || {_,P} <-Ps],
     PStores = [machi_flu_psup:make_proj_supname(P#p_srvr.name) || {_,P} <-Ps],
