@@ -425,6 +425,15 @@ do_process_pending(S) ->
     S4 = process_bad_files(BadFiles, S3),
     {{P_FLUs, P_Chains}, S4}.
 
+flu_config_exists(FLU, S) ->
+    ConfigDir = get_flu_config_dir(S),
+    case file:read_file_info(ConfigDir ++ "/" ++ atom_to_list(FLU)) of
+        {ok, _} ->
+            true;
+        _ ->
+            false
+    end.
+
 get_pending_dir(_S) ->
     {ok, EtcDir} = application:get_env(machi, platform_etc_dir),
     EtcDir ++ "/pending".
@@ -437,9 +446,20 @@ get_flu_config_dir(_S) ->
     {ok, Dir} = application:get_env(machi, flu_config_dir),
     Dir.
 
+get_flu_data_dir(_S) ->
+    {ok, Dir} = application:get_env(machi, flu_data_dir),
+    Dir.
+
 get_chain_config_dir(_S) ->
     {ok, Dir} = application:get_env(machi, chain_config_dir),
     Dir.
+
+get_data_dir(_S) ->
+    {ok, Dir} = application:get_env(machi, platform_data_dir),
+    Dir.
+
+get_preserve_dir(S) ->
+    get_data_dir(S) ++ "/^PRESERVE".
 
 process_pending_flus(P_FLUs, S) ->
     lists:foldl(fun process_pending_flu/2, S, P_FLUs).
@@ -487,14 +507,14 @@ process_pending_chain({File, CD}, S) ->
                                 [File]),
                     _ = move_to_rejected(File, S),
                     S;
-                [FLU|_]=LocalFLUs ->
+                [FLU|_] ->
                     %% TODO: Between the successful chain change inside of
                     %% bootstrap_chain() (and before it returns to us!) and
                     %% the return of process_pending_chain2(), we have a race
                     %% window if this process crashes.
                     case bootstrap_chain(CD, FLU) of
                         {ok, AddedFLUs, RemovedFLUs} ->
-                            process_pending_chain2(File, CD, LocalFLUs,
+                            process_pending_chain2(File, CD,
                                                    AddedFLUs, RemovedFLUs, S);
                         Else ->
                             lager:error("Pending chain config file ~s "
@@ -511,22 +531,34 @@ process_pending_chain({File, CD}, S) ->
             S
     end.
 
-process_pending_chain2(File, CD, LocalFLUs, _AddedFLUs, RemovedFLUs, S) ->
-    %% AddedFLUs: no any extra work.
-    %% RemovedFLUs: Stop the FLU, config -> j-i-c, data -> j-i-c
-    case ordsets:intersection(ordsets:from_list(LocalFLUs),
-                              ordsets:from_list(RemovedFLUs)) of
+process_pending_chain2(File, CD, _AddedFLUs, RemovedFLUs, S) ->
+    LocalRemovedFLUs = [FLU || FLU <- RemovedFLUs,
+                               flu_config_exists(FLU, S)],
+    case LocalRemovedFLUs of
         [] ->
             ok;
-        LocalRemovedFLUs ->
+        [_|_] ->
             %% Sleep for a little bit to allow HC to settle.
             timer:sleep(3000),
             [begin
                  %% We may be retrying this, so be liberal with any pattern
                  %% matching on return values.
                  _ = machi_flu_psup:stop_flu_package(FLU),
-                 io:format(user, "TODO: move config ~s LINE ~p\n", [?MODULE, ?LINE]),
-                 io:format(user, "TODO: move data ~s LINE ~p\n", [?MODULE, ?LINE]),
+                 ConfigDir = get_flu_config_dir(S),
+                 FluDataDir = get_flu_data_dir(S),
+                 PreserveDir = get_preserve_dir(S),
+                 Suffix = make_ts_suffix(),
+                 FLU_str = atom_to_list(FLU),
+                 MyPreserveDir = PreserveDir ++ "/" ++ FLU_str ++ "." ++ Suffix,
+                 ok = filelib:ensure_dir(MyPreserveDir ++ "/unused"),
+io:format(user, "PRE ~s\n", [MyPreserveDir]),
+                 _ = file:make_dir(MyPreserveDir),
+io:format(user, "PRE rename ~s ~s\n", [ConfigDir ++ "/" ++ FLU_str, MyPreserveDir ++ "/" ++ FLU_str ++ ".config"]),
+                 _ = file:rename(ConfigDir ++ "/" ++ FLU_str,
+                                 MyPreserveDir ++ "/" ++ FLU_str ++ ".config"),
+io:format(user, "PRE rename ~s ~s\n", [FluDataDir ++ "/" ++ FLU_str, MyPreserveDir ++ "/" ++ FLU_str ++ ".data"]),
+                 _ = file:rename(FluDataDir ++ "/" ++ FLU_str,
+                                 MyPreserveDir ++ "/" ++ FLU_str ++ ".data"),
                  ok
              end || FLU <- LocalRemovedFLUs]
     end,
@@ -540,10 +572,12 @@ process_bad_files(Files, S) ->
 move_to_rejected(File, S) ->
     lager:error("Pending unknown config file ~s has been rejected\n", [File]),
     Dst = get_rejected_dir(S),
-    Suffix = lists:flatten(io_lib:format("~w,~w,~w",
-                                         tuple_to_list(os:timestamp()))),
+    Suffix = make_ts_suffix(),
     ok = file:rename(File, Dst ++ "/" ++ filename:basename(File) ++ Suffix),
     S.
+
+make_ts_suffix() ->
+    lists:flatten(io_lib:format("~w,~w,~w", tuple_to_list(os:timestamp()))).
 
 move_to_flu_config(FLU, File, S) ->
     lager:info("Creating FLU config file ~w\n", [FLU]),
