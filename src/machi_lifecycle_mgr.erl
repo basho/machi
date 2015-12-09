@@ -381,6 +381,11 @@ bootstrap_chain2(#chain_def_v1{name=NewChainName, mode=NewCMode,
             AddedFLUs = NewAll_list -- OldAll_list,
             RemovedFLUs = OldAll_list -- NewAll_list,
             {ok, AddedFLUs, RemovedFLUs};
+        chain_bad_state=Else ->
+            lager:error("Attempt to bootstrap chain ~w via FLU ~w "
+                        "failed (no retries): ~w (defn ~w)\n",
+                        [NewChainName, FLU, Else, CD]),
+            Else;
         Else ->
             lager:error("Attempt to bootstrap chain ~w via FLU ~w "
                         "failed: ~w (defn ~w)\n",
@@ -410,7 +415,7 @@ set_chain_members(OldChainName, NewChainName, OldCMode,
                                                    NewCMode,
                                                    MembersDict, NewWitnesses);
        true ->
-            chain_bad_arg
+            chain_bad_state
     end.
 
 do_process_pending(S) ->
@@ -513,9 +518,8 @@ process_pending_chain({File, CD}, S) ->
                     %% the return of process_pending_chain2(), we have a race
                     %% window if this process crashes.
                     case bootstrap_chain(CD, FLU) of
-                        {ok, AddedFLUs, RemovedFLUs} ->
-                            process_pending_chain2(File, CD,
-                                                   AddedFLUs, RemovedFLUs, S);
+                        {ok, _AddedFLUs, RemovedFLUs} ->
+                            process_pending_chain2(File, CD, RemovedFLUs, S);
                         Else ->
                             lager:error("Pending chain config file ~s "
                                         "has failed (~w), rejected\n",
@@ -531,7 +535,7 @@ process_pending_chain({File, CD}, S) ->
             S
     end.
 
-process_pending_chain2(File, CD, _AddedFLUs, RemovedFLUs, S) ->
+process_pending_chain2(File, CD, RemovedFLUs, S) ->
     LocalRemovedFLUs = [FLU || FLU <- RemovedFLUs,
                                flu_config_exists(FLU, S)],
     case LocalRemovedFLUs of
@@ -551,12 +555,9 @@ process_pending_chain2(File, CD, _AddedFLUs, RemovedFLUs, S) ->
                  FLU_str = atom_to_list(FLU),
                  MyPreserveDir = PreserveDir ++ "/" ++ FLU_str ++ "." ++ Suffix,
                  ok = filelib:ensure_dir(MyPreserveDir ++ "/unused"),
-io:format(user, "PRE ~s\n", [MyPreserveDir]),
                  _ = file:make_dir(MyPreserveDir),
-io:format(user, "PRE rename ~s ~s\n", [ConfigDir ++ "/" ++ FLU_str, MyPreserveDir ++ "/" ++ FLU_str ++ ".config"]),
                  _ = file:rename(ConfigDir ++ "/" ++ FLU_str,
                                  MyPreserveDir ++ "/" ++ FLU_str ++ ".config"),
-io:format(user, "PRE rename ~s ~s\n", [FluDataDir ++ "/" ++ FLU_str, MyPreserveDir ++ "/" ++ FLU_str ++ ".data"]),
                  _ = file:rename(FluDataDir ++ "/" ++ FLU_str,
                                  MyPreserveDir ++ "/" ++ FLU_str ++ ".data"),
                  ok
