@@ -82,7 +82,9 @@
           mode           :: pv1_consistency_mode(),
           full           :: [p_srvr()],
           witnesses      :: [p_srvr()],
-          props = []      :: list()  % proplist for other related info
+          old_all        :: [pv1_server()],
+          old_witnesses  :: [pv1_server()],
+          props = []     :: list()  % proplist for other related info
          }).
 
 -endif. % !MACHI_PROJECTION_HRL

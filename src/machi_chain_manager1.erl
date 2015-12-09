@@ -1255,7 +1255,7 @@ react_to_env_A20(Retries, #ch_mgr{name=MyName, proj=P_current}=S) ->
             P_none0 = make_none_projection(Epoch,
                                            MyName, All_list, Witness_list, MembersDict),
             P_none = P_none0#projection_v1{chain_name=ChainName},
-            {{x,y,z,42,77}, set_proj(S2, P_none)};
+            {{now_using,[],Epoch}, set_proj(S2, P_none)};
         _ ->
             react_to_env_A21(Retries, UnanimousTag, P_latest, ReadExtra, S2)
     end.
