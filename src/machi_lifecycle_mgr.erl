@@ -332,3 +332,25 @@ bootstrap_chain(#chain_def_v1{name=ChainName, mode=CMode, full=Full,
                                  "failed: ~w (defn ~w)\n", [Else, CD]),
             ok
     end.
+
+%% 1. Don't worry about partial writes to config dir: that's a Policy
+%%    implementation worry: create a temp file, fsync(2), then rename(2)
+%%    and possibly fsync(2) on the dir.
+%%
+%% 2. Add periodic re-scan check FLUs & chains (in that order).
+%%
+%% 3. Add force re-rescan of FLUs *or* chains.  (separate is better?)
+%%
+%% 4. For chain modification: add "change" directory?  Scan looks in
+%%    "change"?
+%%
+%% 5. Easy comparison for current vs. new chain config.
+%%    - identify new FLUs: no action required, HC will deal with it?
+%%    - identify removed FLUs: set_chain_members() to change HC
+%%                           : stop FLU package (after short pause)
+%%                           : move config file -> just-in-case
+%%                           : move data files -> just-in-case
+%%                             - identify j-i-c dir in case resuming from interruption??? to avoid problem of putting config & data files in different places?
+%%                             - move data files itself may be interrupted?
+%%    - move chain def'n from change -> chain_config_dir
+
