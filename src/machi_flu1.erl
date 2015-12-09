@@ -229,24 +229,27 @@ append_server_loop(FluPid, #state{wedged=Wedged_p,
                                   witness=Witness_p,
                                   epoch_id=OldEpochId, flu_name=FluName}=S) ->
     receive
-        {seq_append, From, _Prefix, _Chunk, _CSum, _Extra, _EpochID}
+        {seq_append, From, _N, _L, _Prefix, _Chunk, _CSum, _Extra, _EpochID}
           when Witness_p ->
             %% The FLU's net_server_loop() process ought to filter all
             %% witness states, but we'll keep this clause for extra
             %% paranoia.
             From ! witness,
             append_server_loop(FluPid, S);
-        {seq_append, From, _Prefix, _Chunk, _CSum, _Extra, _EpochID}
+        {seq_append, From, _N, _L, _Prefix, _Chunk, _CSum, _Extra, _EpochID}
           when Wedged_p ->
             From ! wedged,
             append_server_loop(FluPid, S);
-        {seq_append, From, Prefix, Chunk, CSum, Extra, EpochID} ->
+        {seq_append, From, CoC_Namespace, CoC_Locator,
+         Prefix, Chunk, CSum, Extra, EpochID} ->
             %% Old is the one from our state, plain old 'EpochID' comes
             %% from the client.
             _ = case OldEpochId == EpochID of
                 true ->
                     spawn(fun() -> 
-                        append_server_dispatch(From, Prefix, Chunk, CSum, Extra, FluName, EpochID) 
+                        append_server_dispatch(From, CoC_Namespace, CoC_Locator,
+                                               Prefix, Chunk, CSum, Extra,
+                                               FluName, EpochID) 
                     end);
                 false ->
                     From ! {error, bad_epoch}
@@ -401,10 +404,12 @@ do_pb_ll_request3({low_wedge_status, _EpochID}, S) ->
 do_pb_ll_request3({low_proj, PCMD}, S) ->
     {do_server_proj_request(PCMD, S), S};
 %% Witness status *matters* below
-do_pb_ll_request3({low_append_chunk, _EpochID, PKey, Prefix, Chunk, CSum_tag,
+do_pb_ll_request3({low_append_chunk, _EpochID, CoC_Namespace, CoC_Locator,
+                   Prefix, Chunk, CSum_tag,
                 CSum, ChunkExtra},
                   #state{witness=false}=S) ->
-    {do_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
+    {do_server_append_chunk(CoC_Namespace, CoC_Locator,
+                            Prefix, Chunk, CSum_tag, CSum,
                             ChunkExtra, S), S};
 do_pb_ll_request3({low_write_chunk, _EpochID, File, Offset, Chunk, CSum_tag,
                    CSum},
@@ -444,10 +449,12 @@ do_pb_hl_request2({high_echo, Msg}, S) ->
     {Msg, S};
 do_pb_hl_request2({high_auth, _User, _Pass}, S) ->
     {-77, S};
-do_pb_hl_request2({high_append_chunk, _todoPK, Prefix, ChunkBin, TaggedCSum,
+do_pb_hl_request2({high_append_chunk, CoC_Namespace, CoC_Locator,
+                   Prefix, ChunkBin, TaggedCSum,
                    ChunkExtra}, #state{high_clnt=Clnt}=S) ->
     Chunk = {TaggedCSum, ChunkBin},
-    Res = machi_cr_client:append_chunk_extra(Clnt, Prefix, Chunk,
+    Res = machi_cr_client:append_chunk_extra(Clnt, CoC_Namespace, CoC_Locator,
+                                             Prefix, Chunk,
                                              ChunkExtra),
     {Res, S};
 do_pb_hl_request2({high_write_chunk, File, Offset, ChunkBin, TaggedCSum},
@@ -506,23 +513,27 @@ do_server_proj_request({kick_projection_reaction},
           end),
     async_no_response.
 
-do_server_append_chunk(PKey, Prefix, Chunk, CSum_tag, CSum,
+do_server_append_chunk(CoC_Namespace, CoC_Locator,
+                       Prefix, Chunk, CSum_tag, CSum,
                        ChunkExtra, S) ->
     case sanitize_prefix(Prefix) of
         ok ->
-            do_server_append_chunk2(PKey, Prefix, Chunk, CSum_tag, CSum,
+            do_server_append_chunk2(CoC_Namespace, CoC_Locator,
+                                    Prefix, Chunk, CSum_tag, CSum,
                                     ChunkExtra, S);
         _ ->
             {error, bad_arg}
     end.
 
-do_server_append_chunk2(_PKey, Prefix, Chunk, CSum_tag, Client_CSum,
+do_server_append_chunk2(CoC_Namespace, CoC_Locator,
+                        Prefix, Chunk, CSum_tag, Client_CSum,
                         ChunkExtra, #state{flu_name=FluName,
                                            epoch_id=EpochID}=_S) ->
     %% TODO: Do anything with PKey?
     try
         TaggedCSum = check_or_make_tagged_checksum(CSum_tag, Client_CSum,Chunk),
-        R = {seq_append, self(), Prefix, Chunk, TaggedCSum, ChunkExtra, EpochID},
+        R = {seq_append, self(), CoC_Namespace, CoC_Locator,
+             Prefix, Chunk, TaggedCSum, ChunkExtra, EpochID},
         FluName ! R,
         receive
             {assignment, Offset, File} ->
@@ -673,8 +684,10 @@ do_server_trunc_hack(File, #state{data_dir=DataDir}=_S) ->
             {error, bad_arg}
     end.
 
-append_server_dispatch(From, Prefix, Chunk, CSum, Extra, FluName, EpochId) ->
-    Result = case handle_append(Prefix, Chunk, CSum, Extra, FluName, EpochId) of
+append_server_dispatch(From, CoC_Namespace, CoC_Locator,
+                       Prefix, Chunk, CSum, Extra, FluName, EpochId) ->
+    Result = case handle_append(CoC_Namespace, CoC_Locator,
+                                Prefix, Chunk, CSum, Extra, FluName, EpochId) of
         {ok, File, Offset} ->
             {assignment, Offset, File};
         Other ->
@@ -683,10 +696,13 @@ append_server_dispatch(From, Prefix, Chunk, CSum, Extra, FluName, EpochId) ->
     From ! Result,
     exit(normal).
 
-handle_append(_Prefix, <<>>, _Csum, _Extra, _FluName, _EpochId) ->
+handle_append(_N, _L, _Prefix, <<>>, _Csum, _Extra, _FluName, _EpochId) ->
     {error, bad_arg};
-handle_append(Prefix, Chunk, Csum, Extra, FluName, EpochId) ->
-    Res = machi_flu_filename_mgr:find_or_make_filename_from_prefix(FluName, EpochId, {prefix, Prefix}),
+handle_append(CoC_Namespace, CoC_Locator,
+              Prefix, Chunk, Csum, Extra, FluName, EpochId) ->
+    CoC = {coc, CoC_Namespace, CoC_Locator},
+    Res = machi_flu_filename_mgr:find_or_make_filename_from_prefix(
+            FluName, EpochId, {prefix, Prefix}, CoC),
     case Res of
         {file, F} ->
             case machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, F}) of

@@ -40,3 +40,6 @@
 
 %% TODO: it's used in flu_sup and elsewhere, change this to suitable name
 -define(TEST_ETS_TABLE, test_ets_table).
+
+-define(DEFAULT_COC_NAMESPACE, "").
+-define(DEFAULT_COC_LOCATOR,    0).

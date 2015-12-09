@@ -61,16 +61,17 @@ smoke_test2() ->
             %% a separate test module?  Or separate test func?
             {error, _} = ?C:auth(Clnt, "foo", "bar"),
 
-            PK = <<>>,
+            CoC_n = "",              % CoC_namespace (not implemented)
+            CoC_l = 0,               % CoC_locator (not implemented)
             Prefix = <<"prefix">>,
             Chunk1 = <<"Hello, chunk!">>,
             {ok, {Off1, Size1, File1}} =
-                ?C:append_chunk(Clnt, PK, Prefix, Chunk1, none, 0),
+                ?C:append_chunk(Clnt, CoC_n, CoC_l, Prefix, Chunk1, none, 0),
             true = is_binary(File1),
             Chunk2 = "It's another chunk",
             CSum2 = {client_sha, machi_util:checksum_chunk(Chunk2)},
             {ok, {Off2, Size2, File2}} =
-                ?C:append_chunk(Clnt, PK, Prefix, Chunk2, CSum2, 1024),
+                ?C:append_chunk(Clnt, CoC_n, CoC_l, Prefix, Chunk2, CSum2, 1024),
             Chunk3 = ["This is a ", <<"test,">>, 32, [["Hello, world!"]]],
             File3 = File2,
             Off3 = Off2 + iolist_size(Chunk2),
@@ -114,7 +115,8 @@ smoke_test2() ->
             LargeBytes = binary:copy(<<"x">>, 1024*1024),
             LBCsum = {client_sha, machi_util:checksum_chunk(LargeBytes)},
             {ok, {Offx, Sizex, Filex}} =
-                ?C:append_chunk(Clnt, PK, Prefix, LargeBytes, LBCsum, 0),
+                ?C:append_chunk(Clnt, CoC_n, CoC_l,
+                                Prefix, LargeBytes, LBCsum, 0),
             ok = ?C:trim_chunk(Clnt, Filex, Offx, Sizex),
 
             %% Make sure everything was trimmed

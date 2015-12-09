@@ -52,14 +52,16 @@ from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    append_chunk=#mpb_ll_appendchunkreq{
                      epoch_id=PB_EpochID,
-                     placement_key=PKey,
+                     coc_namespace=CoC_Namespace,
+                     coc_locator=CoC_Locator,
                      prefix=Prefix,
                      chunk=Chunk,
                      csum=#mpb_chunkcsum{type=CSum_type, csum=CSum},
                      chunk_extra=ChunkExtra}}) ->
     EpochID = conv_to_epoch_id(PB_EpochID),
     CSum_tag = conv_to_csum_tag(CSum_type),
-    {ReqID, {low_append_chunk, EpochID, PKey, Prefix, Chunk, CSum_tag, CSum,
+    {ReqID, {low_append_chunk, EpochID, CoC_Namespace, CoC_Locator,
+             Prefix, Chunk, CSum_tag, CSum,
              ChunkExtra}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
@@ -170,14 +172,15 @@ from_pb_request(#mpb_request{req_id=ReqID,
     {ReqID, {high_auth, User, Pass}};
 from_pb_request(#mpb_request{req_id=ReqID,
                              append_chunk=IR=#mpb_appendchunkreq{}}) ->
-    #mpb_appendchunkreq{placement_key=__todoPK,
+    #mpb_appendchunkreq{coc_namespace=CoC_namespace,
+                        coc_locator=CoC_locator,
                         prefix=Prefix,
                         chunk=Chunk,
                         csum=CSum,
                         chunk_extra=ChunkExtra} = IR,
     TaggedCSum = make_tagged_csum(CSum, Chunk),
-    {ReqID, {high_append_chunk, __todoPK, Prefix, Chunk, TaggedCSum,
-             ChunkExtra}};
+    {ReqID, {high_append_chunk, CoC_namespace, CoC_locator, Prefix, Chunk,
+             TaggedCSum, ChunkExtra}};
 from_pb_request(#mpb_request{req_id=ReqID,
                              write_chunk=IR=#mpb_writechunkreq{}}) ->
     #mpb_writechunkreq{chunk=#mpb_chunk{file_name=File,
@@ -388,15 +391,16 @@ to_pb_request(ReqID, {low_echo, _BogusEpochID, Msg}) ->
 to_pb_request(ReqID, {low_auth, _BogusEpochID, User, Pass}) ->
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     auth=#mpb_authreq{user=User, password=Pass}};
-to_pb_request(ReqID, {low_append_chunk, EpochID, PKey, Prefix, Chunk,
-                      CSum_tag, CSum, ChunkExtra}) ->
+to_pb_request(ReqID, {low_append_chunk, EpochID, CoC_Namespace, CoC_Locator,
+                      Prefix, Chunk, CSum_tag, CSum, ChunkExtra}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     CSum_type = conv_from_csum_tag(CSum_tag),
     PB_CSum = #mpb_chunkcsum{type=CSum_type, csum=CSum},
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     append_chunk=#mpb_ll_appendchunkreq{
                       epoch_id=PB_EpochID,
-                      placement_key=PKey,
+                      coc_namespace=CoC_Namespace,
+                      coc_locator=CoC_Locator,
                       prefix=Prefix,
                       chunk=Chunk,
                       csum=PB_CSum,
@@ -500,7 +504,7 @@ to_pb_response(ReqID, {low_auth, _, _, _}, __TODO_Resp) ->
     #mpb_ll_response{req_id=ReqID,
                      generic=#mpb_errorresp{code=1,
                                             msg="AUTH not implemented"}};
-to_pb_response(ReqID, {low_append_chunk, _EID, _PKey, _Pfx, _Ch, _CST, _CS, _CE}, Resp)->
+to_pb_response(ReqID, {low_append_chunk, _EID, _N, _L, _Pfx, _Ch, _CST, _CS, _CE}, Resp)->
     case Resp of
         {ok, {Offset, Size, File}} ->
             Where = #mpb_chunkpos{offset=Offset,
@@ -687,7 +691,7 @@ to_pb_response(ReqID, {high_auth, _User, _Pass}, _Resp) ->
     #mpb_response{req_id=ReqID,
                   generic=#mpb_errorresp{code=1,
                                          msg="AUTH not implemented"}};
-to_pb_response(ReqID, {high_append_chunk, _TODO, _Prefix, _Chunk, _TSum, _CE}, Resp)->
+to_pb_response(ReqID, {high_append_chunk, _CoC_n, _CoC_l, _Prefix, _Chunk, _TSum, _CE}, Resp)->
     case Resp of
         {ok, {Offset, Size, File}} ->
             Where = #mpb_chunkpos{offset=Offset,
