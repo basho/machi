@@ -25,7 +25,9 @@
 %% for implementing the lifecycle changes as expressed by "policy".
 %% In our case, "policy" is created by an external administrative
 %% entity that creates and deletes configuration files that define
-%% FLUs and chains relative to this local machine.
+%% FLUs and chains relative to this local machine.  (This "policy"
+%% may be a human administrator or (as the Machi project matures)
+%% partial or full automatic implementation of policy.)
 %%
 %% The "master configuration" for deciding which FLUs should be
 %% running on this machine was inspired by BSD UNIX's `init(8)' and the
@@ -108,7 +110,7 @@
 %%
 %%  <li> <tt>name :: atom()</tt>: The name of the FLU.  This name
 %%       should be unique over the lifetime of the administrative
-%%       domain and thus managed by outside policy.  This name must be
+%%       domain and thus managed by external policy.  This name must be
 %%       the same as the name of the `rc.d'-style config file that
 %%       defines the FLU.
 %% </li>
@@ -154,7 +156,7 @@
 %%
 %%  <li> <tt>name :: atom()</tt>: The name of the chain.  This name
 %%       should be unique over the lifetime of the administrative
-%%       domain and thus managed by outside policy.  This name must be
+%%       domain and thus managed by external policy.  This name must be
 %%       the same as the name of the `rc.d'-style config file that
 %%       defines the chain.
 %% </li>
