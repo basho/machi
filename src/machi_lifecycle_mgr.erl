@@ -350,27 +350,34 @@ bootstrap_chain2(CD, FLU, 0) ->
     lager:warning("Failed all attempts to bootstrap chain ~w via FLU ~w ",
                   [CD,FLU]),
     failed;
-bootstrap_chain2(#chain_def_v1{name=NewChainName, mode=CMode, full=Full,
-                               witnesses=Witnesses, props=Props}=CD,
+bootstrap_chain2(#chain_def_v1{name=NewChainName, mode=NewCMode,
+                               full=Full, witnesses=Witnesses,
+                               old_all=ReqOldAll, old_witnesses=ReqOldWitnesses,
+                               props=_Props}=CD,
                  FLU, N) ->
     All_p_srvrs = Witnesses ++ Full,
     L = [{Name, P_srvr} || #p_srvr{name=Name}=P_srvr <- All_p_srvrs],
     MembersDict = orddict:from_list(L),
+    NewAll_list = [Name || #p_srvr{name=Name} <- All_p_srvrs],
+    NewWitnesses_list = [Name || #p_srvr{name=Name} <- Witnesses],
+
     Mgr = machi_chain_manager1:make_chmgr_regname(FLU),
     PStore = machi_flu1:make_projection_server_regname(FLU),
     {ok, #projection_v1{epoch_number=OldEpoch, chain_name=OldChainName,
+                        mode=OldCMode,
                         all_members=OldAll_list, witnesses=OldWitnesses}} =
         machi_projection_store:read_latest_projection(PStore, private),
-    NewAll_list = [Name || #p_srvr{name=Name} <- All_p_srvrs],
-    case set_chain_members(OldChainName, NewChainName,
+    case set_chain_members(OldChainName, NewChainName, OldCMode,
+                           ReqOldAll, ReqOldWitnesses,
                            OldAll_list, OldWitnesses,
-                           NewAll_list, NewWitnesses,
+                           NewAll_list, Witnesses,
                            Mgr, NewChainName, OldEpoch,
-                           CMode, MembersDict, NewWitnesses) of
+                           NewCMode, MembersDict, NewWitnesses_list) of
         ok ->
             lager:info("Bootstrapped chain ~w via FLU ~w to "
                        "mode=~w all=~w witnesses=~w\n",
-                       [NewChainName, FLU, CMode, All_list, NewWitnesses]),
+                       [NewChainName, FLU, NewCMode,
+                        NewAll_list, NewWitnesses_list]),
             AddedFLUs = NewAll_list -- OldAll_list,
             RemovedFLUs = OldAll_list -- NewAll_list,
             {ok, AddedFLUs, RemovedFLUs};
@@ -382,15 +389,25 @@ bootstrap_chain2(#chain_def_v1{name=NewChainName, mode=CMode, full=Full,
             bootstrap_chain2(CD, FLU, N-1)
     end.
 
-set_chain_members(OldChainName, NewChainName,
+set_chain_members(OldChainName, NewChainName, OldCMode,
+                  ReqOldAll, ReqOldWitnesses,
                   OldAll_list, OldWitnesses, NewAll_list, NewWitnesses,
-                  Mgr, ChainName, OldEpoch, CMode, MembersDict, Props) ->
-    if OldChainName == NewChainName,
+                  Mgr, ChainName, OldEpoch, NewCMode, MembersDict, _Props) ->
+    if OldChainName == NewChainName, OldCMode == NewCMode,
        OldAll_list == NewAll_list, OldWitnesses == NewWitnesses ->
+            %% The chain's current definition at this FLU is already what we
+            %% want.  Let's pretend that we sent the command and that it was
+            %% successful.
             ok;
-       OldEpoch == 0 orelse (OldChainName == NewChainName) ->
+       OldEpoch == 0 orelse (OldChainName == NewChainName andalso
+                             OldCMode == NewCMode andalso
+                             ReqOldAll == OldAll_list andalso
+                             ReqOldWitnesses == OldWitnesses) ->
+            %% The old epoch is 0 (no chain defined) or else the prerequisites
+            %% for our chain change request are indeed matched by the FLU's
+            %% current private projection.
             machi_chain_manager1:set_chain_members(Mgr, ChainName, OldEpoch,
-                                                   CMode,
+                                                   NewCMode,
                                                    MembersDict, NewWitnesses);
        true ->
             chain_bad_arg
@@ -440,22 +457,28 @@ process_pending_flu({File, P}, S) ->
             _ = move_to_rejected(File, S),
             S;
         true ->
-            {ok, SupPid} = machi_flu_psup:start_flu_package(P),
-            lager:info("Started FLU ~w with supervisor pid ~p\n",
-                       [FLU, SupPid]),
-            _ = move_to_flu_config(FLU, File, S),
-            S
+            case machi_flu_psup:start_flu_package(P) of
+                {ok, SupPid} ->
+                    lager:info("Started FLU ~w with supervisor pid ~p\n",
+                               [FLU, SupPid]),
+                    _ = move_to_flu_config(FLU, File, S),
+                    S;
+                Else ->
+                    lager:error("Start FLU ~w failed: ~p\n", [FLU, Else]),
+                    _ = move_to_rejected(File, S),
+                    S
+            end
     end.
 
 process_pending_chains(P_Chains, S) ->
     lists:foldl(fun process_pending_chain/2, S, P_Chains).
 
 process_pending_chain({File, CD}, S) ->
-    #chain_def_v1{name=Name, mode=CMode, full=Full, witnesses=Witnesses} = CD,
+    #chain_def_v1{full=Full, witnesses=Witnesses} = CD,
     case sanitize_chain_def_records([CD]) of
         [CD] ->
             RunningFLUs = get_local_running_flus(),
-            AllNames = [Name || #p_srvr{name=Name} <- Full ++ Witnesses],
+            AllNames = [FLUName || #p_srvr{name=FLUName} <- Full ++ Witnesses],
             case ordsets:intersection(ordsets:from_list(AllNames),
                                       ordsets:from_list(RunningFLUs)) of
                 [] ->
@@ -488,10 +511,27 @@ process_pending_chain({File, CD}, S) ->
             S
     end.
 
-process_pending_chain2(File, CD, LocalFLUs, AddedFLUs, RemovedFLUs, S) ->
+process_pending_chain2(File, CD, LocalFLUs, _AddedFLUs, RemovedFLUs, S) ->
     %% AddedFLUs: no any extra work.
     %% RemovedFLUs: Stop the FLU, config -> j-i-c, data -> j-i-c
-    io:format(user, "TODO: ~s LINE ~p\n", [?MODULE, ?LINE]),
+    case ordsets:intersection(ordsets:from_list(LocalFLUs),
+                              ordsets:from_list(RemovedFLUs)) of
+        [] ->
+            ok;
+        LocalRemovedFLUs ->
+            %% Sleep for a little bit to allow HC to settle.
+            timer:sleep(3000),
+            [begin
+                 %% We may be retrying this, so be liberal with any pattern
+                 %% matching on return values.
+                 _ = machi_flu_psup:stop_flu_package(FLU),
+                 io:format(user, "TODO: move config ~s LINE ~p\n", [?MODULE, ?LINE]),
+                 io:format(user, "TODO: move data ~s LINE ~p\n", [?MODULE, ?LINE]),
+                 ok
+             end || FLU <- LocalRemovedFLUs]
+    end,
+    #chain_def_v1{name=Name} = CD,
+    _ = move_to_chain_config(Name, File, S),
     S.
 
 process_bad_files(Files, S) ->
@@ -509,4 +549,10 @@ move_to_flu_config(FLU, File, S) ->
     lager:info("Creating FLU config file ~w\n", [FLU]),
     Dst = get_flu_config_dir(S),
     ok = file:rename(File, Dst ++ "/" ++ atom_to_list(FLU)),
+    S.
+
+move_to_chain_config(Name, File, S) ->
+    lager:info("Creating chain config file ~w\n", [Name]),
+    Dst = get_chain_config_dir(S),
+    ok = file:rename(File, Dst ++ "/" ++ atom_to_list(Name)),
     S.
