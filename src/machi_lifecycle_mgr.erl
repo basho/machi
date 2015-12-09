@@ -378,9 +378,7 @@ bootstrap_chain2(#chain_def_v1{name=NewChainName, mode=NewCMode,
                        "mode=~w all=~w witnesses=~w\n",
                        [NewChainName, FLU, NewCMode,
                         NewAll_list, NewWitnesses_list]),
-            AddedFLUs = NewAll_list -- OldAll_list,
-            RemovedFLUs = OldAll_list -- NewAll_list,
-            {ok, AddedFLUs, RemovedFLUs};
+            ok;
         chain_bad_state=Else ->
             lager:error("Attempt to bootstrap chain ~w via FLU ~w "
                         "failed (no retries): ~w (defn ~w)\n",
@@ -499,50 +497,34 @@ process_pending_chains(P_Chains, S) ->
     lists:foldl(fun process_pending_chain/2, S, P_Chains).
 
 process_pending_chain({File, CD}, S) ->
-    #chain_def_v1{name=Name, full=Full, witnesses=Witnesses} = CD,
+    #chain_def_v1{name=Name,
+                  local_stop=LocalStopFLUs, local_run=LocalRunFLUs} = CD,
     case sanitize_chain_def_records([CD]) of
         [CD] ->
-            RunningFLUs = get_local_running_flus(),
-            AllNames = [FLUName || #p_srvr{name=FLUName} <- Full ++ Witnesses],
-            case ordsets:intersection(ordsets:from_list(AllNames),
-                                      ordsets:from_list(RunningFLUs)) of
+            case LocalRunFLUs of
                 [] ->
-                    %% TODO: hahahah, /me cries ... so, there's a problem if
-                    %% we crash at the end of process_pending_chain2(), then
-                    %% we don't delete the pending #chain_def_v1{} file ... so
-                    %% we'll come to this same path the next time, and
-                    %% get_current_chain_for_running_flus() may tell us that
-                    %% there are zero FLUs running for this chain ... because
-                    %% they were stopped before the crash.  Silly.
-                    %%
-                    %% TODO: fix this gap by adding another field to
-                    %%       #chain_def_v1{} that specifies what *policy*
-                    %%       believes/states/defines/THE_TRUTH about which
-                    %%       FLUs in the chain are configured on this machine.
-                    %%       Then always use exactly that truth to guide us.
-                    case get_current_chain_for_running_flus(CD, RunningFLUs) of
+                    case LocalStopFLUs of
                         [] ->
                             lager:error("Pending chain config file ~s has no "
                                         "FLUs on this machine, rejected\n",
                                         [File]),
                             _ = move_to_rejected(File, S),
                             S;
-                        RemovedFLUs ->
-                            lager:info("Pending chain config file ~s creates "
-                                       "chain ~w of length 0, "
-                                       "stopping FLUS: ~w\n",
-                                       [File, Name, RemovedFLUs]),
-                            process_pending_chain2(File, CD, RemovedFLUs,
+                        [_|_] ->
+                            lager:info("Pending chain config file ~s stops "
+                                       "all local members of chain ~w: ~w\n",
+                                       [File, Name, LocalStopFLUs]),
+                            process_pending_chain2(File, CD, LocalStopFLUs,
                                                    delete, S)
                     end;
                 [FLU|_] ->
                     %% TODO: Between the successful chain change inside of
                     %% bootstrap_chain() (and before it returns to us!) and
                     %% the return of process_pending_chain2(), we have a race
-                    %% window if this process crashes.
+                    %% window if this process crashes. (Review again!)
                     case bootstrap_chain(CD, FLU) of
-                        {ok, _AddedFLUs, RemovedFLUs} ->
-                            process_pending_chain2(File, CD, RemovedFLUs,
+                        ok ->
+                            process_pending_chain2(File, CD, LocalStopFLUs,
                                                    move, S);
                         Else ->
                             lager:error("Pending chain config file ~s "
@@ -627,18 +609,7 @@ move_to_chain_config(Name, File, S) ->
     S.
 
 delete_chain_config(Name, File, S) ->
-    lager:info("Deleting chain config file ~w for chain ~w\n", [File, Name]),
+    lager:info("Deleting chain config file ~s for chain ~w\n", [File, Name]),
     Dst = get_chain_config_dir(S),
     ok = file:delete(Dst ++ "/" ++ atom_to_list(Name)),
     S.
-
-get_current_chain_for_running_flus(#chain_def_v1{name=Name}, RunningFLUs) ->
-    FLU_CurChs = [begin
-                      PStore = machi_flu1:make_projection_server_regname(FLU),
-                      {ok, #projection_v1{chain_name=Ch}} =
-                          machi_projection_store:read_latest_projection(
-                            PStore, private),
-                      {FLU, Ch}
-                  end || FLU <- RunningFLUs],
-    [FLU || {FLU, CurChain} <- FLU_CurChs,
-            CurChain == Name].
