@@ -113,17 +113,22 @@ handle_info({tcp_closed, Socket}=_Info, #state{socket=Socket}=S) ->
     lager:debug("~s:handle_info: ~w", [?MODULE, _Info]),
     transport_closed(Socket, S);
 handle_info({tcp_error, Socket, Reason}=_Info, #state{socket=Socket}=S) ->
-    lager:debug("~s:handle_info: ~w", [?MODULE, _Info]),
+    lager:warning("~s:handle_info (socket=~w) tcp_error: ~w", [?MODULE, Socket, Reason]),
     transport_error(Socket, Reason, S);
 handle_info(_Info, S) ->
     lager:warning("~s:handle_info UNKNOWN message: ~w", [?MODULE, _Info]),
     {noreply, S}.
 
-terminate(_Reason, #state{socket=undefined}=_S) ->
-    lager:debug("~s:terminate: ~w", [?MODULE, _Reason]),
+terminate(normal, #state{socket=undefined}=_S) ->
     ok;
-terminate(_Reason, #state{socket=Socket}=_S) ->
-    lager:debug("~s:terminate: ~w", [?MODULE, _Reason]),
+terminate(Reason, #state{socket=undefined}=_S) ->
+    lager:warning("~s:terminate (socket=undefined): ~w", [?MODULE, Reason]),
+    ok;
+terminate(normal, #state{socket=Socket}=_S) ->
+    (catch gen_tcp:close(Socket)),
+    ok;
+terminate(Reason, #state{socket=Socket}=_S) ->
+    lager:warning("~s:terminate (socket=Socket): ~w", [?MODULE, Reason]),
     (catch gen_tcp:close(Socket)),
     ok.
 

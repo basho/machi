@@ -34,13 +34,13 @@
 
 flu_smoke_test() ->
     Host = "localhost",
-    TcpPort = 32957,
+    TcpPort = 12957,
     DataDir = "./data",
     Prefix = <<"prefix!">>,
     BadPrefix = BadFile = "no/good",
     W_props = [{initial_wedged, false}],
+    {_, _, _} = machi_test_util:start_flu_package(smoke_flu, TcpPort, DataDir, W_props),
     try
-        _ = machi_test_util:start_flu_package(smoke_flu, TcpPort, DataDir, W_props),
         Msg = "Hello, world!",
         Msg = ?FLU_C:echo(Host, TcpPort, Msg),
         {error, bad_arg} = ?FLU_C:checksum_list(Host, TcpPort,
@@ -142,10 +142,10 @@ flu_smoke_test() ->
 
 flu_projection_smoke_test() ->
     Host = "localhost",
-    TcpPort = 32959,
+    TcpPort = 12959,
     DataDir = "./data.projst",
+    {_,_,_} = machi_test_util:start_flu_package(projection_test_flu, TcpPort, DataDir),
     try
-        machi_test_util:start_flu_package(projection_test_flu, TcpPort, DataDir),
         [ok = flu_projection_common(Host, TcpPort, T) ||
             T <- [public, private] ]
 %% ,        {ok, {false, EpochID1}} = ?FLU_C:wedge_status(Host, TcpPort),
@@ -179,11 +179,11 @@ flu_projection_common(Host, TcpPort, T) ->
 
 bad_checksum_test() ->
     Host = "localhost",
-    TcpPort = 32960,
+    TcpPort = 12960,
     DataDir = "./data.bct",
     Opts = [{initial_wedged, false}],
+    {_,_,_} = machi_test_util:start_flu_package(projection_test_flu, TcpPort, DataDir, Opts),
     try
-        machi_test_util:start_flu_package(projection_test_flu, TcpPort, DataDir, Opts),
         Prefix = <<"some prefix">>,
         Chunk1 = <<"yo yo yo">>,
         Chunk1_badcs = {<<?CSUM_TAG_CLIENT_SHA:8, 0:(8*20)>>, Chunk1},
@@ -197,11 +197,11 @@ bad_checksum_test() ->
 
 witness_test() ->
     Host = "localhost",
-    TcpPort = 32961,
+    TcpPort = 12961,
     DataDir = "./data.witness",
     Opts = [{initial_wedged, false}, {witness_mode, true}],
+    {_,_,_} = machi_test_util:start_flu_package(projection_test_flu, TcpPort, DataDir, Opts),
     try
-        machi_test_util:start_flu_package(projection_test_flu, TcpPort, DataDir, Opts),
         Prefix = <<"some prefix">>,
         Chunk1 = <<"yo yo yo">>,
 
