@@ -499,7 +499,7 @@ process_pending_chains(P_Chains, S) ->
     lists:foldl(fun process_pending_chain/2, S, P_Chains).
 
 process_pending_chain({File, CD}, S) ->
-    #chain_def_v1{full=Full, witnesses=Witnesses} = CD,
+    #chain_def_v1{name=Name, full=Full, witnesses=Witnesses} = CD,
     case sanitize_chain_def_records([CD]) of
         [CD] ->
             RunningFLUs = get_local_running_flus(),
@@ -507,11 +507,34 @@ process_pending_chain({File, CD}, S) ->
             case ordsets:intersection(ordsets:from_list(AllNames),
                                       ordsets:from_list(RunningFLUs)) of
                 [] ->
-                    lager:error("Pending chain config file ~s "
-                                "has no local FLUs on this machine, rejected\n",
-                                [File]),
-                    _ = move_to_rejected(File, S),
-                    S;
+                    %% TODO: hahahah, /me cries ... so, there's a problem if
+                    %% we crash at the end of process_pending_chain2(), then
+                    %% we don't delete the pending #chain_def_v1{} file ... so
+                    %% we'll come to this same path the next time, and
+                    %% get_current_chain_for_running_flus() may tell us that
+                    %% there are zero FLUs running for this chain ... because
+                    %% they were stopped before the crash.  Silly.
+                    %%
+                    %% TODO: fix this gap by adding another field to
+                    %%       #chain_def_v1{} that specifies what *policy*
+                    %%       believes/states/defines/THE_TRUTH about which
+                    %%       FLUs in the chain are configured on this machine.
+                    %%       Then always use exactly that truth to guide us.
+                    case get_current_chain_for_running_flus(CD, RunningFLUs) of
+                        [] ->
+                            lager:error("Pending chain config file ~s has no "
+                                        "FLUs on this machine, rejected\n",
+                                        [File]),
+                            _ = move_to_rejected(File, S),
+                            S;
+                        RemovedFLUs ->
+                            lager:info("Pending chain config file ~s creates "
+                                       "chain ~w of length 0, "
+                                       "stopping FLUS: ~w\n",
+                                       [File, Name, RemovedFLUs]),
+                            process_pending_chain2(File, CD, RemovedFLUs,
+                                                   delete, S)
+                    end;
                 [FLU|_] ->
                     %% TODO: Between the successful chain change inside of
                     %% bootstrap_chain() (and before it returns to us!) and
@@ -519,7 +542,8 @@ process_pending_chain({File, CD}, S) ->
                     %% window if this process crashes.
                     case bootstrap_chain(CD, FLU) of
                         {ok, _AddedFLUs, RemovedFLUs} ->
-                            process_pending_chain2(File, CD, RemovedFLUs, S);
+                            process_pending_chain2(File, CD, RemovedFLUs,
+                                                   move, S);
                         Else ->
                             lager:error("Pending chain config file ~s "
                                         "has failed (~w), rejected\n",
@@ -535,7 +559,7 @@ process_pending_chain({File, CD}, S) ->
             S
     end.
 
-process_pending_chain2(File, CD, RemovedFLUs, S) ->
+process_pending_chain2(File, CD, RemovedFLUs, ChainConfigAction, S) ->
     LocalRemovedFLUs = [FLU || FLU <- RemovedFLUs,
                                flu_config_exists(FLU, S)],
     case LocalRemovedFLUs of
@@ -556,15 +580,25 @@ process_pending_chain2(File, CD, RemovedFLUs, S) ->
                  MyPreserveDir = PreserveDir ++ "/" ++ FLU_str ++ "." ++ Suffix,
                  ok = filelib:ensure_dir(MyPreserveDir ++ "/unused"),
                  _ = file:make_dir(MyPreserveDir),
-                 _ = file:rename(ConfigDir ++ "/" ++ FLU_str,
-                                 MyPreserveDir ++ "/" ++ FLU_str ++ ".config"),
-                 _ = file:rename(FluDataDir ++ "/" ++ FLU_str,
-                                 MyPreserveDir ++ "/" ++ FLU_str ++ ".data"),
+                 Src1 = ConfigDir ++ "/" ++ FLU_str,
+                 Dst1 = MyPreserveDir ++ "/" ++ FLU_str ++ ".config",
+                 lager:info("Stopped FLU ~w: rename ~s ~s\n",
+                            [FLU, Src1, Dst1]),
+                 _ = file:rename(Src1, Dst1),
+                 Src2 = FluDataDir ++ "/" ++ FLU_str,
+                 Dst2 = MyPreserveDir ++ "/" ++ FLU_str ++ ".data",
+                 lager:info("Stopped FLU ~w: rename ~s ~s\n",
+                            [FLU, Src2, Dst2]),
+                 _ = file:rename(Src2, Dst2),
                  ok
              end || FLU <- LocalRemovedFLUs]
     end,
     #chain_def_v1{name=Name} = CD,
-    _ = move_to_chain_config(Name, File, S),
+    if ChainConfigAction == move ->
+            _ = move_to_chain_config(Name, File, S);
+       ChainConfigAction == delete ->
+            _ = delete_chain_config(Name, File, S)
+    end,
     S.
 
 process_bad_files(Files, S) ->
@@ -591,3 +625,20 @@ move_to_chain_config(Name, File, S) ->
     Dst = get_chain_config_dir(S),
     ok = file:rename(File, Dst ++ "/" ++ atom_to_list(Name)),
     S.
+
+delete_chain_config(Name, File, S) ->
+    lager:info("Deleting chain config file ~w for chain ~w\n", [File, Name]),
+    Dst = get_chain_config_dir(S),
+    ok = file:delete(Dst ++ "/" ++ atom_to_list(Name)),
+    S.
+
+get_current_chain_for_running_flus(#chain_def_v1{name=Name}, RunningFLUs) ->
+    FLU_CurChs = [begin
+                      PStore = machi_flu1:make_projection_server_regname(FLU),
+                      {ok, #projection_v1{chain_name=Ch}} =
+                          machi_projection_store:read_latest_projection(
+                            PStore, private),
+                      {FLU, Ch}
+                  end || FLU <- RunningFLUs],
+    [FLU || {FLU, CurChain} <- FLU_CurChs,
+            CurChain == Name].
