@@ -158,7 +158,7 @@ ast_tuple_syntax_test() ->
                                     {admin_interface, "5.6.7.8"}]},
                {flu, "fx", "foohost", 4000, []},
                switch_old_and_new,
-               {chain, "cy", ["fx", "fy"], ["fz"], [{foo,"yay"},{bar,baz}]} ],
+               {chain, "cy", ["fx", "fy"], [{foo,"yay"},{bar,baz}]} ],
 
     {_Good,[]=_Bad} = T(Canon1),
     Canon1_norm = machi_lifecycle_mgr:normalize_ast_tuple_syntax(Canon1),
@@ -180,9 +180,9 @@ ast_tuple_syntax_test() ->
             {flu, "fx", "foohost", 4000, gack},
             {flu, "fx", "foohost", 4000, [22]} ]),
     {[],[_,_,_]} =
-        T([ {chain, 'cy', ["fx", "fy"], ["fz"], [foo,{bar,baz}]},
+        T([ {chain, 'cy', ["fx", "fy"], [foo,{bar,baz}]},
             yoloyolo,
-            {chain, "cy", ["fx", 27], ["fz"], oops,arity,way,way,way,too,big,x}
+            {chain, "cy", ["fx", 27], oops,arity,way,way,way,too,big,x}
           ]).
 
 ast_run_test() ->

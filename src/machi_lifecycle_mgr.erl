@@ -574,6 +574,8 @@ process_pending_chain2(File, CD, RemovedFLUs, ChainConfigAction, S) ->
                  Dst2 = MyPreserveDir ++ "/" ++ FLU_str ++ ".data",
                  lager:info("Stopped FLU ~w: rename ~s ~s\n",
                             [FLU, Src2, Dst2]),
+                 %% TODO: If EXDEV, then we should rename to
+                 %%       another dir on same device, but ... where?
                  _ = file:rename(Src2, Dst2),
                  ok
              end || FLU <- LocalRemovedFLUs]
@@ -639,19 +641,15 @@ check_an_ast_tuple({host, Name, AdminI, ClientI, Props}) ->
 check_an_ast_tuple({flu, Name, HostName, Port, Props}) ->
     is_stringy(Name) andalso is_stringy(HostName) andalso
         is_porty(Port) andalso is_proplisty(Props);
-check_an_ast_tuple({chain, Name, AddList, RemoveList, Props}) ->
+check_an_ast_tuple({chain, Name, FullList, Props}) ->
     is_stringy(Name) andalso
-    lists:all(fun is_stringy/1, AddList) andalso
-    lists:all(fun is_stringy/1, RemoveList) andalso
+    lists:all(fun is_stringy/1, FullList) andalso
     is_proplisty(Props);
-check_an_ast_tuple({chain, Name, CMode, AddList, Add_Witnesses,
-                    RemoveList, Remove_Witnesses, Props}) ->
+check_an_ast_tuple({chain, Name, CMode, FullList, Witnesses, Props}) ->
     is_stringy(Name) andalso
     (CMode == ap_mode orelse CMode == cp_mode) andalso
-    lists:all(fun is_stringy/1, AddList) andalso
-    lists:all(fun is_stringy/1, Add_Witnesses) andalso
-    lists:all(fun is_stringy/1, RemoveList) andalso
-    lists:all(fun is_stringy/1, Remove_Witnesses) andalso
+    lists:all(fun is_stringy/1, FullList) andalso
+    lists:all(fun is_stringy/1, Witnesses) andalso
     is_proplisty(Props);
 check_an_ast_tuple(switch_old_and_new) ->
     true;
@@ -675,12 +673,10 @@ normalize_an_ast_tuple({host, Name, AdminI, ClientI, Props}) ->
     {host, Name, AdminI, ClientI, n(Props2)};
 normalize_an_ast_tuple({flu, Name, HostName, Port, Props}) ->
     {flu, Name, HostName, Port, n(Props)};
-normalize_an_ast_tuple({chain, Name, AddList, RemoveList, Props}) ->
-    {chain, Name, ap_mode, n(AddList), [], n(RemoveList), [], n(Props)};
-normalize_an_ast_tuple({chain, Name, CMode, AddList, Add_Witnesses,
-                        RemoveList, Remove_Witnesses, Props}) ->
-    {chain, Name, CMode, n(AddList), n(Add_Witnesses),
-                         n(RemoveList), n(Remove_Witnesses), n(Props)};
+normalize_an_ast_tuple({chain, Name, FullList, Props}) ->
+    {chain, Name, ap_mode, n(FullList), [], n(Props)};
+normalize_an_ast_tuple({chain, Name, CMode, FullList, Witnesses, Props}) ->
+    {chain, Name, CMode, n(FullList), n(Witnesses), n(Props)};
 normalize_an_ast_tuple(A=switch_old_and_new) ->
     A.
 
