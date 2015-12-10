@@ -48,7 +48,7 @@ smoke_test2() ->
             {platform_etc_dir, Dir ++ "/etc"},
             {not_used_pending, Dir ++ "/etc/pending"}
            ],
-    EnvKeys = [K || {K, V} <- Envs],
+    EnvKeys = [K || {K,_V} <- Envs],
     undefined = application:get_env(machi, yo),
     Cleanup = machi_flu1_test:get_env_vars(machi, EnvKeys ++ [yo]),
     [begin
@@ -153,12 +153,19 @@ make_pending_config(Term) ->
 
 ast_tuple_syntax_test() ->
     T = fun(L) -> machi_lifecycle_mgr:check_ast_tuple_syntax(L) end,
-    {_Good,[]=_Bad} =
-        T([ {host, "localhost", []},
-            {host, "localhost", [{client_interface, "1.2.3.4"},
-                                 {admin_interface, "5.6.7.8"}]},
-            {flu, "fx", "foohost", 4000, []},
-            {chain, "cy", ["fx", "fy"], ["fz"], [foo,{bar,baz}]} ]),
+    Canon1 = [ {host, "localhost", []},
+               {host, "localhost", [{client_interface, "1.2.3.4"},
+                                    {admin_interface, "5.6.7.8"}]},
+               {flu, "fx", "foohost", 4000, []},
+               switch_old_and_new,
+               {chain, "cy", ["fx", "fy"], ["fz"], [{foo,"yay"},{bar,baz}]} ],
+
+    {_Good,[]=_Bad} = T(Canon1),
+    Canon1_norm = machi_lifecycle_mgr:normalize_ast_tuple_syntax(Canon1),
+    true = (length(Canon1) == length(Canon1_norm)),
+    {Canon1_norm_b, []} = T(Canon1_norm),
+    true = (length(Canon1_norm) == length(Canon1_norm_b)),
+
     {[],[_,_,_,_]} =
         T([ {host, 'localhost', []},
             {host, 'localhost', yo},
@@ -172,10 +179,25 @@ ast_tuple_syntax_test() ->
             {flu, "fx", "foohost", 40009999, []},
             {flu, "fx", "foohost", 4000, gack},
             {flu, "fx", "foohost", 4000, [22]} ]),
-    {[],[_,_]} =
+    {[],[_,_,_]} =
         T([ {chain, 'cy', ["fx", "fy"], ["fz"], [foo,{bar,baz}]},
+            yoloyolo,
             {chain, "cy", ["fx", 27], ["fz"], oops,arity,way,way,way,too,big,x}
           ]).
+
+ast_run_test() ->
+    PortBase = 20300,
+    R1 = [
+          {host, "localhost", "localhost", "localhost", []},
+          switch_old_and_new,
+          {flu, "f1", "localhost", PortBase+0, []},
+          {flu, "f2", "localhost", PortBase+1, []}
+         ],
+    {ok, X1} = machi_lifecycle_mgr:run_ast(R1),
+    Y1 = {lists:sort(dict:to_list(element(1, X1))),
+          lists:sort(dict:to_list(element(2, X1))),
+          element(3, X1)},
+    io:format(user, "\nY1 ~p\n", [Y1]).
 
 -endif. % !PULSE
 -endif. % TEST

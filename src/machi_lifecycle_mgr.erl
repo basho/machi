@@ -620,31 +620,173 @@ delete_chain_config(Name, File, S) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 check_ast_tuple_syntax(Ts) ->
-    lists:partition(fun check_a_ast_tuple/1, Ts).
+    lists:partition(fun check_an_ast_tuple/1, Ts).
 
-check_a_ast_tuple({host, Name, Props}) ->
+check_an_ast_tuple({host, Name, Props}) ->
     is_stringy(Name) andalso is_proplisty(Props) andalso
     lists:all(fun({admin_interface, X})  -> is_stringy(X);
                  ({client_interface, X}) -> is_stringy(X);
                  (_)                     -> false
               end, Props);
-check_a_ast_tuple({flu, Name, HostName, Port, Props}) ->
+check_an_ast_tuple({host, Name, AdminI, ClientI, Props}) ->
+    is_stringy(Name) andalso
+    is_stringy(AdminI) andalso is_stringy(ClientI) andalso
+    is_proplisty(Props) andalso
+    lists:all(fun({admin_interface, X})  -> is_stringy(X);
+                 ({client_interface, X}) -> is_stringy(X);
+                 (_)                     -> false
+              end, Props);
+check_an_ast_tuple({flu, Name, HostName, Port, Props}) ->
     is_stringy(Name) andalso is_stringy(HostName) andalso
         is_porty(Port) andalso is_proplisty(Props);
-check_a_ast_tuple({chain, Name, AddList, RemoveList, Props}) ->
+check_an_ast_tuple({chain, Name, AddList, RemoveList, Props}) ->
     is_stringy(Name) andalso
     lists:all(fun is_stringy/1, AddList) andalso
     lists:all(fun is_stringy/1, RemoveList) andalso
-        is_proplisty(Props);
-check_a_ast_tuple(_) ->
+    is_proplisty(Props);
+check_an_ast_tuple({chain, Name, CMode, AddList, Add_Witnesses,
+                    RemoveList, Remove_Witnesses, Props}) ->
+    is_stringy(Name) andalso
+    (CMode == ap_mode orelse CMode == cp_mode) andalso
+    lists:all(fun is_stringy/1, AddList) andalso
+    lists:all(fun is_stringy/1, Add_Witnesses) andalso
+    lists:all(fun is_stringy/1, RemoveList) andalso
+    lists:all(fun is_stringy/1, Remove_Witnesses) andalso
+    is_proplisty(Props);
+check_an_ast_tuple(switch_old_and_new) ->
+    true;
+check_an_ast_tuple(_) ->
     false.
+
+%% Prerequisite: all tuples are approved by check_ast_tuple_syntax().
+
+normalize_ast_tuple_syntax(Ts) ->
+    lists:map(fun normalize_an_ast_tuple/1, Ts).
+
+normalize_an_ast_tuple({host, Name, Props}) ->
+    AdminI  = proplists:get_value(admin_interface, Props, Name),
+    ClientI = proplists:get_value(client_interface, Props, Name),
+    Props2 = lists:keydelete(admin_interface, 1,
+             lists:keydelete(client_interface, 1, Props)),
+    {host, Name, AdminI, ClientI, n(Props2)};
+normalize_an_ast_tuple({host, Name, AdminI, ClientI, Props}) ->
+    Props2 = lists:keydelete(admin_interface, 1,
+             lists:keydelete(client_interface, 1, Props)),
+    {host, Name, AdminI, ClientI, n(Props2)};
+normalize_an_ast_tuple({flu, Name, HostName, Port, Props}) ->
+    {flu, Name, HostName, Port, n(Props)};
+normalize_an_ast_tuple({chain, Name, AddList, RemoveList, Props}) ->
+    {chain, Name, ap_mode, n(AddList), [], n(RemoveList), [], n(Props)};
+normalize_an_ast_tuple({chain, Name, CMode, AddList, Add_Witnesses,
+                        RemoveList, Remove_Witnesses, Props}) ->
+    {chain, Name, CMode, n(AddList), n(Add_Witnesses),
+                         n(RemoveList), n(Remove_Witnesses), n(Props)};
+normalize_an_ast_tuple(A=switch_old_and_new) ->
+    A.
+
+run_ast(Ts) ->
+    {_, []} = check_ast_tuple_syntax(Ts),
+    Ts2 = normalize_ast_tuple_syntax(Ts),
+    Env1 = make_ast_run_env(),
+    try
+        Env2 = lists:foldl(fun run_ast_cmd/2, Env1, Ts2),
+        {ok, Env2}
+    catch throw:DbgStuff ->
+            {error, DbgStuff}
+    end.
+
+run_ast_cmd({host, Name, _AdminI, _ClientI, _Props}=T, E) ->
+    Key = {kv, {host, Name}},
+    case d_find(Key, E) of
+        error ->
+            d_store(Key, T, E);
+        {ok, _} ->
+            err("Duplicate host definition ~p: ~p", [Name], T)
+    end;
+run_ast_cmd({flu, Name, HostName, Port, _Props}=T, E) ->
+    Key = {kv, {flu, Name}},
+    HostExists_p = env_host_exists(HostName, E),
+    case d_find(Key, E) of
+        error when HostExists_p ->
+            case host_port_is_assigned(HostName, Port, E) of
+                false ->
+                    d_store(Key, T, E);
+                {true, UsedBy} ->
+                    err("Host ~p port ~p already in use by FLU ~p",
+                        [HostName, Port, UsedBy], T)
+            end;
+        error ->
+            err("Unknown host ~p", [HostName], T);
+        {ok, _} ->
+            err("Duplicate flu ~p", [Name], T)
+    end;
+run_ast_cmd(switch_old_and_new, E) ->
+    switch_env_dict(E);
+run_ast_cmd(Unknown, _E) ->
+    err("Unknown AST thingie", [], Unknown).
+
+make_ast_run_env() ->
+    {_KV_old=dict:new(), _KV_new=dict:new(), _IsNew=false}.
+
+env_host_exists(HostName, E) ->
+    Key = {kv, {host, HostName}},
+    case d_find(Key, E) of
+        error ->
+            false;
+        {ok, _} ->
+            true
+    end.
+
+host_port_is_assigned(HostName, Port, {KV_old, KV_new, _}) ->
+    L = dict:to_list(KV_old) ++ dict:to_list(KV_new),
+    FLU_Ts = [V || {{kv, {flu, _}}, V} <- L],
+    case [V || {flu, _Nm, Host_, Port_, _Ps}=V <- FLU_Ts,
+               Host_ == HostName, Port_ == Port] of
+        [{flu, Name, _Host, _Port, _Ps}] ->
+            {true, Name};
+        [] ->
+            false
+    end.
+
+d_find(Key, {KV_old, KV_new, IsNew}) ->
+    case dict:find(Key, KV_new) of
+        {ok, Val} when IsNew ->
+            Val;
+        _ ->
+            dict:find(Key, KV_old)
+    end.
+
+d_store(Key, Val, {KV_old, KV_new, false}) ->
+    {dict:store(Key, Val, KV_old), KV_new, false};
+d_store(Key, Val, {KV_old, KV_new, true}) ->
+    {KV_old, dict:store(Key, Val, KV_new), true}.
+
+switch_env_dict({KV_old, KV_new, false}) ->
+    {KV_old, KV_new, true};
+switch_env_dict({_, _, true}) ->
+    A = switch_old_and_new,
+    err("Duplicate ~p", [A], A).
+
+n(L) ->
+    lists:sort(L).
+
+err(Fmt, Args, AST) ->
+    throw({lists:flatten(io_lib:format(Fmt, Args)), AST}).
+
+%% We won't allow 'atom' style proplist members: too difficult to normalize.
+%% Also, no duplicates, again because normalizing useful for checksums but
+%% bad for order-based traditional proplists (first key wins).
 
 is_proplisty(Props) ->
     is_list(Props) andalso
     lists:all(fun({_,_})             -> true;
-                 (X) when is_atom(X) -> true;
+                 %% nope: (X) when is_atom(X) -> true;
                  (_)                 -> false
-              end, Props).
+              end, Props) andalso
+    begin
+        Ks = [K || {K,_V} <- Props],
+        lists:sort(Ks) == lists:usort(Ks)
+    end.
 
 is_stringy(L) ->
     is_list(L) andalso
