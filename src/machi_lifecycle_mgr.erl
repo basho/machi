@@ -641,14 +641,14 @@ check_an_ast_tuple({host, Name, AdminI, ClientI, Props}) ->
 check_an_ast_tuple({flu, Name, HostName, Port, Props}) ->
     is_stringy(Name) andalso is_stringy(HostName) andalso
         is_porty(Port) andalso is_proplisty(Props);
-check_an_ast_tuple({chain, Name, FullList, Props}) ->
+check_an_ast_tuple({chain, Name, AllList, Props}) ->
     is_stringy(Name) andalso
-    lists:all(fun is_stringy/1, FullList) andalso
+    lists:all(fun is_stringy/1, AllList) andalso
     is_proplisty(Props);
-check_an_ast_tuple({chain, Name, CMode, FullList, Witnesses, Props}) ->
+check_an_ast_tuple({chain, Name, CMode, AllList, Witnesses, Props}) ->
     is_stringy(Name) andalso
     (CMode == ap_mode orelse CMode == cp_mode) andalso
-    lists:all(fun is_stringy/1, FullList) andalso
+    lists:all(fun is_stringy/1, AllList) andalso
     lists:all(fun is_stringy/1, Witnesses) andalso
     is_proplisty(Props);
 check_an_ast_tuple(switch_old_and_new) ->
@@ -673,10 +673,10 @@ normalize_an_ast_tuple({host, Name, AdminI, ClientI, Props}) ->
     {host, Name, AdminI, ClientI, n(Props2)};
 normalize_an_ast_tuple({flu, Name, HostName, Port, Props}) ->
     {flu, Name, HostName, Port, n(Props)};
-normalize_an_ast_tuple({chain, Name, FullList, Props}) ->
-    {chain, Name, ap_mode, n(FullList), [], n(Props)};
-normalize_an_ast_tuple({chain, Name, CMode, FullList, Witnesses, Props}) ->
-    {chain, Name, CMode, n(FullList), n(Witnesses), n(Props)};
+normalize_an_ast_tuple({chain, Name, AllList, Props}) ->
+    {chain, Name, ap_mode, n(AllList), [], n(Props)};
+normalize_an_ast_tuple({chain, Name, CMode, AllList, Witnesses, Props}) ->
+    {chain, Name, CMode, n(AllList), n(Witnesses), n(Props)};
 normalize_an_ast_tuple(A=switch_old_and_new) ->
     A.
 
@@ -699,14 +699,21 @@ run_ast_cmd({host, Name, _AdminI, _ClientI, _Props}=T, E) ->
         {ok, _} ->
             err("Duplicate host definition ~p: ~p", [Name], T)
     end;
-run_ast_cmd({flu, Name, HostName, Port, _Props}=T, E) ->
-    Key = {kv, {flu, Name}},
+run_ast_cmd({flu, Name, HostName, Port, Props}=T, E) ->
+    Key     = {kv,  {flu, Name}},
+    Key_tmp = {tmp, {flu, Name}},
     HostExists_p = env_host_exists(HostName, E),
     case d_find(Key, E) of
         error when HostExists_p ->
             case host_port_is_assigned(HostName, Port, E) of
                 false ->
-                    d_store(Key, T, E);
+                    {ok, ClientI} = get_host_client_interface(HostName, E),
+                    Mod = proplists:get_value(
+                            proto_mod, Props, 'machi_flu1_client'),
+                    Val_tmp = #p_srvr{name=Name, proto_mod=Mod,
+                                      address=ClientI, port=Port, props=Props},
+                    d_store(Key, T,
+                            d_store(Key_tmp, Val_tmp, E));
                 {true, UsedBy} ->
                     err("Host ~p port ~p already in use by FLU ~p",
                         [HostName, Port, UsedBy], T)
@@ -716,10 +723,24 @@ run_ast_cmd({flu, Name, HostName, Port, _Props}=T, E) ->
         {ok, _} ->
             err("Duplicate flu ~p", [Name], T)
     end;
+run_ast_cmd({chain, Name, _CMode, _AllList, _Witnesses, _Props}=T, E) ->
+    Key = {kv, {chain, Name}},
+    case d_find(Key, E) of
+        error ->
+            run_ast_new_chain(T, E);
+        {ok, _} ->
+            run_ast_modify_chain(T, E)
+    end;
 run_ast_cmd(switch_old_and_new, E) ->
     switch_env_dict(E);
 run_ast_cmd(Unknown, _E) ->
     err("Unknown AST thingie", [], Unknown).
+
+run_ast_new_chain({chain, Name, CMode, AllList, Witnesses, Props}=T, E) ->
+    err("YO", [], T).
+
+run_ast_modify_chain(T, _E) ->
+    err("TODO modify chain", [], T).
 
 make_ast_run_env() ->
     {_KV_old=dict:new(), _KV_new=dict:new(), _IsNew=false}.
@@ -731,6 +752,15 @@ env_host_exists(HostName, E) ->
             false;
         {ok, _} ->
             true
+    end.
+
+get_host_client_interface(HostName, E) ->
+    Key = {kv, {host, HostName}},
+    case d_find(Key, E) of
+        error ->
+            false;
+        {ok, {host, _Name, _AdminI, ClientI, _Props}} ->
+            {ok, ClientI}
     end.
 
 host_port_is_assigned(HostName, Port, {KV_old, KV_new, _}) ->

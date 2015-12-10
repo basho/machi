@@ -189,9 +189,11 @@ ast_run_test() ->
     PortBase = 20300,
     R1 = [
           {host, "localhost", "localhost", "localhost", []},
+          {flu, "f0", "localhost", PortBase+0, []},
           switch_old_and_new,
-          {flu, "f1", "localhost", PortBase+0, []},
-          {flu, "f2", "localhost", PortBase+1, []}
+          {flu, "f1", "localhost", PortBase+1, []},
+          {flu, "f2", "localhost", PortBase+2, []},
+          {chain, "ca", ["f0", "f1", "f2"], []}
          ],
     {ok, X1} = machi_lifecycle_mgr:run_ast(R1),
     Y1 = {lists:sort(dict:to_list(element(1, X1))),
