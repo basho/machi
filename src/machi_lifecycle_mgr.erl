@@ -205,6 +205,9 @@
 %% API
 -export([start_link/0,
          process_pending/0]).
+-ifdef(TEST).
+-compile(export_all).
+-endif. % TEST
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -548,8 +551,8 @@ process_pending_chain2(File, CD, RemovedFLUs, ChainConfigAction, S) ->
         [] ->
             ok;
         [_|_] ->
-            %% Sleep for a little bit to allow HC to settle.
-            timer:sleep(3000),
+            %% %% Sleep for a little bit to allow HC to settle.
+            %% timer:sleep(1000),
             [begin
                  %% We may be retrying this, so be liberal with any pattern
                  %% matching on return values.

@@ -1,6 +1,6 @@
 %% -------------------------------------------------------------------
 %%
-%% Copyright (c) 2007-2014 Basho Technologies, Inc.  All Rights Reserved.
+%% Copyright (c) 2007-2015 Basho Technologies, Inc.  All Rights Reserved.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -78,15 +78,15 @@
 -define(MAX_CHAIN_LENGTH, 64).
 
 -record(chain_def_v1, {
-          name           :: atom(),
-          mode           :: pv1_consistency_mode(),
-          full           :: [p_srvr()],
-          witnesses      :: [p_srvr()],
-          old_all        :: [pv1_server()], % guard against some races
-          old_witnesses  :: [pv1_server()], % guard against some races
-          local_run      :: [pv1_server()], % must be tailored to each machine!
-          local_stop     :: [pv1_server()], % must be tailored to each machine!
-          props = []     :: list()   % proplist for other related info
+          name            :: atom(),         % chain name
+          mode            :: pv1_consistency_mode(),
+          full = []       :: [p_srvr()],
+          witnesses = []  :: [p_srvr()],
+          old_all = []    :: [pv1_server()], % guard against some races
+          old_witnesses=[] :: [pv1_server()], % guard against some races
+          local_run = []  :: [pv1_server()], % must be tailored to each machine!
+          local_stop = [] :: [pv1_server()], % must be tailored to each machine!
+          props = []      :: list()   % proplist for other related info
          }).
 
 -endif. % !MACHI_PROJECTION_HRL

@@ -30,6 +30,22 @@
 -define(FLU, machi_flu1).
 -define(FLU_C, machi_flu1_client).
 
+get_env_vars(App, Ks) ->
+    Raw = [application:get_env(App, K) || K <- Ks],
+    Old = lists:zip(Ks, Raw),
+    {App, Old}.
+
+clean_up_env_vars({App, Old}) ->
+    [case Res of
+         undefined ->
+             application:unset_env(App, K);
+         {ok, V} ->
+             application:set_env(App, K, V)
+     end || {K, Res} <- Old].
+
+filter_env_var({ok, V}) -> V;
+filter_env_var(Else)    -> Else.
+
 clean_up_data_dir(DataDir) ->
     [begin
          Fs = filelib:wildcard(DataDir ++ Glob),

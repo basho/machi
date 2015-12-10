@@ -955,7 +955,7 @@ conv_from_status({error, partial_read}) ->
 conv_from_status({error, bad_epoch}) ->
     'BAD_EPOCH';
 conv_from_status(_OOPS) ->
-    io:format(user, "HEY, ~s:~w got ~w\n", [?MODULE, ?LINE, _OOPS]),
+    io:format(user, "HEY, ~s:~w got ~p\n", [?MODULE, ?LINE, _OOPS]),
     'BAD_JOSS'.
 
 conv_to_boolean(undefined) ->

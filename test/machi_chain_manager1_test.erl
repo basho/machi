@@ -273,6 +273,17 @@ make_prop_ets() ->
 
 -endif. % EQC
 
+make_advance_fun(FitList, FLUList, MgrList, Num) ->
+    fun() ->
+            [begin
+                 [catch machi_fitness:trigger_early_adjustment(Fit, Tgt) ||
+                     Fit <- FitList,
+                     Tgt <- FLUList ],
+                 [catch ?MGR:trigger_react_to_env(Mgr) || Mgr <- MgrList],
+                 ok
+             end || _ <- lists:seq(1, Num)]
+    end.
+
 smoke0_test() ->
     {ok, _} = machi_partition_simulator:start_link({1,2,3}, 50, 50),
     Host = "localhost",
@@ -348,6 +359,7 @@ nonunanimous_setup_and_fix_test2() ->
     [machi_flu1_test:clean_up_data_dir(Dir) || {_,_,Dir} <- FluInfo],
     {ok, SupPid} = machi_flu_sup:start_link(),
     Opts = [{active_mode, false}, {initial_wedged, true}],
+    ChainName = my_little_chain,
     [{ok,_}=machi_flu_psup:start_flu_package(Name, Port, Dir, Opts) ||
                {Name,Port,Dir} <- FluInfo],
     Proxies = [Proxy_a, Proxy_b, Proxy_c] =
@@ -356,19 +368,14 @@ nonunanimous_setup_and_fix_test2() ->
     MembersDict = machi_projection:make_members_dict(lists:sublist(P_s, 2)),
     Mgrs = [Ma,Mb,Mc] = [a_chmgr, b_chmgr, c_chmgr],
     MgrProxies = [{Ma, Proxy_a}, {Mb, Proxy_b}, {Mc, Proxy_c}],
-    Advance = fun() ->
-                 [begin
-                      [catch machi_fitness:trigger_early_adjustment(Fit, Tgt) ||
-                          Fit <- [a_fitness,b_fitness,c_fitness],
-                          Tgt <- [a,b,c] ],
-                      [catch ?MGR:trigger_react_to_env(Mgr) ||
-                          {Mgr,_Proxy} <- MgrProxies],
-                      ok
-                  end || _ <- lists:seq(1, 3)]
-              end,
-    ok = machi_chain_manager1:set_chain_members(Ma, MembersDict),
-    ok = machi_chain_manager1:set_chain_members(Mb, MembersDict),
-
+    Advance = make_advance_fun([a_fitness,b_fitness,c_fitness],
+                               [a,b,c],
+                               [Mgr || {Mgr,_Proxy} <- MgrProxies],
+                               3),
+    ok = machi_chain_manager1:set_chain_members(Ma, ChainName, 0, ap_mode,
+                                                MembersDict, []),
+    ok = machi_chain_manager1:set_chain_members(Mb, ChainName, 0, ap_mode,
+                                                MembersDict, []),
     try
         {ok, P1} = ?MGR:test_calc_projection(Ma, false),
 
@@ -410,7 +417,7 @@ nonunanimous_setup_and_fix_test2() ->
 
         MembersDict3 = machi_projection:make_members_dict(P_s),
         ok = machi_chain_manager1:set_chain_members(
-               Ma, ch_not_def_yet, EpochNum_a, ap_mode, MembersDict3, []),
+               Ma, ChainName, EpochNum_a, ap_mode, MembersDict3, []),
 
         Advance(),
         {_, _, TheEpoch_3} = ?MGR:trigger_react_to_env(Ma),
@@ -424,7 +431,7 @@ nonunanimous_setup_and_fix_test2() ->
 
         MembersDict4 = machi_projection:make_members_dict(tl(P_s)),
         ok = machi_chain_manager1:set_chain_members(
-               Mb, ch_not_def_yet, TheEpoch_3, ap_mode, MembersDict4, []),
+               Mb, ChainName, TheEpoch_3, ap_mode, MembersDict4, []),
 
         Advance(),
         {ok, {true, _}} = ?FLU_PC:wedge_status(Proxy_a),
@@ -438,7 +445,7 @@ nonunanimous_setup_and_fix_test2() ->
 
         MembersDict5 = machi_projection:make_members_dict(P_s),
         ok = machi_chain_manager1:set_chain_members(
-               Mb, ch_not_def_yet, TheEpoch_4, ap_mode, MembersDict5, []),
+               Mb, ChainName, TheEpoch_4, ap_mode, MembersDict5, []),
 
         Advance(),
         {_, _, TheEpoch_5} = ?MGR:trigger_react_to_env(Ma),
@@ -462,7 +469,7 @@ nonunanimous_setup_and_fix_test2() ->
 
         MembersDict7 = machi_projection:make_members_dict(tl(P_s)),
         ok = machi_chain_manager1:set_chain_members(
-               Mb, ch_not_def_yet, TheEpoch_6, ap_mode, MembersDict7, []),
+               Mb, ChainName, TheEpoch_6, ap_mode, MembersDict7, []),
 
         Advance(),
         {_, _, TheEpoch_7} = ?MGR:trigger_react_to_env(Mb),
@@ -498,7 +505,7 @@ nonunanimous_setup_and_fix_test2() ->
         MembersDict9 = machi_projection:make_members_dict(P_s),
         {_, _, TheEpoch_9} = ?MGR:trigger_react_to_env(Mb),
         ok = machi_chain_manager1:set_chain_members(
-               Mb, ch_not_def_yet, TheEpoch_9, ap_mode, MembersDict9, []),
+               Mb, ChainName, TheEpoch_9, ap_mode, MembersDict9, []),
         Advance(),
         {_, _, TheEpoch_9b} = ?MGR:trigger_react_to_env(Mb),
         true = (TheEpoch_9b > TheEpoch_9),

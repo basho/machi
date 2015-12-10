@@ -96,7 +96,7 @@ make_package_spec(FluName, TcpPort, DataDir, Props) ->
      permanent, ?SHUTDOWN, supervisor, []}.
 
 start_flu_package(#p_srvr{name=FluName, port=TcpPort, props=Props}) ->
-    DataDir = get_data_dir(Props),
+    DataDir = get_data_dir(FluName, Props),
     start_flu_package(FluName, TcpPort, DataDir, Props).
 
 start_flu_package(FluName, TcpPort, DataDir, Props) ->
@@ -177,11 +177,11 @@ get_env(Setting, Default) ->
         {ok, V} -> V
     end.
 
-get_data_dir(Props) ->
+get_data_dir(FluName, Props) ->
     case proplists:get_value(data_dir, Props) of
         Path when is_list(Path) ->
             Path;
         undefined ->
             {ok, Dir} = application:get_env(machi, flu_data_dir),
-            Dir
+            Dir ++ "/" ++ atom_to_list(FluName)
     end.
