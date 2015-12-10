@@ -250,6 +250,7 @@ do_pb_ll_request2(EpochID, CMD, S) ->
     end.
 
 lookup_epoch(#state{epoch_tab=T}) ->
+    %% TODO: race in shutdown to access ets table after owner dies
     ets:lookup_element(T, epoch, 2).
 
 %% Witness status does not matter below.
