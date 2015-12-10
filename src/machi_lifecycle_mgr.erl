@@ -616,3 +616,41 @@ delete_chain_config(Name, File, S) ->
     Dst = get_chain_config_dir(S),
     ok = file:delete(Dst ++ "/" ++ atom_to_list(Name)),
     S.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+check_ast_tuple_syntax(Ts) ->
+    lists:partition(fun check_a_ast_tuple/1, Ts).
+
+check_a_ast_tuple({host, Name, Props}) ->
+    is_stringy(Name) andalso is_proplisty(Props) andalso
+    lists:all(fun({admin_interface, X})  -> is_stringy(X);
+                 ({client_interface, X}) -> is_stringy(X);
+                 (_)                     -> false
+              end, Props);
+check_a_ast_tuple({flu, Name, HostName, Port, Props}) ->
+    is_stringy(Name) andalso is_stringy(HostName) andalso
+        is_porty(Port) andalso is_proplisty(Props);
+check_a_ast_tuple({chain, Name, AddList, RemoveList, Props}) ->
+    is_stringy(Name) andalso
+    lists:all(fun is_stringy/1, AddList) andalso
+    lists:all(fun is_stringy/1, RemoveList) andalso
+        is_proplisty(Props);
+check_a_ast_tuple(_) ->
+    false.
+
+is_proplisty(Props) ->
+    is_list(Props) andalso
+    lists:all(fun({_,_})             -> true;
+                 (X) when is_atom(X) -> true;
+                 (_)                 -> false
+              end, Props).
+
+is_stringy(L) ->
+    is_list(L) andalso
+    lists:all(fun(C) when 33 =< C, C =< 126 -> true;
+                 (_)                        -> false
+              end, L).
+
+is_porty(Port) ->
+    is_integer(Port) andalso 1024 =< Port andalso Port =< 65535.

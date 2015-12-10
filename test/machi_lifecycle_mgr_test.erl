@@ -151,5 +151,31 @@ make_pending_config(Term) ->
     ok = file:write_file(Dir ++ "/" ++ lists:flatten(io_lib:format("~w,~w,~w", tuple_to_list(os:timestamp()))),
                          Blob).
 
+ast_tuple_syntax_test() ->
+    T = fun(L) -> machi_lifecycle_mgr:check_ast_tuple_syntax(L) end,
+    {_Good,[]=_Bad} =
+        T([ {host, "localhost", []},
+            {host, "localhost", [{client_interface, "1.2.3.4"},
+                                 {admin_interface, "5.6.7.8"}]},
+            {flu, "fx", "foohost", 4000, []},
+            {chain, "cy", ["fx", "fy"], ["fz"], [foo,{bar,baz}]} ]),
+    {[],[_,_,_,_]} =
+        T([ {host, 'localhost', []},
+            {host, 'localhost', yo},
+            {host, "localhost", [{client_interface, 77.88293829832}]},
+            {host, "localhost", [{client_interface, "1.2.3.4"},
+                                 {bummer, "5.6.7.8"}]} ]),
+    {[],[_,_,_,_,_,_]} =
+        T([ {flu, 'fx', "foohost", 4000, []},
+            {flu, "fx", <<"foohost">>, 4000, []},
+            {flu, "fx", "foohost", -4000, []},
+            {flu, "fx", "foohost", 40009999, []},
+            {flu, "fx", "foohost", 4000, gack},
+            {flu, "fx", "foohost", 4000, [22]} ]),
+    {[],[_,_]} =
+        T([ {chain, 'cy', ["fx", "fy"], ["fz"], [foo,{bar,baz}]},
+            {chain, "cy", ["fx", 27], ["fz"], oops,arity,way,way,way,too,big,x}
+          ]).
+
 -endif. % !PULSE
 -endif. % TEST
