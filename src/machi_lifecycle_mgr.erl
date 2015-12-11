@@ -802,11 +802,12 @@ run_ast_cmd(Unknown, _E) ->
     err("Unknown AST thingie", [], Unknown).
 
 make_ast_run_env() ->
-    {_KV_old=dict:new(), _KV_new=dict:new(), _IsNew=false}.
+    {_KV_old=gb_trees:empty(), _KV_new=gb_trees:empty(), _IsNew=false}.
 
 env_host_exists(Name, E) ->
-    Key = {kv,{host, Name}},
-    case d_find(Key, E) of error ->
+    Key = {kv,{host,Name}},
+    case d_find(Key, E) of
+        error ->
             false;
         {ok, _} ->
             true
@@ -831,7 +832,7 @@ get_host_client_interface(HostName, E) ->
     end.
 
 host_port_is_assigned(HostName, Port, {KV_old, KV_new, _}) ->
-    L = dict:to_list(KV_old) ++ dict:to_list(KV_new),
+    L = gb_trees:to_list(KV_old) ++ gb_trees:to_list(KV_new),
     FLU_Ts = [V || {{kv,{flu,_}}, V} <- L],
     case [V || {flu, _Nm, Host_, Port_, _Ps}=V <- FLU_Ts,
                Host_ == HostName, Port_ == Port] of
@@ -842,20 +843,26 @@ host_port_is_assigned(HostName, Port, {KV_old, KV_new, _}) ->
     end.
 
 d_find(Key, {KV_old, KV_new, IsNew}) ->
-    case dict:find(Key, KV_new) of
-        {ok, _Val}=Res when IsNew ->
-            Res;
+    %% Bah, use 'dict' return value convention.
+    case gb_trees:lookup(Key, KV_new) of
+        {value, Val} when IsNew ->
+            {ok, Val};
         _ ->
-            dict:find(Key, KV_old)
+            case gb_trees:lookup(Key, KV_old) of
+                {value, Val} ->
+                    {ok, Val};
+                _ ->
+                    error
+            end
     end.
 
 d_store(Key, Val, {KV_old, KV_new, false}) ->
-    {dict:store(Key, Val, KV_old), KV_new, false};
+    {gb_trees:enter(Key, Val, KV_old), KV_new, false};
 d_store(Key, Val, {KV_old, KV_new, true}) ->
-    {KV_old, dict:store(Key, Val, KV_new), true}.
+    {KV_old, gb_trees:enter(Key, Val, KV_new), true}.
 
 d_erase({tmp,_}=Key, {KV_old, KV_new, IsNew}) ->
-    {dict:erase(Key, KV_old), dict:erase(Key, KV_new), IsNew}.
+    {gb_trees:delete_any(Key, KV_old), gb_trees:delete_any(Key, KV_new), IsNew}.
 
 switch_env_dict({KV_old, KV_new, false}) ->
     {KV_old, KV_new, true};

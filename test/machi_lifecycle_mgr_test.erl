@@ -197,8 +197,8 @@ ast_run_test() ->
          ],
 
     {ok, Env1} = machi_lifecycle_mgr:run_ast(R1),
-    Y1 = {lists:sort(dict:to_list(element(1, Env1))),
-          lists:sort(dict:to_list(element(2, Env1))),
+    Y1 = {lists:sort(gb_trees:to_list(element(1, Env1))),
+          lists:sort(gb_trees:to_list(element(2, Env1))),
           element(3, Env1)},
     io:format(user, "\nY1 ~p\n", [Y1]),
 
