@@ -681,27 +681,49 @@ normalize_an_ast_tuple(A=switch_old_and_new) ->
     A.
 
 run_ast(Ts) ->
-    {_, []} = check_ast_tuple_syntax(Ts),
-    Ts2 = normalize_ast_tuple_syntax(Ts),
-    Env1 = make_ast_run_env(),
-    try
-        Env2 = lists:foldl(fun run_ast_cmd/2, Env1, Ts2),
-        {ok, Env2}
-    catch throw:DbgStuff ->
-            {error, DbgStuff}
+    case check_ast_tuple_syntax(Ts) of
+        {_, []} ->
+            Ts2 = normalize_ast_tuple_syntax(Ts),
+            Env1 = make_ast_run_env(),
+            try
+                Env2 = lists:foldl(fun run_ast_cmd/2, Env1, Ts2),
+                {ok, Env2}
+            catch throw:DbgStuff ->
+                    {error, DbgStuff}
+            end;
+        {_, Else} ->
+            {error, {bad_syntax, Else}}
     end.
 
+%% Legend for env key naming scheme
+%%
+%% {kv, X}
+%% Mutable: no.
+%% Reference KV store for X.  Variations of X are:
+%%     {host, Name} | {flu, Name} | {chain, Name}
+%%
+%% {tmp, X}
+%% Mutable: yes.
+%% Tmp scratch for X.  Variations of X are:
+%%     {p_srvr, Name}
+%%     #p_srvr{} record for FLU Name, for cache/convenience purposes.
+%%     If a FLU has been defined via {kv,_}, this key must also exist.
+%%
+%%     {flu_assigned_to, ChainName}
+%%     If a FLU is currently assigned to a chain, map to ChainName.
+%%     If a FLU is not currently assigned to a chain, key does not exist.
+
 run_ast_cmd({host, Name, _AdminI, _ClientI, _Props}=T, E) ->
-    Key = {kv, {host, Name}},
+    Key = {kv,{host,Name}},
     case d_find(Key, E) of
         error ->
             d_store(Key, T, E);
         {ok, _} ->
-            err("Duplicate host definition ~p: ~p", [Name], T)
+            err("Duplicate host definition ~p", [Name], T)
     end;
 run_ast_cmd({flu, Name, HostName, Port, Props}=T, E) ->
-    Key     = {kv,  {flu, Name}},
-    Key_tmp = {tmp, {flu, Name}},
+    Key   = {kv,{flu,Name}},
+    Key_p = {kv,{p_srvr,Name}},
     HostExists_p = env_host_exists(HostName, E),
     case d_find(Key, E) of
         error when HostExists_p ->
@@ -710,10 +732,10 @@ run_ast_cmd({flu, Name, HostName, Port, Props}=T, E) ->
                     {ok, ClientI} = get_host_client_interface(HostName, E),
                     Mod = proplists:get_value(
                             proto_mod, Props, 'machi_flu1_client'),
-                    Val_tmp = #p_srvr{name=Name, proto_mod=Mod,
-                                      address=ClientI, port=Port, props=Props},
+                    Val_p = #p_srvr{name=Name, proto_mod=Mod,
+                                    address=ClientI, port=Port, props=Props},
                     d_store(Key, T,
-                            d_store(Key_tmp, Val_tmp, E));
+                    d_store(Key_p, Val_p, E));
                 {true, UsedBy} ->
                     err("Host ~p port ~p already in use by FLU ~p",
                         [HostName, Port, UsedBy], T)
@@ -723,30 +745,75 @@ run_ast_cmd({flu, Name, HostName, Port, Props}=T, E) ->
         {ok, _} ->
             err("Duplicate flu ~p", [Name], T)
     end;
-run_ast_cmd({chain, Name, _CMode, _AllList, _Witnesses, _Props}=T, E) ->
-    Key = {kv, {chain, Name}},
+run_ast_cmd({chain, Name, CMode, AllList, Witnesses, _Props}=T, E) ->
+    Key = {kv,{chain,Name}},
+    AllFLUs = AllList ++ Witnesses,
+
+    %% All FLUs must exist.
+    case lists:sort(AllFLUs) == lists:usort(AllFLUs) of
+        true  -> ok;
+        false -> err("Duplicate FLU(s) specified", [], T)
+    end,
+    MissingFLUs = [FLU || FLU <- AllFLUs, not env_flu_exists(FLU, E)],
+    case MissingFLUs of
+        []    -> ok;
+        [_|_] -> err("Undefined FLU(s) ~p", [MissingFLUs], T)
+    end,
+
+    %% All FLUs must not be assigned to another chain.
+    AssignedFLUs =
+        [case d_find({tmp,{flu_assigned_to,FLU}}, E) of
+             error ->
+                 [];
+             {ok, Ch} when Ch == Name ->
+                 [];                            % It's assigned to me already
+             {ok, Ch} ->
+                 [{flu, FLU, assigned_to_chain, Ch}]
+         end || FLU <- AllFLUs],
+    case lists:append(AssignedFLUs) of
+        [] -> ok;
+        As -> err("Some FLUs are assigned to other chains: ~p\n", [As], T)
+    end,
+
+    %% If chain already exists, then the consistency mode cannot change.
     case d_find(Key, E) of
         error ->
-            run_ast_new_chain(T, E);
-        {ok, _} ->
-            run_ast_modify_chain(T, E)
-    end;
+            ok;
+        {ok, C_old} ->
+            {chain, _, OldCMode, _, _, _} = C_old,
+            if CMode == OldCMode -> ok;
+               true              -> err("Invalid consistency mode: ~w -> ~w",
+                                        [OldCMode, CMode], T)
+            end
+    end,
+
+    E2 = lists:foldl(fun(FLU, Env) ->
+                             d_erase({tmp,{flu_assigned_to,FLU}}, Env)
+                     end, E, AllFLUs),
+    E3 = lists:foldl(fun(FLU, Env) ->
+                             d_store({tmp,{flu_assigned_to,FLU}}, Name, Env)
+                     end, E2, AllFLUs),
+
+    %% It's good, let's roll.
+    d_store(Key, T, E3);
 run_ast_cmd(switch_old_and_new, E) ->
     switch_env_dict(E);
 run_ast_cmd(Unknown, _E) ->
     err("Unknown AST thingie", [], Unknown).
 
-run_ast_new_chain({chain, Name, CMode, AllList, Witnesses, Props}=T, E) ->
-    err("YO", [], T).
-
-run_ast_modify_chain(T, _E) ->
-    err("TODO modify chain", [], T).
-
 make_ast_run_env() ->
     {_KV_old=dict:new(), _KV_new=dict:new(), _IsNew=false}.
 
-env_host_exists(HostName, E) ->
-    Key = {kv, {host, HostName}},
+env_host_exists(Name, E) ->
+    Key = {kv,{host, Name}},
+    case d_find(Key, E) of error ->
+            false;
+        {ok, _} ->
+            true
+    end.
+
+env_flu_exists(Name, E) ->
+    Key = {kv,{flu,Name}},
     case d_find(Key, E) of
         error ->
             false;
@@ -755,7 +822,7 @@ env_host_exists(HostName, E) ->
     end.
 
 get_host_client_interface(HostName, E) ->
-    Key = {kv, {host, HostName}},
+    Key = {kv,{host,HostName}},
     case d_find(Key, E) of
         error ->
             false;
@@ -765,7 +832,7 @@ get_host_client_interface(HostName, E) ->
 
 host_port_is_assigned(HostName, Port, {KV_old, KV_new, _}) ->
     L = dict:to_list(KV_old) ++ dict:to_list(KV_new),
-    FLU_Ts = [V || {{kv, {flu, _}}, V} <- L],
+    FLU_Ts = [V || {{kv,{flu,_}}, V} <- L],
     case [V || {flu, _Nm, Host_, Port_, _Ps}=V <- FLU_Ts,
                Host_ == HostName, Port_ == Port] of
         [{flu, Name, _Host, _Port, _Ps}] ->
@@ -776,8 +843,8 @@ host_port_is_assigned(HostName, Port, {KV_old, KV_new, _}) ->
 
 d_find(Key, {KV_old, KV_new, IsNew}) ->
     case dict:find(Key, KV_new) of
-        {ok, Val} when IsNew ->
-            Val;
+        {ok, _Val}=Res when IsNew ->
+            Res;
         _ ->
             dict:find(Key, KV_old)
     end.
@@ -786,6 +853,9 @@ d_store(Key, Val, {KV_old, KV_new, false}) ->
     {dict:store(Key, Val, KV_old), KV_new, false};
 d_store(Key, Val, {KV_old, KV_new, true}) ->
     {KV_old, dict:store(Key, Val, KV_new), true}.
+
+d_erase({tmp,_}=Key, {KV_old, KV_new, IsNew}) ->
+    {dict:erase(Key, KV_old), dict:erase(Key, KV_new), IsNew}.
 
 switch_env_dict({KV_old, KV_new, false}) ->
     {KV_old, KV_new, true};

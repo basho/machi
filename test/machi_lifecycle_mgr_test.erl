@@ -195,11 +195,28 @@ ast_run_test() ->
           {flu, "f2", "localhost", PortBase+2, []},
           {chain, "ca", ["f0", "f1", "f2"], []}
          ],
+
+
     {ok, X1} = machi_lifecycle_mgr:run_ast(R1),
     Y1 = {lists:sort(dict:to_list(element(1, X1))),
           lists:sort(dict:to_list(element(2, X1))),
           element(3, X1)},
-    io:format(user, "\nY1 ~p\n", [Y1]).
+    io:format(user, "\nY1 ~p\n", [Y1]),
+
+    Negative_after_R1 =
+        [
+          {host, "localhost", "foo", "foo", []}, % dupe host
+          {flu, "f1", "other", PortBase+9999999, []}, % bogus port # (syntax)
+          {flu, "f1", "other", PortBase+888, []}, % dupe flu name
+          {flu, "f7", "localhost", PortBase+1, []}, % dupe host+port
+          {chain, "ca", ["f7"], []}, % unknown flu
+          {chain, "cb", ["f0"], []}, % flu previously assigned
+          {chain, "ca", cp_mode, ["f0", "f1", "f2"], [], []} % mode change
+        ],
+    [begin
+         io:format(user, "Neg ~p\n", [Neg]),
+         {error, _} = machi_lifecycle_mgr:run_ast(R1 ++ [Neg])
+     end || Neg <- Negative_after_R1].
 
 -endif. % !PULSE
 -endif. % TEST
