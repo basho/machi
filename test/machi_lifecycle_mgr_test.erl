@@ -107,7 +107,7 @@ smoke_test2() ->
         io:format("\nSTEP: Reset chain = [b,c]\n", []),
 
         C2 = #chain_def_v1{name=cx, mode=ap_mode, full=[Pb,Pc],
-                           old_all=[a,b,c], old_witnesses=[],
+                           old_full=[a,b,c], old_witnesses=[],
                            local_stop=[a], local_run=[b,c]},
         make_pending_config(C2),
         {[],[_]} = machi_lifecycle_mgr:process_pending(),
@@ -123,7 +123,7 @@ smoke_test2() ->
         io:format("\nSTEP: Reset chain = []\n", []),
 
         C3 = #chain_def_v1{name=cx, mode=ap_mode, full=[],
-                           old_all=[b,c], old_witnesses=[],
+                           old_full=[b,c], old_witnesses=[],
                            local_stop=[b,c], local_run=[]},
         make_pending_config(C3),
         {[],[_]} = machi_lifecycle_mgr:process_pending(),

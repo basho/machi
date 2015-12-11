@@ -82,7 +82,7 @@
           mode            :: pv1_consistency_mode(),
           full = []       :: [p_srvr()],
           witnesses = []  :: [p_srvr()],
-          old_all = []    :: [pv1_server()], % guard against some races
+          old_full = []   :: [pv1_server()], % guard against some races
           old_witnesses=[] :: [pv1_server()], % guard against some races
           local_run = []  :: [pv1_server()], % must be tailored to each machine!
           local_stop = [] :: [pv1_server()], % must be tailored to each machine!

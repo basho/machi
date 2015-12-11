@@ -355,7 +355,8 @@ bootstrap_chain2(CD, FLU, 0) ->
     failed;
 bootstrap_chain2(#chain_def_v1{name=NewChainName, mode=NewCMode,
                                full=Full, witnesses=Witnesses,
-                               old_all=ReqOldAll, old_witnesses=ReqOldWitnesses,
+                               old_full=ReqOldFull,
+                               old_witnesses=ReqOldWitnesses,
                                props=_Props}=CD,
                  FLU, N) ->
     All_p_srvrs = Witnesses ++ Full,
@@ -371,7 +372,7 @@ bootstrap_chain2(#chain_def_v1{name=NewChainName, mode=NewCMode,
                         all_members=OldAll_list, witnesses=OldWitnesses}} =
         machi_projection_store:read_latest_projection(PStore, private),
     case set_chain_members(OldChainName, NewChainName, OldCMode,
-                           ReqOldAll, ReqOldWitnesses,
+                           ReqOldFull, ReqOldWitnesses,
                            OldAll_list, OldWitnesses,
                            NewAll_list, Witnesses,
                            Mgr, NewChainName, OldEpoch,
@@ -396,18 +397,18 @@ bootstrap_chain2(#chain_def_v1{name=NewChainName, mode=NewCMode,
     end.
 
 set_chain_members(OldChainName, NewChainName, OldCMode,
-                  ReqOldAll, ReqOldWitnesses,
-                  OldAll_list, OldWitnesses, NewAll_list, NewWitnesses,
+                  ReqOldFull, ReqOldWitnesses,
+                  OldFull_list, OldWitnesses, NewAll_list, NewWitnesses,
                   Mgr, ChainName, OldEpoch, NewCMode, MembersDict, _Props) ->
     if OldChainName == NewChainName, OldCMode == NewCMode,
-       OldAll_list == NewAll_list, OldWitnesses == NewWitnesses ->
+       OldFull_list == NewAll_list, OldWitnesses == NewWitnesses ->
             %% The chain's current definition at this FLU is already what we
             %% want.  Let's pretend that we sent the command and that it was
             %% successful.
             ok;
        OldEpoch == 0 orelse (OldChainName == NewChainName andalso
                              OldCMode == NewCMode andalso
-                             ReqOldAll == OldAll_list andalso
+                             ReqOldFull == OldFull_list andalso
                              ReqOldWitnesses == OldWitnesses) ->
             %% The old epoch is 0 (no chain defined) or else the prerequisites
             %% for our chain change request are indeed matched by the FLU's
@@ -641,14 +642,14 @@ check_an_ast_tuple({host, Name, AdminI, ClientI, Props}) ->
 check_an_ast_tuple({flu, Name, HostName, Port, Props}) ->
     is_stringy(Name) andalso is_stringy(HostName) andalso
         is_porty(Port) andalso is_proplisty(Props);
-check_an_ast_tuple({chain, Name, AllList, Props}) ->
+check_an_ast_tuple({chain, Name, FullList, Props}) ->
     is_stringy(Name) andalso
-    lists:all(fun is_stringy/1, AllList) andalso
+    lists:all(fun is_stringy/1, FullList) andalso
     is_proplisty(Props);
-check_an_ast_tuple({chain, Name, CMode, AllList, Witnesses, Props}) ->
+check_an_ast_tuple({chain, Name, CMode, FullList, Witnesses, Props}) ->
     is_stringy(Name) andalso
     (CMode == ap_mode orelse CMode == cp_mode) andalso
-    lists:all(fun is_stringy/1, AllList) andalso
+    lists:all(fun is_stringy/1, FullList) andalso
     lists:all(fun is_stringy/1, Witnesses) andalso
     is_proplisty(Props);
 check_an_ast_tuple(switch_old_and_new) ->
@@ -673,10 +674,10 @@ normalize_an_ast_tuple({host, Name, AdminI, ClientI, Props}) ->
     {host, Name, AdminI, ClientI, n(Props2)};
 normalize_an_ast_tuple({flu, Name, HostName, Port, Props}) ->
     {flu, Name, HostName, Port, n(Props)};
-normalize_an_ast_tuple({chain, Name, AllList, Props}) ->
-    {chain, Name, ap_mode, n(AllList), [], n(Props)};
-normalize_an_ast_tuple({chain, Name, CMode, AllList, Witnesses, Props}) ->
-    {chain, Name, CMode, n(AllList), n(Witnesses), n(Props)};
+normalize_an_ast_tuple({chain, Name, FullList, Props}) ->
+    {chain, Name, ap_mode, n(FullList), [], n(Props)};
+normalize_an_ast_tuple({chain, Name, CMode, FullList, Witnesses, Props}) ->
+    {chain, Name, CMode, n(FullList), n(Witnesses), n(Props)};
 normalize_an_ast_tuple(A=switch_old_and_new) ->
     A.
 
@@ -701,14 +702,16 @@ run_ast(Ts) ->
 %% Mutable: no.
 %% Reference KV store for X.  Variations of X are:
 %%     {host, Name} | {flu, Name} | {chain, Name}
+%%     Value is a {host,...} or {flu,...}, or {chain,...} AST tuple.
 %%
-%% {tmp, X}
-%% Mutable: yes.
-%% Tmp scratch for X.  Variations of X are:
 %%     {p_srvr, Name}
 %%     #p_srvr{} record for FLU Name, for cache/convenience purposes.
 %%     If a FLU has been defined via {kv,_}, this key must also exist.
 %%
+%%
+%% {tmp, X}
+%% Mutable: yes.
+%% Tmp scratch for X.  Variations of X are:
 %%     {flu_assigned_to, ChainName}
 %%     If a FLU is currently assigned to a chain, map to ChainName.
 %%     If a FLU is not currently assigned to a chain, key does not exist.
@@ -732,7 +735,7 @@ run_ast_cmd({flu, Name, HostName, Port, Props}=T, E) ->
                     {ok, ClientI} = get_host_client_interface(HostName, E),
                     Mod = proplists:get_value(
                             proto_mod, Props, 'machi_flu1_client'),
-                    Val_p = #p_srvr{name=Name, proto_mod=Mod,
+                    Val_p = #p_srvr{name=list_to_atom(Name), proto_mod=Mod,
                                     address=ClientI, port=Port, props=Props},
                     d_store(Key, T,
                     d_store(Key_p, Val_p, E));
@@ -745,9 +748,9 @@ run_ast_cmd({flu, Name, HostName, Port, Props}=T, E) ->
         {ok, _} ->
             err("Duplicate flu ~p", [Name], T)
     end;
-run_ast_cmd({chain, Name, CMode, AllList, Witnesses, _Props}=T, E) ->
+run_ast_cmd({chain, Name, CMode, FullList, Witnesses, _Props}=T, E) ->
     Key = {kv,{chain,Name}},
-    AllFLUs = AllList ++ Witnesses,
+    AllFLUs = FullList ++ Witnesses,
 
     %% All FLUs must exist.
     case lists:sort(AllFLUs) == lists:usort(AllFLUs) of
@@ -858,6 +861,7 @@ d_find(Key, {KV_old, KV_new, IsNew}) ->
 
 d_get(Key, {KV_old, KV_new, IsNew}) ->
     %% Bah, use 'dict' return value convention.
+    %% Assume key exists, fail if not found.
     case gb_trees:lookup(Key, KV_new) of
         {value, Val} when IsNew ->
             Val;
@@ -924,12 +928,12 @@ diff_env({KV_old, KV_new, _IsNew}=E, RelativeHost) ->
                      end
              end,
 
-    DiffD = lists:foldl(fun(K, D) ->
-                                gb_trees:enter(K, [], D)
-                        end, gb_trees:empty(), lists:usort(Keys_old++Keys_new)),
-    DiffD2 = lists:foldl(Append(old), DiffD, Keys_old),
-    DiffD3 = lists:foldl(Append(new), DiffD2, Keys_new),
-    %% DiffD3 values will be exactly one of: [old], [old,new], [new]
+    %% DiffD = lists:foldl(fun(K, D) ->
+    %%                             gb_trees:enter(K, [], D)
+    %%                     end, gb_trees:empty(), lists:usort(Keys_old++Keys_new)),
+    %% DiffD2 = lists:foldl(Append(old), DiffD, Keys_old),
+    %% DiffD3 = lists:foldl(Append(new), DiffD2, Keys_new),
+    %% %% DiffD3 values will be exactly one of: [old], [old,new], [new]
 
     put(final, []),
     Add = fun(X) -> put(final, [X|get(final)]) end,
@@ -946,23 +950,42 @@ diff_env({KV_old, KV_new, _IsNew}=E, RelativeHost) ->
     %% Find new chains on this host and define them.
     %% Find modified chains on this host and re-define them.
     [begin
-         {chain, Name, CMode, AllList, Witnesses, Props} = V,
-         FLUsA = [d_get({kv,{flu,FLU}}, E) || FLU <- AllList],
+         {chain, Name, CMode, FullList, Witnesses, Props} = V,
+         FLUsF = [d_get({kv,{flu,FLU}}, E) || FLU <- FullList],
          FLUsW = [d_get({kv,{flu,FLU}}, E) || FLU <- Witnesses],
-         TheFLU_Hosts =
-             [Host || {flu, _Name, Host, _Port, _Ps} <- FLUsA ++ FLUsW],
-         case (lists:member(RelativeHost, TheFLU_Hosts)
+         TheFLU_Hosts = [{list_to_atom(FLU_str), Host} ||
+                            {flu, FLU_str, Host, _Port, _Ps} <- FLUsF ++ FLUsW],
+         case (lists:keymember(RelativeHost, 2, TheFLU_Hosts)
                orelse RelativeHost == all) of
              true ->
+                 Ps_F = [d_get({kv,{p_srvr,FLU}}, E) || FLU <- FullList],
+                 Ps_W = [d_get({kv,{p_srvr,FLU}}, E) || FLU <- Witnesses],
+
                  case gb_trees:lookup({kv,{chain,Name}}, KV_old) of
                      {value, OldT} ->
-                         Add({yo,change,Name});
+                         {chain, _, _, OldFull_ss, OldWitnesses_ss, _} = OldT,
+                         OldFull = [Str || Str <- OldFull_ss],
+                         OldWitnesses = [Str || Str <- OldWitnesses_ss],
+io:format(user, "\nOldT: ~p\n", [OldT]),
+                         Run = [FLU || {FLU, Hst} <- TheFLU_Hosts,
+                                       Hst == RelativeHost
+                                           orelse RelativeHost == all,
+                                       not lists:member(FLU,
+                                                        OldFull++OldWitnesses)],
+                         Stop = [yolo];
                      none ->
-                         Add({yo,new,Name})
-                 end;
+                         OldFull = [],
+                         OldWitnesses = [],
+                         Run = [derp,derp],
+                         Stop = []
+                 end,
+                 Add(#chain_def_v1{name=list_to_atom(Name),
+                                   mode=CMode, full=Ps_F, witnesses=Ps_W,
+                                   old_full=OldFull, old_witnesses=OldWitnesses,
+                                   local_run=Run, local_stop=Stop});
              false ->
                  ok
          end
      end || {{kv,{chain,Name}}, V} <- New_list],
 
-    {DiffD3, lists:reverse(get(final))}.
+    {gb_trees:empty(), lists:reverse(get(final))}.
