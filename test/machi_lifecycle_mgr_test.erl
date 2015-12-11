@@ -31,10 +31,7 @@
 
 -define(MGR, machi_chain_manager1).
 
-smoke_test_() ->
-    {timeout, 120, fun() -> smoke_test2() end}.
-
-smoke_test2() ->
+setup() ->
     catch application:stop(machi),
     {ok, SupPid} = machi_sup:start_link(),
     error_logger:tty(false),
@@ -55,6 +52,24 @@ smoke_test2() ->
          filelib:ensure_dir(V ++ "/unused"),
          application:set_env(machi, K, V)
      end || {K, V} <- Envs],
+    {SupPid, Dir, Cleanup}.
+
+cleanup({SupPid, Dir, Cleanup}) ->
+    exit(SupPid, normal),
+    machi_util:wait_for_death(SupPid, 100),
+    error_logger:tty(true),
+    catch application:stop(machi),
+    machi_flu1_test:clean_up_data_dir(Dir ++ "/*/*"),
+    machi_flu1_test:clean_up_data_dir(Dir),
+    machi_flu1_test:clean_up_env_vars(Cleanup),
+    undefined = application:get_env(machi, yo),
+    ok.
+
+smoke_test_() ->
+    {timeout, 60, fun() -> smoke_test2() end}.
+
+smoke_test2() ->
+    YoCleanup = setup(),
     try
         Prefix = <<"pre">>,
         Chunk1 = <<"yochunk">>,
@@ -135,20 +150,15 @@ smoke_test2() ->
 
         ok
     after
-        exit(SupPid, normal),
-        machi_util:wait_for_death(SupPid, 100),
-        error_logger:tty(true),
-        catch application:stop(machi),
-        %% machi_flu1_test:clean_up_data_dir(Dir ++ "/*/*"),
-        %% machi_flu1_test:clean_up_data_dir(Dir),
-        machi_flu1_test:clean_up_env_vars(Cleanup),
-        undefined = application:get_env(machi, yo)
+        cleanup(YoCleanup)
     end.
 
 make_pending_config(Term) ->
     Dir = machi_lifecycle_mgr:get_pending_dir(x),
     Blob = io_lib:format("~w.\n", [Term]),
-    ok = file:write_file(Dir ++ "/" ++ lists:flatten(io_lib:format("~w,~w,~w", tuple_to_list(os:timestamp()))),
+    {A,B,C} = os:timestamp(),
+    ok = file:write_file(Dir ++ "/" ++
+                         lists:flatten(io_lib:format("~w.~6..0w",[A*1000000+B,C])),
                          Blob).
 
 ast_tuple_syntax_test() ->
@@ -236,7 +246,7 @@ ast_run_test() ->
          {flu, 'f5', "localhost", PortBase+5, []},
          {chain, 'cc', ['f3','f5'], []}],
     {ok, Env2} = machi_lifecycle_mgr:run_ast(R2),
-    {X2a, X2b} = machi_lifecycle_mgr:diff_env(Env2, "localhost"),
+    {_X2a, X2b} = machi_lifecycle_mgr:diff_env(Env2, "localhost"),
     %% io:format(user, "X2b: ~p\n", [X2b]),
     F5_port = PortBase+5,
     [#p_srvr{name='f5',address="localhost",port=F5_port},
@@ -246,6 +256,60 @@ ast_run_test() ->
                    local_run=[f5], local_stop=[f4]}] = X2b,
 
     ok.
+
+ast_then_apply_test_() ->
+    {timeout, 60, fun() -> ast_then_apply_test2() end}.
+
+ast_then_apply_test2() ->
+    YoCleanup = setup(),
+    try
+        PortBase = 20400,
+        NumChains = 4,
+        ChainLen = 3,
+        FLU_num = NumChains * ChainLen,
+        FLU_defs = [{flu, list_to_atom("f"++integer_to_list(X)),
+                     "localhost", PortBase+X, []} || X <- lists:seq(1,FLU_num)],
+        FLU_names = [FLU || {flu,FLU,_,_,_} <- FLU_defs],
+        Ch_defs = [{chain, list_to_atom("c"++integer_to_list(X)),
+                    lists:sublist(FLU_names, X, 3),
+                    []} || X <- lists:seq(1, FLU_num, 3)],
+
+        R1 = [switch_old_and_new,
+              {host, "localhost", "localhost", "localhost", []}]
+             ++ FLU_defs ++ Ch_defs,
+        {ok, Env1} = machi_lifecycle_mgr:run_ast(R1),
+        {_X1a, X1b} = machi_lifecycle_mgr:diff_env(Env1, "localhost"),
+        %% io:format(user, "X1b ~p\n", [X1b]),
+        [make_pending_config(X) || X <- X1b],
+        {PassFLUs, PassChains} = machi_lifecycle_mgr:process_pending(),
+        true = (length(PassFLUs) == length(FLU_defs)),
+        true = (length(PassChains) == length(Ch_defs)),
+             
+        %% Kick the chain managers into doing something useful right now.
+        Pstores = [list_to_atom(atom_to_list(X) ++ "_pstore") || X <- FLU_names],
+        Fits = [list_to_atom(atom_to_list(X) ++ "_fitness") || X <- FLU_names],
+        ChMgrs = [list_to_atom(atom_to_list(X) ++ "_chmgr") || X <- FLU_names],
+        Advance = machi_chain_manager1_test:make_advance_fun(
+                    Fits, FLU_names, ChMgrs, 3),
+        Advance(),
+
+        %% Sanity check: everyone is configured properly.
+        [begin
+             {ok, #projection_v1{epoch_number=Epoch, all_members=All,
+                                 chain_name=ChainName, upi=UPI}} =
+                 machi_projection_store:read_latest_projection(PStore, private),
+             %% io:format(user, "~p: epoch ~p all ~p\n", [PStore, Epoch, All]),
+             true = Epoch > 0,
+             ChainLen = length(All),
+             true = (length(UPI) > 0),
+             {chain, _, Full, []} = lists:keyfind(ChainName, 2, Ch_defs),
+             true = lists:sort(Full) == lists:sort(All)
+         end || PStore <- Pstores],
+        
+        ok
+    after
+        cleanup(YoCleanup)
+    end.
 
 -endif. % !PULSE
 -endif. % TEST

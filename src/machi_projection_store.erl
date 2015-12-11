@@ -321,7 +321,7 @@ do_proj_write3(ProjType, #projection_v1{epoch_number=Epoch,
     end.
 
 do_proj_write4(ProjType, Proj, Path, Epoch, #state{consistency_mode=CMode}=S) ->
-    {ok, FH} = file:open(Path, [write, raw, binary]),
+    {{ok, FH}, Epoch, Path} = {file:open(Path, [write, raw, binary]), Epoch, Path},
     ok = file:write(FH, term_to_binary(Proj)),
     ok = file:sync(FH),
     ok = file:close(FH),
@@ -387,7 +387,6 @@ wait_for_liveness(PidSpec, StartTime, WaitTime) ->
         undefined ->
             case timer:now_diff(os:timestamp(), StartTime) div 1000 of
                 X when X < WaitTime ->
-                    io:format(user, "\nYOO ~p ~p\n", [PidSpec, lists:sort(registered())]),
                     timer:sleep(1),
                     wait_for_liveness(PidSpec, StartTime, WaitTime)
             end;
