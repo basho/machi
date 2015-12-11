@@ -190,10 +190,15 @@ ast_run_test() ->
     R1 = [
           {host, "localhost", "localhost", "localhost", []},
           {flu, "f0", "localhost", PortBase+0, []},
-          switch_old_and_new,
           {flu, "f1", "localhost", PortBase+1, []},
+          {chain, "ca", ["f0"], []},
+          {chain, "cb", ["f1"], []},
+          switch_old_and_new,
           {flu, "f2", "localhost", PortBase+2, []},
-          {chain, "ca", ["f0", "f1", "f2"], []}
+          {flu, "f3", "localhost", PortBase+3, []},
+          {flu, "f4", "localhost", PortBase+4, []},
+          {chain, "ca", ["f0", "f2"], []},
+          {chain, "cc", ["f3", "f4"], []}
          ],
 
     {ok, Env1} = machi_lifecycle_mgr:run_ast(R1),
@@ -209,7 +214,7 @@ ast_run_test() ->
           {flu, "f1", "other", PortBase+888, []}, % dupe flu name
           {flu, "f7", "localhost", PortBase+1, []}, % dupe host+port
           {chain, "ca", ["f7"], []}, % unknown flu
-          {chain, "cb", ["f0"], []}, % flu previously assigned
+          {chain, "cc", ["f0"], []}, % flu previously assigned
           {chain, "ca", cp_mode, ["f0", "f1", "f2"], [], []} % mode change
         ],
     [begin
@@ -217,9 +222,10 @@ ast_run_test() ->
          {error, _} = machi_lifecycle_mgr:run_ast(R1 ++ [Neg])
      end || Neg <- Negative_after_R1],
 
-    %% %% The 'run' phase doesn't blow smoke.  What about 'diff'.
-    %% {ok, X2} = machi_lifecycle_mgr:diff_env(Env1),
-    %% io:format(user, "X2: ~p\n", [X2]),
+    %% The 'run' phase doesn't blow smoke.  What about 'diff'?
+    {X2a, X2b} = machi_lifecycle_mgr:diff_env(Env1, "localhost"),
+    io:format(user, "X2a: ~p\n", [gb_trees:to_list(X2a)]),
+    io:format(user, "X2b: ~p\n", [X2b]),
 
     ok.
 

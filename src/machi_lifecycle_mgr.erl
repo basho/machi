@@ -856,6 +856,18 @@ d_find(Key, {KV_old, KV_new, IsNew}) ->
             end
     end.
 
+d_get(Key, {KV_old, KV_new, IsNew}) ->
+    %% Bah, use 'dict' return value convention.
+    case gb_trees:lookup(Key, KV_new) of
+        {value, Val} when IsNew ->
+            Val;
+        _ ->
+            case gb_trees:lookup(Key, KV_old) of
+                {value, Val} ->
+                    Val
+            end
+    end.
+
 d_store(Key, Val, {KV_old, KV_new, false}) ->
     {gb_trees:enter(Key, Val, KV_old), KV_new, false};
 d_store(Key, Val, {KV_old, KV_new, true}) ->
@@ -900,5 +912,57 @@ is_stringy(L) ->
 is_porty(Port) ->
     is_integer(Port) andalso 1024 =< Port andalso Port =< 65535.
 
-diff_env({KV_old, KV_new, _IsNew}) ->
-    yo.
+diff_env({KV_old, KV_new, _IsNew}=E, RelativeHost) ->
+    Old_list = gb_trees:to_list(KV_old),
+    New_list = gb_trees:to_list(KV_new),
+    Keys_old = [K || {K,_V} <- Old_list],
+    Keys_new = [K || {K,_V} <- New_list],
+    Append = fun(Item) ->
+                     fun(K, D) ->
+                             L = gb_trees:get(K, D),
+                             gb_trees:enter(K, L ++ [Item], D)
+                     end
+             end,
+
+    DiffD = lists:foldl(fun(K, D) ->
+                                gb_trees:enter(K, [], D)
+                        end, gb_trees:empty(), lists:usort(Keys_old++Keys_new)),
+    DiffD2 = lists:foldl(Append(old), DiffD, Keys_old),
+    DiffD3 = lists:foldl(Append(new), DiffD2, Keys_new),
+    %% DiffD3 values will be exactly one of: [old], [old,new], [new]
+
+    put(final, []),
+    Add = fun(X) -> put(final, [X|get(final)]) end,
+
+    %% Find all new FLUs and define them.
+    [begin
+         {flu, Name, Host, _Port, _Ps} = V,
+         if Host == RelativeHost; Host == any ->
+                 {ok, P_srvr} = d_find({kv,{p_srvr,Name}}, E),
+                 Add(P_srvr)
+         end
+     end || {{kv,{flu,Name}}, V} <- New_list],
+
+    %% Find new chains on this host and define them.
+    %% Find modified chains on this host and re-define them.
+    [begin
+         {chain, Name, CMode, AllList, Witnesses, Props} = V,
+         FLUsA = [d_get({kv,{flu,FLU}}, E) || FLU <- AllList],
+         FLUsW = [d_get({kv,{flu,FLU}}, E) || FLU <- Witnesses],
+         TheFLU_Hosts =
+             [Host || {flu, _Name, Host, _Port, _Ps} <- FLUsA ++ FLUsW],
+         case (lists:member(RelativeHost, TheFLU_Hosts)
+               orelse RelativeHost == all) of
+             true ->
+                 case gb_trees:lookup({kv,{chain,Name}}, KV_old) of
+                     {value, OldT} ->
+                         Add({yo,change,Name});
+                     none ->
+                         Add({yo,new,Name})
+                 end;
+             false ->
+                 ok
+         end
+     end || {{kv,{chain,Name}}, V} <- New_list],
+
+    {DiffD3, lists:reverse(get(final))}.
