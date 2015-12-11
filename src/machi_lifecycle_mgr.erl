@@ -640,17 +640,17 @@ check_an_ast_tuple({host, Name, AdminI, ClientI, Props}) ->
                  (_)                     -> false
               end, Props);
 check_an_ast_tuple({flu, Name, HostName, Port, Props}) ->
-    is_stringy(Name) andalso is_stringy(HostName) andalso
+    is_atom(Name) andalso is_stringy(HostName) andalso
         is_porty(Port) andalso is_proplisty(Props);
 check_an_ast_tuple({chain, Name, FullList, Props}) ->
-    is_stringy(Name) andalso
-    lists:all(fun is_stringy/1, FullList) andalso
+    is_atom(Name) andalso
+    lists:all(fun erlang:is_atom/1, FullList) andalso
     is_proplisty(Props);
 check_an_ast_tuple({chain, Name, CMode, FullList, Witnesses, Props}) ->
-    is_stringy(Name) andalso
+    is_atom(Name) andalso
     (CMode == ap_mode orelse CMode == cp_mode) andalso
-    lists:all(fun is_stringy/1, FullList) andalso
-    lists:all(fun is_stringy/1, Witnesses) andalso
+    lists:all(fun erlang:is_atom/1, FullList) andalso
+    lists:all(fun erlang:is_atom/1, Witnesses) andalso
     is_proplisty(Props);
 check_an_ast_tuple(switch_old_and_new) ->
     true;
@@ -735,7 +735,7 @@ run_ast_cmd({flu, Name, HostName, Port, Props}=T, E) ->
                     {ok, ClientI} = get_host_client_interface(HostName, E),
                     Mod = proplists:get_value(
                             proto_mod, Props, 'machi_flu1_client'),
-                    Val_p = #p_srvr{name=list_to_atom(Name), proto_mod=Mod,
+                    Val_p = #p_srvr{name=Name, proto_mod=Mod,
                                     address=ClientI, port=Port, props=Props},
                     d_store(Key, T,
                     d_store(Key_p, Val_p, E));
@@ -953,8 +953,8 @@ diff_env({KV_old, KV_new, _IsNew}=E, RelativeHost) ->
          {chain, Name, CMode, FullList, Witnesses, Props} = V,
          FLUsF = [d_get({kv,{flu,FLU}}, E) || FLU <- FullList],
          FLUsW = [d_get({kv,{flu,FLU}}, E) || FLU <- Witnesses],
-         TheFLU_Hosts = [{list_to_atom(FLU_str), Host} ||
-                            {flu, FLU_str, Host, _Port, _Ps} <- FLUsF ++ FLUsW],
+         TheFLU_Hosts =
+             [{FLU, Host} || {flu, FLU, Host, _Port, _Ps} <- FLUsF ++ FLUsW],
          case (lists:keymember(RelativeHost, 2, TheFLU_Hosts)
                orelse RelativeHost == all) of
              true ->
@@ -965,21 +965,22 @@ diff_env({KV_old, KV_new, _IsNew}=E, RelativeHost) ->
                      {value, OldT} ->
                          {chain, _, _, OldFull_ss, OldWitnesses_ss, _} = OldT,
                          OldFull = [Str || Str <- OldFull_ss],
-                         OldWitnesses = [Str || Str <- OldWitnesses_ss],
-io:format(user, "\nOldT: ~p\n", [OldT]),
-                         Run = [FLU || {FLU, Hst} <- TheFLU_Hosts,
-                                       Hst == RelativeHost
-                                           orelse RelativeHost == all,
-                                       not lists:member(FLU,
-                                                        OldFull++OldWitnesses)],
-                         Stop = [yolo];
+                         OldWitnesses = [Str || Str <- OldWitnesses_ss];
                      none ->
                          OldFull = [],
-                         OldWitnesses = [],
-                         Run = [derp,derp],
-                         Stop = []
+                         OldWitnesses = []
                  end,
-                 Add(#chain_def_v1{name=list_to_atom(Name),
+                 Run = [FLU || {FLU, Hst} <- TheFLU_Hosts,
+                               Hst == RelativeHost
+                                   orelse RelativeHost == all,
+                               not lists:member(FLU,
+                                                OldFull++OldWitnesses)],
+                 Stop = [FLU || {FLU, Hst} <- TheFLU_Hosts,
+                                Hst == RelativeHost
+                                    orelse RelativeHost == all,
+                                lists:member(FLU,
+                                             OldFull++OldWitnesses)],
+             Add(#chain_def_v1{name=Name,
                                    mode=CMode, full=Ps_F, witnesses=Ps_W,
                                    old_full=OldFull, old_witnesses=OldWitnesses,
                                    local_run=Run, local_stop=Stop});

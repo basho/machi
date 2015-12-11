@@ -156,9 +156,9 @@ ast_tuple_syntax_test() ->
     Canon1 = [ {host, "localhost", []},
                {host, "localhost", [{client_interface, "1.2.3.4"},
                                     {admin_interface, "5.6.7.8"}]},
-               {flu, "fx", "foohost", 4000, []},
+               {flu, 'fx', "foohost", 4000, []},
                switch_old_and_new,
-               {chain, "cy", ["fx", "fy"], [{foo,"yay"},{bar,baz}]} ],
+               {chain, 'cy', ['fx', 'fy'], [{foo,"yay"},{bar,baz}]} ],
 
     {_Good,[]=_Bad} = T(Canon1),
     Canon1_norm = machi_lifecycle_mgr:normalize_ast_tuple_syntax(Canon1),
@@ -173,12 +173,12 @@ ast_tuple_syntax_test() ->
             {host, "localhost", [{client_interface, "1.2.3.4"},
                                  {bummer, "5.6.7.8"}]} ]),
     {[],[_,_,_,_,_,_]} =
-        T([ {flu, 'fx', "foohost", 4000, []},
-            {flu, "fx", <<"foohost">>, 4000, []},
-            {flu, "fx", "foohost", -4000, []},
-            {flu, "fx", "foohost", 40009999, []},
-            {flu, "fx", "foohost", 4000, gack},
-            {flu, "fx", "foohost", 4000, [22]} ]),
+        T([ {flu, 'fx', 'foohost', 4000, []},
+            {flu, 'fx', <<"foohost">>, 4000, []},
+            {flu, 'fx', "foohost", -4000, []},
+            {flu, 'fx', "foohost", 40009999, []},
+            {flu, 'fx', "foohost", 4000, gack},
+            {flu, 'fx', "foohost", 4000, [22]} ]),
     {[],[_,_,_]} =
         T([ {chain, 'cy', ["fx", "fy"], [foo,{bar,baz}]},
             yoloyolo,
@@ -189,16 +189,16 @@ ast_run_test() ->
     PortBase = 20300,
     R1 = [
           {host, "localhost", "localhost", "localhost", []},
-          {flu, "f0", "localhost", PortBase+0, []},
-          {flu, "f1", "localhost", PortBase+1, []},
-          {chain, "ca", ["f0"], []},
-          {chain, "cb", ["f1"], []},
+          {flu, 'f0', "localhost", PortBase+0, []},
+          {flu, 'f1', "localhost", PortBase+1, []},
+          {chain, 'ca', ['f0'], []},
+          {chain, 'cb', ['f1'], []},
           switch_old_and_new,
-          {flu, "f2", "localhost", PortBase+2, []},
-          {flu, "f3", "localhost", PortBase+3, []},
-          {flu, "f4", "localhost", PortBase+4, []},
-          {chain, "ca", ["f0", "f2"], []},
-          {chain, "cc", ["f3", "f4"], []}
+          {flu, 'f2', "localhost", PortBase+2, []},
+          {flu, 'f3', "localhost", PortBase+3, []},
+          {flu, 'f4', "localhost", PortBase+4, []},
+          {chain, 'ca', ['f0', 'f2'], []},
+          {chain, 'cc', ['f3', 'f4'], []}
          ],
 
     {ok, Env1} = machi_lifecycle_mgr:run_ast(R1),
@@ -210,12 +210,12 @@ ast_run_test() ->
     Negative_after_R1 =
         [
           {host, "localhost", "foo", "foo", []}, % dupe host
-          {flu, "f1", "other", PortBase+9999999, []}, % bogus port # (syntax)
-          {flu, "f1", "other", PortBase+888, []}, % dupe flu name
-          {flu, "f7", "localhost", PortBase+1, []}, % dupe host+port
-          {chain, "ca", ["f7"], []}, % unknown flu
-          {chain, "cc", ["f0"], []}, % flu previously assigned
-          {chain, "ca", cp_mode, ["f0", "f1", "f2"], [], []} % mode change
+          {flu, 'f1', "other", PortBase+9999999, []}, % bogus port # (syntax)
+          {flu, 'f1', "other", PortBase+888, []}, % dupe flu name
+          {flu, 'f7', "localhost", PortBase+1, []}, % dupe host+port
+          {chain, 'ca', ['f7'], []}, % unknown flu
+          {chain, 'cc', ['f0'], []}, % flu previously assigned
+          {chain, 'ca', cp_mode, ['f0', 'f1', 'f2'], [], []} % mode change
         ],
     [begin
          io:format(user, "Neg ~p\n", [Neg]),
