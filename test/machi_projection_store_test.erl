@@ -33,7 +33,7 @@ smoke_test() ->
     Dir = "./data.a",
     Os = [{ignore_stability_time, true}, {active_mode, false}],
     os:cmd("rm -rf " ++ Dir),
-    machi_flu1_test:start_flu_package(a, PortBase, "./data.a", Os),
+    machi_test_util:start_flu_package(a, PortBase, "./data.a", Os),
 
     try
         P1 = machi_projection:new(1, a, [], [], [], [], []),
@@ -58,7 +58,7 @@ smoke_test() ->
 
         ok
     after
-        machi_flu1_test:stop_flu_package(a)
+        machi_test_util:stop_flu_package()
     end.
 
 -endif. % !PULSE

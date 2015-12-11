@@ -43,7 +43,7 @@ smoke_test2() ->
           {c,#p_srvr{name=c, address="localhost", port=5552, props="./data.c"}}
          ],
     [os:cmd("rm -rf " ++ P#p_srvr.props) || {_,P} <- Ps],
-    {ok, SupPid} = machi_flu_sup:start_link(),
+    {ok, SupPid} = machi_sup:start_link(),
     try
         %% Only run a, don't run b & c so we have 100% failures talking to them
         [begin
@@ -74,7 +74,7 @@ partial_stop_restart2() ->
     PStores = [machi_flu_psup:make_proj_supname(P#p_srvr.name) || {_,P} <-Ps],
     Dict = orddict:from_list(Ps),
     [os:cmd("rm -rf " ++ P#p_srvr.props) || {_,P} <- Ps],
-    {ok, SupPid} = machi_flu_sup:start_link(),
+    {ok, SupPid} = machi_sup:start_link(),
     DbgProps = [{initial_wedged, true}],
     Start = fun({_,P}) ->
                     #p_srvr{name=Name, port=Port, props=Dir} = P,

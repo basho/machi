@@ -143,16 +143,19 @@ init([FluName, TcpPort, DataDir, Props0]) ->
 
     FProxySupSpec = machi_file_proxy_sup:child_spec(FluName),
 
+    ListenerSupSpec = {machi_listener_sup:make_listener_sup_name(FluName),
+                       {machi_listener_sup, start_link, [FluName]},
+                       permanent, ?SHUTDOWN, supervisor, []},
+
     FluSpec = {FluName,
                {machi_flu1, start_link,
                 [ [{FluName, TcpPort, DataDir}|Props] ]},
                permanent, ?SHUTDOWN, worker, []},
 
-
     {ok, {SupFlags, [
-            ProjSpec, FitnessSpec, MgrSpec, 
-            FProxySupSpec, FNameMgrSpec, MetaSupSpec, 
-            FluSpec]}}.
+            ProjSpec, FitnessSpec, MgrSpec,
+            FProxySupSpec, FNameMgrSpec, MetaSupSpec,
+            ListenerSupSpec, FluSpec]}}.
 
 make_flu_regname(FluName) when is_atom(FluName) ->
     FluName.

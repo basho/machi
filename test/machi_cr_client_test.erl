@@ -96,7 +96,7 @@ run_ticks(MgrList) ->
     ok.
 
 smoke_test2() ->
-    {ok, SupPid} = machi_flu_sup:start_link(),
+    {ok, SupPid} = machi_sup:start_link(),
     error_logger:tty(false),
     try
         Prefix = <<"pre">>,
@@ -208,7 +208,7 @@ io:format(user, "\nFiles = ~p\n", [machi_cr_client:list_files(C1)]),
 witness_smoke_test_() -> {timeout, 1*60, fun() -> witness_smoke_test2() end}.
 
 witness_smoke_test2() ->
-    SupPid = case machi_flu_sup:start_link() of 
+    SupPid = case machi_sup:start_link() of
                 {ok, P} -> P;
                 {error, {already_started, P1}} -> P1;
                 Other -> error(Other)

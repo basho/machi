@@ -342,7 +342,7 @@ setup_target(Num, Seed, Verbose) ->
 setup_chain(Seed, AllListE, FLUNames, MgrNames, Dict) ->
     ok = shutdown_hard(),
     [begin
-         machi_flu1_test:clean_up_data_dir(Dir),
+         machi_test_util:clean_up_dir(Dir),
          filelib:ensure_dir(Dir ++ "/not-used")
      end || {_P, Dir} <- AllListE],
     [catch ets:delete(T) || T <- tabs()],

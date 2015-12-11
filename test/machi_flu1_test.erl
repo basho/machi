@@ -30,57 +30,16 @@
 -define(FLU, machi_flu1).
 -define(FLU_C, machi_flu1_client).
 
-clean_up_data_dir(DataDir) ->
-    [begin
-         Fs = filelib:wildcard(DataDir ++ Glob),
-         [file:delete(F) || F <- Fs],
-         [file:del_dir(F) || F <- Fs]
-     end || Glob <- ["*/*/*/*", "*/*/*", "*/*", "*"] ],
-    _ = file:del_dir(DataDir),
-    ok.
-
-start_flu_package(RegName, TcpPort, DataDir) ->
-    start_flu_package(RegName, TcpPort, DataDir, []).
-
-start_flu_package(RegName, TcpPort, DataDir, Props) ->
-    case proplists:get_value(save_data_dir, Props) of
-        true ->
-            ok;
-        _ ->
-            clean_up_data_dir(DataDir)
-    end,
-
-    maybe_start_sup(),
-    machi_flu_psup:start_flu_package(RegName, TcpPort, DataDir, Props).
-
-stop_flu_package(FluName) ->
-    machi_flu_psup:stop_flu_package(FluName),
-    Pid = whereis(machi_sup),
-    exit(Pid, normal),
-    machi_util:wait_for_death(Pid, 100).
-
-maybe_start_sup() ->
-    case whereis(machi_sup) of
-        undefined ->
-            machi_sup:start_link(),
-            %% evil but we have to let stuff start up
-            timer:sleep(10),
-            maybe_start_sup();
-        Pid -> Pid
-    end.
-
-
 -ifndef(PULSE).
 
 flu_smoke_test() ->
     Host = "localhost",
-    TcpPort = 32957,
+    TcpPort = 12957,
     DataDir = "./data",
     Prefix = <<"prefix!">>,
     BadPrefix = BadFile = "no/good",
-
     W_props = [{initial_wedged, false}],
-    start_flu_package(smoke_flu, TcpPort, DataDir, W_props),
+    {_, _, _} = machi_test_util:start_flu_package(smoke_flu, TcpPort, DataDir, W_props),
     try
         Msg = "Hello, world!",
         Msg = ?FLU_C:echo(Host, TcpPort, Msg),
@@ -178,22 +137,21 @@ flu_smoke_test() ->
         ok = ?FLU_C:quit(?FLU_C:connect(#p_srvr{address=Host,
                                                 port=TcpPort}))
     after
-        stop_flu_package(smoke_flu)
+        machi_test_util:stop_flu_package()
     end.
 
 flu_projection_smoke_test() ->
     Host = "localhost",
-    TcpPort = 32959,
+    TcpPort = 12959,
     DataDir = "./data.projst",
-
-    start_flu_package(projection_test_flu, TcpPort, DataDir),
+    {_,_,_} = machi_test_util:start_flu_package(projection_test_flu, TcpPort, DataDir),
     try
         [ok = flu_projection_common(Host, TcpPort, T) ||
             T <- [public, private] ]
 %% ,        {ok, {false, EpochID1}} = ?FLU_C:wedge_status(Host, TcpPort),
 %% io:format(user, "EpochID1 ~p\n", [EpochID1])
     after
-        stop_flu_package(projection_test_flu)
+        machi_test_util:stop_flu_package()
     end.
 
 flu_projection_common(Host, TcpPort, T) ->
@@ -221,11 +179,10 @@ flu_projection_common(Host, TcpPort, T) ->
 
 bad_checksum_test() ->
     Host = "localhost",
-    TcpPort = 32960,
+    TcpPort = 12960,
     DataDir = "./data.bct",
-
     Opts = [{initial_wedged, false}],
-    start_flu_package(projection_test_flu, TcpPort, DataDir, Opts),
+    {_,_,_} = machi_test_util:start_flu_package(projection_test_flu, TcpPort, DataDir, Opts),
     try
         Prefix = <<"some prefix">>,
         Chunk1 = <<"yo yo yo">>,
@@ -235,16 +192,15 @@ bad_checksum_test() ->
                                                     Prefix, Chunk1_badcs),
         ok
     after
-        stop_flu_package(projection_test_flu)
+        machi_test_util:stop_flu_package()
     end.
 
 witness_test() ->
     Host = "localhost",
-    TcpPort = 32961,
+    TcpPort = 12961,
     DataDir = "./data.witness",
-
     Opts = [{initial_wedged, false}, {witness_mode, true}],
-    start_flu_package(projection_test_flu, TcpPort, DataDir, Opts),
+    {_,_,_} = machi_test_util:start_flu_package(projection_test_flu, TcpPort, DataDir, Opts),
     try
         Prefix = <<"some prefix">>,
         Chunk1 = <<"yo yo yo">>,
@@ -276,7 +232,7 @@ witness_test() ->
 
         ok
     after
-        stop_flu_package(projection_test_flu)
+        machi_test_util:stop_flu_package()
     end.
 
 %% The purpose of timing_pb_encoding_test_ and timing_bif_encoding_test_ is

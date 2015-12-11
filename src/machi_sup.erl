@@ -47,8 +47,6 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 init([]) ->
-    %% {_, Ps} = process_info(self(), links),
-    %% [unlink(P) || P <- Ps],
     RestartStrategy = one_for_one,
     MaxRestarts = 1000,
     MaxSecondsBetweenRestarts = 3600,
@@ -59,12 +57,8 @@ init([]) ->
     Shutdown = ?SHUTDOWN,
     Type = supervisor,
 
-    ServerSup =
-        {machi_flu_sup, {machi_flu_sup, start_link, []},
-         Restart, Shutdown, Type, []},
-
-    {ok, {SupFlags, [ServerSup]}}.
-
-    %% AChild = {'AName', {'AModule', start_link, []},
-    %%           Restart, Shutdown, Type, ['AModule']},
-    %% {ok, {SupFlags, [AChild]}}.
+    FluSup = {machi_flu_sup, {machi_flu_sup, start_link, []},
+              Restart, Shutdown, Type, []},
+    RanchSup = {ranch_sup, {ranch_sup, start_link, []},
+                Restart, Shutdown, supervisor, [ranch_sup]},
+    {ok, {SupFlags, [FluSup, RanchSup]}}.
