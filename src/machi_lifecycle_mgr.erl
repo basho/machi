@@ -941,9 +941,11 @@ diff_env({KV_old, KV_new, _IsNew}=E, RelativeHost) ->
     %% Find all new FLUs and define them.
     [begin
          {flu, Name, Host, _Port, _Ps} = V,
-         if Host == RelativeHost; Host == any ->
+         if Host == RelativeHost orelse RelativeHost == all ->
                  {ok, P_srvr} = d_find({kv,{p_srvr,Name}}, E),
-                 Add(P_srvr)
+                 Add(P_srvr);
+            true ->
+                 ok
          end
      end || {{kv,{flu,Name}}, V} <- New_list],
 
@@ -975,18 +977,29 @@ diff_env({KV_old, KV_new, _IsNew}=E, RelativeHost) ->
                                    orelse RelativeHost == all,
                                not lists:member(FLU,
                                                 OldFull++OldWitnesses)],
-                 Stop = [FLU || {FLU, Hst} <- TheFLU_Hosts,
-                                Hst == RelativeHost
-                                    orelse RelativeHost == all,
-                                lists:member(FLU,
-                                             OldFull++OldWitnesses)],
-             Add(#chain_def_v1{name=Name,
+                 %% Gaaah, need to find the host for FLUs not present
+                 %% in FLUsF ++ FLUsW.
+                 OldFLUsF = [d_get({kv,{flu,FLU}}, E) || FLU <- OldFull],
+                 OldFLUsW = [d_get({kv,{flu,FLU}}, E) || FLU <- OldWitnesses],
+                 OldTheFLU_Hosts =
+                     [{FLU, Host} || {flu, FLU, Host, _Port, _Ps} <- OldFLUsF ++ OldFLUsW],
+                 %% Yay, now we have the info we need for local FLU Stop list.
+                 Stop = [FLU || FLU <- OldFull++OldWitnesses,
+                                not (lists:member(FLU, FullList)
+                                     orelse
+                                     lists:member(FLU, Witnesses)),
+                                lists:member({FLU, RelativeHost}, OldTheFLU_Hosts)
+                                    orelse RelativeHost == all],
+                 PropsExtra = [],
+                 %% PropsExtra = [{auto_gen,true}],
+                 Add(#chain_def_v1{name=Name,
                                    mode=CMode, full=Ps_F, witnesses=Ps_W,
                                    old_full=OldFull, old_witnesses=OldWitnesses,
-                                   local_run=Run, local_stop=Stop});
+                                   local_run=Run, local_stop=Stop,
+                                   props=Props ++ PropsExtra});
              false ->
                  ok
          end
      end || {{kv,{chain,Name}}, V} <- New_list],
 
-    {gb_trees:empty(), lists:reverse(get(final))}.
+    {x, lists:reverse(get(final))}.

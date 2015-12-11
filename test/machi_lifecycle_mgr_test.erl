@@ -202,10 +202,11 @@ ast_run_test() ->
          ],
 
     {ok, Env1} = machi_lifecycle_mgr:run_ast(R1),
-    Y1 = {lists:sort(gb_trees:to_list(element(1, Env1))),
-          lists:sort(gb_trees:to_list(element(2, Env1))),
-          element(3, Env1)},
-    io:format(user, "\nY1 ~p\n", [Y1]),
+    %% Uncomment to examine the Env trees.
+    %% Y1 = {lists:sort(gb_trees:to_list(element(1, Env1))),
+    %%       lists:sort(gb_trees:to_list(element(2, Env1))),
+    %%       element(3, Env1)},
+    %% io:format(user, "\nY1 ~p\n", [Y1]),
 
     Negative_after_R1 =
         [
@@ -218,14 +219,31 @@ ast_run_test() ->
           {chain, 'ca', cp_mode, ['f0', 'f1', 'f2'], [], []} % mode change
         ],
     [begin
-         io:format(user, "Neg ~p\n", [Neg]),
+         %% io:format(user, "dbg: Neg ~p\n", [Neg]),
          {error, _} = machi_lifecycle_mgr:run_ast(R1 ++ [Neg])
      end || Neg <- Negative_after_R1],
 
     %% The 'run' phase doesn't blow smoke.  What about 'diff'?
-    {X2a, X2b} = machi_lifecycle_mgr:diff_env(Env1, "localhost"),
-    io:format(user, "X2a: ~p\n", [gb_trees:to_list(X2a)]),
-    io:format(user, "X2b: ~p\n", [X2b]),
+    {X1a, X1b} = machi_lifecycle_mgr:diff_env(Env1, "localhost"),
+    %% There's only one host, "localhost", so 'all' should be exactly equal.
+    {X1a, X1b} = machi_lifecycle_mgr:diff_env(Env1, all),
+    %% io:format(user, "X1b: ~p\n", [X1b]),
+
+    %% Append to the R1 scenario: for chain cc: add f5, remove f4
+    %% Expect: see pattern matching below on X2b.
+    R2 = (R1 -- [switch_old_and_new]) ++
+        [switch_old_and_new,
+         {flu, 'f5', "localhost", PortBase+5, []},
+         {chain, 'cc', ['f3','f5'], []}],
+    {ok, Env2} = machi_lifecycle_mgr:run_ast(R2),
+    {X2a, X2b} = machi_lifecycle_mgr:diff_env(Env2, "localhost"),
+    %% io:format(user, "X2b: ~p\n", [X2b]),
+    F5_port = PortBase+5,
+    [#p_srvr{name='f5',address="localhost",port=F5_port},
+     #chain_def_v1{name='cc',
+                   full=[#p_srvr{name='f3'},#p_srvr{name='f5'}], witnesses=[],
+                   old_full=[f3,f4], old_witnesses=[],
+                   local_run=[f5], local_stop=[f4]}] = X2b,
 
     ok.
 
