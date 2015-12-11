@@ -295,7 +295,7 @@ get_initial_chains() ->
     sanitize_chain_def_records(CDefs).
 
 sanitize_chain_def_records(Ps) ->
-    {Sane, _} = lists:foldl(fun sanitize_chain_def_rec/2, {[], dict:new()}, Ps),
+    {Sane, _} = lists:foldl(fun sanitize_chain_def_rec/2, {[], gb_trees:empty()}, Ps),
     Sane.
 
 sanitize_chain_def_rec(Whole, {Acc, D}) ->
@@ -306,7 +306,7 @@ sanitize_chain_def_rec(Whole, {Acc, D}) ->
                       witnesses=Witnesses} = Whole,
         {true, 10} = {is_atom(Name), 10},
         NameK = {name, Name},
-        {error, 20} = {dict:find(NameK, D), 20},
+        {none, 20} = {gb_trees:lookup(NameK, D), 20},
         {true, 30} = {(Mode == ap_mode orelse Mode == cp_mode), 30},
         IsPSrvr = fun(X) when is_record(X, p_srvr) -> true;
                      (_)                           -> false
@@ -315,7 +315,7 @@ sanitize_chain_def_rec(Whole, {Acc, D}) ->
         {true, 50} = {lists:all(IsPSrvr, Witnesses), 50},
 
         %% All is sane enough.
-        D2 = dict:store(NameK, Name, D),
+        D2 = gb_trees:enter(NameK, Name, D),
         {[Whole|Acc], D2}
     catch X:Y ->
             lager:error("~s: Bad chain_def record (~w ~w), skipping: ~P\n",
@@ -892,3 +892,6 @@ is_stringy(L) ->
 
 is_porty(Port) ->
     is_integer(Port) andalso 1024 =< Port andalso Port =< 65535.
+
+diff_env({KV_old, KV_new, _IsNew}) ->
+    yo.

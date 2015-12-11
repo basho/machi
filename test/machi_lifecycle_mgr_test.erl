@@ -196,11 +196,10 @@ ast_run_test() ->
           {chain, "ca", ["f0", "f1", "f2"], []}
          ],
 
-
-    {ok, X1} = machi_lifecycle_mgr:run_ast(R1),
-    Y1 = {lists:sort(dict:to_list(element(1, X1))),
-          lists:sort(dict:to_list(element(2, X1))),
-          element(3, X1)},
+    {ok, Env1} = machi_lifecycle_mgr:run_ast(R1),
+    Y1 = {lists:sort(dict:to_list(element(1, Env1))),
+          lists:sort(dict:to_list(element(2, Env1))),
+          element(3, Env1)},
     io:format(user, "\nY1 ~p\n", [Y1]),
 
     Negative_after_R1 =
@@ -216,7 +215,13 @@ ast_run_test() ->
     [begin
          io:format(user, "Neg ~p\n", [Neg]),
          {error, _} = machi_lifecycle_mgr:run_ast(R1 ++ [Neg])
-     end || Neg <- Negative_after_R1].
+     end || Neg <- Negative_after_R1],
+
+    %% %% The 'run' phase doesn't blow smoke.  What about 'diff'.
+    %% {ok, X2} = machi_lifecycle_mgr:diff_env(Env1),
+    %% io:format(user, "X2: ~p\n", [X2]),
+
+    ok.
 
 -endif. % !PULSE
 -endif. % TEST
