@@ -221,7 +221,7 @@ checksum_list(Pid) ->
 init({Filename, DataDir, CsumTable}) ->
     {_, DPath} = machi_util:make_data_filename(DataDir, Filename),
     ok = filelib:ensure_dir(DPath),
-    UnwrittenBytes = machi_csum_table:calc_unwritten_bytes(CsumTable),
+    UnwrittenBytes = machi_csum_table:calc_unwritten_bytes(CsumTable, iolist_to_binary(Filename)),
     {Eof, infinity} = lists:last(UnwrittenBytes),
     {ok, FHd} = file:open(DPath, [read, write, binary, raw]),
     %% Reserve for EC and stuff, to prevent eof when read
@@ -343,7 +343,7 @@ handle_call({write, Offset, ClientMeta, Data}, _From,
                     {Error, Err + 1}
             end
     end,
-    {NewEof, infinity} = lists:last(machi_csum_table:calc_unwritten_bytes(CsumTable, F)),
+    {NewEof, infinity} = lists:last(machi_csum_table:calc_unwritten_bytes(CsumTable, iolist_to_binary(F))),
     lager:debug("Wrote ~p bytes at ~p of file ~p, NewEOF = ~p~n",
                 [iolist_size(Data), Offset, F, NewEof]),
     {reply, Resp, State#state{writes = {T+1, NewErr},
@@ -365,7 +365,8 @@ handle_call({trim, Offset, Size, _TriggerGC}, _From,
                            trims = {T, Err},
                            csum_table = CsumTable}) ->
 
-    case machi_csum_table:all_trimmed(CsumTable, Filename,
+    F = iolist_to_binary(Filename),
+    case machi_csum_table:all_trimmed(CsumTable, F,
                                       Offset, Offset+Size) of
         true ->
             NewState = State#state{ops=Ops+1, trims={T, Err+1}},
@@ -377,18 +378,18 @@ handle_call({trim, Offset, Size, _TriggerGC}, _From,
             LUpdate = maybe_regenerate_checksum(
                         FHd,
                         machi_csum_table:find_leftneighbor(CsumTable,
-                                                           Filename,
+                                                           F,
                                                            Offset)),
             RUpdate = maybe_regenerate_checksum(
                         FHd,
                         machi_csum_table:find_rightneighbor(CsumTable,
-                                                            Filename,
+                                                            F,
                                                             Offset+Size)),
 
-            case machi_csum_table:trim(CsumTable, Filename, Offset,
+            case machi_csum_table:trim(CsumTable, F, Offset,
                                        Size, LUpdate, RUpdate) of
                 ok ->
-                    {NewEof, infinity} = lists:last(machi_csum_table:calc_unwritten_bytes(CsumTable, Filename)),
+                    {NewEof, infinity} = lists:last(machi_csum_table:calc_unwritten_bytes(CsumTable, F)),
                     NewState = State#state{ops=Ops+1,
                                            trims={T+1, Err},
                                            eof_position=NewEof},
@@ -439,7 +440,7 @@ handle_call({append, ClientMeta, Extra, Data}, _From,
 
 handle_call({checksum_list}, _FRom, State = #state{filename=Filename,
                                                    csum_table=T}) ->
-    All = machi_csum_table:all(T, Filename),
+    All = machi_csum_table:all(T,iolist_to_binary(Filename)),
     {reply, {ok, All}, State};
 
 handle_call(Req, _From, State) ->
@@ -617,7 +618,7 @@ check_or_make_tagged_csum(OtherTag, _ClientCsum, _Data) ->
 do_read(FHd, Filename, CsumTable, Offset, Size, _, _) ->
     %% Note that find/3 only returns overlapping chunks, both borders
     %% are not aligned to original Offset and Size.
-    ChunkCsums = machi_csum_table:find(CsumTable, Filename,
+    ChunkCsums = machi_csum_table:find(CsumTable, iolist_to_binary(Filename),
                                        Offset, Size),
     read_all_ranges(FHd, Filename, ChunkCsums, [], []).
 
@@ -696,7 +697,7 @@ read_all_ranges(FHd, Filename, [{Offset, Size, TaggedCsum}|T], ReadChunks, Trimm
 handle_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Data) ->
     Size = iolist_size(Data),
  
-    case machi_csum_table:find(CsumTable, Filename, Offset, Size) of
+    case machi_csum_table:find(CsumTable, iolist_to_binary(Filename), Offset, Size) of
         [] -> %% Nothing should be there
             try
                 do_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Size, Data)
@@ -719,6 +720,7 @@ handle_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Data) ->
                     ok;
                 {ok, _Other} ->
                     %% TODO: leave some debug/warning message here?
+                    io:format(user, "baposdifa;lsdfkj<<<<<<<~n", []),
                     {error, written}
             end;
         [{Offset, Size, OtherCsum}] ->
@@ -727,11 +729,12 @@ handle_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Data) ->
                         " a check for unwritten bytes gave us checksum ~p"
                         " but the data we were trying to write has checksum ~p",
                         [Offset, Filename, OtherCsum, TaggedCsum]),
+            io:format(user, "baposdifa;lsdfkj*************8~n", []),
             {error, written};
         _Chunks ->
             %% TODO: Do we try to read all continuous chunks to see
             %% wether its total checksum matches client-provided checksum?
-            case machi_csum_table:any_trimmed(CsumTable, Filename,
+            case machi_csum_table:any_trimmed(CsumTable, iolist_to_binary(Filename),
                                               Offset, Size) of
                 true ->
                     %% More than a byte is trimmed, besides, do we
@@ -741,6 +744,7 @@ handle_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Data) ->
                     {error, trimmed};
                 false ->
                     %% No byte is trimmed, but at least one byte is written
+                    io:format(user, "baposdifa;lsdfkj*************8 ~p~n", [_Chunks]),
                     {error, written}
             end
     end.
@@ -758,6 +762,7 @@ handle_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Data) ->
 do_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Size, Data) ->
     case file:pwrite(FHd, Offset, Data) of
         ok ->
+            F = iolist_to_binary(Filename),
             lager:debug("Successful write in file ~p at offset ~p, length ~p",
                         [Filename, Offset, Size]),
 
@@ -767,14 +772,14 @@ do_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Size, Data) ->
             LUpdate = maybe_regenerate_checksum(
                         FHd,
                         machi_csum_table:find_leftneighbor(CsumTable,
-                                                           Filename,
+                                                           F,
                                                            Offset)),
             RUpdate = maybe_regenerate_checksum(
                         FHd,
                         machi_csum_table:find_rightneighbor(CsumTable,
-                                                            Filename,
+                                                            F,
                                                             Offset+Size)),
-            ok = machi_csum_table:write(CsumTable, Filename, Offset, Size,
+            ok = machi_csum_table:write(CsumTable, F, Offset, Size,
                                         TaggedCsum, LUpdate, RUpdate),
             lager:debug("Successful write to checksum file for ~p",
                         [Filename]),
@@ -845,7 +850,7 @@ maybe_gc(Reply, S = #state{data_filehandle = FHd,
                            eof_position = Eof,
                            csum_table=CsumTable}) ->
     lager:debug("GC? Let's try it: ~p.~n", [Filename]),
-    case machi_csum_table:maybe_trim_file(CsumTable, Filename, Eof) of
+    case machi_csum_table:maybe_trim_file(CsumTable, iolist_to_binary(Filename), Eof) of
         {ok, trimmed} ->
             %% Checksum table entries are all trimmed now, unlinking
             %% file from operating system

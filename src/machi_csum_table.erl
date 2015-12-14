@@ -43,12 +43,8 @@ open(CSumFilename, _Opts) ->
                       %% operating system's file cache, which is for
                       %% Machi's main read efficiency
                       {total_leveldb_mem_percent, 10}],
+    ok = filelib:ensure_dir(CSumFilename),
     {ok, T} = eleveldb:open(CSumFilename, LevelDBOptions),
-    %% Dummy entry for reserved headers
-    %% ok = eleveldb:put(T,
-    %%                   sext:encode({0, ?MINIMUM_OFFSET}),
-    %%                   sext:encode(?CSUM_TAG_NONE_ATOM),
-    %%                   [{sync, true}]),
     C0 = #machi_csum_table{
             file=CSumFilename,
             table=T},
@@ -64,35 +60,26 @@ split_checksum_list_blob_decode(Bin) ->
 -spec find(table(), binary(), machi_dt:file_offset(), machi_dt:chunk_size())
           -> [chunk()].
 find(#machi_csum_table{table=T}, Filename, Offset, Size) when is_binary(Filename) ->
-    {ok, I} = eleveldb:iterator(T, [], keys_only),
     EndKey = sext:encode({Filename, Offset+Size, 0}),
-    StartKey = sext:encode({Filename, Offset, Size}),
 
-    {ok, FirstKey} = case eleveldb:iterator_move(I, StartKey) of
-                         {error, invalid_iterator} ->
-                             eleveldb:iterator_move(I, first);
-                         {ok, _} = R0 ->
-                             case eleveldb:iterator_move(I, prev) of
-                                 {error, invalid_iterator} ->
-                                     R0;
-                                 {ok, _} = R1 ->
-                                     R1
-                             end
-                     end,
-    _ = eleveldb:iterator_close(I),
-    FoldFun = fun({K, V}, Acc) ->
-                      {Filename, TargetOffset, TargetSize} = sext:decode(K),
-                      case ?has_overlap(TargetOffset, TargetSize, Offset, Size) of
-                          true ->
-                              [{TargetOffset, TargetSize, sext:decode(V)}|Acc];
-                          false ->
+    case search_for_start_key(T, Filename, Offset, Size) of
+        undefined -> [];
+        FirstKey -> 
+
+            FoldFun = fun({K, V}, Acc) ->
+                              {Filename, TargetOffset, TargetSize} = sext:decode(K),
+                              case ?has_overlap(TargetOffset, TargetSize, Offset, Size) of
+                                  true ->
+                                      [{TargetOffset, TargetSize, sext:decode(V)}|Acc];
+                                  false ->
+                                      Acc
+                              end;
+                         (_K, Acc) ->
+                              lager:error("~p wrong option", [_K]),
                               Acc
-                      end;
-                 (_K, Acc) ->
-                      lager:error("~p wrong option", [_K]),
-                      Acc
-              end,
-    lists:reverse(eleveldb_fold(T, FirstKey, EndKey, FoldFun, [])).
+                      end,
+            lists:reverse(eleveldb_fold(T, FirstKey, EndKey, FoldFun, []))
+    end.
 
 
 %% @doc Updates all chunk info, by deleting existing entries if exists
@@ -196,10 +183,11 @@ any_trimmed(CsumT, Filename, Offset, Size) ->
 calc_unwritten_bytes(#machi_csum_table{table=_} = CsumT, Filename) ->
     case lists:sort(all(CsumT, Filename)) of
         [] ->
-            [{?MINIMUM_OFFSET, infinity}];
-        Sorted ->
-            {LastOffset, _, _} = hd(Sorted),
-            build_unwritten_bytes_list(Sorted, LastOffset, [])
+            [{0, infinity}];
+        [{0, _, _}|_] = Sorted ->
+            build_unwritten_bytes_list(Sorted, 0, []);
+        [{LastOffset, _, _}|_] = Sorted ->
+            build_unwritten_bytes_list(Sorted, LastOffset, [{0, LastOffset}])
     end.
 
 all(CsumT, Filename) ->
@@ -233,7 +221,7 @@ maybe_trim_file(#machi_csum_table{table=T} = CsumT, Filename, EofP) when is_bina
 %% @doc Folds over all chunks of a file
 -spec foldl_file_chunks(fun((chunk(),  Acc0 :: term()) -> Acc :: term()),
                         Acc0 :: term(), table(), binary()) -> Acc :: term().
-foldl_file_chunks(Fun, Acc0, #machi_csum_table{table=T}, Filename) ->
+foldl_file_chunks(Fun, Acc0, #machi_csum_table{table=T}, Filename) when is_binary(Filename) ->
     FoldFun = fun({K, V}, Acc) ->
                       {Filename, Offset, Len} = sext:decode(K),
                       Fun({Offset, Len, sext:decode(V)}, Acc);
@@ -259,6 +247,8 @@ foldl_chunks(Fun, Acc0, #machi_csum_table{table=T}) ->
                       Acc
               end,
     eleveldb:fold(T, FoldFun, Acc0, [{verify_checksums, true}]).
+
+%% == internal functions ==
 
 -spec build_unwritten_bytes_list( CsumData   :: [{ Offset   :: non_neg_integer(),
                                                    Size     :: pos_integer(),
@@ -323,3 +313,50 @@ eleveldb_do_fold({error, iterator_closed}, _, _, _, Acc) ->
 eleveldb_do_fold({error, invalid_iterator}, _, _, _, Acc) ->
     %% Probably reached to end
     Acc.
+
+
+%% Key1 < MaybeStartKey =< Key
+%% FirstKey =< MaybeStartKey
+search_for_start_key(T, Filename, Offset, Size) ->
+    MaybeStartKey = sext:encode({Filename, Offset, Size}),
+    FirstKey = sext:encode({Filename, 0, 0}),
+    {ok, I} = eleveldb:iterator(T, [], keys_only),
+
+    try
+        case eleveldb:iterator_move(I, MaybeStartKey) of
+            {error, invalid_iterator} ->
+                %% No key in right - go for probably first key in the file
+                case eleveldb:iterator_move(I, FirstKey) of
+                    {error, _} -> undefined;
+                    {ok, Key0} -> goto_end(I, Key0, Offset)
+                end;
+            {ok, Key} when Key < FirstKey ->
+                FirstKey;
+            {ok, Key} ->
+                case eleveldb:iterator_move(I, prev) of
+                    {error, invalid_iterator} ->
+                        Key;
+                    {ok, Key1} when Key1 < FirstKey ->
+                        Key;
+                    {ok, Key1} ->
+                        Key1
+                end
+        end
+    after
+        _ = eleveldb:iterator_close(I)
+    end.
+
+goto_end(I, Key, Offset) ->
+    case sext:decode(Key) of
+        {_Filename, O, L} when Offset =< O + L ->
+            Key;
+        {_Filename, O, L} when O + L < Offset ->
+            case eleveldb:iterator_move(I, next) of
+                {ok, NextKey} ->
+                    goto_end(I, NextKey, Offset);
+                {error, _} ->
+                    Key
+            end
+    end.
+
+    
