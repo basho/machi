@@ -21,7 +21,9 @@
 %% @doc The Machi FLU file server + file location sequencer.
 %%
 %% This module implements only the Machi FLU file server and its
-%% implicit sequencer.  
+%% implicit sequencer together with listener, append server,
+%% file management and file proxy processes.
+
 %% Please see the EDoc "Overview" for details about the FLU as a
 %% primitive file server process vs. the larger Machi design of a FLU
 %% as a sequencer + file server + chain manager group of processes.
@@ -54,27 +56,16 @@
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+-export([timing_demo_test_COMMENTED_/0, sort_2lines/2]). % Just to suppress warning
 -endif. % TEST
 
 -export([start_link/1, stop/1,
          update_wedge_state/3, wedge_myself/2]).
--export([make_projection_server_regname/1]).
+-export([make_projection_server_regname/1,
+         ets_table_name/1]).
 %% TODO: remove or replace in OTP way after gen_*'ified
--export([main2/4, run_append_server/2,
-         current_state/1, format_state/1]).
+-export([main2/4]).
 
--record(state, {
-          flu_name        :: atom(),
-          proj_store      :: pid(),
-          witness = false :: boolean(),
-          append_pid      :: pid(),
-          wedged = true   :: boolean(),
-          etstab          :: ets:tid(),
-          epoch_id        :: 'undefined' | machi_dt:epoch_id(),
-          props = []      :: list()  % proplist
-         }).
-
--define(SERVER_CMD_READ_TIMEOUT, 600*1000).
 -define(INIT_TIMEOUT, 60*1000).
 
 start_link([{FluName, TcpPort, DataDir}|Rest])
@@ -97,31 +88,14 @@ stop(Pid) when is_pid(Pid) ->
     end.
 
 update_wedge_state(PidSpec, Boolean, EpochId)
-  when (Boolean == true orelse Boolean == false), is_tuple(EpochId) ->
-    PidSpec ! {wedge_state_change, Boolean, EpochId}.
+  when is_boolean(Boolean), is_tuple(EpochId) ->
+    gen_server:cast(PidSpec, {wedge_state_change, Boolean, EpochId}).
 
 wedge_myself(PidSpec, EpochId)
   when is_tuple(EpochId) ->
-    PidSpec ! {wedge_myself, EpochId}.
-
-current_state(PidSpec) ->
-    PidSpec ! {current_state, self()},
-    %% TODO: Not so rubust f(^^;)
-    receive
-        Res -> Res
-    after
-        60*1000 -> {error, timeout}
-    end.
-
-format_state(State) ->
-    Fields = record_info(fields, state),
-    [_Name | Values] = tuple_to_list(State),
-    lists:zip(Fields, Values).
+    gen_server:cast(PidSpec, {wedge_myself, EpochId}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-ets_table_name(FluName) when is_atom(FluName) ->
-    list_to_atom(atom_to_list(FluName) ++ "_epoch").
 
 main2(FluName, TcpPort, DataDir, Props) ->
     {SendAppendPidToProj_p, ProjectionPid} =
@@ -149,23 +123,15 @@ main2(FluName, TcpPort, DataDir, Props) ->
                 {true, undefined}
         end,
     Witness_p = proplists:get_value(witness_mode, Props, false),
-    
-    S0 = #state{flu_name=FluName,
-                proj_store=ProjectionPid,
-                wedged=Wedged_p,
-                witness=Witness_p,
-                etstab=ets_table_name(FluName),
-                epoch_id=EpochId,
-                props=Props},
-    {ok, AppendPid} = start_append_server(S0, self()),
+
+    {ok, AppendPid} = start_append_server(FluName, Witness_p, Wedged_p, EpochId),
     if SendAppendPidToProj_p ->
-            machi_projection_store:set_wedge_notify_pid(ProjectionPid,
-                                                        AppendPid);
+            machi_projection_store:set_wedge_notify_pid(ProjectionPid, AppendPid);
        true ->
             ok
     end,
-    S1 = S0#state{append_pid=AppendPid},
-    {ok, ListenerPid} = start_listen_server(TcpPort, DataDir, S1),
+    {ok, ListenerPid} = start_listen_server(FluName, TcpPort, Witness_p, DataDir,
+                                            ets_table_name(FluName), ProjectionPid),
     %% io:format(user, "Listener started: ~w~n", [{FluName, ListenerPid}]),
 
     Config_e = machi_util:make_config_filename(DataDir, "unused"),
@@ -176,135 +142,23 @@ main2(FluName, TcpPort, DataDir, Props) ->
     ok = filelib:ensure_dir(Projection_e),
 
     put(flu_flu_name, FluName),
-    put(flu_append_pid, S1#state.append_pid),
+    put(flu_append_pid, AppendPid),
     put(flu_projection_pid, ProjectionPid),
     put(flu_listen_pid, ListenerPid),
     proc_lib:init_ack({ok, self()}),
 
     receive killme -> ok end,
-    (catch exit(S1#state.append_pid, kill)),
+    (catch exit(AppendPid, kill)),
     (catch exit(ProjectionPid, kill)),
     (catch exit(ListenerPid, kill)),
     ok.
 
-start_append_server(S, AckPid) ->
-    proc_lib:start_link(?MODULE, run_append_server, [AckPid, S], ?INIT_TIMEOUT).
+start_append_server(FluName, Witness_p, Wedged_p, EpochId) ->
+    machi_flu1_subsup:start_append_server(FluName, Witness_p, Wedged_p, EpochId).
 
-start_listen_server(TcpPort, DataDir,
-                    #state{flu_name=FluName, witness=Witness, etstab=EtsTab,
-                           proj_store=ProjStore}=_S) ->
-    machi_listener_sup:start_listener(FluName, TcpPort, Witness, DataDir,
-                                      EtsTab, ProjStore).
-
-run_append_server(FluPid, #state{flu_name=Name,
-                                 wedged=Wedged_p,epoch_id=EpochId}=S) ->
-    %% Reminder: Name is the "main" name of the FLU, i.e., no suffix
-    register(Name, self()),
-    TID = ets:new(ets_table_name(Name),
-                  [set, protected, named_table, {read_concurrency, true}]),
-    ets:insert(TID, {epoch, {Wedged_p, EpochId}}),
-    proc_lib:init_ack({ok, self()}),
-    append_server_loop(FluPid, S#state{etstab=TID}).
-
-append_server_loop(FluPid, #state{wedged=Wedged_p,
-                                  witness=Witness_p,
-                                  epoch_id=OldEpochId, flu_name=FluName}=S) ->
-    receive
-        {seq_append, From, _N, _L, _Prefix, _Chunk, _CSum, _Extra, _EpochID}
-          when Witness_p ->
-            %% The FLU's machi_flu1_net_server process ought to filter all
-            %% witness states, but we'll keep this clause for extra
-            %% paranoia.
-            From ! witness,
-            append_server_loop(FluPid, S);
-        {seq_append, From, _N, _L, _Prefix, _Chunk, _CSum, _Extra, _EpochID}
-          when Wedged_p ->
-            From ! wedged,
-            append_server_loop(FluPid, S);
-        {seq_append, From, CoC_Namespace, CoC_Locator,
-         Prefix, Chunk, CSum, Extra, EpochID} ->
-            %% Old is the one from our state, plain old 'EpochID' comes
-            %% from the client.
-            _ = case OldEpochId == EpochID of
-                true ->
-                    spawn(fun() -> 
-                        append_server_dispatch(From, CoC_Namespace, CoC_Locator,
-                                               Prefix, Chunk, CSum, Extra,
-                                               FluName, EpochID) 
-                    end);
-                false ->
-                    From ! {error, bad_epoch}
-            end,
-            append_server_loop(FluPid, S);
-        {wedge_myself, WedgeEpochId} ->
-            if not Wedged_p andalso WedgeEpochId == OldEpochId ->
-                    true = ets:insert(S#state.etstab,
-                                      {epoch, {true, OldEpochId}}),
-                    %% Tell my chain manager that it might want to react to
-                    %% this new world.
-                    Chmgr = machi_chain_manager1:make_chmgr_regname(FluName),
-                    spawn(fun() ->
-                            catch machi_chain_manager1:trigger_react_to_env(Chmgr)
-                          end),
-                    append_server_loop(FluPid, S#state{wedged=true});
-               true ->
-                    append_server_loop(FluPid, S)
-            end;
-        {wedge_state_change, Boolean, {NewEpoch, _}=NewEpochId} ->
-            OldEpoch = case OldEpochId of {OldE, _} -> OldE;
-                                          undefined -> -1
-                       end,
-            if NewEpoch >= OldEpoch ->
-                    true = ets:insert(S#state.etstab,
-                                      {epoch, {Boolean, NewEpochId}}),
-                    append_server_loop(FluPid, S#state{wedged=Boolean,
-                                                       epoch_id=NewEpochId});
-               true ->
-                    append_server_loop(FluPid, S)
-            end;
-        {wedge_status, FromPid} ->
-            #state{wedged=Wedged_p, epoch_id=EpochId} = S,
-            FromPid ! {wedge_status_reply, Wedged_p, EpochId},
-            append_server_loop(FluPid, S);
-        {current_state, FromPid} ->
-            FromPid ! S;
-        Else ->
-            io:format(user, "append_server_loop: WHA? ~p\n", [Else]),
-            append_server_loop(FluPid, S)
-    end.
-
-append_server_dispatch(From, CoC_Namespace, CoC_Locator,
-                       Prefix, Chunk, CSum, Extra, FluName, EpochId) ->
-    Result = case handle_append(CoC_Namespace, CoC_Locator,
-                                Prefix, Chunk, CSum, Extra, FluName, EpochId) of
-        {ok, File, Offset} ->
-            {assignment, Offset, File};
-        Other ->
-            Other
-    end,
-    From ! Result,
-    exit(normal).
-
-handle_append(_N, _L, _Prefix, <<>>, _Csum, _Extra, _FluName, _EpochId) ->
-    {error, bad_arg};
-handle_append(CoC_Namespace, CoC_Locator,
-              Prefix, Chunk, Csum, Extra, FluName, EpochId) ->
-    CoC = {coc, CoC_Namespace, CoC_Locator},
-    Res = machi_flu_filename_mgr:find_or_make_filename_from_prefix(
-            FluName, EpochId, {prefix, Prefix}, CoC),
-    case Res of
-        {file, F} ->
-            case machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, F}) of
-                {ok, Pid} ->
-                    {Tag, CS} = machi_util:unmake_tagged_csum(Csum),
-                    Meta = [{client_csum_tag, Tag}, {client_csum, CS}],
-                    machi_file_proxy:append(Pid, Meta, Extra, Chunk);
-                {error, trimmed} = E ->
-                    E
-            end;
-        Error ->
-            Error
-    end.
+start_listen_server(FluName, TcpPort, Witness_p, DataDir, EtsTab, ProjectionPid) ->
+    machi_flu1_subsup:start_listener(FluName, TcpPort, Witness_p, DataDir,
+                                     EtsTab, ProjectionPid).
 
 %% This is the name of the projection store that is spawned by the
 %% *flu*, for use primarily in testing scenarios.  In normal use, we
@@ -316,6 +170,8 @@ handle_append(CoC_Namespace, CoC_Locator,
 make_projection_server_regname(BaseName) ->
     list_to_atom(atom_to_list(BaseName) ++ "_pstore").
 
+ets_table_name(FluName) when is_atom(FluName) ->
+    list_to_atom(atom_to_list(FluName) ++ "_epoch").
 
 -ifdef(TEST).
 
@@ -357,7 +213,7 @@ timing_demo_test2() ->
                      lists:foldl(fun(X, _) ->
                                          B = machi_checksums:encode_csum_file_entry_hex(X, 100, CSum),
                                          %% file:write(ZZZ, [B, 10]),
-                                         machi_checksums:decode_csum_file_entry_hex(list_to_binary(B))
+                                         decode_csum_file_entry_hex(list_to_binary(B))
                                  end, x, Xs)
              end),
     io:format(user, "~.3f sec\n", [HexUSec / 1000000]),

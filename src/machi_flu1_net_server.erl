@@ -355,16 +355,15 @@ do_server_append_chunk2(CoC_Namespace, CoC_Locator,
         TaggedCSum = check_or_make_tagged_checksum(CSum_tag, Client_CSum,Chunk),
         R = {seq_append, self(), CoC_Namespace, CoC_Locator,
              Prefix, Chunk, TaggedCSum, ChunkExtra, EpochID},
-        FluName ! R,
-        receive
+        case gen_server:call(FluName, R, 10*1000) of
             {assignment, Offset, File} ->
                 Size = iolist_size(Chunk),
                 {ok, {Offset, Size, File}};
             witness ->
                 {error, bad_arg};
             wedged ->
-                {error, wedged}
-        after 10*1000 ->
+                {error, wedged};
+            {error, timeout} ->
                 {error, partition}
         end
     catch
