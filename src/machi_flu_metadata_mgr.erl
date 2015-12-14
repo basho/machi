@@ -39,12 +39,11 @@
 -define(HASH(X), erlang:phash2(X)). %% hash algorithm to use
 -define(TIMEOUT, 10 * 1000). %% 10 second timeout
 
--define(KNOWN_FILES_LIST_PREFIX, "known_files_").
-
 -record(state, {fluname :: atom(),
                 datadir :: string(),
                 tid     :: ets:tid(),
                 cnt     :: non_neg_integer(),
+                csum_table      :: machi_csum_table:table(),
                 trimmed_files :: machi_plist:plist()
                }).
 
@@ -109,16 +108,17 @@ init([FluName, Name, DataDir, Num]) ->
     %% important: we'll need another persistent storage to
     %% remember deleted (trimmed) file, to prevent resurrection after
     %% flu restart and append.
-    FileListFileName =
-        filename:join([DataDir, ?KNOWN_FILES_LIST_PREFIX ++ atom_to_list(FluName)]),
-    {ok, PList} = machi_plist:open(FileListFileName, []),
+
+    Tid = ets:new(Name, [{keypos, 2}, {read_concurrency, true}, {write_concurrency, true}]),
+
+    CsumTableDir = filename:join(DataDir, "checksums"),
+    {ok, CsumTable} = machi_csum_table:open(CsumTableDir, []),
     %% TODO make sure all files non-existent, if any remaining files
     %% here, just delete it. They're in the list *because* they're all
     %% trimmed.
 
-    Tid = ets:new(Name, [{keypos, 2}, {read_concurrency, true}, {write_concurrency, true}]),
     {ok, #state{fluname = FluName, datadir = DataDir, tid = Tid, cnt = Num,
-                trimmed_files=PList}}.
+                csum_table=CsumTable}}.
 
 handle_cast(Req, State) ->
     lager:warning("Got unknown cast ~p", [Req]),
@@ -133,14 +133,14 @@ handle_call({proxy_pid, Filename}, _From, State = #state{ tid = Tid }) ->
 
 handle_call({start_proxy_pid, Filename}, _From,
             State = #state{ fluname = N, tid = Tid, datadir = D,
-                            trimmed_files=TrimmedFiles}) ->
-    case machi_plist:find(TrimmedFiles, Filename) of
+                            csum_table=CsumTable}) ->
+    case machi_csum_table:file_trimmed(CsumTable) of
         false ->
             NewR = case lookup_md(Tid, Filename) of
                        not_found ->
-                           start_file_proxy(N, D, Filename);
+                           start_file_proxy(N, D, Filename, CsumTable);
                        #md{ proxy_pid = undefined } = R0 ->
-                           start_file_proxy(N, D, R0);
+                           start_file_proxy(N, D, R0, CsumTable);
                        #md{ proxy_pid = _Pid } = R1 ->
                            R1
                    end,
@@ -219,9 +219,9 @@ handle_info(Info, State) ->
     lager:warning("Got unknown info ~p", [Info]),
     {noreply, State}.
 
-terminate(Reason, _State = #state{trimmed_files=TrimmedFiles}) ->
+terminate(Reason, _State = #state{csum_table=CsumTable}) ->
     lager:info("Shutting down because ~p", [Reason]),
-    machi_plist:close(TrimmedFiles),
+    ok = machi_csum_table:close(CsumTable),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -253,13 +253,13 @@ lookup_md(Tid, Data) ->
         [R] -> R
     end.
 
-start_file_proxy(FluName, D, R = #md{filename = F} ) ->
-    {ok, Pid} = machi_file_proxy_sup:start_proxy(FluName, D, F),
+start_file_proxy(FluName, D, R = #md{filename = F}, CsumTable) ->
+    {ok, Pid} = machi_file_proxy_sup:start_proxy(FluName, D, F, CsumTable),
     Mref = monitor(process, Pid),
     R#md{ proxy_pid = Pid, mref = Mref };
 
-start_file_proxy(FluName, D, Filename) ->
-    start_file_proxy(FluName, D, #md{ filename = Filename }).
+start_file_proxy(FluName, D, Filename, CsumTable) ->
+    start_file_proxy(FluName, D, #md{ filename = Filename }, CsumTable).
 
 update_ets(Tid, R) ->
     ets:insert(Tid, R).

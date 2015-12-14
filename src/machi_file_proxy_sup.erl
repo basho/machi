@@ -26,7 +26,7 @@
 -export([
     child_spec/1,
     start_link/1,
-    start_proxy/3
+    start_proxy/4
 ]).
 
 %% supervisor callback
@@ -43,9 +43,9 @@ child_spec(FluName) ->
 start_link(FluName) ->
     supervisor:start_link({local, make_proxy_name(FluName)}, ?MODULE, []).
 
-start_proxy(FluName, DataDir, Filename) ->
+start_proxy(FluName, DataDir, Filename, CsumTable) ->
     supervisor:start_child(make_proxy_name(FluName),
-                           [FluName, Filename, DataDir]).
+                           [Filename, DataDir, CsumTable]).
 
 init([]) ->
     SupFlags = {simple_one_for_one, 1000, 10},

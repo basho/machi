@@ -1,16 +1,19 @@
 -module(machi_csum_table).
 
+%% @doc Object Database mapper that translates
+%% (file, checksum, offset, size)|(trimmed-file) <-> LevelDB key and value
+%% Keys and values are both encoded with sext.
+
 -export([open/2,
-         find/3,
-         write/6, write/4, trim/5,
-         find_leftneighbor/2, find_rightneighbor/2,
-         all_trimmed/3, any_trimmed/3,
-         all_trimmed/2,
-         calc_unwritten_bytes/1,
+         find/4,
+         write/7, write/5, trim/6,
+         find_leftneighbor/3, find_rightneighbor/3,
+         all_trimmed/4, any_trimmed/4,
+         calc_unwritten_bytes/2,
          split_checksum_list_blob_decode/1,
-         all/1,
-         close/1, delete/1,
-         foldl_chunks/3]).
+         all/2,
+         close/1, maybe_trim_file/3,
+         foldl_file_chunks/4, foldl_chunks/3]).
 
 -include("machi.hrl").
 
@@ -42,10 +45,10 @@ open(CSumFilename, _Opts) ->
                       {total_leveldb_mem_percent, 10}],
     {ok, T} = eleveldb:open(CSumFilename, LevelDBOptions),
     %% Dummy entry for reserved headers
-    ok = eleveldb:put(T,
-                      sext:encode({0, ?MINIMUM_OFFSET}),
-                      sext:encode(?CSUM_TAG_NONE_ATOM),
-                      [{sync, true}]),
+    %% ok = eleveldb:put(T,
+    %%                   sext:encode({0, ?MINIMUM_OFFSET}),
+    %%                   sext:encode(?CSUM_TAG_NONE_ATOM),
+    %%                   [{sync, true}]),
     C0 = #machi_csum_table{
             file=CSumFilename,
             table=T},
@@ -55,16 +58,15 @@ open(CSumFilename, _Opts) ->
 split_checksum_list_blob_decode(Bin) ->
     erlang:binary_to_term(Bin).
 
-
 -define(has_overlap(LeftOffset, LeftSize, RightOffset, RightSize),
         ((LeftOffset - (RightOffset+RightSize)) * (LeftOffset+LeftSize - RightOffset) < 0)).
 
--spec find(table(), machi_dt:file_offset(), machi_dt:chunk_size())
+-spec find(table(), binary(), machi_dt:file_offset(), machi_dt:chunk_size())
           -> [chunk()].
-find(#machi_csum_table{table=T}, Offset, Size) ->
+find(#machi_csum_table{table=T}, Filename, Offset, Size) when is_binary(Filename) ->
     {ok, I} = eleveldb:iterator(T, [], keys_only),
-    EndKey = sext:encode({Offset+Size, 0}),
-    StartKey = sext:encode({Offset, Size}),
+    EndKey = sext:encode({Filename, Offset+Size, 0}),
+    StartKey = sext:encode({Filename, Offset, Size}),
 
     {ok, FirstKey} = case eleveldb:iterator_move(I, StartKey) of
                          {error, invalid_iterator} ->
@@ -79,7 +81,7 @@ find(#machi_csum_table{table=T}, Offset, Size) ->
                      end,
     _ = eleveldb:iterator_close(I),
     FoldFun = fun({K, V}, Acc) ->
-                      {TargetOffset, TargetSize} = sext:decode(K),
+                      {Filename, TargetOffset, TargetSize} = sext:decode(K),
                       case ?has_overlap(TargetOffset, TargetSize, Offset, Size) of
                           true ->
                               [{TargetOffset, TargetSize, sext:decode(V)}|Acc];
@@ -95,21 +97,21 @@ find(#machi_csum_table{table=T}, Offset, Size) ->
 
 %% @doc Updates all chunk info, by deleting existing entries if exists
 %% and putting new chunk info
--spec write(table(),
+-spec write(table(), binary(),
             machi_dt:file_offset(), machi_dt:chunk_size(),
             machi_dt:chunk_csum()|'none'|'trimmed',
             undefined|chunk(), undefined|chunk()) ->
                    ok | {error, term()}.
-write(#machi_csum_table{table=T} = CsumT, Offset, Size, CSum,
-      LeftUpdate, RightUpdate) ->
+write(#machi_csum_table{table=T} = CsumT, Filename,
+      Offset, Size, CSum, LeftUpdate, RightUpdate) when is_binary(Filename) ->
     PutOps =
         [{put,
-          sext:encode({Offset, Size}),
+          sext:encode({Filename, Offset, Size}),
           sext:encode(CSum)}]
         ++ case LeftUpdate of
                {LO, LS, LCsum} when LO + LS =:= Offset ->
                    [{put,
-                     sext:encode({LO, LS}),
+                     sext:encode({Filename, LO, LS}),
                      sext:encode(LCsum)}];
                undefined ->
                    []
@@ -117,58 +119,58 @@ write(#machi_csum_table{table=T} = CsumT, Offset, Size, CSum,
         ++ case RightUpdate of
                {RO, RS, RCsum} when RO =:= Offset + Size ->
                    [{put,
-                     sext:encode({RO, RS}),
+                     sext:encode({Filename, RO, RS}),
                      sext:encode(RCsum)}];
                undefined ->
                    []
            end,
-    Chunks = find(CsumT, Offset, Size),
+    Chunks = find(CsumT, Filename, Offset, Size),
     DeleteOps = lists:map(fun({O, L, _}) ->
-                                  {delete, sext:encode({O, L})}
+                                  {delete, sext:encode({Filename, O, L})}
                           end, Chunks),
     eleveldb:write(T, DeleteOps ++ PutOps, [{sync, true}]).
 
--spec find_leftneighbor(table(), non_neg_integer()) ->
+-spec find_leftneighbor(table(), binary(), non_neg_integer()) ->
                                undefined | chunk().
-find_leftneighbor(CsumT, Offset) ->
-    case find(CsumT, Offset, 1) of
+find_leftneighbor(CsumT, Filename, Offset) when is_binary(Filename) ->
+    case find(CsumT, Filename, Offset, 1) of
         [] -> undefined;
         [{Offset, _, _}] -> undefined;
         [{LOffset, _, CsumOrTrimmed}] -> {LOffset, Offset - LOffset, CsumOrTrimmed}
     end.
 
--spec find_rightneighbor(table(), non_neg_integer()) ->
+-spec find_rightneighbor(table(), binary(), non_neg_integer()) ->
                                 undefined | chunk().
-find_rightneighbor(CsumT, Offset) ->
-    case find(CsumT, Offset, 1) of
+find_rightneighbor(CsumT, Filename, Offset) when is_binary(Filename) ->
+    case find(CsumT, Filename, Offset, 1) of
         [] -> undefined;
         [{Offset, _, _}] -> undefined;
         [{ROffset, RSize, CsumOrTrimmed}] ->
             {Offset, ROffset + RSize - Offset, CsumOrTrimmed}
     end.
 
--spec write(table(), machi_dt:file_offset(), machi_dt:file_size(),
+-spec write(table(), binary(), machi_dt:file_offset(), machi_dt:file_size(),
             machi_dt:chunk_csum()|none|trimmed) ->
                    ok | {error, trimmed|file:posix()}.
-write(CsumT, Offset, Size, CSum) ->
-    write(CsumT, Offset, Size, CSum, undefined, undefined).
+write(CsumT, Filename, Offset, Size, CSum) ->
+    write(CsumT, Filename, Offset, Size, CSum, undefined, undefined).
 
-trim(CsumT, Offset, Size, LeftUpdate, RightUpdate) ->
-    write(CsumT, Offset, Size,
+trim(CsumT, Filename, Offset, Size, LeftUpdate, RightUpdate) ->
+    write(CsumT, Filename, Offset, Size,
           trimmed, %% Should this be much smaller like $t or just 't'
           LeftUpdate, RightUpdate).
 
 %% @doc returns whether all bytes in a specific window is continously
 %% trimmed or not
--spec all_trimmed(table(), non_neg_integer(), non_neg_integer()) -> boolean().
-all_trimmed(#machi_csum_table{table=T}, Left, Right) ->
+-spec all_trimmed(table(), binary(), non_neg_integer(), non_neg_integer()) -> boolean().
+all_trimmed(#machi_csum_table{table=T}, Filename, Left, Right) when is_binary(Filename) ->
     FoldFun = fun({_, _}, false) ->
                       false;
                  ({K, V}, Pos) when is_integer(Pos) andalso Pos =< Right ->
                       case {sext:decode(K), sext:decode(V)} of
-                          {{Pos, Size}, trimmed} ->
+                          {{Filename, Pos, Size}, trimmed} ->
                               Pos + Size;
-                          {{Offset, Size}, _}
+                          {{Filename, Offset, Size}, _}
                             when Offset + Size =< Left ->
                               Left;
                           _Eh ->
@@ -183,22 +185,16 @@ all_trimmed(#machi_csum_table{table=T}, Left, Right) ->
             true
     end.
 
-%% @doc returns whether all bytes 0-Pos0 is continously trimmed or
-%% not, including header.
--spec all_trimmed(table(), non_neg_integer()) -> boolean().
-all_trimmed(CsumT, Pos0) ->
-    all_trimmed(CsumT, 0, Pos0).
-
--spec any_trimmed(table(),
+-spec any_trimmed(table(), binary(),
                   pos_integer(),
                   machi_dt:chunk_size()) -> boolean().
-any_trimmed(CsumT, Offset, Size) ->
-    Chunks = find(CsumT, Offset, Size),
+any_trimmed(CsumT, Filename, Offset, Size) ->
+    Chunks = find(CsumT, Filename, Offset, Size),
     lists:any(fun({_, _, State}) -> State =:= trimmed end, Chunks).
 
--spec calc_unwritten_bytes(table()) -> [byte_sequence()].
-calc_unwritten_bytes(#machi_csum_table{table=_} = CsumT) ->
-    case lists:sort(all(CsumT)) of
+-spec calc_unwritten_bytes(table(), binary()) -> [byte_sequence()].
+calc_unwritten_bytes(#machi_csum_table{table=_} = CsumT, Filename) ->
+    case lists:sort(all(CsumT, Filename)) of
         [] ->
             [{?MINIMUM_OFFSET, infinity}];
         Sorted ->
@@ -206,29 +202,58 @@ calc_unwritten_bytes(#machi_csum_table{table=_} = CsumT) ->
             build_unwritten_bytes_list(Sorted, LastOffset, [])
     end.
 
-all(CsumT) ->
+all(CsumT, Filename) ->
     FoldFun = fun(E, Acc) -> [E|Acc] end,
-    lists:reverse(foldl_chunks(FoldFun, [], CsumT)).
+    lists:reverse(foldl_file_chunks(FoldFun, [], CsumT, Filename)).
 
 -spec close(table()) -> ok.
 close(#machi_csum_table{table=T}) ->
     ok = eleveldb:close(T).
 
--spec delete(table()) -> ok.
-delete(#machi_csum_table{table=T, file=F}) ->
-    catch eleveldb:close(T),
-    %% TODO change this to directory walk
-    case os:cmd("rm -rf " ++ F) of
-        "" -> ok;
-        E -> E
+
+-spec maybe_trim_file(table(), binary(), non_neg_integer()) ->
+                             {ok, trimmed|not_trimmed} | {error, term()}.
+maybe_trim_file(#machi_csum_table{table=T} = CsumT, Filename, EofP) when is_binary(Filename) ->
+    %% TODO: optimize; this code runs fold on eleveldb twice.
+    case all_trimmed(CsumT, Filename, 0, EofP) of
+        true ->
+            Chunks = all(CsumT, Filename),
+            DeleteOps = lists:map(fun({O, L, _}) ->
+                                          {delete, sext:encode({Filename, O, L})}
+                                  end, Chunks),
+            FileTombstone = {put, sext:encode({ts, Filename}), sext:encode(ts)},
+            case eleveldb:write(T, [FileTombstone|DeleteOps], [{sync, true}]) of
+                ok -> {ok, trimmed};
+                Other -> Other
+            end;
+        false ->
+            {ok, not_trimmed}
     end.
 
+%% @doc Folds over all chunks of a file
+-spec foldl_file_chunks(fun((chunk(),  Acc0 :: term()) -> Acc :: term()),
+                        Acc0 :: term(), table(), binary()) -> Acc :: term().
+foldl_file_chunks(Fun, Acc0, #machi_csum_table{table=T}, Filename) ->
+    FoldFun = fun({K, V}, Acc) ->
+                      {Filename, Offset, Len} = sext:decode(K),
+                      Fun({Offset, Len, sext:decode(V)}, Acc);
+                 (_K, Acc) ->
+                      _ = lager:error("~p: wrong option?", [_K]),
+                      Acc
+              end,
+    StartKey = {Filename, 0, 0},
+    EndKey = { <<Filename/binary, 255, 255, 255, 255, 255>>, 0, 0},
+    eleveldb_fold(T, sext:encode(StartKey), sext:encode(EndKey),
+                  FoldFun, Acc0).
+
+
+%% @doc Folds over all chunks of all files
 -spec foldl_chunks(fun((chunk(),  Acc0 :: term()) -> Acc :: term()),
                    Acc0 :: term(), table()) -> Acc :: term().
 foldl_chunks(Fun, Acc0, #machi_csum_table{table=T}) ->
     FoldFun = fun({K, V}, Acc) ->
-                      {Offset, Len} = sext:decode(K),
-                      Fun({Offset, Len, sext:decode(V)}, Acc);
+                      {Filename, Offset, Len} = sext:decode(K),
+                      Fun({Filename, Offset, Len, sext:decode(V)}, Acc);
                  (_K, Acc) ->
                       _ = lager:error("~p: wrong option?", [_K]),
                       Acc

@@ -149,7 +149,7 @@ main2(FluName, TcpPort, DataDir, Props) ->
                 {true, undefined}
         end,
     Witness_p = proplists:get_value(witness_mode, Props, false),
-    
+
     S0 = #state{flu_name=FluName,
                 proj_store=ProjectionPid,
                 wedged=Wedged_p,
