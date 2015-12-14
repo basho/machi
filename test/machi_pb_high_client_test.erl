@@ -91,10 +91,7 @@ smoke_test2() ->
                  #p_srvr{name=Name, props=Props} = P,
                  Dir = proplists:get_value(data_dir, Props),
                  ?assertEqual({ok, [File1Bin]},
-                              file:list_dir(filename:join([Dir, "data"]))),
-                 FileListFileName = filename:join([Dir, "known_files_" ++ atom_to_list(Name)]),
-                 {ok, Plist} = machi_plist:open(FileListFileName, []),
-                 ?assertEqual([], machi_plist:all(Plist))
+                              file:list_dir(filename:join([Dir, "data"])))
              end || P <- Ps],
 
             [begin
@@ -118,12 +115,11 @@ smoke_test2() ->
             File = binary_to_list(Filex),
             [begin
                  #p_srvr{name=Name, props=Props} = P,
-                 Dir = proplists:get_value(data_dir, Props),
-                 ?assertEqual({ok, []},
-                              file:list_dir(filename:join([Dir, "data"]))),
-                 FileListFileName = filename:join([Dir, "known_files_" ++ atom_to_list(Name)]),
-                 {ok, Plist} = machi_plist:open(FileListFileName, []),
-                 ?assertEqual([File], machi_plist:all(Plist))
+                 DataDir = filename:join([proplists:get_value(data_dir, Props), "data"]),
+                 ?assertEqual({ok, []}, file:list_dir(DataDir)),
+                 {ok, CsumT} = machi_flu_filename_mgr:get_csum_table(Name),
+                 Plist = machi_csum_table:all_files(CsumT),
+                 ?assertEqual([{File, ts}], Plist)
              end || P <- Ps],
 
             [begin

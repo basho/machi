@@ -77,25 +77,28 @@ random_binary(Start, End) ->
     end.
 
 setup() ->
-    {ok, Pid} = machi_file_proxy:start_link(fluname, "test", ?TESTDIR),
-    Pid.
+    {ok, CsumT} = machi_csum_table:open(filename:join([?TESTDIR, "csumfile"]), []),
+    {ok, Pid} = machi_file_proxy:start_link("test", ?TESTDIR, CsumT),
+    {Pid, CsumT}.
 
-teardown(Pid) ->
-    catch machi_file_proxy:stop(Pid).
+teardown({Pid, CsumT}) ->
+    catch machi_file_proxy:stop(Pid),
+    catch machi_csum_table:close(CsumT).
 
 machi_file_proxy_test_() ->
     clean_up_data_dir(?TESTDIR),
     {setup,
      fun setup/0,
      fun teardown/1,
-     fun(Pid) ->
+     fun({Pid, _}) ->
              [
               ?_assertEqual({error, bad_arg}, machi_file_proxy:read(Pid, -1, -1)),
               ?_assertEqual({error, bad_arg}, machi_file_proxy:write(Pid, -1, <<"yo">>)),
               ?_assertEqual({error, bad_arg}, machi_file_proxy:append(Pid, [], -1, <<"krep">>)),
-              ?_assertMatch({ok, {_, []}}, machi_file_proxy:read(Pid, 1, 1)),
+              ?_assertMatch({error, not_written}, machi_file_proxy:read(Pid, 1, 1)),
               ?_assertEqual({error, not_written}, machi_file_proxy:read(Pid, 1024, 1)),
-              ?_assertMatch({ok, {_, []}}, machi_file_proxy:read(Pid, 1, 1024)),
+              ?_assertMatch({ok, "test", _}, machi_file_proxy:append(Pid, random_binary(0, 1024))),
+              ?_assertMatch({ok, _}, machi_file_proxy:read(Pid, 1, 1024)),
               ?_assertEqual({error, not_written}, machi_file_proxy:read(Pid, 1024, ?HYOOGE)),
               ?_assertEqual({error, not_written}, machi_file_proxy:read(Pid, ?HYOOGE, 1)),
               {timeout, 10,
@@ -114,7 +117,7 @@ multiple_chunks_read_test_() ->
     {setup,
      fun setup/0,
      fun teardown/1,
-     fun(Pid) ->
+     fun({Pid, _}) ->
              [
               ?_assertEqual(ok, machi_file_proxy:trim(Pid, 0, 1, false)),
               ?_assertMatch({ok, {[], [{"test", 0, 1}]}},

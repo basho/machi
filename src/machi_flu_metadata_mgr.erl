@@ -39,13 +39,10 @@
 -define(HASH(X), erlang:phash2(X)). %% hash algorithm to use
 -define(TIMEOUT, 10 * 1000). %% 10 second timeout
 
--define(KNOWN_FILES_LIST_PREFIX, "known_files_").
-
 -record(state, {fluname :: atom(),
                 datadir :: string(),
                 tid     :: ets:tid(),
-                cnt     :: non_neg_integer(),
-                trimmed_files :: machi_plist:plist()
+                cnt     :: non_neg_integer()
                }).
 
 %% This record goes in the ets table where filename is the key
@@ -62,8 +59,7 @@
          lookup_proxy_pid/2,
          start_proxy_pid/2,
          stop_proxy_pid/2,
-         build_metadata_mgr_name/2,
-         trim_file/2
+         build_metadata_mgr_name/2
         ]).
 
 %% gen_server callbacks
@@ -101,24 +97,15 @@ start_proxy_pid(FluName, {file, Filename}) ->
 stop_proxy_pid(FluName, {file, Filename}) ->
     gen_server:call(get_manager_atom(FluName, Filename), {stop_proxy_pid, Filename}, ?TIMEOUT).
 
-trim_file(FluName, {file, Filename}) ->
-    gen_server:call(get_manager_atom(FluName, Filename), {trim_file, Filename}, ?TIMEOUT).
-
 %% gen_server callbacks
 init([FluName, Name, DataDir, Num]) ->
     %% important: we'll need another persistent storage to
     %% remember deleted (trimmed) file, to prevent resurrection after
     %% flu restart and append.
-    FileListFileName =
-        filename:join([DataDir, ?KNOWN_FILES_LIST_PREFIX ++ atom_to_list(FluName)]),
-    {ok, PList} = machi_plist:open(FileListFileName, []),
-    %% TODO make sure all files non-existent, if any remaining files
-    %% here, just delete it. They're in the list *because* they're all
-    %% trimmed.
 
     Tid = ets:new(Name, [{keypos, 2}, {read_concurrency, true}, {write_concurrency, true}]),
-    {ok, #state{fluname = FluName, datadir = DataDir, tid = Tid, cnt = Num,
-                trimmed_files=PList}}.
+
+    {ok, #state{fluname = FluName, datadir = DataDir, tid = Tid, cnt = Num}}.
 
 handle_cast(Req, State) ->
     lager:warning("Got unknown cast ~p", [Req]),
@@ -132,23 +119,17 @@ handle_call({proxy_pid, Filename}, _From, State = #state{ tid = Tid }) ->
     {reply, Reply, State};
 
 handle_call({start_proxy_pid, Filename}, _From,
-            State = #state{ fluname = N, tid = Tid, datadir = D,
-                            trimmed_files=TrimmedFiles}) ->
-    case machi_plist:find(TrimmedFiles, Filename) of
-        false ->
-            NewR = case lookup_md(Tid, Filename) of
-                       not_found ->
-                           start_file_proxy(N, D, Filename);
-                       #md{ proxy_pid = undefined } = R0 ->
-                           start_file_proxy(N, D, R0);
-                       #md{ proxy_pid = _Pid } = R1 ->
-                           R1
-                   end,
-            update_ets(Tid, NewR),
-            {reply, {ok, NewR#md.proxy_pid}, State};
-        true ->
-            {reply, {error, trimmed}, State}
-    end;
+            State = #state{ fluname = N, tid = Tid, datadir = D}) ->
+    NewR = case lookup_md(Tid, Filename) of
+               not_found ->
+                   start_file_proxy(N, D, Filename);
+               #md{ proxy_pid = undefined } = R0 ->
+                   start_file_proxy(N, D, R0);
+               #md{ proxy_pid = _Pid } = R1 ->
+                   R1
+           end,
+    update_ets(Tid, NewR),
+    {reply, {ok, NewR#md.proxy_pid}, State};
 
 handle_call({stop_proxy_pid, Filename}, _From, State = #state{ tid = Tid }) ->
     case lookup_md(Tid, Filename) of
@@ -162,15 +143,6 @@ handle_call({stop_proxy_pid, Filename}, _From, State = #state{ tid = Tid }) ->
             update_ets(Tid, R#md{ proxy_pid = undefined, mref = undefined })
     end,
     {reply, ok, State};
-
-handle_call({trim_file, Filename}, _,
-            S = #state{trimmed_files = TrimmedFiles }) ->
-    case machi_plist:add(TrimmedFiles, Filename) of
-        {ok, TrimmedFiles2} ->
-            {reply, ok, S#state{trimmed_files=TrimmedFiles2}};
-        Error ->
-            {reply, Error, S}
-    end;
 
 handle_call(Req, From, State) ->
     lager:warning("Got unknown call ~p from ~p", [Req, From]),
@@ -219,9 +191,8 @@ handle_info(Info, State) ->
     lager:warning("Got unknown info ~p", [Info]),
     {noreply, State}.
 
-terminate(Reason, _State = #state{trimmed_files=TrimmedFiles}) ->
+terminate(Reason, _State) ->
     lager:info("Shutting down because ~p", [Reason]),
-    machi_plist:close(TrimmedFiles),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -253,7 +224,7 @@ lookup_md(Tid, Data) ->
         [R] -> R
     end.
 
-start_file_proxy(FluName, D, R = #md{filename = F} ) ->
+start_file_proxy(FluName, D, R = #md{filename = F}) ->
     {ok, Pid} = machi_file_proxy_sup:start_proxy(FluName, D, F),
     Mref = monitor(process, Pid),
     R#md{ proxy_pid = Pid, mref = Mref };

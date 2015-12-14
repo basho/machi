@@ -44,8 +44,9 @@ start_link(FluName) ->
     supervisor:start_link({local, make_proxy_name(FluName)}, ?MODULE, []).
 
 start_proxy(FluName, DataDir, Filename) ->
+    {ok, CsumTable} = machi_flu_filename_mgr:get_csum_table(FluName),
     supervisor:start_child(make_proxy_name(FluName),
-                           [FluName, Filename, DataDir]).
+                           [Filename, DataDir, CsumTable]).
 
 init([]) ->
     SupFlags = {simple_one_for_one, 1000, 10},
