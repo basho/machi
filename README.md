@@ -28,8 +28,8 @@ What if we want a file store that is always available to write new
 file data and attempts best-effort file reads?
 
 If we really do care about data loss and/or data corruption, then we
-really want both #3 and #1.  Unfortunately, systems that meet criteria
-#1 are *very*
+really want both #3 and #1.  Unfortunately, systems that meet
+criteria #1 are *very*
 rare.  Why?  This is 2015.  We have decades of research that shows
 that computer hardware can (and
 indeed does) corrupt data at nearly every level of the modern
