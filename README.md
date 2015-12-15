@@ -5,8 +5,8 @@
 Outline
 
 1. [Why another file store?](#sec1)
-2. [Development status summary](#sec2)
-3. [Where to learn more about Machi](#sec3)
+2. [Where to learn more about Machi](#sec2)
+3. [Development status summary](#sec3)
 4. [Contributing to Machi's development](#sec4)
 
 <a name="sec1">
@@ -39,8 +39,8 @@ file data and attempts best-effort file reads?
 
 If we really do care about data loss and/or data corruption, then we
 really want both #3 and #1.  Unfortunately, systems that meet
-criteria #1 are *very*
-rare.  Why?  This is 2015.  We have decades of research that shows
+criteria #1 are _very rare_.
+Why?  This is 2015.  We have decades of research that shows
 that computer hardware can (and
 indeed does) corrupt data at nearly every level of the modern
 client/server application stack.  Systems with end-to-end data
@@ -49,7 +49,23 @@ Machi is an effort to change the deplorable state of the world, one
 Erlang function at a time.
 
 <a name="sec2">
-## 2. Development status summary
+## 2. Where to learn more about Machi
+
+The two major design documents for Machi are now mostly stable.
+Please see the [doc](./doc) directory's [README](./doc) for details.
+
+We also have a
+[Frequently Asked Questions (FAQ) list](./FAQ.md).
+
+Scott recently (November 2015) gave a presentation at the
+[RICON 2015 conference](http://ricon.io) about one of the techniques
+used by Machi; "Managing Chain Replication Metadata with
+Humming Consensus" is available online now.
+* [slides (PDF format)](http://ricon.io/speakers/slides/Scott_Fritchie_Ricon_2015.pdf)
+* [video](https://www.youtube.com/watch?v=yR5kHL1bu1Q)
+
+<a name="sec3">
+## 3. Development status summary
 
 Mid-December 2015: work is underway.
 
@@ -57,11 +73,19 @@ Mid-December 2015: work is underway.
     * Code refactoring: metadata management using
       [ELevelDB](https://github.com/basho/eleveldb)
     * File repair using file-centric, Merkle-style hash tree.
+    * Server-side socket handling is now performed by
+      [ranch](https://github.com/ninenines/ranch)
     * QuickCheck tests for file repair correctness
         * 2015-12-15: The EUnit test `machi_ap_repair_eqc` is
           currently failing occasionally because it (correctly) detects
           double-write errors.  Double-write errors will be eliminated
           when the ELevelDB integration work is complete.
+    * The `make stage` and `make release` commands can be used to
+      create a primitive "package".  Use `./rel/machi/bin/machi console`
+      to start the Machi app in interactive mode.  Substitute the word
+      `start` instead of console to start Machi in background/daemon
+      mode.  The `./rel/machi/bin/machi` command without any arguments
+      will give a short usage summary.
     * Chain Replication management using the Humming Consensus
       algorithm to manage chain state is stable.
         * ... with the caveat that it runs very well in a very harsh
@@ -83,22 +107,6 @@ please see the
 If you'd like to work on a protocol such as Thrift, UBF,
 msgpack over UDP, or some other protocol, let us know by
 [opening an issue to discuss it](./issues/new).
-
-<a name="sec3">
-## 3. Where to learn more about Machi
-
-The two major design documents for Machi are now mostly stable.
-Please see the [doc](./doc) directory's [README](./doc) for details.
-
-We also have a
-[Frequently Asked Questions (FAQ) list](./FAQ.md).
-
-Scott recently (November 2015) gave a presentation at the
-[RICON 2015 conference](http://ricon.io) about one of the techniques
-used by Machi; "Managing Chain Replication Metadata with
-Humming Consensus" is available online now.
-* [slides (PDF format)](http://ricon.io/speakers/slides/Scott_Fritchie_Ricon_2015.pdf)
-* [video](https://www.youtube.com/watch?v=yR5kHL1bu1Q)
 
 <a name="sec4">
 ## 4. Contributing to Machi's development
