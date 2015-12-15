@@ -6,20 +6,6 @@ Erlang documentation, please use this link:
 
 ## Documents in this directory
 
-### chain-self-management-sketch.org
-
-[chain-self-management-sketch.org](chain-self-management-sketch.org)
-is a mostly-deprecated draft of
-an introduction to the
-self-management algorithm proposed for Machi.  Most material has been
-moved to the [high-level-chain-mgr.pdf](high-level-chain-mgr.pdf) document.
-
-### cluster-of-clusters (directory)
-
-This directory contains the sketch of the "cluster of clusters" design
-strawman for partitioning/distributing/sharding files across a large
-number of independent Machi clusters.
-
 ### high-level-machi.pdf
 
 [high-level-machi.pdf](high-level-machi.pdf)
@@ -50,9 +36,9 @@ introduction to the Humming Consensus algorithm.  Its abstract:
 > of file updates to all replica servers in a Machi cluster.  Chain
 > Replication is a variation of primary/backup replication where the
 > order of updates between the primary server and each of the backup
-> servers is strictly ordered into a single ``chain''.  Management of
-> Chain Replication's metadata, e.g., ``What is the current order of
-> servers in the chain?'', remains an open research problem.  The
+> servers is strictly ordered into a single "chain".  Management of
+> Chain Replication's metadata, e.g., "What is the current order of
+> servers in the chain?", remains an open research problem.  The
 > current state of the art for Chain Replication metadata management
 > relies on an external oracle (e.g., ZooKeeper) or the Elastic
 > Replication algorithm.
@@ -60,7 +46,7 @@ introduction to the Humming Consensus algorithm.  Its abstract:
 > This document describes the Machi chain manager, the component
 > responsible for managing Chain Replication metadata state.  The chain
 > manager uses a new technique, based on a variation of CORFU, called
-> ``humming consensus''.
+> "humming consensus".
 > Humming consensus does not require active participation by all or even
 > a majority of participants to make decisions.  Machi's chain manager
 > bases its logic on humming consensus to make decisions about how to
@@ -71,3 +57,18 @@ introduction to the Humming Consensus algorithm.  Its abstract:
 > decision during that epoch.  When a differing decision is discovered,
 > new time epochs are proposed in which a new consensus is reached and
 > disseminated to all available participants.
+
+### chain-self-management-sketch.org
+
+[chain-self-management-sketch.org](chain-self-management-sketch.org)
+is a mostly-deprecated draft of
+an introduction to the
+self-management algorithm proposed for Machi.  Most material has been
+moved to the [high-level-chain-mgr.pdf](high-level-chain-mgr.pdf) document.
+
+### cluster-of-clusters (directory)
+
+This directory contains the sketch of the "cluster of clusters" design
+strawman for partitioning/distributing/sharding files across a large
+number of independent Machi clusters.
+
