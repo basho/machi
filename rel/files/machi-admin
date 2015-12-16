@@ -22,23 +22,41 @@ cd $RUNNER_BASE_DIR
 SCRIPT=`basename $0`
 
 usage() {
-    echo "Usage: $SCRIPT { test | "
+    echo "Usage: $SCRIPT { quick-admin-check | quick-admin-apply | "
     echo "                    top }"
 }
 
 case "$1" in
-    test)
+    quick-admin-check)
         # Make sure the local node IS running
         node_up_check
 
         shift
 
-        # Parse out the node name to pass to the client
-        NODE_NAME=${NAME_ARG#* }
+        NODE_NAME=${NAME_ARG#* } # target machi server node name
+        IN_FILE="$1"
 
-        $ERTS_PATH/erl -noshell $NAME_PARAM machi_test$NAME_HOST $COOKIE_ARG \
-                       -pa $RUNNER_LIB_DIR/basho-patches \
-                       -eval "case catch(machi:client_test(\"$NODE_NAME\")) of \
+        $ERTS_PATH/erl -noshell -noinput $NAME_PARAM machi_test$NAME_HOST $COOKIE_ARG \
+                       -remsh $NODE_NAME \
+                       -eval "Me = self(), spawn('"$NODE_NAME"', fun() -> X = (catch(machi_lifecycle_mgr:quick_admin_sanity_check(\"$IN_FILE\"))), Me ! {res, X} end), XX = receive {res, Res} -> Res after 10*1000 -> timeout end, io:format(user, \"Result: ~p\n\", [XX]), case XX of \
+                               ok -> init:stop();                             \
+                               _  -> init:stop(1)                             \
+                              end."
+
+        ;;
+    quick-admin-apply)
+        # Make sure the local node IS running
+        node_up_check
+
+        shift
+
+        NODE_NAME=${NAME_ARG#* } # target machi server node name
+        IN_FILE="$1"
+        RELATIVE_HOST="$2"
+
+        $ERTS_PATH/erl -noshell -noinput $NAME_PARAM machi_test$NAME_HOST $COOKIE_ARG \
+                       -remsh $NODE_NAME \
+                       -eval "Me = self(), spawn('"$NODE_NAME"', fun() -> X = (catch(machi_lifecycle_mgr:quick_admin_apply(\"$IN_FILE\", \"$RELATIVE_HOST\"))), Me ! {res, X} end), XX = receive {res, Res} -> Res after 10*1000 -> timeout end, io:format(user, \"Result: ~p\n\", [XX]), case XX of \
                                ok -> init:stop();                             \
                                _  -> init:stop(1)                             \
                               end."

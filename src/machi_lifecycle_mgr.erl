@@ -207,7 +207,7 @@
          process_pending/0]).
 -export([get_pending_dir/0, get_rejected_dir/0, get_flu_config_dir/0,
          get_flu_data_dir/0, get_chain_config_dir/0, get_data_dir/0]).
--export([quick_admin_sanity_check/0, quick_admin_apply/1]).
+-export([quick_admin_sanity_check/1, quick_admin_apply/2]).
 -export([make_pending_config/1, run_ast/1, diff_env/2]).
 -ifdef(TEST).
 -compile(export_all).
@@ -323,6 +323,8 @@ sanitize_chain_def_rec(Whole, {Acc, D}) ->
 perhaps_bootstrap_chains([], LocalFLUs_at_zero, LocalFLUs) ->
     if LocalFLUs == [] ->
             ok;
+       LocalFLUs_at_zero == [] ->
+            ok;
        true ->
             lager:warning("The following FLUs are defined but are not also "
                           "members of a defined chain: ~w\n",
@@ -420,6 +422,7 @@ set_chain_members(OldChainName, NewChainName, OldCMode,
 do_process_pending(S) ->
     PendingDir = get_pending_dir(),
     PendingParsed = machi_flu_sup:load_rc_d_files_from_dir(PendingDir),
+    %% A pending file has exactly one record (#p_srvr{} or #chain_def_v1{}).
     P_FLUs = [X || {_File, #p_srvr{}}=X <- PendingParsed],
     P_Chains = [X || {_File, #chain_def_v1{}}=X <- PendingParsed],
     BadFiles = [File || {File, []} <- PendingParsed],
@@ -466,7 +469,7 @@ get_preserve_dir() ->
 
 get_quick_admin_dir() ->
     {ok, EtcDir} = application:get_env(machi, platform_etc_dir),
-    EtcDir ++ "/quick-admin".
+    EtcDir ++ "/quick-admin-archive".
 
 process_pending_flus(P_FLUs, S) ->
     lists:foldl(fun process_pending_flu/2, S, P_FLUs).
@@ -600,7 +603,7 @@ move_to_rejected(File, S) ->
     S.
 
 make_ts_suffix() ->
-    lists:flatten(io_lib:format("~w,~w,~w", tuple_to_list(os:timestamp()))).
+    str("~w,~w,~w", tuple_to_list(os:timestamp())).
 
 move_to_flu_config(FLU, File, S) ->
     lager:info("Creating FLU config file ~w\n", [FLU]),
@@ -890,7 +893,10 @@ n(L) ->
     lists:sort(L).
 
 err(Fmt, Args, AST) ->
-    throw({lists:flatten(io_lib:format(Fmt, Args)), AST}).
+    throw({str(Fmt, Args), AST}).
+
+str(Fmt, Args) ->
+    lists:flatten(io_lib:format(Fmt, Args)).
 
 %% We won't allow 'atom' style proplist members: too difficult to normalize.
 %% Also, no duplicates, again because normalizing useful for checksums but
@@ -991,7 +997,7 @@ make_pending_config(Term) ->
     Dir = get_pending_dir(),
     Blob = io_lib:format("~p.\n", [Term]),
     {A,B,C} = os:timestamp(),
-    Path = lists:flatten(io_lib:format("~s/~w.~6..0w",[Dir, A*1000000+B, C])),
+    Path = str("~s/~w.~6..0w",[Dir, A*1000000+B, C]),
     ok = file:write_file(Path, Blob).
 
 %% @doc Check a "quick admin" directory's for sanity
@@ -1013,28 +1019,29 @@ make_pending_config(Term) ->
 %% files were actually safe &amp; sane, therefore any sanity problem can only
 %% be caused by the contents of the largest numbered file.
 
-quick_admin_sanity_check() ->
+quick_admin_sanity_check(File) ->
     try
-        {ok, Env} = quick_admin_run_ast(),
-        {true, diff_env(Env, all)}
+        {ok, Env} = quick_admin_run_ast(File),
+        ok
     catch X:Y ->
-            {false, {X,Y}}
+            {error, {X,Y, erlang:get_stacktrace()}}
     end.
 
-quick_admin_apply(HostName) ->
+quick_admin_apply(File, HostName) ->
     try
-        {ok, Env} = quick_admin_run_ast(),
+        {ok, Env} = quick_admin_run_ast(File),
         {_, Cs} = diff_env(Env, HostName),
         [ok = make_pending_config(C) || C <- Cs],
         {PassFLUs, PassChains} = machi_lifecycle_mgr:process_pending(),
         case length(PassFLUs) + length(PassChains) of
             N when N == length(Cs) ->
-                yay;
+                ok = quick_admin_add_archive_file(File),
+                ok;
             _ ->
-                {sad, expected, length(Cs), Cs, got, PassFLUs, PassChains}
+                {error, {expected, length(Cs), Cs, got, PassFLUs, PassChains}}
         end
     catch X:Y ->
-            {false, {X,Y}, erlang:get_stacktrace()}
+            {error, {X,Y, erlang:get_stacktrace()}}
     end.
 
 
@@ -1042,14 +1049,31 @@ quick_admin_parse_quick(F) ->
     {ok, Terms} = file:consult(F),
     Terms.
 
-quick_admin_run_ast() ->
-    case filelib:wildcard(get_quick_admin_dir() ++ "/*") of
-        [] ->
-            PrevASTs = LatestASTs = [];
-        Quicks ->
-            LatestQuick = lists:last(Quicks),
-            Prev = Quicks -- [LatestQuick],
-            PrevASTs = lists:append([quick_admin_parse_quick(F) || F <- Prev]),
-            LatestASTs = quick_admin_parse_quick(LatestQuick)
-    end,
+quick_admin_run_ast(File) ->
+    Prevs = quick_admin_list_archive_files(),
+    PrevASTs = lists:append([quick_admin_parse_quick(F) || F <- Prevs]),
+    LatestASTs = quick_admin_parse_quick(File),
     {ok, _Env} = run_ast(PrevASTs ++ [switch_old_and_new] ++ LatestASTs).
+
+quick_admin_list_archive_files() ->
+    Prevs0 = filelib:wildcard(get_quick_admin_dir() ++ "/*"),
+    [Fn || Fn <- Prevs0, base_fn_all_digits(Fn)].
+
+base_fn_all_digits(Path) ->
+    Base = filename:basename(Path),
+    lists:all(fun is_ascii_digit/1, Base).
+
+is_ascii_digit(X) when $0 =< X, X =< $9 ->
+    true;
+is_ascii_digit(_) ->
+    false.
+
+quick_admin_add_archive_file(File) ->
+    Prevs = quick_admin_list_archive_files(),
+    N = case [list_to_integer(filename:basename(Fn)) || Fn <- Prevs] of
+            [] -> 0;
+            Ns -> lists:max(Ns)
+        end,
+    Dir = get_quick_admin_dir(),
+    NewName = str("~s/~6..0w", [Dir, N + 1]),
+    ok = file:rename(File, NewName).
