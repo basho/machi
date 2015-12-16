@@ -164,7 +164,7 @@ append_server_dispatch(From, CoC_Namespace, CoC_Locator,
             Other
     end,
     _ = gen_server:reply(From, Result),
-    exit(normal).
+    ok.
 
 handle_append(_N, _L, _Prefix, <<>>, _Csum, _Extra, _FluName, _EpochId) ->
     {error, bad_arg};

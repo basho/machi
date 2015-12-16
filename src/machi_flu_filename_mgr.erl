@@ -67,12 +67,12 @@
     ]).
 
 -define(TIMEOUT, 10 * 1000).
--include("machi_projection.hrl"). %% included for pv1_epoch_n type
+-include("machi_projection.hrl"). %% included for pv1_epoch type
 
 -record(state, {fluname :: atom(),
                 tid     :: ets:tid(),
                 datadir :: string(),
-                epoch   :: pv1_epoch_n()
+                epoch   :: pv1_epoch()
                }).
 
 %% public API
@@ -87,8 +87,8 @@ start_link(FluName, DataDir) when is_atom(FluName) andalso is_list(DataDir) ->
     N = make_filename_mgr_name(FluName),
     gen_server:start_link({local, N}, ?MODULE, [FluName, DataDir], []).
 
--spec find_or_make_filename_from_prefix( FluName :: atom(), 
-                                         EpochId :: pv1_epoch_n(), 
+-spec find_or_make_filename_from_prefix( FluName :: atom(),
+                                         EpochId :: pv1_epoch(),
                                          Prefix :: {prefix, string()},
                                          machi_dt:coc_nl()) ->
         {file, Filename :: string()} | {error, Reason :: term() } | timeout.
@@ -130,7 +130,7 @@ list_files_by_prefix(_FluName, Other) ->
 init([FluName, DataDir]) ->
     Tid = ets:new(make_filename_mgr_name(FluName), [named_table, {read_concurrency, true}]),
     {ok, #state{fluname = FluName,
-                epoch = 0,
+                epoch = ?DUMMY_PV1_EPOCH,
                 datadir = DataDir,
                 tid = Tid}}.
 

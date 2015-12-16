@@ -85,8 +85,8 @@ fitness(FluName) ->
 
 -spec flu1(atom()) -> [{atom(), term()}].
 flu1(FluName) ->
-    State = machi_flu1:current_state(FluName),
-    machi_flu1:format_state(State).
+    State = machi_flu1_append_server:current_state(FluName),
+    machi_flu1_append_server:format_state(State).
 
 %% Internal functions
 
