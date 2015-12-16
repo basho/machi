@@ -100,7 +100,7 @@ smoke_test2() ->
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         io:format("\nSTEP: Start 3 FLUs, no chain.\n", []),
 
-        [make_pending_config(P) || P <- [Pa,Pb,Pc] ],
+        [machi_lifecycle_mgr:make_pending_config(P) || P <- [Pa,Pb,Pc] ],
         {[_,_,_],[]} = machi_lifecycle_mgr:process_pending(),
         [{ok, #projection_v1{epoch_number=0}} =
              machi_projection_store:read_latest_projection(PSTORE, private)
@@ -111,7 +111,7 @@ smoke_test2() ->
 
         C1 = #chain_def_v1{name=cx, mode=ap_mode, full=[Pa,Pb,Pc],
                            local_run=[a,b,c]},
-        make_pending_config(C1),
+        machi_lifecycle_mgr:make_pending_config(C1),
         {[],[_]} = machi_lifecycle_mgr:process_pending(),
         Advance(),
         [{ok, #projection_v1{all_members=[a,b,c]}} =
@@ -124,7 +124,7 @@ smoke_test2() ->
         C2 = #chain_def_v1{name=cx, mode=ap_mode, full=[Pb,Pc],
                            old_full=[a,b,c], old_witnesses=[],
                            local_stop=[a], local_run=[b,c]},
-        make_pending_config(C2),
+        machi_lifecycle_mgr:make_pending_config(C2),
         {[],[_]} = machi_lifecycle_mgr:process_pending(),
         Advance(),
         %% a should be down
@@ -140,7 +140,7 @@ smoke_test2() ->
         C3 = #chain_def_v1{name=cx, mode=ap_mode, full=[],
                            old_full=[b,c], old_witnesses=[],
                            local_stop=[b,c], local_run=[]},
-        make_pending_config(C3),
+        machi_lifecycle_mgr:make_pending_config(C3),
         {[],[_]} = machi_lifecycle_mgr:process_pending(),
         Advance(),
         %% a,b,c should be down
@@ -152,14 +152,6 @@ smoke_test2() ->
     after
         cleanup(YoCleanup)
     end.
-
-make_pending_config(Term) ->
-    Dir = machi_lifecycle_mgr:get_pending_dir(x),
-    Blob = io_lib:format("~w.\n", [Term]),
-    {A,B,C} = os:timestamp(),
-    ok = file:write_file(Dir ++ "/" ++
-                         lists:flatten(io_lib:format("~w.~6..0w",[A*1000000+B,C])),
-                         Blob).
 
 ast_tuple_syntax_test() ->
     T = fun(L) -> machi_lifecycle_mgr:check_ast_tuple_syntax(L) end,
@@ -280,7 +272,7 @@ ast_then_apply_test2() ->
         {ok, Env1} = machi_lifecycle_mgr:run_ast(R1),
         {_X1a, X1b} = machi_lifecycle_mgr:diff_env(Env1, "localhost"),
         %% io:format(user, "X1b ~p\n", [X1b]),
-        [make_pending_config(X) || X <- X1b],
+        [machi_lifecycle_mgr:make_pending_config(X) || X <- X1b],
         {PassFLUs, PassChains} = machi_lifecycle_mgr:process_pending(),
         true = (length(PassFLUs) == length(FLU_defs)),
         true = (length(PassChains) == length(Ch_defs)),

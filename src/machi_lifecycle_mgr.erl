@@ -205,6 +205,10 @@
 %% API
 -export([start_link/0,
          process_pending/0]).
+-export([get_pending_dir/0, get_rejected_dir/0, get_flu_config_dir/0,
+         get_flu_data_dir/0, get_chain_config_dir/0, get_data_dir/0]).
+-export([quick_admin_sanity_check/0, quick_admin_apply/1]).
+-export([make_pending_config/1, run_ast/1, diff_env/2]).
 -ifdef(TEST).
 -compile(export_all).
 -endif. % TEST
@@ -282,14 +286,7 @@ get_latest_public_epochs(FLUs) ->
      end || FLU <- FLUs].
 
 get_initial_chains() ->
-    DoesNotExist = "/tmp/does/not/exist",
-    ConfigDir = case application:get_env(machi, chain_config_dir, DoesNotExist) of
-                    DoesNotExist ->
-                        DoesNotExist;
-                    Dir ->
-                        ok = filelib:ensure_dir(Dir ++ "/unused"),
-                        Dir
-                end,
+    ConfigDir = get_chain_config_dir(),
     CDefs = [CDef || {_File, CDef} <- machi_flu_sup:load_rc_d_files_from_dir(
                                         ConfigDir)],
     sanitize_chain_def_records(CDefs).
@@ -378,7 +375,7 @@ bootstrap_chain2(#chain_def_v1{name=NewChainName, mode=NewCMode,
                            Mgr, NewChainName, OldEpoch,
                            NewCMode, MembersDict, NewWitnesses_list) of
         ok ->
-            lager:info("Bootstrapped chain ~w via FLU ~w to "
+            lager:info("Configured chain ~w via FLU ~w to "
                        "mode=~w all=~w witnesses=~w\n",
                        [NewChainName, FLU, NewCMode,
                         NewAll_list, NewWitnesses_list]),
@@ -421,8 +418,7 @@ set_chain_members(OldChainName, NewChainName, OldCMode,
     end.
 
 do_process_pending(S) ->
-    PendingDir = get_pending_dir(S),
-    %% PendingFiles = get_pending_files(PendingDir, S),
+    PendingDir = get_pending_dir(),
     PendingParsed = machi_flu_sup:load_rc_d_files_from_dir(PendingDir),
     P_FLUs = [X || {_File, #p_srvr{}}=X <- PendingParsed],
     P_Chains = [X || {_File, #chain_def_v1{}}=X <- PendingParsed],
@@ -432,8 +428,8 @@ do_process_pending(S) ->
     S4 = process_bad_files(BadFiles, S3),
     {{P_FLUs, P_Chains}, S4}.
 
-flu_config_exists(FLU, S) ->
-    ConfigDir = get_flu_config_dir(S),
+flu_config_exists(FLU) ->
+    ConfigDir = get_flu_config_dir(),
     case file:read_file_info(ConfigDir ++ "/" ++ atom_to_list(FLU)) of
         {ok, _} ->
             true;
@@ -441,32 +437,36 @@ flu_config_exists(FLU, S) ->
             false
     end.
 
-get_pending_dir(_S) ->
+get_pending_dir() ->
     {ok, EtcDir} = application:get_env(machi, platform_etc_dir),
     EtcDir ++ "/pending".
 
-get_rejected_dir(_S) ->
+get_rejected_dir() ->
     {ok, EtcDir} = application:get_env(machi, platform_etc_dir),
     EtcDir ++ "/rejected".
 
-get_flu_config_dir(_S) ->
+get_flu_config_dir() ->
     {ok, Dir} = application:get_env(machi, flu_config_dir),
     Dir.
 
-get_flu_data_dir(_S) ->
+get_flu_data_dir() ->
     {ok, Dir} = application:get_env(machi, flu_data_dir),
     Dir.
 
-get_chain_config_dir(_S) ->
+get_chain_config_dir() ->
     {ok, Dir} = application:get_env(machi, chain_config_dir),
     Dir.
 
-get_data_dir(_S) ->
+get_data_dir() ->
     {ok, Dir} = application:get_env(machi, platform_data_dir),
     Dir.
 
-get_preserve_dir(S) ->
-    get_data_dir(S) ++ "/^PRESERVE".
+get_preserve_dir() ->
+    get_data_dir() ++ "/^PRESERVE".
+
+get_quick_admin_dir() ->
+    {ok, EtcDir} = application:get_env(machi, platform_etc_dir),
+    EtcDir ++ "/quick-admin".
 
 process_pending_flus(P_FLUs, S) ->
     lists:foldl(fun process_pending_flu/2, S, P_FLUs).
@@ -547,7 +547,7 @@ process_pending_chain({File, CD}, S) ->
 
 process_pending_chain2(File, CD, RemovedFLUs, ChainConfigAction, S) ->
     LocalRemovedFLUs = [FLU || FLU <- RemovedFLUs,
-                               flu_config_exists(FLU, S)],
+                               flu_config_exists(FLU)],
     case LocalRemovedFLUs of
         [] ->
             ok;
@@ -558,9 +558,9 @@ process_pending_chain2(File, CD, RemovedFLUs, ChainConfigAction, S) ->
                  %% We may be retrying this, so be liberal with any pattern
                  %% matching on return values.
                  _ = machi_flu_psup:stop_flu_package(FLU),
-                 ConfigDir = get_flu_config_dir(S),
-                 FluDataDir = get_flu_data_dir(S),
-                 PreserveDir = get_preserve_dir(S),
+                 ConfigDir = get_flu_config_dir(),
+                 FluDataDir = get_flu_data_dir(),
+                 PreserveDir = get_preserve_dir(),
                  Suffix = make_ts_suffix(),
                  FLU_str = atom_to_list(FLU),
                  MyPreserveDir = PreserveDir ++ "/" ++ FLU_str ++ "." ++ Suffix,
@@ -594,7 +594,7 @@ process_bad_files(Files, S) ->
 
 move_to_rejected(File, S) ->
     lager:error("Pending unknown config file ~s has been rejected\n", [File]),
-    Dst = get_rejected_dir(S),
+    Dst = get_rejected_dir(),
     Suffix = make_ts_suffix(),
     ok = file:rename(File, Dst ++ "/" ++ filename:basename(File) ++ Suffix),
     S.
@@ -604,19 +604,19 @@ make_ts_suffix() ->
 
 move_to_flu_config(FLU, File, S) ->
     lager:info("Creating FLU config file ~w\n", [FLU]),
-    Dst = get_flu_config_dir(S),
+    Dst = get_flu_config_dir(),
     ok = file:rename(File, Dst ++ "/" ++ atom_to_list(FLU)),
     S.
 
 move_to_chain_config(Name, File, S) ->
     lager:info("Creating chain config file ~w\n", [Name]),
-    Dst = get_chain_config_dir(S),
+    Dst = get_chain_config_dir(),
     ok = file:rename(File, Dst ++ "/" ++ atom_to_list(Name)),
     S.
 
 delete_chain_config(Name, File, S) ->
     lager:info("Deleting chain config file ~s for chain ~w\n", [File, Name]),
-    Dst = get_chain_config_dir(S),
+    Dst = get_chain_config_dir(),
     ok = file:delete(Dst ++ "/" ++ atom_to_list(Name)),
     S.
 
@@ -917,24 +917,7 @@ is_porty(Port) ->
     is_integer(Port) andalso 1024 =< Port andalso Port =< 65535.
 
 diff_env({KV_old, KV_new, _IsNew}=E, RelativeHost) ->
-    Old_list = gb_trees:to_list(KV_old),
     New_list = gb_trees:to_list(KV_new),
-    Keys_old = [K || {K,_V} <- Old_list],
-    Keys_new = [K || {K,_V} <- New_list],
-    Append = fun(Item) ->
-                     fun(K, D) ->
-                             L = gb_trees:get(K, D),
-                             gb_trees:enter(K, L ++ [Item], D)
-                     end
-             end,
-
-    %% DiffD = lists:foldl(fun(K, D) ->
-    %%                             gb_trees:enter(K, [], D)
-    %%                     end, gb_trees:empty(), lists:usort(Keys_old++Keys_new)),
-    %% DiffD2 = lists:foldl(Append(old), DiffD, Keys_old),
-    %% DiffD3 = lists:foldl(Append(new), DiffD2, Keys_new),
-    %% %% DiffD3 values will be exactly one of: [old], [old,new], [new]
-
     put(final, []),
     Add = fun(X) -> put(final, [X|get(final)]) end,
 
@@ -1003,3 +986,70 @@ diff_env({KV_old, KV_new, _IsNew}=E, RelativeHost) ->
      end || {{kv,{chain,Name}}, V} <- New_list],
 
     {x, lists:reverse(get(final))}.
+
+make_pending_config(Term) ->
+    Dir = get_pending_dir(),
+    Blob = io_lib:format("~p.\n", [Term]),
+    {A,B,C} = os:timestamp(),
+    Path = lists:flatten(io_lib:format("~s/~w.~6..0w",[Dir, A*1000000+B, C])),
+    ok = file:write_file(Path, Blob).
+
+%% @doc Check a "quick admin" directory's for sanity
+%%
+%% This is a quick admin tool, though perhaps "tool" is too big of a word.
+%% The meaning of "quick" is closer to "quick &amp; dirty hack".  Any
+%% violation of the assumptions of these quick admin functions will result in
+%% unspecified behavior, bugs, plagues, and perhaps lost data.
+%%
+%% Add files in this directory are assumed to have names of the same length
+%% (e.g. 4 bytes), ASCII formatted numbers, greater than 0, left-padded with
+%% "0".  Each file is assumed to have zero or more AST tuples within, parsable
+%% using {ok, ListOfAST_tuples} = file:consult(QuickAdminFile).
+%%
+%% The largest numbered file is assumed to be all of the AST changes that we
+%% want to apply in a single batch.  The AST tuples of all files with smaller
+%% numbers will be concatenated together to create the prior history of
+%% cluster-of-clusters.  We assume that all transitions inside these earlier
+%% files were actually safe &amp; sane, therefore any sanity problem can only
+%% be caused by the contents of the largest numbered file.
+
+quick_admin_sanity_check() ->
+    try
+        {ok, Env} = quick_admin_run_ast(),
+        {true, diff_env(Env, all)}
+    catch X:Y ->
+            {false, {X,Y}}
+    end.
+
+quick_admin_apply(HostName) ->
+    try
+        {ok, Env} = quick_admin_run_ast(),
+        {_, Cs} = diff_env(Env, HostName),
+        [ok = make_pending_config(C) || C <- Cs],
+        {PassFLUs, PassChains} = machi_lifecycle_mgr:process_pending(),
+        case length(PassFLUs) + length(PassChains) of
+            N when N == length(Cs) ->
+                yay;
+            _ ->
+                {sad, expected, length(Cs), Cs, got, PassFLUs, PassChains}
+        end
+    catch X:Y ->
+            {false, {X,Y}, erlang:get_stacktrace()}
+    end.
+
+
+quick_admin_parse_quick(F) ->
+    {ok, Terms} = file:consult(F),
+    Terms.
+
+quick_admin_run_ast() ->
+    case filelib:wildcard(get_quick_admin_dir() ++ "/*") of
+        [] ->
+            PrevASTs = LatestASTs = [];
+        Quicks ->
+            LatestQuick = lists:last(Quicks),
+            Prev = Quicks -- [LatestQuick],
+            PrevASTs = lists:append([quick_admin_parse_quick(F) || F <- Prev]),
+            LatestASTs = quick_admin_parse_quick(LatestQuick)
+    end,
+    {ok, _Env} = run_ast(PrevASTs ++ [switch_old_and_new] ++ LatestASTs).
