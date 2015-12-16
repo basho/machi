@@ -13,8 +13,8 @@
     + [1.1 What is Machi?](#n1.1)
     + [1.2 What is a Machi "cluster of clusters"?](#n1.2)
         + [1.2.1 This "cluster of clusters" idea needs a better name, don't you agree?](#n1.2.1)
-    + [1.3 What is Machi like when operating in "eventually consistent"/"AP mode"?](#n1.3)
-    + [1.4 What is Machi like when operating in "strongly consistent"/"CP mode"?](#n1.4)
+    + [1.3 What is Machi like when operating in "eventually consistent" mode?](#n1.3)
+    + [1.4 What is Machi like when operating in "strongly consistent" mode?](#n1.4)
     + [1.5 What does Machi's API look like?](#n1.5)
     + [1.6 What licensing terms are used by Machi?](#n1.6)
     + [1.7 Where can I find the Machi source code and documentation?  Can I contribute?](#n1.7)
@@ -120,7 +120,7 @@ For proof that naming things is hard, see
 [http://martinfowler.com/bliki/TwoHardThings.html](http://martinfowler.com/bliki/TwoHardThings.html)
 
 <a name="n1.3">
-### 1.3.  What is Machi like when operating in "eventually consistent"/"AP mode"?
+### 1.3.  What is Machi like when operating in "eventually consistent" mode?
 
 Machi's operating mode dictates how a Machi cluster will react to
 network partitions.  A network partition may be caused by:
@@ -130,17 +130,15 @@ network partitions.  A network partition may be caused by:
 * An extreme server software "hang" or "pause", e.g. caused by OS
   scheduling problems such as a failing/stuttering disk device.
 
-"AP mode" refers to the "A" and "P" properties of the "CAP
-conjecture", meaning that the cluster will be "Available" and
-"Partition tolerant".
-
-The consistency semantics of file operations while in "AP mode" are
-eventually consistent during and after network partitions:
+The consistency semantics of file operations while in eventual
+consistency mode during and after network partitions are:
 
 * File write operations are permitted by any client on the "same side"
   of the network partition.
 * File read operations are successful for any file contents where the
   client & server are on the "same side" of the network partition.
+    * File read operations will probably fail for any file contents where the
+      client & server are on "different sides" of the network partition.
 * After the network partition(s) is resolved, files are merged
   together from "all sides" of the partition(s).
     * Unique files are copied in their entirety.
@@ -151,16 +149,10 @@ eventually consistent during and after network partitions:
       to rules which guarantee safe mergeability.).
 
 <a name="n1.4">
-### 1.4.  What is Machi like when operating in "strongly consistent"/"CP mode"?
+### 1.4.  What is Machi like when operating in "strongly consistent" mode?
 
-Machi's operating mode dictates how a Machi cluster will react to
-network partitions.
-"CP mode" refers to the "C" and "P" properties of the "CAP
-conjecture", meaning that the cluster will be "Consistent" and
-"Partition tolerant".
-
-The consistency semantics of file operations while in "CP mode" are
-strongly consistent during and after network partitions:
+The consistency semantics of file operations while in strongly
+consistency mode during and after network partitions are:
 
 * File write operations are permitted by any client on the "same side"
   of the network partition if and only if a quorum majority of Machi servers
@@ -205,7 +197,12 @@ Internally, there is a more complex protocol used by individual
 cluster members to manage file contents and to repair damaged/missing
 files.  See Figure 3 in
 [Machi high level design doc](https://github.com/basho/machi/tree/master/doc/high-level-machi.pdf)
-for more details.
+for more description.
+
+The definitions of both the "high level" external protocol and "low
+level" internal protocol are in a
+[Protocol Buffers](https://developers.google.com/protocol-buffers/docs/overview)
+definition at [./src/machi.proto](./src/machi.proto).
 
 <a name="n1.6">
 ### 1.6.  What licensing terms are used by Machi?
@@ -232,8 +229,8 @@ guidelines at
 <a name="n1.8">
 ### 1.8.  What is Machi's expected release schedule, packaging, and operating system/OS distribution support?
 
-Basho expects that Machi's first release will take place near the end
-of calendar year 2015.
+Basho expects that Machi's first major product release will take place
+during the 2nd quarter of 2016.
 
 Basho's official support for operating systems (e.g. Linux, FreeBSD),
 operating system packaging (e.g. CentOS rpm/yum package management,
@@ -537,6 +534,10 @@ change several times during any single test case) and a random series
 of cluster operations, an event trace of all cluster activity is used
 to verify that no safety-critical rules have been violated.
 
+All test code is available in the [./test](./test) subdirectory.
+Modules that use QuickCheck will use a file suffix of `_eqc`, for
+example, [./test/machi_ap_repair_eqc.erl](./test/machi_ap_repair_eqc.erl).
+
 <a name="n3.5">
 ### 3.5.  Does Machi require shared disk storage? e.g. iSCSI, NBD (Network Block Device), Fibre Channel disks
 
@@ -567,7 +568,10 @@ deploy multiple Machi servers per machine: one Machi server per disk.
 <a name="n3.7">
 ### 3.7.  What language(s) is Machi written in?
 
-So far, Machi is written in 100% Erlang.
+So far, Machi is written in 100% Erlang.  Machi uses at least one
+library, [ELevelDB](https://github.com/basho/eleveldb), that is
+implemented both in C++ and in Erlang, using Erlang NIFs (Native
+Interface Functions) to allow Erlang code to call C++ functions.
 
 In the event that we encounter a performance problem that cannot be
 solved within the Erlang/OTP runtime environment, all of Machi's
@@ -588,19 +592,16 @@ bit-twiddling magicSPEED ... without also having to find a replacement
 for disterl.  (Or without having to re-invent disterl's features in
 another language.)
 
-<a name="artisanal-protocol">
-In the first drafts of the Machi code, the inter-node communication
-uses a hand-crafted, artisanal, mostly ASCII protocol as part of a
-"demo day" quick & dirty prototype.  Work is underway (summer of 2015)
-to replace that protocol gradually with a well-structured,
-well-documented protocol based on Protocol Buffers data serialization.
+All wire protocols used by Machi are defined & implemented using
+[Protocol Buffers](https://developers.google.com/protocol-buffers/docs/overview).
+The definition file can be found at [./src/machi.proto](./src/machi.proto).
 
 <a name="n3.9">
 ### 3.9.  Can I use HTTP to write/read stuff into/from Machi?
 
-Yes, sort of.  For as long as the legacy of
-Machi's first internal protocol & code still
-survives, it's possible to use a
+Short answer: No, not yet.
+
+Longer answer: No, but it was possible as a hack, many months ago, see 
 [primitive/hack'y HTTP interface that is described in this source code commit log](https://github.com/basho/machi/commit/6cebf397232cba8e63c5c9a0a8c02ba391b20fef).
 Please note that commit `6cebf397232cba8e63c5c9a0a8c02ba391b20fef` is
 required to try using this feature: the code has since bit-rotted and
