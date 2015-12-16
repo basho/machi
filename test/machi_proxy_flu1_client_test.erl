@@ -32,7 +32,7 @@
 
 api_smoke_test() ->
     RegName = api_smoke_flu,
-    TcpPort = 57124,
+    TcpPort = 17124,
     DataDir = "./data.api_smoke_flu",
     W_props = [{active_mode, false},{initial_wedged, false}],
     Prefix = <<"prefix">>,
@@ -108,7 +108,7 @@ flu_restart_test_() ->
 
 flu_restart_test2() ->
     RegName = a,
-    TcpPort = 57125,
+    TcpPort = 17125,
     DataDir = "./data.api_smoke_flu2",
     W_props = [{initial_wedged, false}, {active_mode, false}],
 
