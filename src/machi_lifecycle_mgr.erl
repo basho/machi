@@ -81,70 +81,33 @@
 %%
 %% == The FLU Lifecycle ==
 %%
+%% See also: [https://github.com/basho/machi/tree/master/doc/flu-and-chain-lifecycle.org]
+%%
 %% FLUs on the local machine may be started and stopped, as defined by
 %% administrative policy.  In order to do any useful work, however, a
 %% running FLU must also be configured to be a member of a replication
 %% chain.  Thus, as a practical matter, both a FLU and the chain that
 %% the FLU participates in must both be managed by this manager.
 %%
-%% When a new `rc.d'-style config file is written to the FLU
-%% definition directory, a Machi server process will discover the file
-%% within a certain period of time, e.g. 15 seconds.  The FLU will be
-%% started with the file's specified parameters.  A FLU should be
-%% defined and started before configuring its chain membership.
+%% The FLU will be started with the file's specified parameters.  A
+%% FLU should be defined and started before configuring its chain
+%% membership.
 %%
 %% Usually a FLU is removed implicitly by removing that FLU from the a
-%% newer definition file for the chain, or by deleting the entire
-%% chain definition.  If a FLU has been started but never been a chain
-%% member, then the FLU can be stopped &amp; removed explicitly.
-%%
-%% When a FLU has been removed by policy, the FLU's data files are set
-%% aside into a temporary area.  An additional policy command may be
-%% used to permanently delete such FLUs' data files, i.e. to reclaim
-%% disk space.
-%%
-%% Resources for the FLU are defined in `machi_projection.hrl'
-%% in the `p_srvr{}' record.  The major elements of this record are:
-%%
-%% <ul>
-%%
-%%  <li> <tt>name :: atom()</tt>: The name of the FLU.  This name
-%%       should be unique over the lifetime of the administrative
-%%       domain and thus managed by external policy.  This name must be
-%%       the same as the name of the `rc.d'-style config file that
-%%       defines the FLU.
-%% </li>
-%%  <li> <tt>address :: string()</tt>: The DNS hostname or IP address
-%%       used by other servers to communicate with this FLU.
-%% </li>
-%%  <li> <tt>port :: non_neg_integer() </tt>: The TCP port number that
-%%       the FLU listens to for incoming Protocol Buffers-serialized
-%%       communication.
-%% </li>
-%%  <li> <tt>props :: property_list()</tt>: A general-purpose property
-%%       list.  Its use is currently fluid &amp; not well-defined yet.
-%% </li>
-%% </ul>
+%% newer definition of its chain (by omitting the FLU's name).
+%% If a FLU has been started but never been a chain
+%% member, then the FLU can be stopped and removed explicitly.
 %%
 %% A FLU may be created or removed (via implicit or explicit policy).
 %% An existing FLU may not be reconfigured.
 %%
 %% == The Chain Lifecycle ==
 %%
+%% See also: [https://github.com/basho/machi/tree/master/doc/flu-and-chain-lifecycle.org]
+%%
 %% If a FLU on the local machine is expected to participate in a
 %% replication chain, then an `rc.d'-style chain definition file must
 %% also be present on each machine that runs a FLU in the chain.
-%%
-%% Machi's chains are self-managing, via Humming Consensus; see the
-%% [https://github.com/basho/machi/tree/master/doc/] directory for
-%% much more detail about Humming Consensus.  After FLUs have received
-%% their initial chain configuration for Humming Consensus, the FLUs
-%% will manage each other (and the chain) themselves.
-%%
-%% However, Humming Consensus does not handle three chain management
-%% problems: 1. specifying the very first chain configuration,
-%% 2. altering the membership of the chain (adding/removing FLUs from
-%% the chain), or 3. stopping the chain permanently.
 %%
 %% FLUs in a new chain should have definition files created on each
 %% FLU's respective machine prior to defining their chain.  Similarly,
@@ -152,43 +115,12 @@
 %% created.  External policy is responsible for creating each of these
 %% files.
 %%
-%% Resources for the chain are defined in `machi_projection.hrl'
-%% in the `chain_def_v1{}' record.  The major elements of this record are:
-%%
-%% <ul>
-%%
-%%  <li> <tt>name :: atom()</tt>: The name of the chain.  This name
-%%       should be unique over the lifetime of the administrative
-%%       domain and thus managed by external policy.  This name must be
-%%       the same as the name of the `rc.d'-style config file that
-%%       defines the chain.
-%% </li>
-%%  <li> <tt>mode :: 'ap_mode' | 'cp_mode'</tt>: This is the consistency
-%%       to be used for managing the chain's replicated data: eventual
-%%       consistency and strong consistency, respectively.
-%% </li>
-%%  <li> <tt>full :: [#p_srvr{}] </tt>: A list of `#p_srvr{}' records
-%%       to define the full-service members of the chain.
-%% </li>
-%%  <li> <tt>witnesses :: [#p_srvr{}] </tt>: A list of `#p_srvr{}' records
-%%       to define the witness-only members of the chain.  Witness servers
-%%       may only be used with strong consistency mode.
-%% </li>
-%%  <li> <tt>props :: property_list()</tt>: A general-purpose property
-%%       list.  Its use is currently fluid &amp; not well-defined yet.
-%% </li>
-%% </ul>
-%%
-%% A chain may be created, removed, or modified.
+%% A chain may be created or modified.
 %%
 %% A modification request writes a `#chain_def_v1{}' record with the
 %% same name but different `full' and/or `witnesses' list to each
 %% machine that hosts a FLU in the chain (in both the old and new
 %% versions of the chain).
-%%
-%% A deletion request writes a `#chain_def_v1{}' record with the same
-%% name but empty lists for `full' and `witnesses' to each machine
-%% that hosts a FLU in the chain (in the old version of the chain).
 %%
 %% == Conflicts with TCP ports, FLU &amp; chain names, etc ==
 %%
@@ -1080,4 +1012,5 @@ quick_admin_add_archive_file(File) ->
         end,
     Dir = get_quick_admin_dir(),
     NewName = str("~s/~6..0w", [Dir, N + 1]),
-    ok = file:rename(File, NewName).
+    {ok, Contents} = file:read_file(File),
+    ok = file:write_file(NewName, Contents).

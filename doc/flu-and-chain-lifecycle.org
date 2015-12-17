@@ -1,0 +1,620 @@
+FLU and Chain Life Cycle Management -*- mode: org; -*-
+#+STARTUP: lognotedone hidestars indent showall inlineimages
+#+COMMENT: To generate the outline section: egrep '^\*[*]* ' doc/flu-and-chain-lifecycle.org | egrep -v '^\* Outline' | sed -e 's/^\*\*\* /    + /' -e 's/^\*\* /  + /' -e 's/^\* /+ /'
+
+* FLU and Chain Life Cycle Management
+
+In an ideal world, we (the Machi development team) would have a full
+vision of how Machi would be managed, down to the last detail of
+beautiful CLI character and network protocol bit.  Our vision isn't
+complete yet, so we are working one small step at a time.
+
+* Outline
+
++ FLU and Chain Life Cycle Management
++ Terminology review
+  + Terminology: Machi run-time components/services/thingies
+  + Terminology: Machi data structures
+  + Terminology: Cluster-of-cluster (CoC) data structures
++ Overview of administrative life cycles
+  + Cluster-of-clusters (CoC) administrative life cycle
+  + Chain administrative life cycle
+  + FLU server administrative life cycle
++ Quick admin: declarative management of Machi FLU and chain life cycles
+  + Quick admin uses the "rc.d" config scheme for life cycle management
+  + Quick admin's declarative "language": an Erlang-flavored AST
+    + Verb 'host': define a new host for FLU services
+    + Verb 'flu': define a new FLU
+    + Verb 'chain': define or reconfigure a chain
+  + Executing quick admin AST files via the 'machi-admin' utility
+    + Checking the syntax of an AST file
+    + Executing an AST file
+  + Using quick admin to manage multiple machines
++ The "rc.d" style configuration file scheme
+  + Riak had a similar configuration file editing problem (and its solution)
+  + Machi's "rc.d" file scheme.
+  + FLU life cycle management using "rc.d" style files
+    + The key configuration components of a FLU
+  + Chain life cycle management using "rc.d" style files
+    + The key configuration components of a chain
+
+* Terminology review
+
+** Terminology: Machi run-time components/services/thingies
+
++ FLU: a basic Machi server, responsible for managing a collection of
+  files.
+
++ Chain: a small collection of FLUs that maintain replicas of the same
+  collection of files.  A chain is usually small, 1-3 servers, where
+  more than 3 would be used only in cases when availability of
+  certain data is critical despite failures of several machines.
+  + The length of a chain is directly proportional to its
+    replication factor, e.g., a chain length=3 will maintain
+    (nominally) 3 replicas of each file.
+  + To maintain file availability when ~F~ failures have occurred, a
+    chain must be at least ~F+1~ members long.  (In comparison, the
+    quorum replication technique requires ~2F+1~ members in the
+    general case.)
+
++ Cluster: this word can be used interchangeably with "chain".
+
++ Cluster-of-clusters: A collection of Machi clusters where files are
+  horizontally partitioned/sharded/distributed across 
+
+** Terminology: Machi data structures
+
++ Projection: used to define a single chain: the chain's consistency
+  mode (strong or eventual consistency), all members (from an
+  administrative point of view), all active members (from a runtime,
+  automatically-managed point of view), repairing/file-syncing members
+  (also runtime, auto-managed), and so on
+
++ Epoch: A version number of a projection.  The epoch number is used
+  by both clients & servers to manage transitions from one projection
+  to another, e.g., when the chain is temporarily shortened by the
+  failure of a member FLU server.
+
+** Terminology: Cluster-of-cluster (CoC) data structures
+
++ Namespace: A collection of human-friendly names that are mapped to
+  groups of Machi chains that provide the same type of storage
+  service: consistency mode, replication policy, etc.
+  + A single namespace name, e.g. ~normal-ec~, is paired with a single
+    CoC chart (see below).
+  + Example: ~normal-ec~ might be a collection of Machi chains in
+    eventually-consistent mode that are of length=3.
+  + Example: ~risky-ec~ might be a collection of Machi chains in
+    eventually-consistent mode that are of length=1.
+  + Example: ~mgmt-critical~ might be a collection of Machi chains in
+    strongly-consistent mode that are of length=7.
+
++ CoC chart: Encodes the rules which partition/shard/distribute a
+  particular namespace across a group of chains that collectively
+  store the namespace's files.
+  + "chart: noun, a geographical map or plan, especially on used for
+    navigation by sea or air."
+
++ Chain weight: A value assigned to each chain within a CoC chart
+  structure that defines the relative storage capacity of a chain
+  within the namespace.  For example, a chain weight=150 has 50% more
+  capacity than a chain weight=100.
+
++ CoC chart epoch: The version number assigned to a CoC chart.
+
+* Overview of administrative life cycles
+
+** Cluster-of-clusters (CoC) administrative life cycle
+
++ CoC is first created
++ CoC adds namespaces (e.g. consistency policy + chain length policy)
++ CoC adds/removes chains to a namespace to increase/decrease the
+  namespace's storage capacity.
++ CoC adjusts chain weights within a namespace, e.g., to shift files
+  within the namespace to chains with greater storage capacity
+  resources and/or runtime I/O resources.
+
+A CoC "file migration" is the process of moving files from one
+namespace member chain to another for purposes of shifting &
+re-balancing storage capacity and/or runtime I/O capacity.
+
+** Chain administrative life cycle
+
++ A chain is created with an initial FLU membership list.
++ Chain may be administratively modified zero or more times to
+  add/remove member FLU servers.
++ A chain may be decommissioned.
+
+See also: http://basho.github.io/machi/edoc/machi_lifecycle_mgr.html
+
+** FLU server administrative life cycle
+
++ A FLU is created after an administrator chooses the FLU's runtime
+  location is selected by the administrator: which machine/virtual
+  machine, IP address and TCP port allocation, etc.
++ An unassigned FLU may be added to a chain by chain administrative
+  policy.
++ A FLU that is assigned to a chain may be removed from that chain by
+  chain administrative policy.
+  + In the current implementation, the FLU's Erlang processes will be
+    halted.  Then the FLU's data and metadata files will be moved to
+    another area of the disk for safekeeping.  Later, a "garbage
+    collection" process can be used for reclaiming disk space used by
+    halted FLU servers.
+
+See also: http://basho.github.io/machi/edoc/machi_lifecycle_mgr.html
+
+* Quick admin: declarative management of Machi FLU and chain life cycles
+
+The "quick admin" scheme is a temporary (?) tool for managing Machi
+FLU server and chain life cycles in a declarative manner.  The API is
+described in this section.
+
+** Quick admin uses the "rc.d" config scheme for life cycle management
+
+As described at the top of
+http://basho.github.io/machi/edoc/machi_lifecycle_mgr.html, the "rc.d"
+config files do not manage "policy".  "Policy" is doing the right
+thing with a Machi cluster-of-clusters from a systems administrator's
+point of view.  The "rc.d" config files can only implement decisions
+made according to policy.
+
+The "quick admin" tool is a first attempt at automating policy
+decisions in a safe way (we hope) that is also easy to implement (we
+hope) with a variety of systems management tools, e.g. Chef, Puppet,
+Ansible, Saltstack, or plain-old-human-at-a-keyboard.
+
+** Quick admin's declarative "language": an Erlang-flavored AST
+
+The "language" that an administrator uses to express desired policy
+changes is not (yet) a true language.  As a quick implementation hack,
+the current language is an Erlang-flavored abstract syntax tree
+(AST).  The tree isn't very deep, either, frequently just one
+element tall.  (Not much of a tree, is it?)
+
+There are three verbs in the language currently:
+
++ ~host~, define a new host that can execute FLU servers
++ ~flu~, define a new FLU
++ ~chain~, define a new chain or re-configure an existing chain with
+  the same name
+
+*** Verb 'host': define a new host for FLU services
+
+In this context, a host is a machine, virtual machine, or container
+that can execute the Machi application and can therefore provide FLU
+services, i.e. file service, Humming Consensus management.
+
+Two formats may be used to define a new host:
+
+#+BEGIN_SRC
+{host, Name, Props}.
+{host, Name, AdminI, ClientI, Props}.
+#+END_SRC
+
+The shorter tuple is shorthand notation for the latter.  If the
+shorthand form is used, then it will be converted automatically to the
+long form as:
+
+#+BEGIN_SRC
+{host, Name, AdminI=Name, ClientI=Name, Props}.
+#+END_SRC
+
+Type information, description, and restrictions:
+
++ ~Name::string()~ The ~Name~ attribute must be unique.  Note that it
+  is possible to define two different hosts, one using a DNS hostname
+  and one using an IP address.  The user must avoid this
+  double-definition because it is not enforced by quick admin.
+  + The ~Name~ field is used for cross-reference purposes with other
+    verbs, e.g., ~flu~ and ~chain~.
+  + There is no syntax yet for removing a host definition.
+
++ ~AdminI::string()~ A DNS hostname or IP address for cluster
+  administration purposes, e.g. SSH access.
+  + This field is unused at the present time.
+
++ ~ClientI::string()~ A DNS hostname or IP address for Machi's client
+  protocol access, e.g., Protocol Buffers network API service.
+  + This field is unused at the present time.
+
++ ~props::proplist()~ is an Erlang-style property list for specifying
+  additional configuration options, debugging information, sysadmin
+  comments, etc.
+
++ A full-featured admin tool should also include managing several
+  other aspects of configuration related to a "host".  For example,
+  for any single IP address, quick admin assumes that there will be
+  exactly one Erlang VM that is running the Machi application.  Of
+  course, it is possible to have dozens of Erlang VMs on the same
+  (let's assume for clarity) hardware machine and all running Machi
+  ... but there are additional aspects of such a machine that quick
+  admin does not account for
+  + multiple IP addresses per machine
+  + multiple Machi package installation paths
+  + multiple Machi config files (e.g. cuttlefish config, ~etc.conf~,
+    ~vm.args~)
+  + multiple data directories/file system mount points
+    + This is also a management problem for quick admin for a single
+      Machi package on a machine to take advantage of bulk data
+      storage using multiple multiple file system mount points.
+  + multiple Erlang VM host names, required for distributed Erlang,
+    which is used for communication with ~machi~ and ~machi-admin~
+    command line utilities.
+  + and others....
+
+*** Verb 'flu': define a new FLU
+
+A new FLU is defined relative to a previously-defined ~host~ entities;
+an exception will be thrown if the ~host~ cannot be cross-referenced.
+
+#+BEGIN_SRC
+{flu, Name, HostName, Port, Props}
+#+END_SRC
+
+Type information, description, and restrictions:
+
++ ~Name::atom()~ The name of the FLU, as a human-friendly name and
+  also for internal management use; please note the ~atom()~ type.
+  This name must be unique.
+  + The ~Name~ field is used for cross-reference purposes with the
+    ~chain~ verb.
+  + There is no syntax yet for removing a FLU definition.
+
++ ~Hostname::string()~ The cross-reference name of the ~host~ that
+  this FLU should run on.
+
++ ~Port::non_neg_integer()~ The TCP port used by this FLU server's
+  Protocol Buffers network API listener service
+
++ ~props::proplist()~ is an Erlang-style property list for specifying
+  additional configuration options, debugging information, sysadmin
+  comments, etc.
+
+*** Verb 'chain': define or reconfigure a chain
+
+A chain is defined relative to zero or more previously-defined ~flu~
+entities; an exception will be thrown if any ~flu~ cannot be
+cross-referenced.
+
+Two formats may be used to define/reconfigure a chain:
+
+#+BEGIN_SRC
+{chain, Name, FullList, Props}.
+{chain, Name, CMode, FullList, Witnesses, Props}.
+#+END_SRC
+
+The shorter tuple is shorthand notation for the latter.  If the
+shorthand form is used, then it will be converted automatically to the
+long form as:
+
+#+BEGIN_SRC
+{chain, Name, ap_mode, FullList, [], Props}.
+#+END_SRC
+
+Type information, description, and restrictions:
+
++ ~Name::atom()~ The name of the chain, as a human-friendly name and
+  also for internal management use; please note the ~atom()~ type.
+  This name must be unique.
+  + There is no syntax yet for removing a chain definition.
+
++ ~CMode::'ap_mode'|'cp_mode'~ Defines the consistency mode of the
+  chain, either eventual consistency or strong consistency,
+  respectively.
+  + A chain cannot change consistency mode, e.g., from
+    strong~->~eventual consistency.
+
++ ~FullList::list(atom())~ Specifies the list of full-service FLU
+  servers, i.e. servers that provide file data & metadata services as
+  well as Humming Consensus.  Each atom in the list must
+  cross-reference with a previously defined ~chain~; an exception will
+  be thrown if any ~flu~ cannot be cross-referenced.
+
++ ~Witnesses::list(atom())~ Specifies the list of witness-only
+  servers, i.e. servers that only participate in Humming Consensus.
+  Each atom in the list must cross-reference with a previously defined
+  ~chain~; an exception will be thrown if any ~flu~ cannot be
+  cross-referenced.
+  + This list must be empty for eventual consistency chains.
+
++ ~props::proplist()~ is an Erlang-style property list for specifying
+  additional configuration options, debugging information, sysadmin
+  comments, etc.
+
++ If this verb specifies a new ~chain~ name, then all of the member
+  FLU servers (full & witness types) will be bootstrapped to a
+  starting configuration.
+
++ If this verb specifies a previously-defined ~chain~ name, then all
+  of the member FLU servers (full & witness types, respectively) will
+  be adjusted to add or remove members, as appropriate.
+  + Any FLU servers added to either list must not be assigned to any
+    other chain, or they must be a member of this specific chain.
+  + Any FLU servers removed from either list will be halted.
+    (See the "FLU server administrative life cycle" section above.)
+
+** Executing quick admin AST files via the 'machi-admin' utility
+
+Examples of quick admin AST files can be found in the
+~priv/quick-admin/examples~ directory.  Below is an example that will
+define a new host ( ~"localhost"~ ), three new FLU servers ( ~f1~ & ~f2~
+and ~f3~ ), and an eventually consistent chain ( ~c1~ ) that uses the new
+FLU servers:
+
+#+BEGIN_SRC
+{host, "localhost", []}.
+{flu,f1,"localhost",20401,[]}.
+{flu,f2,"localhost",20402,[]}.
+{flu,f3,"localhost",20403,[]}.
+{chain,c1,[f1,f2,f3],[]}.
+#+END_SRC
+
+*** Checking the syntax of an AST file
+
+Given an AST config file, ~/path/to/ast/file~, its basic syntax and
+correctness can be checked without executing it.
+
+#+BEGIN_SRC
+./rel/machi/bin/machi-admin quick-admin-check /path/to/ast/file
+#+END_SRC
+
++ The utility will exit with status zero and output ~ok~ if the syntax
+  and proposed configuration appears to be correct.
++ If there is an error, the utility will exit with status one, and an
+  error message will be printed.
+
+*** Executing an AST file
+
+Given an AST config file, ~/path/to/ast/file~, it can be executed
+using the command:
+
+#+BEGIN_SRC
+./rel/machi/bin/machi-admin quick-admin-apply /path/to/ast/file RelativeHost
+#+END_SRC
+
+... where the last argument, ~RelativeHost~, should be the exact
+spelling of one of the previously defined AST ~host~ entities,
+*and also* is the same host that the ~machi-admin~ utility is being
+executed on.
+
+Restrictions and warnings:
+
++ This is alpha quality software.
+
++ There is no "undo".
+  + Of course there is, but you need to resort to doing things like
+    using ~machi attach~ to attach to the server's CLI to then execute
+    magic Erlang incantations to stop FLUs, unconfigure chains, etc.
+    + Oh, and delete some files with magic paths, also.
+
+** Using quick admin to manage multiple machines
+
+A quick sketch follows:
+
+1. Create the AST file to specify all of the changes that you wish to
+   make to all hosts, FLUs, and/or chains, e.g., ~/tmp/ast.txt~.
+2. Check the basic syntax with the ~quick-admin-check~ argument to
+   ~machi-admin~. 
+3. If the syntax is good, then copy ~/tmp/ast.txt~ to all hosts in the
+   cluster, using the same path, ~/tmp/ast.txt~.
+4. For each machine in the cluster, run:
+#+BEGIN_SRC
+./rel/machi/bin/machi-admin quick-admin-apply /tmp/ast.txt RelativeHost
+#+END_SRC
+
+... where RelativeHost is the AST ~host~ name of the machine that you
+are executing the ~machi-admin~ command on.  The command should be
+successful, with exit status 0 and outputting the string ~ok~.
+
+Finally, for each machine in the cluster, a listing of all files in
+the directory ~rel/machi/etc/quick-admin-archive~ should show exactly
+the same files, one for each time that ~quick-admin-apply~ has been
+run successfully on that machine.
+
+* The "rc.d" style configuration file scheme
+
+This configuration scheme is inspired by BSD UNIX's ~init(8)~ process
+manager's configuration style, called "rc.d" after the name of the
+directory where these files are stored, ~/etc/rc.d~.  The ~init~
+process is responsible for (among other things) starting UNIX
+processes at machine boot time and stopping them when the machine is
+shut down.
+
+The original scheme used by ~init~ to start processes at boot time was
+a single Bourne shell script called ~/etc/rc~.  When a new software
+package was installed that required a daemon to be started at boot
+time, text was added to the ~/etc/rc~ file.  Uninstalling packages was
+much trickier, because it meant removing lines from a file that
+*is a computer program (run by the Bourne shell, a Turing-complete
+programming language)*.  Error-free editing of the ~/etc/rc~ script
+was impossible in all cases.
+
+Later, ~init~'s configuration was split into a few master Bourne shell
+scripts and a subdirectory, ~/etc/rc.d~.  The subdirectory contained
+shell scripts that were responsible for boot time starting of a single
+daemon or service, e.g. NFS or an HTTP server.  When a new software
+package was added, a new file was added to the ~rc.d~ subdirectory.
+When a package was removed, the corresponding file in ~rc.d~ was
+removed.  With this simple scheme, addition & removal of boot time
+scripts was vastly simplified.
+
+** Riak had a similar configuration file editing problem (and its solution)
+
+Another software product from Basho Technologies, Riak, had a similar
+configuration file editing problem.  One file in particular,
+~app.config~, had a syntax that made it difficult both for human
+systems administrators and also computer programs to edit the file in
+a syntactically correct manner.
+
+Later releases of Riak switched to an alternative configuration file
+format, one inspired by the BSD UNIX ~sysctl(8)~ utility and
+~sysctl.conf(5)~ file syntax.  The ~sysctl.conf~ format is much easier
+to manage by computer programs to add items.  Removing items is not
+100% simple, however: the correct lines must be identified and then
+removed (e.g. with Perl or a text editor or combination of ~grep -v~
+and ~mv~), but removing any comment lines that "belong" to the removed
+config item(s) is not any easy for a 1-line shell script to do 100%
+correctly.
+
+Machi will use the ~sysctl.conf~ style configuration for some
+application configuration variables.  However, adding & removing FLUs
+and chains will be managed using the "rc.d" style because of the
+"rc.d" scheme's simplicity and tolerance of mistakes by administrators
+(human or computer).
+
+** Machi's "rc.d" file scheme.
+
+Machi will use a single subdirectory that will contain configuration
+files for some life cycle management task, e.g. a single FLU or a
+single chain.
+
+The contents of the file should be a single Erlang term, serialized in
+ASCII form as Erlang source code statement, i.e. a single Erlang term
+~T~ that is formatted by ~io:format("~w.",[T]).~.  This file must be
+parseable by the Erlang function ~file:consult()~.
+
+Later versions of Machi may change the file format to be more familiar
+to administrators who are unaccustomed to Erlang language syntax.
+
+** FLU life cycle management using "rc.d" style files
+
+*** The key configuration components of a FLU
+
+1. The machine (or virtual machine) to run it on.
+2. The Machi software package's artifacts to execute.
+3. The disk device(s) used to store Machi file data & metadata, "rc.d"
+   style config files, etc.
+4. The name, IP address and TCP port assigned to the FLU service.
+5. Its chain assignment.
+
+Notes:
+
++ Items 1-3 are currently outside of the scope of this life cycle
+  document.  We assume that human administrators know how to do these
+  things.
++ Item 4's properties are explicitly managed by a FLU-defining "rc.d"
+  style config file.
++ Item 5 is managed by the chain life cycle management system.
+
+Here is an example of a properly formatted FLU config file:
+
+#+BEGIN_SRC
+{p_srvr,f1,machi_flu1_client,"192.168.72.23",20401,[]}.
+#+END_SRC
+
+... which corresponds to the following Erlang record definition:
+
+#+BEGIN_SRC
+-record(p_srvr, {
+          name            :: atom(),
+          proto_mod = 'machi_flu1_client' :: atom(), % Module name
+          address         :: term(), % Protocol-specific
+          port            :: term(), % Protocol-specific
+          props = []      :: list()  % proplist for other related info
+         }).
+#+END_SRC
+
++ ~name~ is ~f1~.  This is name of the FLU.  This name should be
+  unique over the lifetime of the administrative domain and thus
+  managed by external policy.  This name must be the same as the name
+  of the config file that defines the FLU.
++ ~proto_mod~ is used for internal management purposes and should be
+  considered a mandatory constant.
++ ~address~ is "192.168.72.23".  The DNS hostname or IP address used
+  by other servers to communicate with this FLU. This must be a valid
+  IP address, previously assigned to this machine/VM using the
+  appropriate operating system-specific procedure.
++ ~port~ is TCP port 20401.  The TCP port number that the FLU listens
+  to for incoming Protocol Buffers-serialized communication.  This TCP
+  port must not be in use (now or in the future) by another Machi FLU
+  or any other process running on this machine/VM.
++ ~props~ is an Erlang-style property list for specifying additional
+  configuration options, debugging information, sysadmin comments,
+  etc.
+  
+** Chain life cycle management using "rc.d" style files
+
+Unlike FLUs, chains have a self-management aspect that makes a chain
+life cycle different from a single FLU server.  Machi's chains are
+self-managing, via Humming Consensus; see the
+https://github.com/basho/machi/tree/master/doc/ directory for much
+more detail about Humming Consensus.  After FLUs have received their
+initial chain configuration for Humming Consensus, the FLUs will
+manage the chain (and each other) by themselves.
+
+However, Humming Consensus does not handle three chain management
+problems:
+
+1. Specifying the very first chain configuration,
+2. Altering the membership of the chain (i.e. adding/removing FLUs
+   from the chain),
+3. Stopping the chain permanently.
+
+A chain "rc.d" file will only be used to bootstrap a newly-defined FLU
+server.  It's like a piece of glue information to introduce the new
+FLU to the Humming Consensus group that is managing the chain's
+dynamic state (e.g. which members are up or down).  In all other
+respects, chain config files are ignored by life cycle management code.
+However, to mimic the life cycle of the FLU server's "rc.d" config
+files, a chain "rc.d" files is not deleted until the chain has been
+decommissioned (i.e. defined with length=0).
+
+*** The key configuration components of a chain
+
+1. The name of the chain.
+2. Consistency mode: eventually consistent or strongly consistent.
+3. The membership list of all FLU servers in the chain.
+   + Remember, all servers in a single chain will manage full replicas
+     of the same collection of Machi files.
+4. If the chain is defined to use strongly consistent mode, then a
+   list of "witness servers" may also be defined.  See the
+   [https://github.com/basho/machi/tree/master/doc/] documentation for
+   more information on witness servers.
+   + The witness list must be empty for all chains in eventual
+     consistency mode. 
+
+Here is an example of a properly formatted chain config file:
+
+#+BEGIN_SRC
+{chain_def_v1,c1,ap_mode,
+              [{p_srvr,f1,machi_flu1_client,"localhost",20401,[]},
+               {p_srvr,f2,machi_flu1_client,"localhost",20402,[]},
+               {p_srvr,f3,machi_flu1_client,"localhost",20403,[]}],
+              [],[],[],
+              [f1,f2,f3],
+              [],[]}.
+#+END_SRC
+
+... which corresponds to the following Erlang record definition:
+
+#+BEGIN_SRC
+-record(chain_def_v1, {
+          name            :: atom(),         % chain name
+          mode            :: 'ap_mode' | 'cp_mode',
+          full = []       :: [p_srvr()],
+          witnesses = []  :: [p_srvr()],
+          old_full = []   :: [atom()], % guard against some races
+          old_witnesses=[] :: [atom()], % guard against some races
+          local_run = []  :: [atom()], % must be tailored to each machine!
+          local_stop = [] :: [atom()], % must be tailored to each machine!
+          props = []      :: list()   % proplist for other related info
+         }).
+#+END_SRC
+
++ ~name~ is ~c1~, the name of the chain.  This name should be unique
+  over the lifetime of the administrative domain and thus managed by
+  external policy.  This name must be the same as the name of the
+  config file that defines the chain.
++ ~mode~ is ~ap_mode~, an internal code symbol for eventual
+  consistency mode.
++ ~full~ is a list of Erlang ~#p_srvr{}~ records for full-service
+  members of the chain, i.e., providing Machi file data & metadata
+  storage services.
++ ~witnesses~ is a list of Erlang ~#p_srvr{}~ records for witness-only
+  FLU servers, i.e., providing only Humming Consensus service.
++ The next four fields are used for internal management only.
++ ~props~ is an Erlang-style property list for specifying additional
+  configuration options, debugging information, sysadmin comments,
+  etc.
+
