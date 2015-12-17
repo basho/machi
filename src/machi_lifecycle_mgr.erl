@@ -486,13 +486,13 @@ process_pending_flu({File, P}, S) ->
             _ = move_to_rejected(File, S),
             S;
         true ->
-            case machi_flu_psup:start_flu_package(P) of
-                {ok, SupPid} ->
-                    lager:info("Started FLU ~w with supervisor pid ~p\n",
-                               [FLU, SupPid]),
-                    _ = move_to_flu_config(FLU, File, S),
-                    S;
-                Else ->
+            try
+                {ok, SupPid} = machi_flu_psup:start_flu_package(P),
+                lager:info("Started FLU ~w with supervisor pid ~p\n",
+                           [FLU, SupPid]),
+                _ = move_to_flu_config(FLU, File, S),
+                S
+            catch error:Else ->
                     lager:error("Start FLU ~w failed: ~p\n", [FLU, Else]),
                     _ = move_to_rejected(File, S),
                     S
@@ -581,7 +581,8 @@ process_pending_chain2(File, CD, RemovedFLUs, ChainConfigAction, S) ->
                  %%       another dir on same device, but ... where?
                  _ = file:rename(Src2, Dst2),
                  ok
-             end || FLU <- LocalRemovedFLUs]
+             end || FLU <- LocalRemovedFLUs],
+            ok
     end,
     #chain_def_v1{name=Name} = CD,
     if ChainConfigAction == move ->
@@ -933,7 +934,8 @@ diff_env({KV_old, KV_new, _IsNew}=E, RelativeHost) ->
          {flu, Name, Host, _Port, _Ps} = V,
          if Host == RelativeHost orelse RelativeHost == all ->
                  {ok, P_srvr} = d_find({kv,{p_srvr,Name}}, E),
-                 Add(P_srvr);
+                 Add(P_srvr),
+                 ok;
             true ->
                  ok
          end
@@ -986,7 +988,8 @@ diff_env({KV_old, KV_new, _IsNew}=E, RelativeHost) ->
                                    mode=CMode, full=Ps_F, witnesses=Ps_W,
                                    old_full=OldFull, old_witnesses=OldWitnesses,
                                    local_run=Run, local_stop=Stop,
-                                   props=Props ++ PropsExtra});
+                                   props=Props ++ PropsExtra}),
+                 ok;
              false ->
                  ok
          end
