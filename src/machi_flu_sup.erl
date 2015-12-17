@@ -116,8 +116,11 @@ sanitize_p_srvr_rec(Whole, {Acc, D}) ->
         error = dict:find(NameK, D),
         true = is_atom(PMod),
         case code:is_loaded(PMod) of
-            {file, _} -> ok;
-            _         -> {module, _} = code:load_file(PMod), ok
+            {file, _} ->
+                ok;
+            _ ->
+                {module, _} = code:load_file(PMod),
+                ok
         end,
         if is_list(Address)  -> ok;
            is_tuple(Address) -> ok              % Erlang-style IPv4 or IPv6

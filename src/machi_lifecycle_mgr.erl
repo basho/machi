@@ -301,20 +301,20 @@ sanitize_chain_def_rec(Whole, {Acc, D}) ->
                       mode=Mode,
                       full=Full,
                       witnesses=Witnesses} = Whole,
-        {true, 10} = {is_atom(Name), 10},
+        {true, ?LINE} = {is_atom(Name), ?LINE},
         NameK = {name, Name},
-        {none, 20} = {gb_trees:lookup(NameK, D), 20},
-        {true, 30} = {(Mode == ap_mode orelse Mode == cp_mode), 30},
+        {none, ?LINE} = {gb_trees:lookup(NameK, D), ?LINE},
+        {true, ?LINE} = {(Mode == ap_mode orelse Mode == cp_mode), ?LINE},
         IsPSrvr = fun(X) when is_record(X, p_srvr) -> true;
                      (_)                           -> false
                   end,
-        {true, 40} = {lists:all(IsPSrvr, Full), 40},
-        {true, 50} = {lists:all(IsPSrvr, Witnesses), 50},
+        {true, ?LINE} = {lists:all(IsPSrvr, Full), ?LINE},
+        {true, ?LINE} = {lists:all(IsPSrvr, Witnesses), ?LINE},
 
         %% All is sane enough.
         D2 = gb_trees:enter(NameK, Name, D),
         {[Whole|Acc], D2}
-    catch X:Y ->
+    catch X:Y ->                                % badmatch will include ?LINE
             lager:error("~s: Bad chain_def record (~w ~w), skipping: ~P\n",
                         [?MODULE, X, Y, Whole, 15]),
             {Acc, D}
@@ -388,10 +388,9 @@ bootstrap_chain2(#chain_def_v1{name=NewChainName, mode=NewCMode,
                         [NewChainName, FLU, Else, CD]),
             Else;
         Else ->
-            lager:error("Attempt to bootstrap chain ~w via FLU ~w "
-                        "failed: ~w (defn ~w)\n",
-                        [NewChainName, FLU, Else, CD]),
-            timer:sleep(555),
+            lager:error("Attempt ~w to bootstrap chain ~w via FLU ~w "
+                        "failed: ~w (may retry with defn ~w)\n",
+                        [N, NewChainName, FLU, Else, CD]),
             bootstrap_chain2(CD, FLU, N-1)
     end.
 
@@ -787,9 +786,11 @@ run_ast_cmd({chain, Name, CMode, FullList, Witnesses, _Props}=T, E) ->
             ok;
         {ok, C_old} ->
             {chain, _, OldCMode, _, _, _} = C_old,
-            if CMode == OldCMode -> ok;
-               true              -> err("Invalid consistency mode: ~w -> ~w",
-                                        [OldCMode, CMode], T)
+            if CMode == OldCMode ->
+                    ok;
+               true ->
+                    err("Consistency mode change ~w -> ~w is not permitted\n",
+                        [OldCMode, CMode], T)
             end
     end,
 
