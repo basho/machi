@@ -57,8 +57,13 @@ init([]) ->
     Shutdown = ?SHUTDOWN,
     Type = supervisor,
 
-    FluSup = {machi_flu_sup, {machi_flu_sup, start_link, []},
-              Restart, Shutdown, Type, []},
+    ServerSup =
+        {machi_flu_sup, {machi_flu_sup, start_link, []},
+         Restart, Shutdown, Type, []},
     RanchSup = {ranch_sup, {ranch_sup, start_link, []},
                 Restart, Shutdown, supervisor, [ranch_sup]},
-    {ok, {SupFlags, [FluSup, RanchSup]}}.
+    LifecycleMgr =
+        {machi_lifecycle_mgr, {machi_lifecycle_mgr, start_link, []},
+         Restart, Shutdown, worker, []},
+
+    {ok, {SupFlags, [ServerSup, RanchSup, LifecycleMgr]}}.

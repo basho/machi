@@ -174,6 +174,7 @@ make_summary(#projection_v1{epoch_number=EpochNum,
                             repairing=Repairing_list,
                             dbg=Dbg, dbg2=Dbg2}) ->
     [{epoch,EpochNum}, {csum,_CSum4},
+{all, _All_list},
      {author,Author}, {mode,CMode},{witnesses, Witness_list},
      {upi,UPI_list},{repair,Repairing_list},{down,Down_list}] ++
         [{d,Dbg}, {d2,Dbg2}].

@@ -30,6 +30,61 @@
 -define(FLU, machi_flu1).
 -define(FLU_C, machi_flu1_client).
 
+get_env_vars(App, Ks) ->
+    Raw = [application:get_env(App, K) || K <- Ks],
+    Old = lists:zip(Ks, Raw),
+    {App, Old}.
+
+clean_up_env_vars({App, Old}) ->
+    [case Res of
+         undefined ->
+             application:unset_env(App, K);
+         {ok, V} ->
+             application:set_env(App, K, V)
+     end || {K, Res} <- Old].
+
+filter_env_var({ok, V}) -> V;
+filter_env_var(Else)    -> Else.
+
+clean_up_data_dir(DataDir) ->
+    [begin
+         Fs = filelib:wildcard(DataDir ++ Glob),
+         [file:delete(F) || F <- Fs],
+         [file:del_dir(F) || F <- Fs]
+     end || Glob <- ["*/*/*/*", "*/*/*", "*/*", "*"] ],
+    _ = file:del_dir(DataDir),
+    ok.
+
+start_flu_package(RegName, TcpPort, DataDir) ->
+    start_flu_package(RegName, TcpPort, DataDir, []).
+
+start_flu_package(RegName, TcpPort, DataDir, Props) ->
+    case proplists:get_value(save_data_dir, Props) of
+        true ->
+            ok;
+        _ ->
+            clean_up_data_dir(DataDir)
+    end,
+
+    maybe_start_sup(),
+    machi_flu_psup:start_flu_package(RegName, TcpPort, DataDir, Props).
+
+stop_flu_package(FluName) ->
+    machi_flu_psup:stop_flu_package(FluName),
+    Pid = whereis(machi_sup),
+    exit(Pid, normal),
+    machi_util:wait_for_death(Pid, 100).
+
+maybe_start_sup() ->
+    case whereis(machi_sup) of
+        undefined ->
+            machi_sup:start_link(),
+            %% evil but we have to let stuff start up
+            timer:sleep(10),
+            maybe_start_sup();
+        Pid -> Pid
+    end.
+
 -ifndef(PULSE).
 
 flu_smoke_test() ->

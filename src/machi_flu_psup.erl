@@ -83,6 +83,8 @@
 %% Supervisor callbacks
 -export([init/1]).
 
+make_package_spec(#p_srvr{name=FluName, port=TcpPort, props=Props}) when is_list(Props) ->
+    make_package_spec({FluName, TcpPort, Props});
 make_package_spec({FluName, TcpPort, Props}) when is_list(Props) ->
     FluDataDir = get_env(flu_data_dir, undefined_is_invalid),
     MyDataDir = filename:join(FluDataDir, atom_to_list(FluName)),
@@ -94,7 +96,7 @@ make_package_spec(FluName, TcpPort, DataDir, Props) ->
      permanent, ?SHUTDOWN, supervisor, []}.
 
 start_flu_package(#p_srvr{name=FluName, port=TcpPort, props=Props}) ->
-    DataDir = get_data_dir(Props),
+    DataDir = get_data_dir(FluName, Props),
     start_flu_package(FluName, TcpPort, DataDir, Props).
 
 start_flu_package(FluName, TcpPort, DataDir, Props) ->
@@ -178,8 +180,11 @@ get_env(Setting, Default) ->
         {ok, V} -> V
     end.
 
-get_data_dir(Props) ->
+get_data_dir(FluName, Props) ->
     case proplists:get_value(data_dir, Props) of
         Path when is_list(Path) ->
-            Path
+            Path;
+        undefined ->
+            {ok, Dir} = application:get_env(machi, flu_data_dir),
+            Dir ++ "/" ++ atom_to_list(FluName)
     end.

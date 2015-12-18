@@ -273,6 +273,17 @@ make_prop_ets() ->
 
 -endif. % EQC
 
+make_advance_fun(FitList, FLUList, MgrList, Num) ->
+    fun() ->
+            [begin
+                 [catch machi_fitness:trigger_early_adjustment(Fit, Tgt) ||
+                     Fit <- FitList,
+                     Tgt <- FLUList ],
+                 [catch ?MGR:trigger_react_to_env(Mgr) || Mgr <- MgrList],
+                 ok
+             end || _ <- lists:seq(1, Num)]
+    end.
+
 smoke0_test() ->
     TcpPort = 6623,
     {[Pa], [M0], _Dirs} = machi_test_util:start_flu_packages(
@@ -319,20 +330,24 @@ smoke1_test2() ->
         machi_test_util:stop_flu_packages()
     end.
 
-nonunanimous_setup_and_fix_test() ->
+nonunanimous_setup_and_fix_test_() ->
+    os:cmd("rm -f /tmp/moomoo.*"),
+    {timeout, 1*60, fun() -> nonunanimous_setup_and_fix_test2() end}.
+
+nonunanimous_setup_and_fix_test2() ->
     TcpPort = 62877,
     MgrOpts = [{active_mode,false}],
-    {Ps, [Ma,Mb], _Dirs} = machi_test_util:start_flu_packages(
-                             2, TcpPort, "./data.", MgrOpts),
+    {Ps, [Ma,Mb,Mc], Dirs} = machi_test_util:start_flu_packages(
+                             3, TcpPort, "./data.", MgrOpts),
     MembersDict = machi_projection:make_members_dict(Ps),
-    [machi_chain_manager1:set_chain_members(M, MembersDict) || M <- [Ma, Mb]],
+    ChainName = my_little_chain,
+    [machi_chain_manager1:set_chain_members(M, ChainName, 0, ap_mode,
+                                            MembersDict, []) || M <- [Ma, Mb]],
 
-    [Proxy_a, Proxy_b] = Proxies =
+    [Proxy_a, Proxy_b, Proxy_c] = Proxies =
         [element(2, ?FLU_PC:start_link(P)) || P <- Ps],
 
     try
-        ok = machi_chain_manager1:set_chain_members(Ma, MembersDict, []),
-        ok = machi_chain_manager1:set_chain_members(Mb, MembersDict, []),
         {ok, P1} = ?MGR:test_calc_projection(Ma, false),
 
         P1a = machi_projection:update_checksum(
@@ -368,11 +383,110 @@ nonunanimous_setup_and_fix_test() ->
         {ok, P2pb} = ?FLU_PC:read_latest_projection(Proxy_b, private),
         P2 = P2pb#projection_v1{dbg2=[]},
 
-        %% Pspam = machi_projection:update_checksum(
-        %%           P1b#projection_v1{epoch_number=?SPAM_PROJ_EPOCH,
-        %%                             dbg=[hello_spam]}),
-        %% ok = ?FLU_PC:write_projection(Proxy_b, public, Pspam),
+        Mgrs = [a_chmgr, b_chmgr, c_chmgr],
+        Advance = make_advance_fun([a_fitness,b_fitness,c_fitness],
+                                   [a,b,c],
+                                   Mgrs,
+                                   3),
+        Advance(),
+        {_, _, TheEpoch_3} = ?MGR:trigger_react_to_env(Ma),
+        {_, _, TheEpoch_3} = ?MGR:trigger_react_to_env(Mb),
+        {_, _, TheEpoch_3} = ?MGR:trigger_react_to_env(Mc),
 
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        io:format("STEP: Remove 'a' from the chain.\n", []),
+
+        MembersDict4 = machi_projection:make_members_dict(tl(Ps)),
+        ok = machi_chain_manager1:set_chain_members(
+               Mb, ChainName, TheEpoch_3, ap_mode, MembersDict4, []),
+
+        Advance(),
+        {ok, {true, _}} = ?FLU_PC:wedge_status(Proxy_a),
+        {_, _, TheEpoch_4} = ?MGR:trigger_react_to_env(Mb),
+        {_, _, TheEpoch_4} = ?MGR:trigger_react_to_env(Mc),
+        [{ok, #projection_v1{upi=[b,c], repairing=[]}} =
+             ?FLU_PC:read_latest_projection(Pxy, private) || Pxy <- tl(Proxies)],
+
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        io:format("STEP: Add a to the chain again (a is running).\n", []),
+
+        MembersDict5 = machi_projection:make_members_dict(Ps),
+        ok = machi_chain_manager1:set_chain_members(
+               Mb, ChainName, TheEpoch_4, ap_mode, MembersDict5, []),
+
+        Advance(),
+        {_, _, TheEpoch_5} = ?MGR:trigger_react_to_env(Ma),
+        {_, _, TheEpoch_5} = ?MGR:trigger_react_to_env(Mb),
+        {_, _, TheEpoch_5} = ?MGR:trigger_react_to_env(Mc),
+        [{ok, #projection_v1{upi=[b,c], repairing=[a]}} =
+             ?FLU_PC:read_latest_projection(Pxy, private) || Pxy <- Proxies],
+
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        io:format("STEP: Stop a while a chain member, advance b&c.\n", []),
+
+        ok = machi_flu_psup:stop_flu_package(a),
+        Advance(),
+        {_, _, TheEpoch_6} = ?MGR:trigger_react_to_env(Mb),
+        {_, _, TheEpoch_6} = ?MGR:trigger_react_to_env(Mc),
+        [{ok, #projection_v1{upi=[b,c], repairing=[]}} =
+             ?FLU_PC:read_latest_projection(Pxy, private) || Pxy <- tl(Proxies)],
+
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        io:format("STEP: Remove 'a' from the chain.\n", []),
+
+        MembersDict7 = machi_projection:make_members_dict(tl(Ps)),
+        ok = machi_chain_manager1:set_chain_members(
+               Mb, ChainName, TheEpoch_6, ap_mode, MembersDict7, []),
+
+        Advance(),
+        {_, _, TheEpoch_7} = ?MGR:trigger_react_to_env(Mb),
+        {_, _, TheEpoch_7} = ?MGR:trigger_react_to_env(Mc),
+        [{ok, #projection_v1{upi=[b,c], repairing=[]}} =
+             ?FLU_PC:read_latest_projection(Pxy, private) || Pxy <- tl(Proxies)],
+
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        io:format("STEP: Start a, advance.\n", []),
+
+        Opts = [{active_mode, false}, {initial_wedged, true}],
+        #p_srvr{name=NameA} = hd(Ps),
+        {ok,_}=machi_flu_psup:start_flu_package(NameA, TcpPort+1, hd(Dirs), Opts),
+        Advance(),
+        {ok, {true, _}} = ?FLU_PC:wedge_status(Proxy_a),
+        {ok, {false, EpochID_8}} = ?FLU_PC:wedge_status(Proxy_b),
+        {ok, {false, EpochID_8}} = ?FLU_PC:wedge_status(Proxy_c),
+        [{ok, #projection_v1{upi=[b,c], repairing=[]}} =
+             ?FLU_PC:read_latest_projection(Pxy, private) || Pxy <- tl(Proxies)],
+
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        io:format("STEP: Stop a, delete a's data, leave it stopped\n", []),
+
+        ok = machi_flu_psup:stop_flu_package(a),
+        Advance(),
+        machi_flu1_test:clean_up_data_dir(hd(Dirs)),
+        {ok, {false, _}} = ?FLU_PC:wedge_status(Proxy_b),
+        {ok, {false, _}} = ?FLU_PC:wedge_status(Proxy_c),
+
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        io:format("STEP: Add a to the chain again (a is stopped).\n", []),
+
+        MembersDict9 = machi_projection:make_members_dict(Ps),
+        {_, _, TheEpoch_9} = ?MGR:trigger_react_to_env(Mb),
+        ok = machi_chain_manager1:set_chain_members(
+               Mb, ChainName, TheEpoch_9, ap_mode, MembersDict9, []),
+        Advance(),
+        {_, _, TheEpoch_9b} = ?MGR:trigger_react_to_env(Mb),
+        true = (TheEpoch_9b > TheEpoch_9),
+
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        io:format("STEP: Start a, and it joins like it ought to\n", []),
+
+        {ok,_}=machi_flu_psup:start_flu_package(NameA, TcpPort+1, hd(Dirs), Opts),
+        Advance(),
+        {ok, {false, {TheEpoch10,_}}} = ?FLU_PC:wedge_status(Proxy_a),
+        {ok, {false, {TheEpoch10,_}}} = ?FLU_PC:wedge_status(Proxy_b),
+        {ok, {false, {TheEpoch10,_}}} = ?FLU_PC:wedge_status(Proxy_c),
+        [{ok, #projection_v1{upi=[b,c], repairing=[a]}} =
+             ?FLU_PC:read_latest_projection(Pxy, private) || Pxy <- Proxies],
         ok
     after
         [ok = ?FLU_PC:quit(X) || X <- Proxies],

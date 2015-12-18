@@ -47,7 +47,7 @@
 -type projection()      :: #projection_v1{}.
 -type projection_type() :: 'public' | 'private'.
 
-%% @doc Tags that stand for how that checksum was generated. See
+%% Tags that stand for how that checksum was generated. See
 %% machi_util:make_tagged_csum/{1,2} for further documentation and
 %% implementation.
 -type csum_tag()    :: none | client_sha | server_sha | server_regen_sha.

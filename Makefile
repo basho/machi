@@ -35,6 +35,9 @@ deps:
 clean:
 	$(REBAR) -r clean
 
+edoc: edoc-clean
+	$(REBAR) skip_deps=true doc
+
 edoc-clean:
 	rm -f edoc/*.png edoc/*.html edoc/*.css edoc/edoc-info
 

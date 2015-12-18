@@ -1,0 +1,4 @@
+{flu,f4,"localhost",20404,[]}.
+{flu,f5,"localhost",20405,[]}.
+{flu,f6,"localhost",20406,[]}.
+{chain,c2,[f4,f5,f6],[]}.

@@ -815,6 +815,7 @@ conv_to_epoch_id(#mpb_epochid{epoch_number=Epoch,
 conv_to_projection_v1(#mpb_projectionv1{epoch_number=Epoch,
                                         epoch_csum=CSum,
                                         author_server=Author,
+                                        chain_name=ChainName,
                                         all_members=AllMembers,
                                         witnesses=Witnesses,
                                         creation_time=CTime,
@@ -828,6 +829,7 @@ conv_to_projection_v1(#mpb_projectionv1{epoch_number=Epoch,
     #projection_v1{epoch_number=Epoch,
                    epoch_csum=CSum,
                    author_server=to_atom(Author),
+                   chain_name=to_atom(ChainName),
                    all_members=[to_atom(X) || X <- AllMembers],
                    witnesses=[to_atom(X) || X <- Witnesses],
                    creation_time=conv_to_now(CTime),
@@ -957,7 +959,7 @@ conv_from_status({error, partial_read}) ->
 conv_from_status({error, bad_epoch}) ->
     'BAD_EPOCH';
 conv_from_status(_OOPS) ->
-    io:format(user, "HEY, ~s:~w got ~w\n", [?MODULE, ?LINE, _OOPS]),
+    io:format(user, "HEY, ~s:~w got ~p\n", [?MODULE, ?LINE, _OOPS]),
     'BAD_JOSS'.
 
 conv_to_boolean(undefined) ->
@@ -975,6 +977,7 @@ conv_from_boolean(true) ->
 conv_from_projection_v1(#projection_v1{epoch_number=Epoch,
                                        epoch_csum=CSum,
                                        author_server=Author,
+                                       chain_name=ChainName,
                                        all_members=AllMembers,
                                        witnesses=Witnesses,
                                        creation_time=CTime,
@@ -988,6 +991,7 @@ conv_from_projection_v1(#projection_v1{epoch_number=Epoch,
     #mpb_projectionv1{epoch_number=Epoch,
                       epoch_csum=CSum,
                       author_server=to_list(Author),
+                      chain_name=to_list(ChainName),
                       all_members=[to_list(X) || X <- AllMembers],
                       witnesses=[to_list(X) || X <- Witnesses],
                       creation_time=conv_from_now(CTime),

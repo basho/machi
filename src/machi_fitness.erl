@@ -39,7 +39,8 @@
          get_unfit_list/1, update_local_down_list/3,
          add_admin_down/3, delete_admin_down/2,
          send_fitness_update_spam/3,
-         send_spam_to_everyone/1]).
+         send_spam_to_everyone/1,
+         trigger_early_adjustment/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -80,6 +81,13 @@ send_fitness_update_spam(Pid, FromName, Dict) ->
 
 send_spam_to_everyone(Pid) ->
     gen_server:call(Pid, {send_spam_to_everyone}, infinity).
+
+%% @doc For testing purposes, we don't want a test to wait for
+%%      wall-clock time to elapse before the fitness server makes a
+%%      down->up status decision.
+
+trigger_early_adjustment(Pid, FLU) ->
+    Pid ! {adjust_down_list, FLU}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
