@@ -87,13 +87,11 @@ stop(Pid) when is_pid(Pid) ->
             error
     end.
 
-update_wedge_state(PidSpec, Boolean, EpochId)
-  when is_boolean(Boolean), is_tuple(EpochId) ->
-    gen_server:cast(PidSpec, {wedge_state_change, Boolean, EpochId}).
+update_wedge_state(PidSpec, Boolean, EpochId) ->
+    machi_flu1_append_server:int_update_wedge_state(PidSpec, Boolean, EpochId).
 
-wedge_myself(PidSpec, EpochId)
-  when is_tuple(EpochId) ->
-    gen_server:cast(PidSpec, {wedge_myself, EpochId}).
+wedge_myself(PidSpec, EpochId) ->
+    machi_flu1_append_server:int_wedge_myself(PidSpec, EpochId).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

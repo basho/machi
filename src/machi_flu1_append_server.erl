@@ -36,7 +36,7 @@
 -export([init/1]).
 -export([handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
-
+-export([int_update_wedge_state/3, int_wedge_myself/2]).
 -export([current_state/1, format_state/1]).
 
 -record(state, {
@@ -67,6 +67,13 @@ format_state(State) ->
     [_Name | Values] = tuple_to_list(State),
     lists:zip(Fields, Values).
 
+int_update_wedge_state(PidSpec, Boolean, EpochId)
+  when is_boolean(Boolean), is_tuple(EpochId) ->
+    gen_server:cast(PidSpec, {wedge_state_change, Boolean, EpochId}).
+
+int_wedge_myself(PidSpec, EpochId)
+  when is_tuple(EpochId) ->
+    gen_server:cast(PidSpec, {wedge_myself, EpochId}).
 
 init([Fluname, Witness_p, Wedged_p, EpochId]) ->
     TID = ets:new(machi_flu1:ets_table_name(Fluname),
