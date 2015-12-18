@@ -4,4 +4,4 @@ notifications:
 script: "priv/test-for-gh-pr.sh"
 otp_release:
   - 17.5
-  - 18.1
+## No, Dialyzer is too different between 17 & 18:  - 18.1
