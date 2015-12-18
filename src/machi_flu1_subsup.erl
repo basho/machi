@@ -100,7 +100,7 @@ init([]) ->
                     string(), ets:tab(), atom() | pid()) -> supervisor:child_spec().
 listener_spec(FluName, TcpPort, Witness, DataDir, EpochTab, ProjStore) ->
     ListenerName = listener_name(FluName),
-    NbAcceptors = 100,
+    NbAcceptors = 10,
     TcpOpts = [{port, TcpPort}, {backlog, ?BACKLOG}],
     NetServerOpts = [FluName, Witness, DataDir, EpochTab, ProjStore],
     ranch:child_spec(ListenerName, NbAcceptors,
