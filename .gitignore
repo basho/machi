@@ -25,5 +25,6 @@ rel/machi
 *.patch
 current_counterexample.eqc
 foo*
+RUNLOG*
 typescript*
 *.swp
