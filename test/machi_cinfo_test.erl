@@ -38,6 +38,7 @@ smoke_test_() ->
       fun() -> machi_cinfo:private_projection(a) end,
       fun() -> machi_cinfo:fitness(a) end,
       fun() -> machi_cinfo:chain_manager(a) end,
+      fun() -> machi_cinfo:flu1(a) end,
       fun() -> machi_cinfo:dump() end
      ]}.
 
