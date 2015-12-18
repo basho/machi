@@ -141,7 +141,8 @@ repair(ap_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
                    %%       [FLU, mbytes(Bytes)]),
                    lager:info("Repair ~w "
                               "Out-of-sync data for FLU ~p: ~s MBytes\n",
-                         [RepairId, FLU, mbytes(Bytes)])
+                         [RepairId, FLU, mbytes(Bytes)]),
+                   ok
                end || FLU <- OurFLUs],
 
               %% ?VERB("Execute repair directives: "),

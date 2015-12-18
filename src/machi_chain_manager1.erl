@@ -341,8 +341,8 @@ handle_call({set_chain_members, SetChainName, SetOldEpoch, CMode,
                             consistency_mode=CMode}, NewProj),
     {Res, S4} = do_react_to_env(S3),
     Reply = case Res of
-                {_,_,_} -> ok;
-                _       -> Res
+                {_,_,_} -> ok
+                % Dialyzer says that all vals match with the 3-tuple pattern
             end,
     {reply, Reply, S4};
 handle_call({set_active, Boolean}, _From, #ch_mgr{timer=TRef}=S) ->
