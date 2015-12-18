@@ -23,9 +23,9 @@ complete yet, so we are working one small step at a time.
 + Quick admin: declarative management of Machi FLU and chain life cycles
   + Quick admin uses the "rc.d" config scheme for life cycle management
   + Quick admin's declarative "language": an Erlang-flavored AST
-    + Verb 'host': define a new host for FLU services
-    + Verb 'flu': define a new FLU
-    + Verb 'chain': define or reconfigure a chain
+    + Term 'host': define a new host for FLU services
+    + Term 'flu': define a new FLU
+    + Term 'chain': define or reconfigure a chain
   + Executing quick admin AST files via the 'machi-admin' utility
     + Checking the syntax of an AST file
     + Executing an AST file
@@ -172,14 +172,14 @@ the current language is an Erlang-flavored abstract syntax tree
 (AST).  The tree isn't very deep, either, frequently just one
 element tall.  (Not much of a tree, is it?)
 
-There are three verbs in the language currently:
+There are three terms in the language currently:
 
 + ~host~, define a new host that can execute FLU servers
 + ~flu~, define a new FLU
 + ~chain~, define a new chain or re-configure an existing chain with
   the same name
 
-*** Verb 'host': define a new host for FLU services
+*** Term 'host': define a new host for FLU services
 
 In this context, a host is a machine, virtual machine, or container
 that can execute the Machi application and can therefore provide FLU
@@ -207,7 +207,7 @@ Type information, description, and restrictions:
   and one using an IP address.  The user must avoid this
   double-definition because it is not enforced by quick admin.
   + The ~Name~ field is used for cross-reference purposes with other
-    verbs, e.g., ~flu~ and ~chain~.
+    terms, e.g., ~flu~ and ~chain~.
   + There is no syntax yet for removing a host definition.
 
 + ~AdminI::string()~ A DNS hostname or IP address for cluster
@@ -243,7 +243,7 @@ Type information, description, and restrictions:
     command line utilities.
   + and others....
 
-*** Verb 'flu': define a new FLU
+*** Term 'flu': define a new FLU
 
 A new FLU is defined relative to a previously-defined ~host~ entities;
 an exception will be thrown if the ~host~ cannot be cross-referenced.
@@ -258,7 +258,7 @@ Type information, description, and restrictions:
   also for internal management use; please note the ~atom()~ type.
   This name must be unique.
   + The ~Name~ field is used for cross-reference purposes with the
-    ~chain~ verb.
+    ~chain~ term.
   + There is no syntax yet for removing a FLU definition.
 
 + ~Hostname::string()~ The cross-reference name of the ~host~ that
@@ -271,7 +271,7 @@ Type information, description, and restrictions:
   additional configuration options, debugging information, sysadmin
   comments, etc.
 
-*** Verb 'chain': define or reconfigure a chain
+*** Term 'chain': define or reconfigure a chain
 
 A chain is defined relative to zero or more previously-defined ~flu~
 entities; an exception will be thrown if any ~flu~ cannot be
@@ -322,11 +322,11 @@ Type information, description, and restrictions:
   additional configuration options, debugging information, sysadmin
   comments, etc.
 
-+ If this verb specifies a new ~chain~ name, then all of the member
++ If this term specifies a new ~chain~ name, then all of the member
   FLU servers (full & witness types) will be bootstrapped to a
   starting configuration.
 
-+ If this verb specifies a previously-defined ~chain~ name, then all
++ If this term specifies a previously-defined ~chain~ name, then all
   of the member FLU servers (full & witness types, respectively) will
   be adjusted to add or remove members, as appropriate.
   + Any FLU servers added to either list must not be assigned to any
