@@ -950,7 +950,7 @@ make_pending_config(Term) ->
 %% The largest numbered file is assumed to be all of the AST changes that we
 %% want to apply in a single batch.  The AST tuples of all files with smaller
 %% numbers will be concatenated together to create the prior history of
-%% cluster-of-clusters.  We assume that all transitions inside these earlier
+%% the cluster.  We assume that all transitions inside these earlier
 %% files were actually safe &amp; sane, therefore any sanity problem can only
 %% be caused by the contents of the largest numbered file.
 

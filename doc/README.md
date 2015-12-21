@@ -66,9 +66,9 @@ an introduction to the
 self-management algorithm proposed for Machi.  Most material has been
 moved to the [high-level-chain-mgr.pdf](high-level-chain-mgr.pdf) document.
 
-### cluster-of-clusters (directory)
+### cluster (directory)
 
-This directory contains the sketch of the "cluster of clusters" design
+This directory contains the sketch of the cluster design
 strawman for partitioning/distributing/sharding files across a large
-number of independent Machi clusters.
+number of independent Machi chains.
 
