@@ -211,7 +211,7 @@ get_local_running_flus() ->
 
 get_latest_public_epochs(FLUs) ->
     [begin
-         PS = machi_flu1:make_projection_server_regname(FLU),
+         PS = machi_flu_psup:make_proj_regname(FLU),
          {ok, {Epoch, _CSum}} = machi_projection_store:get_latest_epochid(
                                   PS, public),
          {FLU, Epoch}
@@ -297,7 +297,7 @@ bootstrap_chain2(#chain_def_v1{name=NewChainName, mode=NewCMode,
     NewWitnesses_list = [Name || #p_srvr{name=Name} <- Witnesses],
 
     Mgr = machi_chain_manager1:make_chmgr_regname(FLU),
-    PStore = machi_flu1:make_projection_server_regname(FLU),
+    PStore = machi_flu_psup:make_proj_regname(FLU),
     {ok, #projection_v1{epoch_number=OldEpoch, chain_name=OldChainName,
                         mode=OldCMode,
                         all_members=OldAll_list, witnesses=OldWitnesses}} =

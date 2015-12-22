@@ -75,7 +75,7 @@ private_projection(FluName) ->
 
 -spec chain_manager(atom()) -> term().
 chain_manager(FluName) ->
-    Mgr = machi_flu_psup:make_mgr_supname(FluName),
+    Mgr = machi_flu_psup:make_mgr_regname(FluName),
     sys:get_status(Mgr).
 
 -spec fitness(atom()) -> term().
@@ -91,7 +91,7 @@ flu1(FluName) ->
 %% Internal functions
 
 projection(FluName, Kind) ->
-    ProjStore = machi_flu1:make_projection_server_regname(FluName),
+    ProjStore = machi_flu_psup:make_proj_regname(FluName),
     {ok, Projection} = machi_projection_store:read_latest_projection(
                          whereis(ProjStore), Kind),
     Fields = record_info(fields, projection_v1),

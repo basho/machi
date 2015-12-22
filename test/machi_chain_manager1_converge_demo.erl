@@ -194,7 +194,7 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
                 {_, ap_mode} -> ap_mode
             end,
     MgrNamez = [begin
-                    MgrName = machi_flu_psup:make_mgr_supname(Name),
+                    MgrName = machi_flu_psup:make_mgr_regname(Name),
                     ok = ?MGR:set_chain_members(MgrName, ch_demo, 0, CMode,
                                                 MembersDict,Witnesses),
                     {Name, MgrName}

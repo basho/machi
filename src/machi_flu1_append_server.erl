@@ -76,7 +76,7 @@ int_wedge_myself(PidSpec, EpochId)
     gen_server:cast(PidSpec, {wedge_myself, EpochId}).
 
 init([Fluname, Witness_p, Wedged_p, EpochId]) ->
-    TID = ets:new(machi_flu1:ets_table_name(Fluname),
+    TID = ets:new(machi_flu1:epoch_table_name(Fluname),
                   [set, protected, named_table, {read_concurrency, true}]),
     ets:insert(TID, {epoch, {Wedged_p, EpochId}}),
     {ok, #state{flu_name=Fluname, witness=Witness_p, wedged=Wedged_p,

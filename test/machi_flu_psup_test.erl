@@ -70,8 +70,8 @@ partial_stop_restart2() ->
           {b,#p_srvr{name=b, address="localhost", port=5561, props="./data.b"}},
           {c,#p_srvr{name=c, address="localhost", port=5562, props="./data.c"}}
          ],
-    ChMgrs = [machi_flu_psup:make_mgr_supname(P#p_srvr.name) || {_,P} <-Ps],
-    PStores = [machi_flu_psup:make_proj_supname(P#p_srvr.name) || {_,P} <-Ps],
+    ChMgrs = [machi_flu_psup:make_mgr_regname(P#p_srvr.name) || {_,P} <-Ps],
+    PStores = [machi_flu_psup:make_proj_regname(P#p_srvr.name) || {_,P} <-Ps],
     Dict = orddict:from_list(Ps),
     [os:cmd("rm -rf " ++ P#p_srvr.props) || {_,P} <- Ps],
     {ok, SupPid} = machi_sup:start_link(),

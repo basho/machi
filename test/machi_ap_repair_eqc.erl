@@ -207,7 +207,7 @@ all_list_extra(Num) ->
     [begin
          FLUNameStr = [$a + I - 1],
          FLUName = list_to_atom(FLUNameStr),
-         MgrName = machi_flu_psup:make_mgr_supname(FLUName),
+         MgrName = machi_flu_psup:make_mgr_regname(FLUName),
          {#p_srvr{name=FLUName, address="localhost", port=PortBase+I,
                   props=[{chmgr, MgrName}]},
           DirBase ++ "/data.eqc." ++ FLUNameStr}
@@ -316,7 +316,7 @@ initial_state() ->
 initial_state(Num, Verbose) ->
     AllListE = all_list_extra(Num),
     FLUNames = [P#p_srvr.name || {P, _Dir} <- AllListE],
-    MgrNames = [{Name, machi_flu_psup:make_mgr_supname(Name)} || Name <- FLUNames],
+    MgrNames = [{Name, machi_flu_psup:make_mgr_regname(Name)} || Name <- FLUNames],
     #state{num=Num, verbose=Verbose,
            flu_names=FLUNames, mgr_names=MgrNames,
            cr_count=cr_count(Num)}.
@@ -325,7 +325,7 @@ setup_target(Num, Seed, Verbose) ->
     %% ?V("setup_target(Num=~w, Seed=~w~nn", [Num, Seed]),
     AllListE = all_list_extra(Num),
     FLUNames = [P#p_srvr.name || {P, _Dir} <- AllListE],
-    MgrNames = [{Name, machi_flu_psup:make_mgr_supname(Name)} || Name <- FLUNames],
+    MgrNames = [{Name, machi_flu_psup:make_mgr_regname(Name)} || Name <- FLUNames],
     Dict = orddict:from_list([{P#p_srvr.name, P} || {P, _Dir} <- AllListE]),
 
     setup_chain(Seed, AllListE, FLUNames, MgrNames, Dict),

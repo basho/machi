@@ -77,8 +77,8 @@
          start_flu_package/1, start_flu_package/4, stop_flu_package/1]).
 %% Internal API
 -export([start_link/4,
-         make_flu_regname/1, make_p_regname/1, make_mgr_supname/1,
-         make_proj_supname/1, make_fitness_regname/1]).
+         make_flu_regname/1, make_p_regname/1, make_mgr_regname/1,
+         make_proj_regname/1, make_fitness_regname/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -121,7 +121,7 @@ init([FluName, TcpPort, DataDir, Props0]) ->
     MaxSecondsBetweenRestarts = 3600,
     SupFlags = {RestartStrategy, MaxRestarts, MaxSecondsBetweenRestarts},
 
-    ProjRegName = make_proj_supname(FluName),
+    ProjRegName = make_proj_regname(FluName),
     Props = Props0 ++ [{projection_store_registered_name, ProjRegName},
                        {use_partition_simulator,false}],
     ProjSpec = {ProjRegName,
@@ -133,7 +133,7 @@ init([FluName, TcpPort, DataDir, Props0]) ->
                {machi_fitness, start_link,
                 [ [{FluName}|Props] ]},
                permanent, ?SHUTDOWN, worker, []},
-    MgrSpec = {make_mgr_supname(FluName),
+    MgrSpec = {make_mgr_regname(FluName),
                {machi_chain_manager1, start_link,
                 [FluName, [], Props]},
                permanent, ?SHUTDOWN, worker, []},
@@ -165,10 +165,10 @@ make_flu_regname(FluName) when is_atom(FluName) ->
 make_p_regname(FluName) when is_atom(FluName) ->
     list_to_atom("flusup_" ++ atom_to_list(FluName)).
 
-make_mgr_supname(MgrName) when is_atom(MgrName) ->
+make_mgr_regname(MgrName) when is_atom(MgrName) ->
     machi_chain_manager1:make_chmgr_regname(MgrName).
 
-make_proj_supname(ProjName) when is_atom(ProjName) ->
+make_proj_regname(ProjName) when is_atom(ProjName) ->
     list_to_atom(atom_to_list(ProjName) ++ "_pstore").
 
 make_fitness_regname(FluName) when is_atom(FluName) ->

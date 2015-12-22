@@ -40,7 +40,7 @@ start_flu_package(FluName, TcpPort, DataDir) ->
 -spec start_flu_package(atom(), inet:port_number(), string(), list()) ->
                                {Ps::[#p_srvr{}], MgrNames::[atom()], Dirs::[string()]}.
 start_flu_package(FluName, TcpPort, DataDir, Props) ->
-    MgrName = machi_flu_psup:make_mgr_supname(FluName),
+    MgrName = machi_flu_psup:make_mgr_regname(FluName),
     FluInfo = [{#p_srvr{name=FluName, address="localhost", port=TcpPort,
                         props=[{chmgr, MgrName}, {data_dir, DataDir} | Props]},
                 DataDir, MgrName}],
@@ -71,7 +71,7 @@ flu_info(FluCount, BaseTcpPort, DirPrefix, Props) ->
     [begin
          FLUNameStr = [$a + I - 1],
          FLUName = list_to_atom(FLUNameStr),
-         MgrName = machi_flu_psup:make_mgr_supname(FLUName),
+         MgrName = machi_flu_psup:make_mgr_regname(FLUName),
          DataDir = DirPrefix ++ "/data.eqc." ++ FLUNameStr,
          {#p_srvr{name=FLUName, address="localhost", port=BaseTcpPort + I,
                   props=[{chmgr, MgrName}, {data_dir, DataDir} | Props]},
@@ -91,7 +91,6 @@ clean_up(FluInfo) ->
              case proplists:get_value(no_cleanup, Props) of
                  true -> ok;
                  _ ->
-                     _ = machi_flu1:stop(FLUName),
                      clean_up_dir(Dir)
              end
          end || {#p_srvr{name=FLUName, props=Props}, Dir, _} <- FluInfo],

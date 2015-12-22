@@ -46,13 +46,10 @@
 
 -module(machi_flu1).
 
--include_lib("kernel/include/file.hrl").
+-behavior(gen_server).
 
 -include("machi.hrl").
--include("machi_pb.hrl").
 -include("machi_projection.hrl").
--define(V(X,Y), ok).
-%% -include("machi_verbose.hrl").
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -60,32 +57,29 @@
 -endif. % TEST
 
 -export([start_link/1, stop/1,
-         update_wedge_state/3, wedge_myself/2]).
--export([make_projection_server_regname/1,
-         ets_table_name/1]).
-%% TODO: remove or replace in OTP way after gen_*'ified
--export([main2/4]).
+         update_wedge_state/3, wedge_myself/2,
+         epoch_table_name/1]).
+
+-export([init/1]).
+-export([handle_call/3, handle_cast/2, handle_info/2,
+         terminate/2, code_change/3]).
 
 -define(INIT_TIMEOUT, 60*1000).
 
+-record(state, {
+          flu_name :: atom(),
+          append_pid :: pid(),
+          projection_pid :: atom() | pid(),
+          listener_pid :: pid()
+         }).
+
 start_link([{FluName, TcpPort, DataDir}|Rest])
   when is_atom(FluName), is_integer(TcpPort), is_list(DataDir) ->
-    proc_lib:start_link(?MODULE, main2, [FluName, TcpPort, DataDir, Rest],
-                        ?INIT_TIMEOUT).
+    gen_server:start_link(?MODULE, [FluName, TcpPort, DataDir, Rest],
+                          [{timeout, ?INIT_TIMEOUT}]).
 
-stop(RegName) when is_atom(RegName) ->
-    case whereis(RegName) of
-        undefined -> ok;
-        Pid -> stop(Pid)
-    end;
-stop(Pid) when is_pid(Pid) ->
-    case erlang:is_process_alive(Pid) of
-        true ->
-            Pid ! killme,
-            ok;
-        false ->
-            error
-    end.
+stop(Pid) ->
+    gen_server:call(Pid, stop).
 
 update_wedge_state(PidSpec, Boolean, EpochId) ->
     machi_flu1_append_server:int_update_wedge_state(PidSpec, Boolean, EpochId).
@@ -95,11 +89,19 @@ wedge_myself(PidSpec, EpochId) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-main2(FluName, TcpPort, DataDir, Props) ->
+init([FluName, TcpPort, DataDir, Props]) ->
+    Config_e = machi_util:make_config_filename(DataDir, "unused"),
+    ok = filelib:ensure_dir(Config_e),
+    {_, Data_e} = machi_util:make_data_filename(DataDir, "unused"),
+    ok = filelib:ensure_dir(Data_e),
+    Projection_e = machi_util:make_projection_filename(DataDir, "unused"),
+    ok = filelib:ensure_dir(Projection_e),
+    put(flu_flu_name, FluName),
+
     {SendAppendPidToProj_p, ProjectionPid} =
         case proplists:get_value(projection_store_registered_name, Props) of
             undefined ->
-                RN = make_projection_server_regname(FluName),
+                RN = machi_flu_psup:make_proj_regname(FluName),
                 {ok, PP} =
                     machi_projection_store:start_link(RN, DataDir, undefined),
                 {true, PP};
@@ -109,6 +111,8 @@ main2(FluName, TcpPort, DataDir, Props) ->
     InitialWedged_p = proplists:get_value(initial_wedged, Props),
     ProjRes = machi_projection_store:read_latest_projection(ProjectionPid,
                                                             private),
+    put(flu_projection_pid, ProjectionPid),
+
     {Wedged_p, EpochId} =
         if InitialWedged_p == undefined,
            is_tuple(ProjRes), element(1, ProjRes) == ok ->
@@ -128,28 +132,38 @@ main2(FluName, TcpPort, DataDir, Props) ->
        true ->
             ok
     end,
-    {ok, ListenerPid} = start_listen_server(FluName, TcpPort, Witness_p, DataDir,
-                                            ets_table_name(FluName), ProjectionPid),
-    %% io:format(user, "Listener started: ~w~n", [{FluName, ListenerPid}]),
-
-    Config_e = machi_util:make_config_filename(DataDir, "unused"),
-    ok = filelib:ensure_dir(Config_e),
-    {_, Data_e} = machi_util:make_data_filename(DataDir, "unused"),
-    ok = filelib:ensure_dir(Data_e),
-    Projection_e = machi_util:make_projection_filename(DataDir, "unused"),
-    ok = filelib:ensure_dir(Projection_e),
-
-    put(flu_flu_name, FluName),
     put(flu_append_pid, AppendPid),
-    put(flu_projection_pid, ProjectionPid),
-    put(flu_listen_pid, ListenerPid),
-    proc_lib:init_ack({ok, self()}),
 
-    receive killme -> ok end,
+    {ok, ListenerPid} = start_listen_server(FluName, TcpPort, Witness_p, DataDir,
+                                            epoch_table_name(FluName), ProjectionPid),
+    put(flu_listener_pid, ListenerPid),
+
+    {ok, #state{flu_name=FluName, append_pid=AppendPid,
+                projection_pid=ProjectionPid, listener_pid=ListenerPid}}.
+
+handle_call(stop, _From, S) ->
+    {stop, normal, ok, S};
+handle_call(Else, From, S) ->
+    lager:info("~s:handle_call: WHA? from=~w ~w", [?MODULE, From, Else]),
+    {noreply, S}.
+
+handle_cast(Else, S) ->
+    lager:info("~s:handle_cast: WHA? ~p", [?MODULE, Else]),
+    {noreply, S}.
+
+handle_info(Else, S) ->
+    lager:info("~s:handle_info: WHA? ~p", [?MODULE, Else]),
+    {noreply, S}.
+
+terminate(_Reason, #state{append_pid=AppendPid, projection_pid=ProjectionPid,
+                         listener_pid=ListenerPid}) ->
     (catch exit(AppendPid, kill)),
     (catch exit(ProjectionPid, kill)),
     (catch exit(ListenerPid, kill)),
     ok.
+
+code_change(_OldVsn, S, _Extra) ->
+    {ok, S}.
 
 start_append_server(FluName, Witness_p, Wedged_p, EpochId) ->
     machi_flu1_subsup:start_append_server(FluName, Witness_p, Wedged_p, EpochId).
@@ -158,17 +172,7 @@ start_listen_server(FluName, TcpPort, Witness_p, DataDir, EtsTab, ProjectionPid)
     machi_flu1_subsup:start_listener(FluName, TcpPort, Witness_p, DataDir,
                                      EtsTab, ProjectionPid).
 
-%% This is the name of the projection store that is spawned by the
-%% *flu*, for use primarily in testing scenarios.  In normal use, we
-%% ought to be using the OTP style of managing processes, via
-%% supervisors, namely via machi_flu_psup.erl, which uses a
-%% *different* naming convention for the projection store name that it
-%% registers.
-
-make_projection_server_regname(BaseName) ->
-    list_to_atom(atom_to_list(BaseName) ++ "_pstore").
-
-ets_table_name(FluName) when is_atom(FluName) ->
+epoch_table_name(FluName) when is_atom(FluName) ->
     list_to_atom(atom_to_list(FluName) ++ "_epoch").
 
 -ifdef(TEST).

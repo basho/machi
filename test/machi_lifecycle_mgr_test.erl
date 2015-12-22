@@ -79,13 +79,10 @@ smoke_test2() ->
         Pa = #p_srvr{name=a,address="localhost",port=PortBase+0},
         Pb = #p_srvr{name=b,address="localhost",port=PortBase+1},
         Pc = #p_srvr{name=c,address="localhost",port=PortBase+2},
-        %% Pstore_a = machi_flu1:make_projection_server_regname(a),
-        %% Pstore_b = machi_flu1:make_projection_server_regname(b),
-        %% Pstore_c = machi_flu1:make_projection_server_regname(c),
         Pstores = [Pstore_a, Pstore_b, Pstore_c] =
-            [machi_flu1:make_projection_server_regname(a),
-             machi_flu1:make_projection_server_regname(b),
-             machi_flu1:make_projection_server_regname(c)],
+            [machi_flu_psup:make_proj_regname(a),
+             machi_flu_psup:make_proj_regname(b),
+             machi_flu_psup:make_proj_regname(c)],
         ChMgrs = [ChMgr_a, ChMgr_b, ChMgr_c] =
             [machi_chain_manager1:make_chmgr_regname(a),
              machi_chain_manager1:make_chmgr_regname(b),

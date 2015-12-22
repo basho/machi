@@ -324,7 +324,7 @@ handle_call({set_chain_members, SetChainName, SetOldEpoch, CMode,
                                 {NUPI, All_list -- NUPI}
                         end,
     NewEpoch = OldEpoch + ?SET_CHAIN_MEMBERS_EPOCH_SKIP,
-    ok = set_consistency_mode(machi_flu_psup:make_proj_supname(MyName), CMode),
+    ok = set_consistency_mode(machi_flu_psup:make_proj_regname(MyName), CMode),
     NewProj = machi_projection:update_checksum(
                 OldProj#projection_v1{author_server=MyName,
                                       chain_name=SetChainName,
@@ -3031,7 +3031,7 @@ get_unfit_list(FitnessServer) ->
 get_projection_store_pid_or_regname(#ch_mgr{name=MyName, opts=MgrOpts}) ->
     case get_projection_store_regname(MgrOpts) of
         undefined ->
-            machi_flu_psup:make_proj_supname(MyName);
+            machi_flu_psup:make_proj_regname(MyName);
         PStr ->
             PStr
     end.
