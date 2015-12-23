@@ -22,6 +22,8 @@
 
 -module(machi_yessir_client).
 
+-ifdef(TODO_refactoring_deferred).
+
 -include("machi.hrl").
 -include("machi_projection.hrl").
 
@@ -509,3 +511,5 @@ disconnect(#yessir{name=Name}) ->
 %% =INFO REPORT==== 17-May-2015::18:57:52 ===
 %% Repair success: tail a of [a] finished ap_mode repair ID {a,{1431,856671,140404}}: ok
 %% Stats [{t_in_files,0},{t_in_chunks,10413},{t_in_bytes,682426368},{t_out_files,0},{t_out_chunks,10413},{t_out_bytes,682426368},{t_bad_chunks,0},{t_elapsed_seconds,1.591}]
+
+-endif. % TODO_refactoring_deferred

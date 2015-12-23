@@ -264,13 +264,24 @@ do_pb_ll_request3({low_proj, PCMD}, S) ->
     {do_server_proj_request(PCMD, S), S};
 
 %% Witness status *matters* below
-do_pb_ll_request3({low_append_chunk, _EpochID, CoC_Namespace, CoC_Locator,
+do_pb_ll_request3({low_append_chunk, NSVersion, NS, NSLocator, EpochID,
                    Prefix, Chunk, CSum_tag,
-                   CSum, ChunkExtra},
+                   CSum, Opts},
                   #state{witness=false}=S) ->
-    {do_server_append_chunk(CoC_Namespace, CoC_Locator,
+    %% io:format(user, "
+    %% append_chunk namespace_version=~p
+    %% namespace=~p
+    %% locator=~p
+    %% epoch_id=~p
+    %% prefix=~p
+    %% chunk=~p
+    %% csum={~p,~p}
+    %% opts=~p\n",
+    %%           [NSVersion, NS, NSLocator, EpochID, Prefix, Chunk, CSum_tag, CSum, Opts]),
+    NSInfo = #ns_info{version=NSVersion, name=NS, locator=NSLocator},
+    {do_server_append_chunk(NSInfo, EpochID,
                             Prefix, Chunk, CSum_tag, CSum,
-                            ChunkExtra, S), S};
+                            Opts, S), S};
 do_pb_ll_request3({low_write_chunk, _EpochID, File, Offset, Chunk, CSum_tag,
                    CSum},
                   #state{witness=false}=S) ->
@@ -334,27 +345,27 @@ do_server_proj_request({kick_projection_reaction},
           end),
     async_no_response.
 
-do_server_append_chunk(CoC_Namespace, CoC_Locator,
+do_server_append_chunk(NSInfo, EpochID,
                        Prefix, Chunk, CSum_tag, CSum,
-                       ChunkExtra, S) ->
+                       Opts, S) ->
     case sanitize_prefix(Prefix) of
         ok ->
-            do_server_append_chunk2(CoC_Namespace, CoC_Locator,
+            do_server_append_chunk2(NSInfo, EpochID,
                                     Prefix, Chunk, CSum_tag, CSum,
-                                    ChunkExtra, S);
+                                    Opts, S);
         _ ->
             {error, bad_arg}
     end.
 
-do_server_append_chunk2(CoC_Namespace, CoC_Locator,
+do_server_append_chunk2(NSInfo, EpochID,
                         Prefix, Chunk, CSum_tag, Client_CSum,
-                        ChunkExtra, #state{flu_name=FluName,
-                                           epoch_id=EpochID}=_S) ->
+                        Opts, #state{flu_name=FluName,
+                                     epoch_id=EpochID}=_S) ->
     %% TODO: Do anything with PKey?
     try
         TaggedCSum = check_or_make_tagged_checksum(CSum_tag, Client_CSum,Chunk),
-        R = {seq_append, self(), CoC_Namespace, CoC_Locator,
-             Prefix, Chunk, TaggedCSum, ChunkExtra, EpochID},
+        R = {seq_append, self(), NSInfo, EpochID,
+             Prefix, Chunk, TaggedCSum, Opts},
         case gen_server:call(FluName, R, 10*1000) of
             {assignment, Offset, File} ->
                 Size = iolist_size(Chunk),
@@ -563,13 +574,11 @@ do_pb_hl_request2({high_echo, Msg}, S) ->
     {Msg, S};
 do_pb_hl_request2({high_auth, _User, _Pass}, S) ->
     {-77, S};
-do_pb_hl_request2({high_append_chunk, CoC_Namespace, CoC_Locator,
-                   Prefix, ChunkBin, TaggedCSum,
-                   ChunkExtra}, #state{high_clnt=Clnt}=S) ->
-    Chunk = {TaggedCSum, ChunkBin},
-    Res = machi_cr_client:append_chunk_extra(Clnt, CoC_Namespace, CoC_Locator,
-                                             Prefix, Chunk,
-                                             ChunkExtra),
+do_pb_hl_request2({high_append_chunk, NS, Prefix, Chunk, TaggedCSum, Opts},
+                  #state{high_clnt=Clnt}=S) ->
+    NSInfo = #ns_info{name=NS},                 % TODO populate other fields
+    Res = machi_cr_client:append_chunk(Clnt, NSInfo,
+                                       Prefix, Chunk, TaggedCSum, Opts),
     {Res, S};
 do_pb_hl_request2({high_write_chunk, File, Offset, ChunkBin, TaggedCSum},
                   #state{high_clnt=Clnt}=S) ->

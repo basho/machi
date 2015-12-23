@@ -85,9 +85,12 @@ partial_stop_restart2() ->
                           machi_flu1_client:wedge_status(Addr, TcpPort)
                   end,
     Append = fun({_,#p_srvr{address=Addr, port=TcpPort}}, EpochID) ->
+                     NSInfo = undefined,
+                     NoCSum = <<>>,
                      machi_flu1_client:append_chunk(Addr, TcpPort,
-                                                    EpochID,
-                                                    <<"prefix">>, <<"data">>)
+                                                    NSInfo, EpochID,
+                                                    <<"prefix">>,
+                                                    <<"data">>, NoCSum)
                   end,
     try
         [Start(P) || P <- Ps],

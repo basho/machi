@@ -107,6 +107,8 @@ smoke_test2() ->
     try
         Prefix = <<"pre">>,
         Chunk1 = <<"yochunk">>,
+        NSInfo = undefined,
+        NoCSum = <<>>,
         Host = "localhost",
         PortBase = 64454,
         Os = [{ignore_stability_time, true}, {active_mode, false}],
@@ -114,12 +116,12 @@ smoke_test2() ->
 
         %% Whew ... ok, now start some damn tests.
         {ok, C1} = machi_cr_client:start_link([P || {_,P}<-orddict:to_list(D)]),
-        machi_cr_client:append_chunk(C1, Prefix, Chunk1),
+        machi_cr_client:append_chunk(C1, NSInfo, Prefix, Chunk1, NoCSum),
         {ok, {Off1,Size1,File1}} =
-            machi_cr_client:append_chunk(C1, Prefix, Chunk1),
-        Chunk1_badcs = {<<?CSUM_TAG_CLIENT_SHA:8, 0:(8*20)>>, Chunk1},
+            machi_cr_client:append_chunk(C1, NSInfo, Prefix, Chunk1, NoCSum),
+        BadCSum = {?CSUM_TAG_CLIENT_SHA, crypto:sha("foo")},
         {error, bad_checksum} =
-            machi_cr_client:append_chunk(C1, Prefix, Chunk1_badcs),
+            machi_cr_client:append_chunk(C1, NSInfo, Prefix, Chunk1, BadCSum),
         {ok, {[{_, Off1, Chunk1, _}], []}} =
             machi_cr_client:read_chunk(C1, File1, Off1, Size1, []),
         {ok, PPP} = machi_flu1_client:read_latest_projection(Host, PortBase+0,
@@ -173,18 +175,19 @@ smoke_test2() ->
         true = is_binary(KludgeBin),
 
         {error, bad_arg} = machi_cr_client:checksum_list(C1, <<"!!!!">>),
-io:format(user, "\nFiles = ~p\n", [machi_cr_client:list_files(C1)]),
+        io:format(user, "\nFiles = ~p\n", [machi_cr_client:list_files(C1)]),
         %% Exactly one file right now, e.g.,
         %% {ok,[{2098202,<<"pre^b144ef13-db4d-4c9f-96e7-caff02dc754f^1">>}]}
         {ok, [_]} = machi_cr_client:list_files(C1),
 
-        %% Go back and test append_chunk_extra() and write_chunk()
+        %% Go back and test append_chunk() + extra and write_chunk()
         Chunk10 = <<"It's a different chunk!">>,
         Size10 = byte_size(Chunk10),
         Extra10 = 5,
+        Opts1 = #append_opts{chunk_extra=Extra10*Size10},
         {ok, {Off10,Size10,File10}} =
-            machi_cr_client:append_chunk_extra(C1, Prefix, Chunk10,
-                                               Extra10 * Size10),
+            machi_cr_client:append_chunk(C1, NSInfo, Prefix, Chunk10,
+                                         NoCSum, Opts1),
         {ok, {[{_, Off10, Chunk10, _}], []}} =
             machi_cr_client:read_chunk(C1, File10, Off10, Size10, []),
         [begin
@@ -198,7 +201,7 @@ io:format(user, "\nFiles = ~p\n", [machi_cr_client:list_files(C1)]),
                  machi_cr_client:read_chunk(C1, File10, Offx, Size10, [])
          end || Seq <- lists:seq(1, Extra10)],
         {ok, {Off11,Size11,File11}} =
-            machi_cr_client:append_chunk(C1, Prefix, Chunk10),
+            machi_cr_client:append_chunk(C1, NSInfo, Prefix, Chunk10, NoCSum),
         %% %% Double-check that our reserved extra bytes were really honored!
         %% true = (Off11 > (Off10 + (Extra10 * Size10))),
 io:format(user, "\nFiles = ~p\n", [machi_cr_client:list_files(C1)]),
@@ -224,6 +227,8 @@ witness_smoke_test2() ->
     try
         Prefix = <<"pre">>,
         Chunk1 = <<"yochunk">>,
+        NSInfo = undefined,
+        NoCSum = <<>>,
         Host = "localhost",
         PortBase = 64444,
         Os = [{ignore_stability_time, true}, {active_mode, false},
@@ -233,12 +238,13 @@ witness_smoke_test2() ->
 
         %% Whew ... ok, now start some damn tests.
         {ok, C1} = machi_cr_client:start_link([P || {_,P}<-orddict:to_list(D)]),
-        {ok, _} = machi_cr_client:append_chunk(C1, Prefix, Chunk1),
+        {ok, _} = machi_cr_client:append_chunk(C1, NSInfo, Prefix,
+                                               Chunk1, NoCSum),
         {ok, {Off1,Size1,File1}} =
-            machi_cr_client:append_chunk(C1, Prefix, Chunk1),
-        Chunk1_badcs = {<<?CSUM_TAG_CLIENT_SHA:8, 0:(8*20)>>, Chunk1},
+            machi_cr_client:append_chunk(C1, NSInfo, Prefix, Chunk1, NoCSum),
+        BadCSum = {?CSUM_TAG_CLIENT_SHA, crypto:sha("foo")},
         {error, bad_checksum} =
-            machi_cr_client:append_chunk(C1, Prefix, Chunk1_badcs),
+            machi_cr_client:append_chunk(C1, NSInfo, Prefix, Chunk1, BadCSum),
         {ok, {[{_, Off1, Chunk1, _}], []}} =
             machi_cr_client:read_chunk(C1, File1, Off1, Size1, []),
 
@@ -270,7 +276,8 @@ witness_smoke_test2() ->
             machi_cr_client:read_chunk(C1, File1, Off1, Size1, []),
         %% But because the head is wedged, an append will fail.
         {error, partition} =
-            machi_cr_client:append_chunk(C1, Prefix, Chunk1, 1*1000),
+            machi_cr_client:append_chunk(C1, NSInfo, Prefix, Chunk1, NoCSum,
+                                         #append_opts{}, 1*1000),
 
         %% The witness's wedge status should cause timeout/partition
         %% for write_chunk also.

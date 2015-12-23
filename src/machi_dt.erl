@@ -20,8 +20,10 @@
 
 -module(machi_dt).
 
+-include("machi.hrl").
 -include("machi_projection.hrl").
 
+-type append_opts() :: #append_opts{}.
 -type chunk()       :: chunk_bin() | {chunk_csum(), chunk_bin()}.
 -type chunk_bin()   :: binary() | iolist().    % client can use either
 -type chunk_csum()  :: binary().               % 1 byte tag, N-1 bytes checksum
@@ -29,9 +31,6 @@
 -type chunk_s()     :: 'trimmed' | binary().
 -type chunk_pos()   :: {file_offset(), chunk_size(), file_name_s()}.
 -type chunk_size()  :: non_neg_integer().
--type coc_namespace() :: string().
--type coc_nl()      :: {coc, coc_namespace(), coc_locator()}.
--type coc_locator() :: non_neg_integer().
 -type error_general() :: 'bad_arg' | 'wedged' | 'bad_checksum'.
 -type epoch_csum()  :: binary().
 -type epoch_num()   :: -1 | non_neg_integer().
@@ -44,6 +43,10 @@
 -type file_prefix() :: binary() | list().
 -type inet_host()   :: inet:ip_address() | inet:hostname().
 -type inet_port()   :: inet:port_number().
+-type locator()     :: number().
+-type namespace()   :: string().
+-type namespace_version() :: non_neg_integer().
+-type ns_info()     :: #ns_info{}.
 -type projection()      :: #projection_v1{}.
 -type projection_type() :: 'public' | 'private'.
 
@@ -53,6 +56,7 @@
 -type csum_tag()    :: none | client_sha | server_sha | server_regen_sha.
 
 -export_type([
+              append_opts/0,
               chunk/0,
               chunk_bin/0,
               chunk_csum/0,
@@ -61,9 +65,6 @@
               chunk_s/0,
               chunk_pos/0,
               chunk_size/0,
-              coc_namespace/0,
-              coc_nl/0,
-              coc_locator/0,
               error_general/0,
               epoch_csum/0,
               epoch_num/0,
@@ -76,6 +77,9 @@
               file_prefix/0,
               inet_host/0,
               inet_port/0,
+              namespace/0,
+              namespace_version/0,
+              ns_info/0,
               projection/0,
               projection_type/0
              ]).

@@ -49,7 +49,8 @@
          %% Other
          wait_for_death/2, wait_for_life/2,
          bool2int/1,
-         int2bool/1
+         int2bool/1,
+         ns_info_default/1
         ]).
 
 -include("machi.hrl").
@@ -68,12 +69,12 @@ make_regname(Prefix) when is_list(Prefix) ->
 
 %% @doc Calculate a config file path, by common convention.
 
--spec make_config_filename(string(), machi_dt:coc_namespace(), machi_dt:coc_locator(), string()) ->
+-spec make_config_filename(string(), machi_dt:namespace(), machi_dt:locator(), string()) ->
       string().
-make_config_filename(DataDir, CoC_Namespace, CoC_Locator, Prefix) ->
-    Locator_str = int_to_hexstr(CoC_Locator, 32),
+make_config_filename(DataDir, NS, Locator, Prefix) ->
+    Locator_str = int_to_hexstr(Locator, 32),
     lists:flatten(io_lib:format("~s/config/~s^~s^~s",
-                                [DataDir, Prefix, CoC_Namespace, Locator_str])).
+                                [DataDir, Prefix, NS, Locator_str])).
 
 %% @doc Calculate a config file path, by common convention.
 
@@ -102,19 +103,19 @@ make_checksum_filename(DataDir, FileName) ->
 
 %% @doc Calculate a file data file path, by common convention.
 
--spec make_data_filename(string(), machi_dt:coc_namespace(), machi_dt:coc_locator(), string(), atom()|string()|binary(), integer()|string()) ->
+-spec make_data_filename(string(), machi_dt:namespace(), machi_dt:locator(), string(), atom()|string()|binary(), integer()|string()) ->
       {binary(), string()}.
-make_data_filename(DataDir, CoC_Namespace, CoC_Locator, Prefix, SequencerName, FileNum)
+make_data_filename(DataDir, NS, Locator, Prefix, SequencerName, FileNum)
   when is_integer(FileNum) ->
-    Locator_str = int_to_hexstr(CoC_Locator, 32),
+    Locator_str = int_to_hexstr(Locator, 32),
     File = erlang:iolist_to_binary(io_lib:format("~s^~s^~s^~s^~w",
-                                                 [Prefix, CoC_Namespace, Locator_str, SequencerName, FileNum])),
+                                                 [Prefix, NS, Locator_str, SequencerName, FileNum])),
     make_data_filename2(DataDir, File);
-make_data_filename(DataDir, CoC_Namespace, CoC_Locator, Prefix, SequencerName, String)
+make_data_filename(DataDir, NS, Locator, Prefix, SequencerName, String)
   when is_list(String) ->
-    Locator_str = int_to_hexstr(CoC_Locator, 32),
+    Locator_str = int_to_hexstr(Locator, 32),
     File = erlang:iolist_to_binary(io_lib:format("~s^~s^~s^~s^~s",
-                                                 [Prefix, CoC_Namespace, Locator_str, SequencerName, string])),
+                                                 [Prefix, NS, Locator_str, SequencerName, string])),
     make_data_filename2(DataDir, File).
 
 make_data_filename2(DataDir, File) ->
@@ -161,7 +162,7 @@ is_valid_filename(Filename) ->
 %% </ul>
 %%
 %% Invalid filenames will return an empty list.
--spec parse_filename( Filename :: string() ) -> {} | {string(), machi_dt:coc_namespace(), machi_dt:coc_locator(), string(), string() }.
+-spec parse_filename( Filename :: string() ) -> {} | {string(), machi_dt:namespace(), machi_dt:locator(), string(), string() }.
 parse_filename(Filename) ->
     case string:tokens(Filename, "^") of
         [Prefix, CoC_NS, CoC_Loc, UUID, SeqNo] ->
@@ -181,10 +182,10 @@ parse_filename(Filename) ->
 %% @doc Read the file size of a config file, which is used as the
 %% basis for a minimum sequence number.
 
--spec read_max_filenum(string(), machi_dt:coc_namespace(), machi_dt:coc_locator(), string()) ->
+-spec read_max_filenum(string(), machi_dt:namespace(), machi_dt:locator(), string()) ->
       non_neg_integer().
-read_max_filenum(DataDir, CoC_Namespace, CoC_Locator, Prefix) ->
-    case file:read_file_info(make_config_filename(DataDir, CoC_Namespace, CoC_Locator, Prefix)) of
+read_max_filenum(DataDir, NS, Locator, Prefix) ->
+    case file:read_file_info(make_config_filename(DataDir, NS, Locator, Prefix)) of
         {error, enoent} ->
             0;
         {ok, FI} ->
@@ -194,11 +195,11 @@ read_max_filenum(DataDir, CoC_Namespace, CoC_Locator, Prefix) ->
 %% @doc Increase the file size of a config file, which is used as the
 %% basis for a minimum sequence number.
 
--spec increment_max_filenum(string(), machi_dt:coc_namespace(), machi_dt:coc_locator(), string()) ->
+-spec increment_max_filenum(string(), machi_dt:namespace(), machi_dt:locator(), string()) ->
       ok | {error, term()}.
-increment_max_filenum(DataDir, CoC_Namespace, CoC_Locator, Prefix) ->
+increment_max_filenum(DataDir, NS, Locator, Prefix) ->
     try
-        {ok, FH} = file:open(make_config_filename(DataDir, CoC_Namespace, CoC_Locator, Prefix), [append]),
+        {ok, FH} = file:open(make_config_filename(DataDir, NS, Locator, Prefix), [append]),
         ok = file:write(FH, "x"),
         ok = file:sync(FH),
         ok = file:close(FH)
@@ -287,12 +288,25 @@ int_to_hexbin(I, I_size) ->
 checksum_chunk(Chunk) when is_binary(Chunk); is_list(Chunk) ->
     crypto:hash(sha, Chunk).
 
+convert_csum_tag(A) when is_atom(A)->
+    A;
+convert_csum_tag(?CSUM_TAG_NONE) ->
+    ?CSUM_TAG_NONE_ATOM;
+convert_csum_tag(?CSUM_TAG_CLIENT_SHA) ->
+    ?CSUM_TAG_CLIENT_SHA_ATOM;
+convert_csum_tag(?CSUM_TAG_SERVER_SHA) ->
+    ?CSUM_TAG_SERVER_SHA_ATOM;
+convert_csum_tag(?CSUM_TAG_SERVER_REGEN_SHA) ->
+    ?CSUM_TAG_SERVER_REGEN_SHA_ATOM.
+
 %% @doc Create a tagged checksum
 
 make_tagged_csum(none) ->
     <<?CSUM_TAG_NONE:8>>;
+make_tagged_csum(<<>>) ->
+    <<?CSUM_TAG_NONE:8>>;
 make_tagged_csum({Tag, CSum}) ->
-    make_tagged_csum(Tag, CSum).
+    make_tagged_csum(convert_csum_tag(Tag), CSum).
 
 %% @doc Makes tagged csum. Each meanings are:
 %% none / ?CSUM_TAG_NONE
@@ -431,3 +445,10 @@ bool2int(true) -> 1;
 bool2int(false) -> 0.
 int2bool(0) -> false;
 int2bool(I) when is_integer(I) -> true.
+
+ns_info_default(#ns_info{}=NSInfo) ->
+    NSInfo;
+ns_info_default(undefined) ->
+    #ns_info{}.
+
+

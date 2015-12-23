@@ -170,12 +170,15 @@ message Mpb_AuthResp {
 // High level API: append_chunk() request & response
 
 message Mpb_AppendChunkReq {
-    required string coc_namespace = 1;
-    required uint32 coc_locator = 2;
+    /* In single chain/non-clustered environment, use namespace="" */
+    required string namespace = 1;
     required string prefix = 3;
     required bytes chunk = 4;
     required Mpb_ChunkCSum csum = 5;
     optional uint32 chunk_extra = 6;
+    optional string preferred_file_name = 7;
+    /* Fail the operation if our preferred file name is not available */
+    optional uint32 flag_fail_preferred = 8;
 }
 
 message Mpb_AppendChunkResp {
@@ -377,14 +380,17 @@ message Mpb_ProjectionV1 {
 // Low level API: append_chunk()
 
 message Mpb_LL_AppendChunkReq {
-    required Mpb_EpochID epoch_id = 1;
-    /* To avoid CoC use, use coc_namespace="" and coc_locator=0 */
-    required string coc_namespace = 2;
-    required uint32 coc_locator = 3;
-    required string prefix = 4;
-    required bytes chunk = 5;
-    required Mpb_ChunkCSum csum = 6;
-    optional uint32 chunk_extra = 7;
+    required uint32 namespace_version = 1;
+    required string namespace = 2;
+    required uint32 locator = 3;
+    required Mpb_EpochID epoch_id = 4;
+    required string prefix = 5;
+    required bytes chunk = 6;
+    required Mpb_ChunkCSum csum = 7;
+    optional uint32 chunk_extra = 8;
+    optional string preferred_file_name = 9;
+    /* Fail the operation if our preferred file name is not available */
+    optional uint32 flag_fail_preferred = 10;
 }
 
 message Mpb_LL_AppendChunkResp {

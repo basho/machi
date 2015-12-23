@@ -82,25 +82,34 @@ init([Fluname, Witness_p, Wedged_p, EpochId]) ->
     {ok, #state{flu_name=Fluname, witness=Witness_p, wedged=Wedged_p,
                 etstab=TID, epoch_id=EpochId}}.
 
-handle_call({seq_append, _From2, _N, _L, _Prefix, _Chunk, _CSum, _Extra, _EpochID},
+handle_call({seq_append, _From2, _NSInfo, _EpochID, _Prefix, _Chunk, _TCSum, _Opts},
             _From, #state{witness=true}=S) ->
     %% The FLU's machi_flu1_net_server process ought to filter all
     %% witness states, but we'll keep this clause for extra
     %% paranoia.
     {reply, witness, S};
-handle_call({seq_append, _From2, _N, _L, _Prefix, _Chunk, _CSum, _Extra, _EpochID},
+handle_call({seq_append, _From2, _NSInfo, _EpochID, _Prefix, _Chunk, _TCSum, _Opts},
             _From, #state{wedged=true}=S) ->
     {reply, wedged, S};
-handle_call({seq_append, _From2, CoC_Namespace, CoC_Locator,
-             Prefix, Chunk, CSum, Extra, EpochID},
+handle_call({seq_append, _From2, NSInfo, EpochID,
+             Prefix, Chunk, TCSum, Opts},
             From, #state{flu_name=FluName, epoch_id=OldEpochId}=S) ->
+    %% io:format(user, "
+    %% HANDLE_CALL append_chunk
+    %% NSInfo=~p
+    %% epoch_id=~p
+    %% prefix=~p
+    %% chunk=~p
+    %% tcsum=~p
+    %% opts=~p\n",
+    %%           [NSInfo, EpochID, Prefix, Chunk, TCSum, Opts]),
     %% Old is the one from our state, plain old 'EpochID' comes
     %% from the client.
     _ = case OldEpochId of
             EpochID ->
                 spawn(fun() ->
-                              append_server_dispatch(From, CoC_Namespace, CoC_Locator,
-                                                     Prefix, Chunk, CSum, Extra,
+                              append_server_dispatch(From, NSInfo,
+                                                     Prefix, Chunk, TCSum, Opts,
                                                      FluName, EpochID)
                       end),
                 {noreply, S};
@@ -161,10 +170,10 @@ terminate(Reason, _S) ->
 code_change(_OldVsn, S, _Extra) ->
     {ok, S}.
 
-append_server_dispatch(From, CoC_Namespace, CoC_Locator,
-                       Prefix, Chunk, CSum, Extra, FluName, EpochId) ->
-    Result = case handle_append(CoC_Namespace, CoC_Locator,
-                                Prefix, Chunk, CSum, Extra, FluName, EpochId) of
+append_server_dispatch(From, NSInfo,
+                       Prefix, Chunk, TCSum, Opts, FluName, EpochId) ->
+    Result = case handle_append(NSInfo,
+                                Prefix, Chunk, TCSum, Opts, FluName, EpochId) of
         {ok, File, Offset} ->
             {assignment, Offset, File};
         Other ->
@@ -173,19 +182,17 @@ append_server_dispatch(From, CoC_Namespace, CoC_Locator,
     _ = gen_server:reply(From, Result),
     ok.
 
-handle_append(_N, _L, _Prefix, <<>>, _Csum, _Extra, _FluName, _EpochId) ->
-    {error, bad_arg};
-handle_append(CoC_Namespace, CoC_Locator,
-              Prefix, Chunk, Csum, Extra, FluName, EpochId) ->
-    CoC = {coc, CoC_Namespace, CoC_Locator},
+handle_append(NSInfo,
+              Prefix, Chunk, TCSum, Opts, FluName, EpochId) ->
     Res = machi_flu_filename_mgr:find_or_make_filename_from_prefix(
-            FluName, EpochId, {prefix, Prefix}, CoC),
+            FluName, EpochId, {prefix, Prefix}, NSInfo),
     case Res of
         {file, F} ->
             case machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, F}) of
                 {ok, Pid} ->
-                    {Tag, CS} = machi_util:unmake_tagged_csum(Csum),
+                    {Tag, CS} = machi_util:unmake_tagged_csum(TCSum),
                     Meta = [{client_csum_tag, Tag}, {client_csum, CS}],
+                    Extra = Opts#append_opts.chunk_extra,
                     machi_file_proxy:append(Pid, Meta, Extra, Chunk);
                 {error, trimmed} = E ->
                     E

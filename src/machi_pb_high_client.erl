@@ -38,7 +38,7 @@
          connected_p/1,
          echo/2, echo/3,
          auth/3, auth/4,
-         append_chunk/7, append_chunk/8,
+         append_chunk/6, append_chunk/7,
          write_chunk/5, write_chunk/6,
          read_chunk/5, read_chunk/6,
          trim_chunk/4, trim_chunk/5,
@@ -96,30 +96,33 @@ auth(PidSpec, User, Pass) ->
 auth(PidSpec, User, Pass, Timeout) ->
     send_sync(PidSpec, {auth, User, Pass}, Timeout).
 
--spec append_chunk(pid(), CoC_namespace::binary(), CoC_locator::integer(), Prefix::binary(), Chunk::binary(),
-                   CSum::binary(), ChunkExtra::non_neg_integer()) ->
+-spec append_chunk(pid(),
+                   NS::machi_dt:namespace(), Prefix::machi_dt:file_prefix(),
+                   Chunk::machi_dt:chunk_bin(), CSum::machi_dt:chunk_csum(),
+                   Opts::machi_dt:append_opts()) ->
                           {ok, Filename::string(), Offset::machi_dt:file_offset()} |
                           {error, machi_client_error_reason()}.
-append_chunk(PidSpec, CoC_namespace, CoC_locator, Prefix, Chunk, CSum, ChunkExtra) ->
-    append_chunk(PidSpec, CoC_namespace, CoC_locator, Prefix, Chunk, CSum, ChunkExtra, ?DEFAULT_TIMEOUT).
+append_chunk(PidSpec, NS, Prefix, Chunk, CSum, Opts) ->
+    append_chunk(PidSpec, NS, Prefix, Chunk, CSum, Opts, ?DEFAULT_TIMEOUT).
 
--spec append_chunk(pid(), CoC_namespace::binary(), CoC_locator::integer(), Prefix::binary(),
-                   Chunk::binary(), CSum::binary(),
-                   ChunkExtra::non_neg_integer(),
+-spec append_chunk(pid(),
+                   NS::machi_dt:namespace(), Prefix::machi_dt:file_prefix(),
+                   Chunk::machi_dt:chunk_bin(), CSum::machi_dt:chunk_csum(),
+                   Opts::machi_dt:append_opts(),
                    Timeout::non_neg_integer()) ->
                           {ok, Filename::string(), Offset::machi_dt:file_offset()} |
                           {error, machi_client_error_reason()}.
-append_chunk(PidSpec, CoC_namespace, CoC_locator, Prefix, Chunk, CSum, ChunkExtra, Timeout) ->
-    send_sync(PidSpec, {append_chunk, CoC_namespace, CoC_locator, Prefix, Chunk, CSum, ChunkExtra}, Timeout).
+append_chunk(PidSpec, NS, Prefix, Chunk, CSum, Opts, Timeout) ->
+    send_sync(PidSpec, {append_chunk, NS, Prefix, Chunk, CSum, Opts}, Timeout).
 
 -spec write_chunk(pid(), File::string(), machi_dt:file_offset(),
-                  Chunk::binary(), CSum::binary()) ->
+                  Chunk::machi_dt:chunk_bin(), CSum::machi_dt:chunk_csum()) ->
                          ok | {error, machi_client_error_reason()}.
 write_chunk(PidSpec, File, Offset, Chunk, CSum) ->
     write_chunk(PidSpec, File, Offset, Chunk, CSum, ?DEFAULT_TIMEOUT).
 
 -spec write_chunk(pid(), File::string(), machi_dt:file_offset(),
-                  Chunk::binary(), CSum::binary(), Timeout::non_neg_integer()) ->
+                  Chunk::machi_dt:chunk_bin(), CSum::machi_dt:chunk_csum(), Timeout::non_neg_integer()) ->
                          ok | {error, machi_client_error_reason()}.
 write_chunk(PidSpec, File, Offset, Chunk, CSum, Timeout) ->
     send_sync(PidSpec, {write_chunk, File, Offset, Chunk, CSum}, Timeout).
@@ -281,18 +284,19 @@ do_send_sync2({auth, User, Pass}, #state{sock=Sock}=S) ->
             Res = {bummer, {X, Y, erlang:get_stacktrace()}},
             {Res, S}
     end;
-do_send_sync2({append_chunk, CoC_Namespace, CoC_Locator,
-               Prefix, Chunk, CSum, ChunkExtra},
+do_send_sync2({append_chunk, NS, Prefix, Chunk, CSum, Opts},
              #state{sock=Sock, sock_id=Index, count=Count}=S) ->
     try
         ReqID = <<Index:64/big, Count:64/big>>,
         CSumT = convert_csum_req(CSum, Chunk),
-        Req = #mpb_appendchunkreq{coc_namespace=CoC_Namespace,
-                                  coc_locator=CoC_Locator,
+        {ChunkExtra, Pref, FailPref} = machi_pb_translate:conv_from_append_opts(Opts),
+        Req = #mpb_appendchunkreq{namespace=NS,
                                   prefix=Prefix,
                                   chunk=Chunk,
                                   csum=CSumT,
-                                  chunk_extra=ChunkExtra},
+                                  chunk_extra=ChunkExtra,
+                                  preferred_file_name=Pref,
+                                  flag_fail_preferred=FailPref},
         R1a = #mpb_request{req_id=ReqID, do_not_alter=1,
                            append_chunk=Req},
         Bin1a = machi_pb:encode_mpb_request(R1a),
@@ -436,9 +440,15 @@ do_send_sync2({list_files},
             {Res, S#state{count=Count+1}}
     end.
 
+%% We only convert the checksum types that make sense here:
+%% none or client_sha.  None of the other types should be sent
+%% to us via the PB high protocol.
+
 convert_csum_req(none, Chunk) ->
     #mpb_chunkcsum{type='CSUM_TAG_CLIENT_SHA',
                    csum=machi_util:checksum_chunk(Chunk)};
+convert_csum_req(<<>>, Chunk) ->
+    convert_csum_req(none, Chunk);
 convert_csum_req({client_sha, CSumBin}, _Chunk) ->
     #mpb_chunkcsum{type='CSUM_TAG_CLIENT_SHA',
                    csum=CSumBin}.

@@ -50,14 +50,13 @@
 -include_lib("pulse_otp/include/pulse_otp.hrl").
 -endif.
 
--define(HARD_TIMEOUT, 2500).
+-define(SHORT_TIMEOUT, 2500).
+-define(LONG_TIMEOUT, (60*1000)).
 
 -export([
          %% File API
-         append_chunk/4, append_chunk/5,
          append_chunk/6, append_chunk/7,
-         append_chunk_extra/5, append_chunk_extra/6,
-         append_chunk_extra/7, append_chunk_extra/8,
+         append_chunk/8, append_chunk/9,
          read_chunk/6, read_chunk/7,
          checksum_list/3, checksum_list/4,
          list_files/2, list_files/3,
@@ -89,142 +88,61 @@
 
 -type port_wrap()   :: {w,atom(),term()}.
 
-%% @doc Append a chunk (binary- or iolist-style) of data to a file
-%% with `Prefix'.
-
--spec append_chunk(port_wrap(), machi_dt:epoch_id(), machi_dt:file_prefix(), machi_dt:chunk()) ->
+-spec append_chunk(port_wrap(),
+                   machi_dt:ns_info(), machi_dt:epoch_id(),
+                   machi_dt:file_prefix(), machi_dt:chunk(),
+                   machi_dt:chunk_csum()) ->
       {ok, machi_dt:chunk_pos()} | {error, machi_dt:error_general()} | {error, term()}.
-append_chunk(Sock, EpochID, Prefix, Chunk) ->
-    append_chunk2(Sock, EpochID,
-                  ?DEFAULT_COC_NAMESPACE, ?DEFAULT_COC_LOCATOR,
-                  Prefix, Chunk, 0).
+append_chunk(Sock, NSInfo, EpochID, Prefix, Chunk, CSum) ->
+    append_chunk(Sock, NSInfo, EpochID, Prefix, Chunk, CSum,
+                 #append_opts{}, ?LONG_TIMEOUT).
 
 %% @doc Append a chunk (binary- or iolist-style) of data to a file
-%% with `Prefix'.
+%% with `Prefix' and also request an additional `Extra' bytes.
+%%
+%% For example, if the `Chunk' size is 1 KByte and `Extra' is 4K Bytes, then
+%% the file offsets that follow `Chunk''s position for the following 4K will
+%% be reserved by the file sequencer for later write(s) by the
+%% `write_chunk()' API.
 
 -spec append_chunk(machi_dt:inet_host(), machi_dt:inet_port(),
-                   machi_dt:epoch_id(), machi_dt:file_prefix(), machi_dt:chunk()) ->
+                   machi_dt:ns_info(), machi_dt:epoch_id(),
+                   machi_dt:file_prefix(), machi_dt:chunk(),
+                   machi_dt:chunk_csum()) ->
       {ok, machi_dt:chunk_pos()} | {error, machi_dt:error_general()} | {error, term()}.
-append_chunk(Host, TcpPort, EpochID, Prefix, Chunk) ->
-    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
-    try
-        append_chunk2(Sock, EpochID,
-                      ?DEFAULT_COC_NAMESPACE, ?DEFAULT_COC_LOCATOR,
-                      Prefix, Chunk, 0)
-    after
-        disconnect(Sock)
-    end.
+append_chunk(Host, TcpPort, NSInfo, EpochID, Prefix, Chunk, CSum) ->
+    append_chunk(Host, TcpPort, NSInfo, EpochID, Prefix, Chunk, CSum,
+                 #append_opts{}, ?LONG_TIMEOUT).
+
+-spec append_chunk(port_wrap(),
+                   machi_dt:ns_info(), machi_dt:epoch_id(),
+                   machi_dt:file_prefix(), machi_dt:chunk(),
+                   machi_dt:chunk_csum(), machi_dt:append_opts(), timeout()) ->
+      {ok, machi_dt:chunk_pos()} | {error, machi_dt:error_general()} | {error, term()}.
+append_chunk(Sock, NSInfo0, EpochID, Prefix, Chunk, CSum, Opts, Timeout) ->
+    NSInfo = machi_util:ns_info_default(NSInfo0),
+    append_chunk2(Sock, NSInfo, EpochID, Prefix, Chunk, CSum, Opts, Timeout).
 
 %% @doc Append a chunk (binary- or iolist-style) of data to a file
-%% with `Prefix'.
-
--spec append_chunk(port_wrap(), machi_dt:epoch_id(),
-                   machi_dt:coc_namespace(), machi_dt:coc_locator(),
-                   machi_dt:file_prefix(), machi_dt:chunk()) ->
-      {ok, machi_dt:chunk_pos()} | {error, machi_dt:error_general()} | {error, term()}.
-append_chunk(Sock, EpochID, CoC_Namespace, CoC_Locator, Prefix, Chunk) ->
-    append_chunk2(Sock, EpochID,
-                  CoC_Namespace, CoC_Locator,
-                  Prefix, Chunk, 0).
-
-%% @doc Append a chunk (binary- or iolist-style) of data to a file
-%% with `Prefix'.
+%% with `Prefix' and also request an additional `Extra' bytes.
+%%
+%% For example, if the `Chunk' size is 1 KByte and `Extra' is 4K Bytes, then
+%% the file offsets that follow `Chunk''s position for the following 4K will
+%% be reserved by the file sequencer for later write(s) by the
+%% `write_chunk()' API.
 
 -spec append_chunk(machi_dt:inet_host(), machi_dt:inet_port(),
-                   machi_dt:epoch_id(),
-                   machi_dt:coc_namespace(), machi_dt:coc_locator(),
-                   machi_dt:file_prefix(), machi_dt:chunk()) ->
+                   machi_dt:ns_info(), machi_dt:epoch_id(),
+                   machi_dt:file_prefix(), machi_dt:chunk(),
+                   machi_dt:chunk_csum(), machi_dt:append_opts(), timeout()) ->
       {ok, machi_dt:chunk_pos()} | {error, machi_dt:error_general()} | {error, term()}.
-append_chunk(Host, TcpPort, EpochID, CoC_Namespace, CoC_Locator, Prefix, Chunk) ->
+append_chunk(Host, TcpPort, NSInfo0, EpochID,
+             Prefix, Chunk, CSum, Opts, Timeout) ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
-        append_chunk2(Sock, EpochID,
-                      CoC_Namespace, CoC_Locator,
-                      Prefix, Chunk, 0)
-    after
-        disconnect(Sock)
-    end.
-
-%% @doc Append a chunk (binary- or iolist-style) of data to a file
-%% with `Prefix' and also request an additional `Extra' bytes.
-%%
-%% For example, if the `Chunk' size is 1 KByte and `Extra' is 4K Bytes, then
-%% the file offsets that follow `Chunk''s position for the following 4K will
-%% be reserved by the file sequencer for later write(s) by the
-%% `write_chunk()' API.
-
--spec append_chunk_extra(port_wrap(), machi_dt:epoch_id(),
-                         machi_dt:file_prefix(), machi_dt:chunk(), machi_dt:chunk_size()) ->
-      {ok, machi_dt:chunk_pos()} | {error, machi_dt:error_general()} | {error, term()}.
-append_chunk_extra(Sock, EpochID, Prefix, Chunk, ChunkExtra)
-  when is_integer(ChunkExtra), ChunkExtra >= 0 ->
-    append_chunk2(Sock, EpochID,
-                  ?DEFAULT_COC_NAMESPACE, ?DEFAULT_COC_LOCATOR,
-                  Prefix, Chunk, ChunkExtra).
-
-%% @doc Append a chunk (binary- or iolist-style) of data to a file
-%% with `Prefix' and also request an additional `Extra' bytes.
-%%
-%% For example, if the `Chunk' size is 1 KByte and `Extra' is 4K Bytes, then
-%% the file offsets that follow `Chunk''s position for the following 4K will
-%% be reserved by the file sequencer for later write(s) by the
-%% `write_chunk()' API.
-
--spec append_chunk_extra(machi_dt:inet_host(), machi_dt:inet_port(),
-               machi_dt:epoch_id(), machi_dt:file_prefix(), machi_dt:chunk(), machi_dt:chunk_size()) ->
-      {ok, machi_dt:chunk_pos()} | {error, machi_dt:error_general()} | {error, term()}.
-append_chunk_extra(Host, TcpPort, EpochID, Prefix, Chunk, ChunkExtra)
-  when is_integer(ChunkExtra), ChunkExtra >= 0 ->
-    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
-    try
-        append_chunk2(Sock, EpochID,
-                      ?DEFAULT_COC_NAMESPACE, ?DEFAULT_COC_LOCATOR,
-                      Prefix, Chunk, ChunkExtra)
-    after
-        disconnect(Sock)
-    end.
-
-%% @doc Append a chunk (binary- or iolist-style) of data to a file
-%% with `Prefix' and also request an additional `Extra' bytes.
-%%
-%% For example, if the `Chunk' size is 1 KByte and `Extra' is 4K Bytes, then
-%% the file offsets that follow `Chunk''s position for the following 4K will
-%% be reserved by the file sequencer for later write(s) by the
-%% `write_chunk()' API.
-
--spec append_chunk_extra(port_wrap(), machi_dt:epoch_id(),
-                         machi_dt:coc_namespace(), machi_dt:coc_locator(),
-                         machi_dt:file_prefix(), machi_dt:chunk(), machi_dt:chunk_size()) ->
-      {ok, machi_dt:chunk_pos()} | {error, machi_dt:error_general()} | {error, term()}.
-append_chunk_extra(Sock, EpochID, CoC_Namespace, CoC_Locator,
-                   Prefix, Chunk, ChunkExtra)
-  when is_integer(ChunkExtra), ChunkExtra >= 0 ->
-    append_chunk2(Sock, EpochID,
-                  CoC_Namespace, CoC_Locator,
-                  Prefix, Chunk, ChunkExtra).
-
-%% @doc Append a chunk (binary- or iolist-style) of data to a file
-%% with `Prefix' and also request an additional `Extra' bytes.
-%%
-%% For example, if the `Chunk' size is 1 KByte and `Extra' is 4K Bytes, then
-%% the file offsets that follow `Chunk''s position for the following 4K will
-%% be reserved by the file sequencer for later write(s) by the
-%% `write_chunk()' API.
-
--spec append_chunk_extra(machi_dt:inet_host(), machi_dt:inet_port(),
-                         machi_dt:epoch_id(),
-                         machi_dt:coc_namespace(), machi_dt:coc_locator(),
-                         machi_dt:file_prefix(), machi_dt:chunk(), machi_dt:chunk_size()) ->
-      {ok, machi_dt:chunk_pos()} | {error, machi_dt:error_general()} | {error, term()}.
-append_chunk_extra(Host, TcpPort, EpochID,
-                   CoC_Namespace, CoC_Locator,
-                   Prefix, Chunk, ChunkExtra)
-  when is_integer(ChunkExtra), ChunkExtra >= 0 ->
-    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
-    try
-        append_chunk2(Sock, EpochID,
-                      CoC_Namespace, CoC_Locator,
-                      Prefix, Chunk, ChunkExtra)
+        NSInfo = machi_util:ns_info_default(NSInfo0),
+        append_chunk2(Sock, NSInfo, EpochID,
+                      Prefix, Chunk, CSum, Opts, Timeout)
     after
         disconnect(Sock)
     end.
@@ -628,23 +546,24 @@ read_chunk2(Sock, EpochID, File0, Offset, Size, Opts) ->
             {low_read_chunk, EpochID, File, Offset, Size, Opts}),
     do_pb_request_common(Sock, ReqID, Req).
 
-append_chunk2(Sock, EpochID, CoC_Namespace, CoC_Locator,
-              Prefix0, Chunk0, ChunkExtra) ->
+append_chunk2(Sock, NSInfo, EpochID,
+              Prefix0, Chunk, CSum0, Opts, Timeout) ->
     ReqID = <<"id">>,
-    {Chunk, CSum_tag, CSum} =
-        case Chunk0 of
-            X when is_binary(X) ->
-                {Chunk0, ?CSUM_TAG_NONE, <<>>};
-            {ChunkCSum, Chk} ->
-                {Tag, CS} = machi_util:unmake_tagged_csum(ChunkCSum),
-                {Chk, Tag, CS}
-        end,
     Prefix = machi_util:make_binary(Prefix0),
+    {CSum_tag, CSum} = case CSum0 of
+                           <<>> ->
+                               {?CSUM_TAG_NONE, <<>>};
+                           {_Tag, _CS} ->
+                               CSum0;
+                           B when is_binary(B) ->
+                               machi_util:unmake_tagged_csum(CSum0)
+                       end,
+    #ns_info{version=NSVersion, name=NS, locator=NSLocator} = NSInfo,
     Req = machi_pb_translate:to_pb_request(
             ReqID,
-            {low_append_chunk, EpochID, CoC_Namespace, CoC_Locator,
-             Prefix, Chunk, CSum_tag, CSum, ChunkExtra}),
-    do_pb_request_common(Sock, ReqID, Req).
+            {low_append_chunk, NSVersion, NS, NSLocator, EpochID,
+             Prefix, Chunk, CSum_tag, CSum, Opts}),
+    do_pb_request_common(Sock, ReqID, Req, true, Timeout).
 
 write_chunk2(Sock, EpochID, File0, Offset, Chunk0) ->
     ReqID = <<"id">>,
@@ -739,18 +658,18 @@ kick_projection_reaction2(Sock, _Options) ->
     ReqID = <<42>>,
     Req = machi_pb_translate:to_pb_request(
                 ReqID, {low_proj, {kick_projection_reaction}}),
-    do_pb_request_common(Sock, ReqID, Req, false).
+    do_pb_request_common(Sock, ReqID, Req, false, ?LONG_TIMEOUT).
 
 do_pb_request_common(Sock, ReqID, Req) ->
-    do_pb_request_common(Sock, ReqID, Req, true).
+    do_pb_request_common(Sock, ReqID, Req, true, ?LONG_TIMEOUT).
 
-do_pb_request_common(Sock, ReqID, Req, GetReply_p) ->
+do_pb_request_common(Sock, ReqID, Req, GetReply_p, Timeout) ->
     erase(bad_sock),
     try
         ReqBin = list_to_binary(machi_pb:encode_mpb_ll_request(Req)),
         ok = w_send(Sock, ReqBin),
         if GetReply_p ->
-                case w_recv(Sock, 0) of
+                case w_recv(Sock, 0, Timeout) of
                     {ok, RespBin} ->
                         Resp = machi_pb:decode_mpb_ll_response(RespBin),
                         {ReqID2, Reply} = machi_pb_translate:from_pb_response(Resp),
@@ -796,7 +715,7 @@ w_connect(#p_srvr{proto_mod=?MODULE, address=Host, port=Port, props=Props}=_P)->
         case proplists:get_value(session_proto, Props, tcp) of
             tcp ->
 put(xxx, goofus),
-                Sock = machi_util:connect(Host, Port, ?HARD_TIMEOUT),
+                Sock = machi_util:connect(Host, Port, ?SHORT_TIMEOUT),
 put(xxx, Sock),
                 ok = inet:setopts(Sock, ?PB_PACKET_OPTS),
                 {w,tcp,Sock};
@@ -820,8 +739,8 @@ w_close({w,tcp,Sock}) ->
     catch gen_tcp:close(Sock),
     ok.
 
-w_recv({w,tcp,Sock}, Amt) ->
-    gen_tcp:recv(Sock, Amt, ?HARD_TIMEOUT).
+w_recv({w,tcp,Sock}, Amt, Timeout) ->
+    gen_tcp:recv(Sock, Amt, Timeout).
 
 w_send({w,tcp,Sock}, IoData) ->
     gen_tcp:send(Sock, IoData).

@@ -34,7 +34,9 @@
 -export([from_pb_request/1,
          from_pb_response/1,
          to_pb_request/2,
-         to_pb_response/3
+         to_pb_response/3,
+         conv_from_append_opts/1,
+         conv_to_append_opts/1
         ]).
 
 %% TODO: fixme cleanup
@@ -50,19 +52,19 @@ from_pb_request(#mpb_ll_request{
     {ReqID, {low_auth, undefined, User, Pass}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
-                   append_chunk=#mpb_ll_appendchunkreq{
+                   append_chunk=IR=#mpb_ll_appendchunkreq{
+                     namespace_version=NSVersion,
+                     namespace=NS,
+                     locator=NSLocator,
                      epoch_id=PB_EpochID,
-                     coc_namespace=CoC_Namespace,
-                     coc_locator=CoC_Locator,
                      prefix=Prefix,
                      chunk=Chunk,
-                     csum=#mpb_chunkcsum{type=CSum_type, csum=CSum},
-                     chunk_extra=ChunkExtra}}) ->
+                     csum=#mpb_chunkcsum{type=CSum_type, csum=CSum}}}) ->
     EpochID = conv_to_epoch_id(PB_EpochID),
     CSum_tag = conv_to_csum_tag(CSum_type),
-    {ReqID, {low_append_chunk, EpochID, CoC_Namespace, CoC_Locator,
-             Prefix, Chunk, CSum_tag, CSum,
-             ChunkExtra}};
+    Opts = conv_to_append_opts(IR),
+    {ReqID, {low_append_chunk, NSVersion, NS, NSLocator, EpochID,
+             Prefix, Chunk, CSum_tag, CSum, Opts}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    write_chunk=#mpb_ll_writechunkreq{
@@ -172,15 +174,13 @@ from_pb_request(#mpb_request{req_id=ReqID,
     {ReqID, {high_auth, User, Pass}};
 from_pb_request(#mpb_request{req_id=ReqID,
                              append_chunk=IR=#mpb_appendchunkreq{}}) ->
-    #mpb_appendchunkreq{coc_namespace=CoC_namespace,
-                        coc_locator=CoC_locator,
+    #mpb_appendchunkreq{namespace=NS,
                         prefix=Prefix,
                         chunk=Chunk,
-                        csum=CSum,
-                        chunk_extra=ChunkExtra} = IR,
+                        csum=CSum} = IR,
     TaggedCSum = make_tagged_csum(CSum, Chunk),
-    {ReqID, {high_append_chunk, CoC_namespace, CoC_locator, Prefix, Chunk,
-             TaggedCSum, ChunkExtra}};
+    Opts = conv_to_append_opts(IR),
+    {ReqID, {high_append_chunk, NS, Prefix, Chunk, TaggedCSum, Opts}};
 from_pb_request(#mpb_request{req_id=ReqID,
                              write_chunk=IR=#mpb_writechunkreq{}}) ->
     #mpb_writechunkreq{chunk=#mpb_chunk{file_name=File,
@@ -391,20 +391,24 @@ to_pb_request(ReqID, {low_echo, _BogusEpochID, Msg}) ->
 to_pb_request(ReqID, {low_auth, _BogusEpochID, User, Pass}) ->
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     auth=#mpb_authreq{user=User, password=Pass}};
-to_pb_request(ReqID, {low_append_chunk, EpochID, CoC_Namespace, CoC_Locator,
-                      Prefix, Chunk, CSum_tag, CSum, ChunkExtra}) ->
+to_pb_request(ReqID, {low_append_chunk, NSVersion, NS, NSLocator, EpochID, 
+                      Prefix, Chunk, CSum_tag, CSum, Opts}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     CSum_type = conv_from_csum_tag(CSum_tag),
     PB_CSum = #mpb_chunkcsum{type=CSum_type, csum=CSum},
+    {ChunkExtra, Pref, FailPref} = conv_from_append_opts(Opts),
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     append_chunk=#mpb_ll_appendchunkreq{
+                      namespace_version=NSVersion,
+                      namespace=NS,
+                      locator=NSLocator,
                       epoch_id=PB_EpochID,
-                      coc_namespace=CoC_Namespace,
-                      coc_locator=CoC_Locator,
                       prefix=Prefix,
                       chunk=Chunk,
                       csum=PB_CSum,
-                      chunk_extra=ChunkExtra}};
+                      chunk_extra=ChunkExtra,
+                      preferred_file_name=Pref,
+                      flag_fail_preferred=FailPref}};
 to_pb_request(ReqID, {low_write_chunk, EpochID, File, Offset, Chunk, CSum_tag, CSum}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     CSum_type = conv_from_csum_tag(CSum_tag),
@@ -504,7 +508,7 @@ to_pb_response(ReqID, {low_auth, _, _, _}, __TODO_Resp) ->
     #mpb_ll_response{req_id=ReqID,
                      generic=#mpb_errorresp{code=1,
                                             msg="AUTH not implemented"}};
-to_pb_response(ReqID, {low_append_chunk, _EID, _N, _L, _Pfx, _Ch, _CST, _CS, _CE}, Resp)->
+to_pb_response(ReqID, {low_append_chunk, _NSV, _NS, _NSL, _EID, _Pfx, _Ch, _CST, _CS, _O}, Resp)->
     case Resp of
         {ok, {Offset, Size, File}} ->
             Where = #mpb_chunkpos{offset=Offset,
@@ -691,7 +695,7 @@ to_pb_response(ReqID, {high_auth, _User, _Pass}, _Resp) ->
     #mpb_response{req_id=ReqID,
                   generic=#mpb_errorresp{code=1,
                                          msg="AUTH not implemented"}};
-to_pb_response(ReqID, {high_append_chunk, _CoC_n, _CoC_l, _Prefix, _Chunk, _TSum, _CE}, Resp)->
+to_pb_response(ReqID, {high_append_chunk, _NS, _Prefix, _Chunk, _TSum, _O}, Resp)->
     case Resp of
         {ok, {Offset, Size, File}} ->
             Where = #mpb_chunkpos{offset=Offset,
@@ -973,6 +977,27 @@ conv_from_boolean(false) ->
     0;
 conv_from_boolean(true) ->
     1.
+
+conv_from_append_opts(#append_opts{chunk_extra=ChunkExtra,
+                                   preferred_file_name=Pref,
+                                   flag_fail_preferred=FailPref}) ->
+    {ChunkExtra, Pref, conv_from_boolean(FailPref)}.
+
+
+conv_to_append_opts(#mpb_appendchunkreq{
+                       chunk_extra=ChunkExtra,
+                       preferred_file_name=Pref,
+                       flag_fail_preferred=FailPref}) ->
+    #append_opts{chunk_extra=ChunkExtra,
+                 preferred_file_name=Pref,
+                 flag_fail_preferred=conv_to_boolean(FailPref)};
+conv_to_append_opts(#mpb_ll_appendchunkreq{
+                       chunk_extra=ChunkExtra,
+                       preferred_file_name=Pref,
+                       flag_fail_preferred=FailPref}) ->
+    #append_opts{chunk_extra=ChunkExtra,
+                 preferred_file_name=Pref,
+                 flag_fail_preferred=conv_to_boolean(FailPref)}.
 
 conv_from_projection_v1(#projection_v1{epoch_number=Epoch,
                                        epoch_csum=CSum,

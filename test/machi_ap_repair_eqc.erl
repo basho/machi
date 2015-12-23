@@ -118,7 +118,10 @@ append(CRIndex, Bin, #state{verbose=V}=S) ->
     {_SimSelfName, C} = lists:nth(CRIndex, CRList),
     Prefix = <<"pre">>,
     Len = byte_size(Bin),
-    Res = (catch machi_cr_client:append_chunk(C, Prefix, Bin, {sec(1), sec(1)})),
+    NSInfo = #ns_info{},
+    NoCSum = <<>>,
+    Opts1 = #append_opts{},
+    Res = (catch machi_cr_client:append_chunk(C, NSInfo, Prefix, Bin, NoCSum, Opts1, sec(1))),
     case Res of
         {ok, {_Off, Len, _FileName}=Key} ->
             case ets:insert_new(?WRITTEN_TAB, {Key, Bin}) of
@@ -427,7 +430,7 @@ confirm_result(_T) ->
         0 -> ok;
         _ ->
             DumpFailed = filename:join(DirBase, "dump-failed-" ++ Suffix),
-            ?V("Dump failed ETS tab to: ~w~n", [DumpFailed]),
+            ?V("Dump failed ETS tab to: ~s~n", [DumpFailed]),
             ets:tab2file(?FAILED_TAB, DumpFailed)
     end,
     case Critical of
