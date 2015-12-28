@@ -90,8 +90,10 @@ verify_file_checksums_local2(Sock1, EpochID, Path0) ->
     end.
 
 verify_file_checksums_remote2(Sock1, EpochID, File) ->
+    NSInfo = undefined,
+    io:format(user, "TODO fix broken read_chunk mod ~s line ~w\n", [?MODULE, ?LINE]),
     ReadChunk = fun(File_name, Offset, Size) ->
-                        ?FLU_C:read_chunk(Sock1, EpochID,
+                        ?FLU_C:read_chunk(Sock1, NSInfo, EpochID,
                                           File_name, Offset, Size, [])
                 end,
     verify_file_checksums_common(Sock1, EpochID, File, ReadChunk).

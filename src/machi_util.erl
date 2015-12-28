@@ -374,7 +374,7 @@ wait_for_death(Pid, Iters) when is_pid(Pid) ->
         false ->
             ok;
         true ->
-            timer:sleep(1),
+            timer:sleep(10),
             wait_for_death(Pid, Iters-1)
     end.
 

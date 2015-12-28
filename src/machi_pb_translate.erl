@@ -79,6 +79,8 @@ from_pb_request(#mpb_ll_request{
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    read_chunk=#mpb_ll_readchunkreq{
+                                 namespace_version=NSVersion,
+                                 namespace=NS,
                                  epoch_id=PB_EpochID,
                                  chunk_pos=ChunkPos,
                                  flag_no_checksum=PB_GetNoChecksum,
@@ -91,7 +93,7 @@ from_pb_request(#mpb_ll_request{
     #mpb_chunkpos{file_name=File,
                   offset=Offset,
                   chunk_size=Size} = ChunkPos,
-    {ReqID, {low_read_chunk, EpochID, File, Offset, Size, Opts}};
+    {ReqID, {low_read_chunk, NSVersion, NS, EpochID, File, Offset, Size, Opts}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    trim_chunk=#mpb_ll_trimchunkreq{
@@ -420,7 +422,7 @@ to_pb_request(ReqID, {low_write_chunk, EpochID, File, Offset, Chunk, CSum_tag, C
                                                     offset=Offset,
                                                     chunk=Chunk,
                                                     csum=PB_CSum}}};
-to_pb_request(ReqID, {low_read_chunk, EpochID, File, Offset, Size, Opts}) ->
+to_pb_request(ReqID, {low_read_chunk, NSVersion, NS, EpochID, File, Offset, Size, Opts}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     FNChecksum = proplists:get_value(no_checksum, Opts, false),
     FNChunk = proplists:get_value(no_chunk, Opts, false),
@@ -428,8 +430,10 @@ to_pb_request(ReqID, {low_read_chunk, EpochID, File, Offset, Size, Opts}) ->
     #mpb_ll_request{
                req_id=ReqID, do_not_alter=2,
                read_chunk=#mpb_ll_readchunkreq{
-                             epoch_id=PB_EpochID,
-                             chunk_pos=#mpb_chunkpos{
+                            namespace_version=NSVersion,
+                            namespace=NS,
+                            epoch_id=PB_EpochID,
+                            chunk_pos=#mpb_chunkpos{
                                           file_name=File,
                                           offset=Offset,
                                           chunk_size=Size},
@@ -528,7 +532,7 @@ to_pb_response(ReqID, {low_write_chunk, _EID, _Fl, _Off, _Ch, _CST, _CS},Resp)->
     Status = conv_from_status(Resp),
     #mpb_ll_response{req_id=ReqID,
                      write_chunk=#mpb_ll_writechunkresp{status=Status}};
-to_pb_response(ReqID, {low_read_chunk, _EID, _Fl, _Off, _Sz, _Opts}, Resp)->
+to_pb_response(ReqID, {low_read_chunk, _NSV, _NS, _EID, _Fl, _Off, _Sz, _Opts}, Resp)->
     case Resp of
         {ok, {Chunks, Trimmed}} ->
             PB_Chunks = lists:map(fun({File, Offset, Bytes, Csum}) ->

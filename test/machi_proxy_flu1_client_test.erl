@@ -62,14 +62,14 @@ api_smoke_test() ->
                 ?MUT:append_chunk(Prox1, NSInfo, FakeEpoch, Prefix, MyChunk,
                                   NoCSum),
             {ok, {[{_, MyOff, MyChunk, _}], []}} =
-                ?MUT:read_chunk(Prox1, FakeEpoch, MyFile, MyOff, MySize, []),
+                ?MUT:read_chunk(Prox1, NSInfo, FakeEpoch, MyFile, MyOff, MySize, []),
             MyChunk2 = <<"my chunk data, yeah, again">>,
             Opts1 = #append_opts{chunk_extra=4242},
             {ok, {MyOff2,MySize2,MyFile2}} =
                 ?MUT:append_chunk(Prox1, NSInfo, FakeEpoch, Prefix,
                                   MyChunk2, NoCSum, Opts1, infinity),
             {ok, {[{_, MyOff2, MyChunk2, _}], []}} =
-                ?MUT:read_chunk(Prox1, FakeEpoch, MyFile2, MyOff2, MySize2, []),
+                ?MUT:read_chunk(Prox1, NSInfo, FakeEpoch, MyFile2, MyOff2, MySize2, []),
             BadCSum = {?CSUM_TAG_CLIENT_SHA, crypto:sha("foo")},
             {error, bad_checksum} = ?MUT:append_chunk(Prox1, NSInfo, FakeEpoch,
                                                       Prefix, MyChunk, BadCSum),
@@ -254,11 +254,11 @@ flu_restart_test2() ->
                                                    AppendOpts1, infinity)
                  end,
                  fun(run) -> {ok, {[{_, Off1, Data, _}], []}} =
-                                 ?MUT:read_chunk(Prox1, FakeEpoch,
+                                 ?MUT:read_chunk(Prox1, NSInfo, FakeEpoch,
                                                  File1, Off1, Size1, []),
                              ok;
                     (line) -> io:format("line ~p, ", [?LINE]);
-                    (stop) -> ?MUT:read_chunk(Prox1, FakeEpoch,
+                    (stop) -> ?MUT:read_chunk(Prox1, NSInfo, FakeEpoch,
                                               File1, Off1, Size1, [])
                  end,
                  fun(run) -> {ok, KludgeBin} =

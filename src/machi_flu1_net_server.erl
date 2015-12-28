@@ -220,6 +220,7 @@ do_pb_ll_request(PB_request, S) ->
                 {Rs, NewS} = do_pb_ll_request3(Cmd0, S),
                 {RqID, Cmd0, Rs, NewS};
             {RqID, Cmd0} ->
+                io:format(user, "TODO: epoch at pos 2 in tuple is probably broken now, wheeeeeeeeeeeeeeeeee\n", []),
                 EpochID = element(2, Cmd0),      % by common convention
                 {Rs, NewS} = do_pb_ll_request2(EpochID, Cmd0, S),
                 {RqID, Cmd0, Rs, NewS}
@@ -246,12 +247,16 @@ do_pb_ll_request2(EpochID, CMD, S) ->
             end,
             {{error, bad_epoch}, S#state{epoch_id=CurrentEpochID}};
        true ->
-            do_pb_ll_request3(CMD, S#state{epoch_id=CurrentEpochID})
+            do_pb_ll_request2b(CMD, S#state{epoch_id=CurrentEpochID})
     end.
 
 lookup_epoch(#state{epoch_tab=T}) ->
     %% TODO: race in shutdown to access ets table after owner dies
     ets:lookup_element(T, epoch, 2).
+
+do_pb_ll_request2b(CMD, S) ->
+    io:format(user, "TODO: check NSVersion & NS\n", []),
+    do_pb_ll_request3(CMD, S).
 
 %% Witness status does not matter below.
 do_pb_ll_request3({low_echo, _BogusEpochID, Msg}, S) ->
@@ -286,7 +291,7 @@ do_pb_ll_request3({low_write_chunk, _EpochID, File, Offset, Chunk, CSum_tag,
                    CSum},
                   #state{witness=false}=S) ->
     {do_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum, S), S};
-do_pb_ll_request3({low_read_chunk, _EpochID, File, Offset, Size, Opts},
+do_pb_ll_request3({low_read_chunk, _NSVersion, _NS, _EpochID, File, Offset, Size, Opts},
                   #state{witness=false} = S) ->
     {do_server_read_chunk(File, Offset, Size, Opts, S), S};
 do_pb_ll_request3({low_trim_chunk, _EpochID, File, Offset, Size, TriggerGC},
@@ -587,7 +592,9 @@ do_pb_hl_request2({high_write_chunk, File, Offset, ChunkBin, TaggedCSum},
     {Res, S};
 do_pb_hl_request2({high_read_chunk, File, Offset, Size, Opts},
                   #state{high_clnt=Clnt}=S) ->
-    Res = machi_cr_client:read_chunk(Clnt, File, Offset, Size, Opts),
+    NSInfo = undefined,
+    io:format(user, "TODO fix broken read_chunk mod ~s line ~w\n", [?MODULE, ?LINE]),
+    Res = machi_cr_client:read_chunk(Clnt, NSInfo, File, Offset, Size, Opts),
     {Res, S};
 do_pb_hl_request2({high_trim_chunk, File, Offset, Size},
                   #state{high_clnt=Clnt}=S) ->

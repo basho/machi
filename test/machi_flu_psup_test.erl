@@ -84,8 +84,8 @@ partial_stop_restart2() ->
     WedgeStatus = fun({_,#p_srvr{address=Addr, port=TcpPort}}) ->
                           machi_flu1_client:wedge_status(Addr, TcpPort)
                   end,
+    NSInfo = undefined,
     Append = fun({_,#p_srvr{address=Addr, port=TcpPort}}, EpochID) ->
-                     NSInfo = undefined,
                      NoCSum = <<>>,
                      machi_flu1_client:append_chunk(Addr, TcpPort,
                                                     NSInfo, EpochID,
@@ -148,7 +148,7 @@ partial_stop_restart2() ->
         {error, wedged} = Append(hd(Ps), EpochID1),
         {_, #p_srvr{address=Addr_a, port=TcpPort_a}} = hd(Ps),
         {error, wedged} = machi_flu1_client:read_chunk(
-                            Addr_a, TcpPort_a, ?DUMMY_PV1_EPOCH,
+                            Addr_a, TcpPort_a, NSInfo, ?DUMMY_PV1_EPOCH,
                             <<>>, 99999999, 1, []),
         {error, wedged} = machi_flu1_client:checksum_list(
                             Addr_a, TcpPort_a, ?DUMMY_PV1_EPOCH, <<>>),

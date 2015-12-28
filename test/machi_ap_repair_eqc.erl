@@ -455,7 +455,9 @@ assert_chunk(C, {Off, Len, FileName}=Key, Bin) ->
     %% TODO: This probably a bug, read_chunk respnds with filename of `string()' type
     FileNameStr = binary_to_list(FileName),
     %% TODO : Use CSum instead of binary (after disuccsion about CSum is calmed down?)
-    case (catch machi_cr_client:read_chunk(C, FileName, Off, Len, [], sec(3))) of
+    NSInfo = undefined,
+    io:format(user, "TODO fix broken read_chunk mod ~s line ~w\n", [?MODULE, ?LINE]),
+    case (catch machi_cr_client:read_chunk(C, NSInfo, FileName, Off, Len, [], sec(3))) of
         {ok, {[{FileNameStr, Off, Bin, _}], []}} ->
             ok;
         {ok, Got} ->

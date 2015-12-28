@@ -58,7 +58,7 @@
 -export([
          %% File API
          append_chunk/6, append_chunk/8,
-         read_chunk/6, read_chunk/7,
+         read_chunk/7, read_chunk/8,
          checksum_list/3, checksum_list/4,
          list_files/2, list_files/3,
          wedge_status/1, wedge_status/2,
@@ -118,13 +118,13 @@ append_chunk(PidSpec, NSInfo, EpochID, Prefix, Chunk, CSum, Opts,
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
-read_chunk(PidSpec, EpochID, File, Offset, Size, Opts) ->
-    read_chunk(PidSpec, EpochID, File, Offset, Size, Opts, infinity).
+read_chunk(PidSpec, NSInfo, EpochID, File, Offset, Size, Opts) ->
+    read_chunk(PidSpec, NSInfo, EpochID, File, Offset, Size, Opts, infinity).
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
-read_chunk(PidSpec, EpochID, File, Offset, Size, Opts, Timeout) ->
-    gen_server:call(PidSpec, {req, {read_chunk, EpochID, File, Offset, Size, Opts}},
+read_chunk(PidSpec, NSInfo, EpochID, File, Offset, Size, Opts, Timeout) ->
+    gen_server:call(PidSpec, {req, {read_chunk, NSInfo, EpochID, File, Offset, Size, Opts}},
                     Timeout).
 
 %% @doc Fetch the list of chunk checksums for `File'.
@@ -287,7 +287,9 @@ write_chunk(PidSpec, EpochID, File, Offset, Chunk, Timeout) ->
                          Timeout) of
         {error, written}=Err ->
             Size = byte_size(Chunk),
-            case read_chunk(PidSpec, EpochID, File, Offset, Size, [], Timeout) of
+            NSInfo = undefined,
+            io:format(user, "TODO fix broken read_chunk mod ~s line ~w\n", [?MODULE, ?LINE]),
+            case read_chunk(PidSpec, NSInfo, EpochID, File, Offset, Size, [], Timeout) of
                 {ok, {[{File, Offset, Chunk2, _}], []}} when Chunk2 == Chunk ->
                     %% See equivalent comment inside write_projection().
                     ok;
@@ -377,9 +379,9 @@ make_req_fun({append_chunk, NSInfo, EpochID,
     fun() -> Mod:append_chunk(Sock, NSInfo, EpochID,
                               Prefix, Chunk, CSum, Opts, Timeout)
     end;
-make_req_fun({read_chunk, EpochID, File, Offset, Size, Opts},
+make_req_fun({read_chunk, NSInfo, EpochID, File, Offset, Size, Opts},
              #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
-    fun() -> Mod:read_chunk(Sock, EpochID, File, Offset, Size, Opts) end;
+    fun() -> Mod:read_chunk(Sock, NSInfo, EpochID, File, Offset, Size, Opts) end;
 make_req_fun({write_chunk, EpochID, File, Offset, Chunk},
              #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
     fun() -> Mod:write_chunk(Sock, EpochID, File, Offset, Chunk) end;
