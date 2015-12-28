@@ -80,7 +80,7 @@
         ]).
 %% For "internal" replication only.
 -export([
-         write_chunk/5, write_chunk/6,
+         write_chunk/6, write_chunk/7,
          trim_chunk/5,
          delete_migration/3, delete_migration/4,
          trunc_hack/3, trunc_hack/4
@@ -89,7 +89,7 @@
 -type port_wrap()   :: {w,atom(),term()}.
 
 -spec append_chunk(port_wrap(),
-                   machi_dt:ns_info(), machi_dt:epoch_id(),
+                   'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(),
                    machi_dt:file_prefix(), machi_dt:chunk(),
                    machi_dt:chunk_csum()) ->
       {ok, machi_dt:chunk_pos()} | {error, machi_dt:error_general()} | {error, term()}.
@@ -106,7 +106,7 @@ append_chunk(Sock, NSInfo, EpochID, Prefix, Chunk, CSum) ->
 %% `write_chunk()' API.
 
 -spec append_chunk(machi_dt:inet_host(), machi_dt:inet_port(),
-                   machi_dt:ns_info(), machi_dt:epoch_id(),
+                   'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(),
                    machi_dt:file_prefix(), machi_dt:chunk(),
                    machi_dt:chunk_csum()) ->
       {ok, machi_dt:chunk_pos()} | {error, machi_dt:error_general()} | {error, term()}.
@@ -115,7 +115,7 @@ append_chunk(Host, TcpPort, NSInfo, EpochID, Prefix, Chunk, CSum) ->
                  #append_opts{}, ?LONG_TIMEOUT).
 
 -spec append_chunk(port_wrap(),
-                   machi_dt:ns_info(), machi_dt:epoch_id(),
+                   'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(),
                    machi_dt:file_prefix(), machi_dt:chunk(),
                    machi_dt:chunk_csum(), machi_dt:append_opts(), timeout()) ->
       {ok, machi_dt:chunk_pos()} | {error, machi_dt:error_general()} | {error, term()}.
@@ -132,7 +132,7 @@ append_chunk(Sock, NSInfo0, EpochID, Prefix, Chunk, CSum, Opts, Timeout) ->
 %% `write_chunk()' API.
 
 -spec append_chunk(machi_dt:inet_host(), machi_dt:inet_port(),
-                   machi_dt:ns_info(), machi_dt:epoch_id(),
+                   'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(),
                    machi_dt:file_prefix(), machi_dt:chunk(),
                    machi_dt:chunk_csum(), machi_dt:append_opts(), timeout()) ->
       {ok, machi_dt:chunk_pos()} | {error, machi_dt:error_general()} | {error, term()}.
@@ -461,23 +461,25 @@ disconnect(_) ->
 %% @doc Restricted API: Write a chunk of already-sequenced data to
 %% `File' at `Offset'.
 
--spec write_chunk(port_wrap(), machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk()) ->
+-spec write_chunk(port_wrap(), 'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk()) ->
       ok | {error, machi_dt:error_general()} | {error, term()}.
-write_chunk(Sock, EpochID, File, Offset, Chunk)
+write_chunk(Sock, NSInfo0, EpochID, File, Offset, Chunk)
   when Offset >= ?MINIMUM_OFFSET ->
-    write_chunk2(Sock, EpochID, File, Offset, Chunk).
+    NSInfo = machi_util:ns_info_default(NSInfo0),
+    write_chunk2(Sock, NSInfo, EpochID, File, Offset, Chunk).
 
 %% @doc Restricted API: Write a chunk of already-sequenced data to
 %% `File' at `Offset'.
 
 -spec write_chunk(machi_dt:inet_host(), machi_dt:inet_port(),
-                  machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk()) ->
+                  'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk()) ->
       ok | {error, machi_dt:error_general()} | {error, term()}.
-write_chunk(Host, TcpPort, EpochID, File, Offset, Chunk)
+write_chunk(Host, TcpPort, NSInfo0, EpochID, File, Offset, Chunk)
   when Offset >= ?MINIMUM_OFFSET ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
-        write_chunk2(Sock, EpochID, File, Offset, Chunk)
+        NSInfo = machi_util:ns_info_default(NSInfo0),
+        write_chunk2(Sock, NSInfo, EpochID, File, Offset, Chunk)
     after
         disconnect(Sock)
     end.
@@ -569,8 +571,9 @@ append_chunk2(Sock, NSInfo, EpochID,
              Prefix, Chunk, CSum_tag, CSum, Opts}),
     do_pb_request_common(Sock, ReqID, Req, true, Timeout).
 
-write_chunk2(Sock, EpochID, File0, Offset, Chunk0) ->
+write_chunk2(Sock, NSInfo, EpochID, File0, Offset, Chunk0) ->
     ReqID = <<"id">>,
+    #ns_info{version=NSVersion, name=NS} = NSInfo,
     File = machi_util:make_binary(File0),
     true = (Offset >= ?MINIMUM_OFFSET),
     {Chunk, CSum_tag, CSum} =
@@ -583,7 +586,7 @@ write_chunk2(Sock, EpochID, File0, Offset, Chunk0) ->
         end,
     Req = machi_pb_translate:to_pb_request(
             ReqID,
-            {low_write_chunk, EpochID, File, Offset, Chunk, CSum_tag, CSum}),
+            {low_write_chunk, NSVersion, NS, EpochID, File, Offset, Chunk, CSum_tag, CSum}),
     do_pb_request_common(Sock, ReqID, Req).
 
 list2(Sock, EpochID) ->

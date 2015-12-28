@@ -193,7 +193,7 @@ message Mpb_AppendChunkResp {
 // High level API: write_chunk() request & response
 
 message Mpb_WriteChunkReq {
-    required Mpb_Chunk chunk = 1;
+    required Mpb_Chunk chunk = 10;
 }
 
 message Mpb_WriteChunkResp {
@@ -411,8 +411,12 @@ message Mpb_LL_AppendChunkResp {
 // Low level API: write_chunk()
 
 message Mpb_LL_WriteChunkReq {
-    required Mpb_EpochID epoch_id = 1;
-    required Mpb_Chunk chunk = 2;
+    // General namespace arguments
+    required uint32 namespace_version = 1;
+    required string namespace = 2;
+
+    required Mpb_EpochID epoch_id = 10;
+    required Mpb_Chunk chunk = 11;
 }
 
 message Mpb_LL_WriteChunkResp {

@@ -120,7 +120,7 @@
          %% File API
          append_chunk/5,
          append_chunk/6, append_chunk/7,
-         write_chunk/4, write_chunk/5,
+         write_chunk/5, write_chunk/6,
          read_chunk/6, read_chunk/7,
          trim_chunk/4, trim_chunk/5,
          checksum_list/2, checksum_list/3,
@@ -186,14 +186,14 @@ append_chunk(PidSpec, NSInfo, Prefix, Chunk, CSum, #append_opts{}=Opts, Timeout0
 %% allocated/sequenced by an earlier append_chunk() call) to
 %% `File' at `Offset'.
 
-write_chunk(PidSpec, File, Offset, Chunk) ->
-    write_chunk(PidSpec, File, Offset, Chunk, ?DEFAULT_TIMEOUT).
+write_chunk(PidSpec, NSInfo, File, Offset, Chunk) ->
+    write_chunk(PidSpec, NSInfo, File, Offset, Chunk, ?DEFAULT_TIMEOUT).
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
-write_chunk(PidSpec, File, Offset, Chunk, Timeout0) ->
+write_chunk(PidSpec, NSInfo, File, Offset, Chunk, Timeout0) ->
     {TO, Timeout} = timeout(Timeout0),
-    gen_server:call(PidSpec, {req, {write_chunk, File, Offset, Chunk, TO}},
+    gen_server:call(PidSpec, {req, {write_chunk, NSInfo, File, Offset, Chunk, TO}},
                     Timeout).
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
@@ -286,8 +286,8 @@ handle_call2({append_chunk, NSInfo,
               Prefix, Chunk, CSum, Opts, TO}, _From, S) ->
     do_append_head(NSInfo, Prefix,
                    Chunk, CSum, Opts, 0, os:timestamp(), TO, S);
-handle_call2({write_chunk, File, Offset, Chunk, TO}, _From, S) ->
-    do_write_head(File, Offset, Chunk, 0, os:timestamp(), TO, S);
+handle_call2({write_chunk, NSInfo, File, Offset, Chunk, TO}, _From, S) ->
+    do_write_head(NSInfo, File, Offset, Chunk, 0, os:timestamp(), TO, S);
 handle_call2({read_chunk, NSInfo, File, Offset, Size, Opts, TO}, _From, S) ->
     do_read_chunk(NSInfo, File, Offset, Size, Opts, 0, os:timestamp(), TO, S);
 handle_call2({trim_chunk, File, Offset, Size, TO}, _From, S) ->
@@ -439,7 +439,7 @@ do_append_midtail2([FLU|RestFLUs]=FLUs, NSInfo,
                    CSum, Opts, Ws, Depth, STime, TO,
                    #state{epoch_id=EpochID, proxies_dict=PD}=S) ->
     Proxy = orddict:fetch(FLU, PD),
-    case ?FLU_PC:write_chunk(Proxy, EpochID, File, Offset, Chunk, ?TIMEOUT) of
+    case ?FLU_PC:write_chunk(Proxy, NSInfo, EpochID, File, Offset, Chunk, ?TIMEOUT) of
         ok ->
             %% io:format(user, "write ~w,", [FLU]),
             do_append_midtail2(RestFLUs, NSInfo, Prefix,
@@ -457,7 +457,7 @@ do_append_midtail2([FLU|RestFLUs]=FLUs, NSInfo,
             %% We know what the chunk ought to be, so jump to the
             %% middle of read-repair.
             Resume = {append, Offset, iolist_size(Chunk), File},
-            do_repair_chunk(FLUs, Resume, Chunk, [], File, Offset,
+            do_repair_chunk(FLUs, Resume, Chunk, [], NSInfo, File, Offset,
                             iolist_size(Chunk), Depth, STime, S);
         {error, trimmed} = Err ->
             %% TODO: nothing can be done
@@ -483,9 +483,9 @@ witnesses_use_our_epoch([FLU|RestFLUs],
             false
     end.
 
-do_write_head(File, Offset, Chunk, 0=Depth, STime, TO, S) ->
-    do_write_head2(File, Offset, Chunk, Depth + 1, STime, TO, S);
-do_write_head(File, Offset, Chunk, Depth, STime, TO, #state{proj=P}=S) ->
+do_write_head(NSInfo, File, Offset, Chunk, 0=Depth, STime, TO, S) ->
+    do_write_head2(NSInfo, File, Offset, Chunk, Depth + 1, STime, TO, S);
+do_write_head(NSInfo, File, Offset, Chunk, Depth, STime, TO, #state{proj=P}=S) ->
     %% io:format(user, "head sleep1,", []),
     sleep_a_while(Depth),
     DiffMs = timer:now_diff(os:timestamp(), STime) div 1000,
@@ -500,23 +500,23 @@ do_write_head(File, Offset, Chunk, Depth, STime, TO, #state{proj=P}=S) ->
             case S2#state.proj of
                 P2 when P2 == undefined orelse
                         P2#projection_v1.upi == [] ->
-                    do_write_head(File, Offset, Chunk, Depth + 1,
+                    do_write_head(NSInfo, File, Offset, Chunk, Depth + 1,
                                   STime, TO, S2);
                 _ ->
-                    do_write_head2(File, Offset, Chunk, Depth + 1,
+                    do_write_head2(NSInfo, File, Offset, Chunk, Depth + 1,
                                    STime, TO, S2)
             end
     end.
 
-do_write_head2(File, Offset, Chunk, Depth, STime, TO,
+do_write_head2(NSInfo, File, Offset, Chunk, Depth, STime, TO,
                #state{epoch_id=EpochID, proj=P, proxies_dict=PD}=S) ->
     [HeadFLU|RestFLUs] = mutation_flus(P),
     Proxy = orddict:fetch(HeadFLU, PD),
-    case ?FLU_PC:write_chunk(Proxy, EpochID, File, Offset, Chunk, ?TIMEOUT) of
+    case ?FLU_PC:write_chunk(Proxy, NSInfo, EpochID, File, Offset, Chunk, ?TIMEOUT) of
         ok ->
             %% From this point onward, we use the same code & logic path as
             %% append does.
-NSInfo=todo,Prefix=todo,CSum=todo,Opts=todo,
+Prefix=todo_prefix,CSum=todo_csum,Opts=todo_opts,
             do_append_midtail(RestFLUs, NSInfo, Prefix,
                               File, Offset, Chunk,
                               CSum, Opts, [HeadFLU], 0, STime, TO, S);
@@ -524,7 +524,7 @@ NSInfo=todo,Prefix=todo,CSum=todo,Opts=todo,
             {reply, BadCS, S};
         {error, Retry}
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
-            do_write_head(File, Offset, Chunk, Depth, STime, TO, S);
+            do_write_head(NSInfo, File, Offset, Chunk, Depth, STime, TO, S);
         {error, written}=Err ->
             {reply, Err, S};
         {error, trimmed}=Err ->
@@ -751,7 +751,7 @@ read_repair2(cp_mode=ConsistencyMode,
             %% TODO: change to {Chunks, Trimmed} and have them repaired
             ToRepair = mutation_flus(P) -- [Tail],
             {Reply, S1} = do_repair_chunks(Chunks, ToRepair, ReturnMode,
-                                           [Tail], File, Depth, STime, S, {ok, Chunks}),
+                                           [Tail], NSInfo, File, Depth, STime, S, {ok, Chunks}),
             {reply, Reply, S1};
         %% {ok, BadChunk} ->
         %%     exit({todo, bad_chunk_size, ?MODULE, ?LINE, File, Offset,
@@ -782,7 +782,7 @@ read_repair2(ap_mode=ConsistencyMode,
             %% TODO: Repair trimmed chunks
             ToRepair = mutation_flus(P) -- [GotItFrom],
             {Reply0, S1} = do_repair_chunks(Chunks, ToRepair, ReturnMode, [GotItFrom],
-                                           File, Depth, STime, S, {ok, Chunks}),
+                                            NSInfo, File, Depth, STime, S, {ok, Chunks}),
             {ok, Chunks} = Reply0,
             Reply = {ok, {Chunks, _Trimmed}},
             {reply, Reply, S1};
@@ -803,20 +803,20 @@ read_repair2(ap_mode=ConsistencyMode,
             exit({todo_should_repair_unlinked_files, ?MODULE, ?LINE, File})
     end.
 
-do_repair_chunks([], _, _, _, _, _, _, S, Reply) ->
+do_repair_chunks([], _, _, _, _, _, _, _, S, Reply) ->
     {Reply, S};
 do_repair_chunks([{_, Offset, Chunk, _Csum}|T],
-                 ToRepair, ReturnMode, [GotItFrom], File, Depth, STime, S, Reply) ->
+                 ToRepair, ReturnMode, [GotItFrom], NSInfo, File, Depth, STime, S, Reply) ->
     Size = iolist_size(Chunk),
-    case do_repair_chunk(ToRepair, ReturnMode, Chunk, [GotItFrom], File, Offset,
+    case do_repair_chunk(ToRepair, ReturnMode, Chunk, [GotItFrom], NSInfo, File, Offset,
                          Size, Depth, STime, S) of
         {ok, Chunk, S1} ->
-            do_repair_chunks(T, ToRepair, ReturnMode, [GotItFrom], File, Depth, STime, S1, Reply);
+            do_repair_chunks(T, ToRepair, ReturnMode, [GotItFrom], NSInfo, File, Depth, STime, S1, Reply);
         Error ->
             Error
     end.
 
-do_repair_chunk(ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
+do_repair_chunk(ToRepair, ReturnMode, Chunk, Repaired, NSInfo, File, Offset,
                 Size, Depth, STime, #state{proj=P}=S) ->
     %% io:format(user, "read_repair3 sleep1,", []),
     sleep_a_while(Depth),
@@ -828,16 +828,16 @@ do_repair_chunk(ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
             case S2#state.proj of
                 P2 when P2 == undefined orelse
                         P2#projection_v1.upi == [] ->
-                    do_repair_chunk(ToRepair, ReturnMode, Chunk, Repaired, File,
+                    do_repair_chunk(ToRepair, ReturnMode, Chunk, Repaired, NSInfo, File,
                                     Offset, Size, Depth + 1, STime, S2);
                 P2 ->
                     ToRepair2 = mutation_flus(P2) -- Repaired,
-                    do_repair_chunk2(ToRepair2, ReturnMode, Chunk, Repaired, File,
+                    do_repair_chunk2(ToRepair2, ReturnMode, Chunk, Repaired, NSInfo, File,
                                      Offset, Size, Depth + 1, STime, S2)
             end
     end.
 
-do_repair_chunk2([], ReturnMode, Chunk, _Repaired, File, Offset,
+do_repair_chunk2([], ReturnMode, Chunk, _Repaired, _NSInfo, File, Offset,
                  _IgnoreSize, _Depth, _STime, S) ->
     %% TODO: add stats for # of repairs, length(_Repaired)-1, etc etc?
     case ReturnMode of
@@ -846,24 +846,24 @@ do_repair_chunk2([], ReturnMode, Chunk, _Repaired, File, Offset,
         {append, Offset, Size, File} ->
             {ok, {Offset, Size, File}, S}
     end;
-do_repair_chunk2([First|Rest]=ToRepair, ReturnMode, Chunk, Repaired, File, Offset,
+do_repair_chunk2([First|Rest]=ToRepair, ReturnMode, Chunk, Repaired, NSInfo, File, Offset,
                  Size, Depth, STime, #state{epoch_id=EpochID, proxies_dict=PD}=S) ->
     Proxy = orddict:fetch(First, PD),
-    case ?FLU_PC:write_chunk(Proxy, EpochID, File, Offset, Chunk, ?TIMEOUT) of
+    case ?FLU_PC:write_chunk(Proxy, NSInfo, EpochID, File, Offset, Chunk, ?TIMEOUT) of
         ok ->
-            do_repair_chunk2(Rest, ReturnMode, Chunk, [First|Repaired], File,
+            do_repair_chunk2(Rest, ReturnMode, Chunk, [First|Repaired], NSInfo, File,
                              Offset, Size, Depth, STime, S);
         {error, bad_checksum}=BadCS ->
             %% TODO: alternate strategy?
             {BadCS, S};
         {error, Retry}
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
-            do_repair_chunk(ToRepair, ReturnMode, Chunk, Repaired, File,
+            do_repair_chunk(ToRepair, ReturnMode, Chunk, Repaired, NSInfo, File,
                             Offset, Size, Depth, STime, S);
         {error, written} ->
             %% TODO: To be very paranoid, read the chunk here to verify
             %% that it is exactly our Chunk.
-            do_repair_chunk2(Rest, ReturnMode, Chunk, Repaired, File,
+            do_repair_chunk2(Rest, ReturnMode, Chunk, Repaired, NSInfo, File,
                              Offset, Size, Depth, STime, S);
         {error, trimmed} = _Error ->
             %% TODO

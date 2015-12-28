@@ -138,7 +138,7 @@ smoke_test2() ->
         [{error, not_written} = machi_flu1_client:read_chunk(
                                   Host, PortBase+X, NSInfo, EpochID,
                                   File1, FooOff1, Size1, []) || X <- [0,1,2] ],
-        ok = machi_flu1_client:write_chunk(Host, PortBase+0, EpochID,
+        ok = machi_flu1_client:write_chunk(Host, PortBase+0, NSInfo, EpochID,
                                            File1, FooOff1, Chunk1),
         {ok, {[{_, FooOff1, Chunk1, _}], []}} =
             machi_flu1_client:read_chunk(Host, PortBase+0, NSInfo, EpochID,
@@ -155,7 +155,7 @@ smoke_test2() ->
         FooOff2 = Off1 + (2*1024*1024),
         Chunk2 = <<"Middle repair chunk">>,
         Size2 = size(Chunk2),
-        ok = machi_flu1_client:write_chunk(Host, PortBase+1, EpochID,
+        ok = machi_flu1_client:write_chunk(Host, PortBase+1, NSInfo, EpochID,
                                            File1, FooOff2, Chunk2),
         {ok, {[{_, FooOff2, Chunk2, _}], []}} =
             machi_cr_client:read_chunk(C1, NSInfo, File1, FooOff2, Size2, []),
@@ -196,7 +196,7 @@ smoke_test2() ->
              %% {error,not_written} = machi_cr_client:read_chunk(C1, NSInfo, File10,
              %%                                                  Offx, Size10),
              {ok, {Offx,Size10,File10}} =
-                 machi_cr_client:write_chunk(C1, File10, Offx, Chunk10),
+                 machi_cr_client:write_chunk(C1, NSInfo, File10, Offx, Chunk10),
              {ok, {[{_, Offx, Chunk10, _}], []}} =
                  machi_cr_client:read_chunk(C1, NSInfo, File10, Offx, Size10, [])
          end || Seq <- lists:seq(1, Extra10)],
@@ -286,7 +286,7 @@ witness_smoke_test2() ->
         File10 = File1,
         Offx = Off1 + (1 * Size10),
         {error, partition} =
-            machi_cr_client:write_chunk(C1, File10, Offx, Chunk10, 1*1000),
+            machi_cr_client:write_chunk(C1, NSInfo, File10, Offx, Chunk10, 1*1000),
 
         ok
     after

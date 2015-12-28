@@ -282,20 +282,20 @@ flu_restart_test2() ->
                  end,
                  fun(run) ->
                              ok =
-                                 ?MUT:write_chunk(Prox1, FakeEpoch, File1, Off1,
+                                 ?MUT:write_chunk(Prox1, NSInfo, FakeEpoch, File1, Off1,
                                                   Data, infinity),
                              ok;
                     (line) -> io:format("line ~p, ", [?LINE]);
-                    (stop) -> ?MUT:write_chunk(Prox1, FakeEpoch, File1, Off1,
+                    (stop) -> ?MUT:write_chunk(Prox1, NSInfo, FakeEpoch, File1, Off1,
                                                Data, infinity)
                  end,
                  fun(run) -> 
                          {error, written} =
-                                 ?MUT:write_chunk(Prox1, FakeEpoch, File1, Off1,
+                                 ?MUT:write_chunk(Prox1, NSInfo, FakeEpoch, File1, Off1,
                                                   Dataxx, infinity),
                              ok;
                     (line) -> io:format("line ~p, ", [?LINE]);
-                    (stop) -> ?MUT:write_chunk(Prox1, FakeEpoch, File1, Off1,
+                    (stop) -> ?MUT:write_chunk(Prox1, NSInfo, FakeEpoch, File1, Off1,
                                                Dataxx, infinity)
                  end
                 ],

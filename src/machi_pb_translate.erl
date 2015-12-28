@@ -68,6 +68,8 @@ from_pb_request(#mpb_ll_request{
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    write_chunk=#mpb_ll_writechunkreq{
+                     namespace_version=NSVersion,
+                     namespace=NS,
                      epoch_id=PB_EpochID,
                      chunk=#mpb_chunk{file_name=File,
                                       offset=Offset,
@@ -75,7 +77,7 @@ from_pb_request(#mpb_ll_request{
                                       csum=#mpb_chunkcsum{type=CSum_type, csum=CSum}}}}) ->
     EpochID = conv_to_epoch_id(PB_EpochID),
     CSum_tag = conv_to_csum_tag(CSum_type),
-    {ReqID, {low_write_chunk, EpochID, File, Offset, Chunk, CSum_tag, CSum}};
+    {ReqID, {low_write_chunk, NSVersion, NS, EpochID, File, Offset, Chunk, CSum_tag, CSum}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    read_chunk=#mpb_ll_readchunkreq{
@@ -411,12 +413,14 @@ to_pb_request(ReqID, {low_append_chunk, NSVersion, NS, NSLocator, EpochID,
                       chunk_extra=ChunkExtra,
                       preferred_file_name=Pref,
                       flag_fail_preferred=FailPref}};
-to_pb_request(ReqID, {low_write_chunk, EpochID, File, Offset, Chunk, CSum_tag, CSum}) ->
+to_pb_request(ReqID, {low_write_chunk, NSVersion, NS, EpochID, File, Offset, Chunk, CSum_tag, CSum}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     CSum_type = conv_from_csum_tag(CSum_tag),
     PB_CSum = #mpb_chunkcsum{type=CSum_type, csum=CSum},
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     write_chunk=#mpb_ll_writechunkreq{
+                      namespace_version=NSVersion,
+                      namespace=NS,
                       epoch_id=PB_EpochID,
                                    chunk=#mpb_chunk{file_name=File,
                                                     offset=Offset,
@@ -528,7 +532,7 @@ to_pb_response(ReqID, {low_append_chunk, _NSV, _NS, _NSL, _EID, _Pfx, _Ch, _CST,
         _Else ->
             make_ll_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
-to_pb_response(ReqID, {low_write_chunk, _EID, _Fl, _Off, _Ch, _CST, _CS},Resp)->
+to_pb_response(ReqID, {low_write_chunk, _NSV, _NS, _EID, _Fl, _Off, _Ch, _CST, _CS},Resp)->
     Status = conv_from_status(Resp),
     #mpb_ll_response{req_id=ReqID,
                      write_chunk=#mpb_ll_writechunkresp{status=Status}};

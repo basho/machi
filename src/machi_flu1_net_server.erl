@@ -287,7 +287,7 @@ do_pb_ll_request3({low_append_chunk, NSVersion, NS, NSLocator, EpochID,
     {do_server_append_chunk(NSInfo, EpochID,
                             Prefix, Chunk, CSum_tag, CSum,
                             Opts, S), S};
-do_pb_ll_request3({low_write_chunk, _EpochID, File, Offset, Chunk, CSum_tag,
+do_pb_ll_request3({low_write_chunk, _NSVersion, _NS, _EpochID, File, Offset, Chunk, CSum_tag,
                    CSum},
                   #state{witness=false}=S) ->
     {do_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum, S), S};
@@ -582,13 +582,16 @@ do_pb_hl_request2({high_auth, _User, _Pass}, S) ->
 do_pb_hl_request2({high_append_chunk, NS, Prefix, Chunk, TaggedCSum, Opts},
                   #state{high_clnt=Clnt}=S) ->
     NSInfo = #ns_info{name=NS},                 % TODO populate other fields
+    io:format(user, "TODO fix broken append_chunk mod ~s line ~w\n", [?MODULE, ?LINE]),
     Res = machi_cr_client:append_chunk(Clnt, NSInfo,
                                        Prefix, Chunk, TaggedCSum, Opts),
     {Res, S};
 do_pb_hl_request2({high_write_chunk, File, Offset, ChunkBin, TaggedCSum},
                   #state{high_clnt=Clnt}=S) ->
+    NSInfo = undefined,
+    io:format(user, "TODO fix broken write_chunk mod ~s line ~w\n", [?MODULE, ?LINE]),
     Chunk = {TaggedCSum, ChunkBin},
-    Res = machi_cr_client:write_chunk(Clnt, File, Offset, Chunk),
+    Res = machi_cr_client:write_chunk(Clnt, NSInfo, File, Offset, Chunk),
     {Res, S};
 do_pb_hl_request2({high_read_chunk, File, Offset, Size, Opts},
                   #state{high_clnt=Clnt}=S) ->

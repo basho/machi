@@ -346,7 +346,7 @@ execute_repair_directive({File, Cmds}, {ProxiesDict, EpochID, Verb, ETS}=Acc) ->
                                  DstP = orddict:fetch(DstFLU, ProxiesDict),
                                  _T3 = os:timestamp(),
                                  ok = machi_proxy_flu1_client:write_chunk(
-                                        DstP, EpochID, File, Offset, Chunk,
+                                        DstP, NSInfo, EpochID, File, Offset, Chunk,
                                         ?SHORT_TIMEOUT),
                                  _T4 = os:timestamp()
                              end || DstFLU <- MyDsts],
