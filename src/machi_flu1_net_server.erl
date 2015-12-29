@@ -294,7 +294,7 @@ do_pb_ll_request3({low_write_chunk, _NSVersion, _NS, _EpochID, File, Offset, Chu
 do_pb_ll_request3({low_read_chunk, _NSVersion, _NS, _EpochID, File, Offset, Size, Opts},
                   #state{witness=false} = S) ->
     {do_server_read_chunk(File, Offset, Size, Opts, S), S};
-do_pb_ll_request3({low_trim_chunk, _EpochID, File, Offset, Size, TriggerGC},
+do_pb_ll_request3({low_trim_chunk, _NSVersion, _NS, _EpochID, File, Offset, Size, TriggerGC},
                   #state{witness=false}=S) ->
     {do_server_trim_chunk(File, Offset, Size, TriggerGC, S), S};
 do_pb_ll_request3({low_checksum_list, _EpochID, File},
@@ -601,7 +601,9 @@ do_pb_hl_request2({high_read_chunk, File, Offset, Size, Opts},
     {Res, S};
 do_pb_hl_request2({high_trim_chunk, File, Offset, Size},
                   #state{high_clnt=Clnt}=S) ->
-    Res = machi_cr_client:trim_chunk(Clnt, File, Offset, Size),
+    NSInfo = undefined,
+    io:format(user, "TODO fix broken trim_chunk mod ~s line ~w\n", [?MODULE, ?LINE]),
+    Res = machi_cr_client:trim_chunk(Clnt, NSInfo, File, Offset, Size),
     {Res, S};
 do_pb_hl_request2({high_checksum_list, File}, #state{high_clnt=Clnt}=S) ->
     Res = machi_cr_client:checksum_list(Clnt, File),

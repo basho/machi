@@ -454,11 +454,16 @@ message Mpb_LL_ReadChunkResp {
 // Low level API: trim_chunk()
 
 message Mpb_LL_TrimChunkReq {
-    required Mpb_EpochID epoch_id = 1;
-    required string file = 2;
-    required uint64 offset = 3;
-    required uint32 size = 4;
-    optional uint32 trigger_gc = 5 [default=0];
+    // General namespace arguments
+    required uint32 namespace_version = 1;
+    required string namespace = 2;
+
+    required Mpb_EpochID epoch_id = 10;
+    required string file = 11;
+    required uint64 offset = 12;
+    required uint32 size = 13;
+
+    optional uint32 trigger_gc = 20 [default=0];
 }
 
 message Mpb_LL_TrimChunkResp {

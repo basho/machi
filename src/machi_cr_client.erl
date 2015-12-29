@@ -122,7 +122,7 @@
          append_chunk/6, append_chunk/7,
          write_chunk/5, write_chunk/6,
          read_chunk/6, read_chunk/7,
-         trim_chunk/4, trim_chunk/5,
+         trim_chunk/5, trim_chunk/6,
          checksum_list/2, checksum_list/3,
          list_files/1, list_files/2,
 
@@ -210,14 +210,14 @@ read_chunk(PidSpec, NSInfo, File, Offset, Size, Opts, Timeout0) ->
 
 %% @doc Trim a chunk of data of size `Size' from `File' at `Offset'.
 
-trim_chunk(PidSpec, File, Offset, Size) ->
-    trim_chunk(PidSpec, File, Offset, Size, ?DEFAULT_TIMEOUT).
+trim_chunk(PidSpec, NSInfo, File, Offset, Size) ->
+    trim_chunk(PidSpec, NSInfo, File, Offset, Size, ?DEFAULT_TIMEOUT).
 
 %% @doc Trim a chunk of data of size `Size' from `File' at `Offset'.
 
-trim_chunk(PidSpec, File, Offset, Size, Timeout0) ->
+trim_chunk(PidSpec, NSInfo, File, Offset, Size, Timeout0) ->
     {TO, Timeout} = timeout(Timeout0),
-    gen_server:call(PidSpec, {req, {trim_chunk, File, Offset, Size, TO}},
+    gen_server:call(PidSpec, {req, {trim_chunk, NSInfo, File, Offset, Size, TO}},
                     Timeout).
 
 %% @doc Fetch the list of chunk checksums for `File'.
@@ -290,8 +290,8 @@ handle_call2({write_chunk, NSInfo, File, Offset, Chunk, TO}, _From, S) ->
     do_write_head(NSInfo, File, Offset, Chunk, 0, os:timestamp(), TO, S);
 handle_call2({read_chunk, NSInfo, File, Offset, Size, Opts, TO}, _From, S) ->
     do_read_chunk(NSInfo, File, Offset, Size, Opts, 0, os:timestamp(), TO, S);
-handle_call2({trim_chunk, File, Offset, Size, TO}, _From, S) ->
-    do_trim_chunk(File, Offset, Size, 0, os:timestamp(), TO, S);
+handle_call2({trim_chunk, NSInfo, File, Offset, Size, TO}, _From, S) ->
+    do_trim_chunk(NSInfo, File, Offset, Size, 0, os:timestamp(), TO, S);
 handle_call2({checksum_list, File, TO}, _From, S) ->
     do_checksum_list(File, 0, os:timestamp(), TO, S);
 handle_call2({list_files, TO}, _From, S) ->
@@ -593,10 +593,10 @@ do_read_chunk2(NSInfo, File, Offset, Size, Opts, Depth, STime, TO,
             {reply, Err, S}
     end.
 
-do_trim_chunk(File, Offset, Size, 0=Depth, STime, TO, S) ->
-    do_trim_chunk(File, Offset, Size, Depth+1, STime, TO, S);
+do_trim_chunk(NSInfo, File, Offset, Size, 0=Depth, STime, TO, S) ->
+    do_trim_chunk(NSInfo, File, Offset, Size, Depth+1, STime, TO, S);
 
-do_trim_chunk(File, Offset, Size, Depth, STime, TO, #state{proj=P}=S) ->
+do_trim_chunk(NSInfo, File, Offset, Size, Depth, STime, TO, #state{proj=P}=S) ->
     sleep_a_while(Depth),
     DiffMs = timer:now_diff(os:timestamp(), STime) div 1000,
     if DiffMs > TO ->
@@ -610,40 +610,40 @@ do_trim_chunk(File, Offset, Size, Depth, STime, TO, #state{proj=P}=S) ->
             case S2#state.proj of
                 P2 when P2 == undefined orelse
                         P2#projection_v1.upi == [] ->
-                    do_trim_chunk(File, Offset, Size, Depth + 1,
+                    do_trim_chunk(NSInfo, File, Offset, Size, Depth + 1,
                                   STime, TO, S2);
                 _ ->
-                    do_trim_chunk2(File, Offset, Size, Depth + 1,
+                    do_trim_chunk2(NSInfo, File, Offset, Size, Depth + 1,
                                    STime, TO, S2)
             end
     end.
 
-do_trim_chunk2(File, Offset, Size, Depth, STime, TO,
+do_trim_chunk2(NSInfo, File, Offset, Size, Depth, STime, TO,
                #state{epoch_id=EpochID, proj=P, proxies_dict=PD}=S) ->
     [HeadFLU|RestFLUs] = mutation_flus(P),
     Proxy = orddict:fetch(HeadFLU, PD),
-    case ?FLU_PC:trim_chunk(Proxy, EpochID, File, Offset, Size, ?TIMEOUT) of
+    case ?FLU_PC:trim_chunk(Proxy, NSInfo, EpochID, File, Offset, Size, ?TIMEOUT) of
         ok ->
-            do_trim_midtail(RestFLUs, undefined, File, Offset, Size,
+            do_trim_midtail(RestFLUs, undefined, NSInfo, File, Offset, Size,
                             [HeadFLU], 0, STime, TO, S);
         {error, trimmed} ->
             %% Maybe the trim had failed in the middle of the tail so re-run
             %% trim accross the whole chain.
-            do_trim_midtail(RestFLUs, undefined, File, Offset, Size,
+            do_trim_midtail(RestFLUs, undefined, NSInfo, File, Offset, Size,
                             [HeadFLU], 0, STime, TO, S);
         {error, bad_checksum}=BadCS ->
             {reply, BadCS, S};
         {error, Retry}
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
-            do_trim_chunk(File, Offset, Size, Depth, STime, TO, S)
+            do_trim_chunk(NSInfo, File, Offset, Size, Depth, STime, TO, S)
     end.
 
-do_trim_midtail(RestFLUs, Prefix, File, Offset, Size,
+do_trim_midtail(RestFLUs, Prefix, NSInfo, File, Offset, Size,
                 Ws, Depth, STime, TO, S)
   when RestFLUs == [] orelse Depth == 0 ->
-       do_trim_midtail2(RestFLUs, Prefix, File, Offset, Size,
+       do_trim_midtail2(RestFLUs, Prefix, NSInfo, File, Offset, Size,
                         Ws, Depth + 1, STime, TO, S);
-do_trim_midtail(_RestFLUs, Prefix, File, Offset, Size,
+do_trim_midtail(_RestFLUs, Prefix, NSInfo, File, Offset, Size,
                 Ws, Depth, STime, TO, #state{proj=P}=S) ->
     %% io:format(user, "midtail sleep2,", []),
     sleep_a_while(Depth),
@@ -670,38 +670,38 @@ do_trim_midtail(_RestFLUs, Prefix, File, Offset, Size,
                             if Prefix == undefined -> % atom! not binary()!!
                                     {error, partition};
                                true ->
-                                    do_trim_chunk(Prefix, Offset, Size,
+                                    do_trim_chunk(NSInfo, Prefix, Offset, Size,
                                                   Depth, STime, TO, S2)
                             end;
                         RestFLUs3 ->
-                            do_trim_midtail2(RestFLUs3, Prefix, File, Offset, Size,
+                            do_trim_midtail2(RestFLUs3, Prefix, NSInfo, File, Offset, Size,
                                              Ws, Depth + 1, STime, TO, S2)
                     end
             end
     end.
 
-do_trim_midtail2([], _Prefix, _File, _Offset, _Size,
+do_trim_midtail2([], _Prefix, _NSInfo, _File, _Offset, _Size,
                    _Ws, _Depth, _STime, _TO, S) ->
     %% io:format(user, "ok!\n", []),
     {reply, ok, S};
-do_trim_midtail2([FLU|RestFLUs]=FLUs, Prefix, File, Offset, Size,
+do_trim_midtail2([FLU|RestFLUs]=FLUs, Prefix, NSInfo, File, Offset, Size,
                    Ws, Depth, STime, TO,
                    #state{epoch_id=EpochID, proxies_dict=PD}=S) ->
     Proxy = orddict:fetch(FLU, PD),
-    case ?FLU_PC:trim_chunk(Proxy, EpochID, File, Offset, Size, ?TIMEOUT) of
+    case ?FLU_PC:trim_chunk(Proxy, NSInfo, EpochID, File, Offset, Size, ?TIMEOUT) of
         ok ->
             %% io:format(user, "write ~w,", [FLU]),
-            do_trim_midtail2(RestFLUs, Prefix, File, Offset, Size,
+            do_trim_midtail2(RestFLUs, Prefix, NSInfo, File, Offset, Size,
                              [FLU|Ws], Depth, STime, TO, S);
         {error, trimmed} ->
-            do_trim_midtail2(RestFLUs, Prefix, File, Offset, Size,
+            do_trim_midtail2(RestFLUs, Prefix, NSInfo, File, Offset, Size,
                              [FLU|Ws], Depth, STime, TO, S);
         {error, bad_checksum}=BadCS ->
             %% TODO: alternate strategy?
             {reply, BadCS, S};
         {error, Retry}
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
-            do_trim_midtail(FLUs, Prefix, File, Offset, Size,
+            do_trim_midtail(FLUs, Prefix, NSInfo, File, Offset, Size,
                             Ws, Depth, STime, TO, S)
     end.
 

@@ -99,6 +99,8 @@ from_pb_request(#mpb_ll_request{
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    trim_chunk=#mpb_ll_trimchunkreq{
+                     namespace_version=NSVersion,
+                     namespace=NS,
                      epoch_id=PB_EpochID,
                      file=File,
                      offset=Offset,
@@ -106,7 +108,7 @@ from_pb_request(#mpb_ll_request{
                                  trigger_gc=PB_TriggerGC}}) ->
     EpochID = conv_to_epoch_id(PB_EpochID),
     TriggerGC = conv_to_boolean(PB_TriggerGC),
-    {ReqID, {low_trim_chunk, EpochID, File, Offset, Size, TriggerGC}};
+    {ReqID, {low_trim_chunk, NSVersion, NS, EpochID, File, Offset, Size, TriggerGC}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    checksum_list=#mpb_ll_checksumlistreq{
@@ -444,10 +446,12 @@ to_pb_request(ReqID, {low_read_chunk, NSVersion, NS, EpochID, File, Offset, Size
                             flag_no_checksum=machi_util:bool2int(FNChecksum),
                             flag_no_chunk=machi_util:bool2int(FNChunk),
                             flag_needs_trimmed=machi_util:bool2int(NeedsTrimmed)}};
-to_pb_request(ReqID, {low_trim_chunk, EpochID, File, Offset, Size, TriggerGC}) ->
+to_pb_request(ReqID, {low_trim_chunk, NSVersion, NS, EpochID, File, Offset, Size, TriggerGC}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     trim_chunk=#mpb_ll_trimchunkreq{
+                                  namespace_version=NSVersion,
+                                  namespace=NS,
                                   epoch_id=PB_EpochID,
                                   file=File,
                                   offset=Offset,
@@ -563,7 +567,7 @@ to_pb_response(ReqID, {low_read_chunk, _NSV, _NS, _EID, _Fl, _Off, _Sz, _Opts}, 
         _Else ->
             make_ll_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
-to_pb_response(ReqID, {low_trim_chunk, _, _, _, _, _}, Resp) ->
+to_pb_response(ReqID, {low_trim_chunk, _, _, _, _, _, _, _}, Resp) ->
     case Resp of
         ok ->
             #mpb_ll_response{req_id=ReqID,

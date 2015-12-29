@@ -81,7 +81,7 @@
 %% For "internal" replication only.
 -export([
          write_chunk/6, write_chunk/7,
-         trim_chunk/5,
+         trim_chunk/6,
          delete_migration/3, delete_migration/4,
          trunc_hack/3, trunc_hack/4
         ]).
@@ -487,16 +487,18 @@ write_chunk(Host, TcpPort, NSInfo0, EpochID, File, Offset, Chunk)
 %% @doc Restricted API: Write a chunk of already-sequenced data to
 %% `File' at `Offset'.
 
--spec trim_chunk(port_wrap(), machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk_size()) ->
+-spec trim_chunk(port_wrap(), 'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk_size()) ->
       ok | {error, machi_dt:error_general()} | {error, term()}.
-trim_chunk(Sock, EpochID, File0, Offset, Size)
+trim_chunk(Sock, NSInfo0, EpochID, File0, Offset, Size)
   when Offset >= ?MINIMUM_OFFSET ->
     ReqID = <<"id">>,
+    NSInfo = machi_util:ns_info_default(NSInfo0),
+    #ns_info{version=NSVersion, name=NS} = NSInfo,
     File = machi_util:make_binary(File0),
     true = (Offset >= ?MINIMUM_OFFSET),
     Req = machi_pb_translate:to_pb_request(
             ReqID,
-            {low_trim_chunk, EpochID, File, Offset, Size, 0}),
+            {low_trim_chunk, NSVersion, NS, EpochID, File, Offset, Size, 0}),
     do_pb_request_common(Sock, ReqID, Req).
 
 %% @doc Restricted API: Delete a file after it has been successfully
