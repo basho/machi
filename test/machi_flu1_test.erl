@@ -112,7 +112,8 @@ flu_smoke_test() ->
                                                       Prefix, Chunk1, NoCSum),
         {ok, {[{_, Off1, Chunk1, _}], _}} = ?FLU_C:read_chunk(Host, TcpPort,
                                                        NSInfo, ?DUMMY_PV1_EPOCH,
-                                                       File1, Off1, Len1, []),
+                                                       File1, Off1, Len1,
+                                                       noopt),
         {ok, KludgeBin} = ?FLU_C:checksum_list(Host, TcpPort, File1),
         true = is_binary(KludgeBin),
         {error, bad_arg} = ?FLU_C:append_chunk(Host, TcpPort, NSInfo,
@@ -121,8 +122,9 @@ flu_smoke_test() ->
         {ok, [{_,File1}]} = ?FLU_C:list_files(Host, TcpPort, ?DUMMY_PV1_EPOCH),
         Len1 = size(Chunk1),
         {error, not_written} = ?FLU_C:read_chunk(Host, TcpPort,
-                                                  NSInfo, ?DUMMY_PV1_EPOCH,
-                                                  File1, Off1*983829323, Len1, []),
+                                                 NSInfo, ?DUMMY_PV1_EPOCH,
+                                                 File1, Off1*983829323, Len1,
+                                                 noopt),
         %% XXX FIXME
         %%
         %% This is failing because the read extends past the end of the file.
@@ -163,13 +165,13 @@ flu_smoke_test() ->
         {error, bad_arg} = ?FLU_C:write_chunk(Host, TcpPort, NSInfo, ?DUMMY_PV1_EPOCH,
                                               BadFile, Off2, Chunk2),
         {ok, {[{_, Off2, Chunk2, _}], _}} =
-            ?FLU_C:read_chunk(Host, TcpPort, NSInfo, ?DUMMY_PV1_EPOCH, File2, Off2, Len2, []),
+            ?FLU_C:read_chunk(Host, TcpPort, NSInfo, ?DUMMY_PV1_EPOCH, File2, Off2, Len2, noopt),
         {error, bad_arg} = ?FLU_C:read_chunk(Host, TcpPort,
                                                  NSInfo, ?DUMMY_PV1_EPOCH,
-                                                 "no!!", Off2, Len2, []),
+                                                 "no!!", Off2, Len2, noopt),
         {error, bad_arg} = ?FLU_C:read_chunk(Host, TcpPort,
                                              NSInfo, ?DUMMY_PV1_EPOCH,
-                                             BadFile, Off2, Len2, []),
+                                             BadFile, Off2, Len2, noopt),
 
         %% We know that File1 still exists.  Pretend that we've done a
         %% migration and exercise the delete_migration() API.
@@ -273,7 +275,7 @@ witness_test() ->
                                                Prefix, Chunk1, NoCSum),
         File = <<"foofile">>,
         {error, bad_arg} = ?FLU_C:read_chunk(Host, TcpPort, NSInfo, EpochID1,
-                                             File, 9999, 9999, []),
+                                             File, 9999, 9999, noopt),
         {error, bad_arg} = ?FLU_C:checksum_list(Host, TcpPort, File),
         {error, bad_arg} = ?FLU_C:list_files(Host, TcpPort, EpochID1),
         {ok, {false, EpochID1}} = ?FLU_C:wedge_status(Host, TcpPort),

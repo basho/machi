@@ -112,7 +112,7 @@ run(read, KeyGen, _ValueGen, #m{conn=Conn, max_key=MaxKey}=S) ->
     Idx = KeyGen() rem MaxKey,
     %% {File, Offset, Size, _CSum} = ets:lookup_element(?ETS_TAB, Idx, 2),
     {File, Offset, Size} = ets:lookup_element(?ETS_TAB, Idx, 2),
-    case machi_cr_client:read_chunk(Conn, File, Offset, Size, [], ?THE_TIMEOUT) of
+    case machi_cr_client:read_chunk(Conn, File, Offset, Size, undefined, ?THE_TIMEOUT) of
         {ok, _Chunk} ->
             {ok, S};
         {error, _}=Err ->

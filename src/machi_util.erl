@@ -50,6 +50,7 @@
          wait_for_death/2, wait_for_life/2,
          bool2int/1,
          int2bool/1,
+         read_opts_default/1,
          ns_info_default/1
         ]).
 
@@ -445,9 +446,14 @@ bool2int(false) -> 0.
 int2bool(0) -> false;
 int2bool(I) when is_integer(I) -> true.
 
+read_opts_default(#read_opts{}=NSInfo) ->
+    NSInfo;
+read_opts_default(A) when is_atom(A) ->
+    #read_opts{}.
+
 ns_info_default(#ns_info{}=NSInfo) ->
     NSInfo;
-ns_info_default(undefined) ->
+ns_info_default(A) when is_atom(A) ->
     #ns_info{}.
 
 

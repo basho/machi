@@ -150,28 +150,29 @@ append_chunk(Host, TcpPort, NSInfo0, EpochID,
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
 -spec read_chunk(port_wrap(), 'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk_size(),
-                 proplists:proplist()) ->
+                 machi_dt:read_opts_x()) ->
       {ok, machi_dt:chunk_s()} |
       {error, machi_dt:error_general() | 'not_written' | 'partial_read'} |
       {error, term()}.
-read_chunk(Sock, NSInfo0, EpochID, File, Offset, Size, Opts)
+read_chunk(Sock, NSInfo0, EpochID, File, Offset, Size, Opts0)
   when Offset >= ?MINIMUM_OFFSET, Size >= 0 ->
     NSInfo = machi_util:ns_info_default(NSInfo0),
+    Opts = machi_util:read_opts_default(Opts0),
     read_chunk2(Sock, NSInfo, EpochID, File, Offset, Size, Opts).
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
 -spec read_chunk(machi_dt:inet_host(), machi_dt:inet_port(), 'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(),
                  machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk_size(),
-                 proplists:proplist()) ->
+                 machi_dt:read_opts_x()) ->
       {ok, machi_dt:chunk_s()} |
       {error, machi_dt:error_general() | 'not_written' | 'partial_read'} |
       {error, term()}.
-read_chunk(Host, TcpPort, NSInfo0, EpochID, File, Offset, Size, Opts)
+read_chunk(Host, TcpPort, NSInfo0, EpochID, File, Offset, Size, Opts0)
   when Offset >= ?MINIMUM_OFFSET, Size >= 0 ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     NSInfo = machi_util:ns_info_default(NSInfo0),
-io:format(user, "dbgyo ~s LINE ~p NSInfo0 ~p NSInfo ~p\n", [?MODULE, ?LINE, NSInfo0, NSInfo]), timer:sleep(333),
+    Opts = machi_util:read_opts_default(Opts0),
     try
         read_chunk2(Sock, NSInfo, EpochID, File, Offset, Size, Opts)
     after

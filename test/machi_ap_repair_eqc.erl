@@ -457,7 +457,7 @@ assert_chunk(C, {Off, Len, FileName}=Key, Bin) ->
     %% TODO : Use CSum instead of binary (after disuccsion about CSum is calmed down?)
     NSInfo = undefined,
     io:format(user, "TODO fix broken read_chunk mod ~s line ~w\n", [?MODULE, ?LINE]),
-    case (catch machi_cr_client:read_chunk(C, NSInfo, FileName, Off, Len, [], sec(3))) of
+    case (catch machi_cr_client:read_chunk(C, NSInfo, FileName, Off, Len, undefined, sec(3))) of
         {ok, {[{FileNameStr, Off, Bin, _}], []}} ->
             ok;
         {ok, Got} ->

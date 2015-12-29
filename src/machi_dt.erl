@@ -49,6 +49,8 @@
 -type ns_info()     :: #ns_info{}.
 -type projection()      :: #projection_v1{}.
 -type projection_type() :: 'public' | 'private'.
+-type read_opts()   :: #read_opts{}.
+-type read_opts_x() :: 'undefined' | 'noopt' | 'none' | #read_opts{}.
 
 %% Tags that stand for how that checksum was generated. See
 %% machi_util:make_tagged_csum/{1,2} for further documentation and
@@ -82,6 +84,8 @@
               namespace_version/0,
               ns_info/0,
               projection/0,
-              projection_type/0
+              projection_type/0,
+              read_opts/0,
+              read_opts_x/0
              ]).
 

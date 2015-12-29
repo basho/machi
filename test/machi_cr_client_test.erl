@@ -123,13 +123,13 @@ smoke_test2() ->
         {error, bad_checksum} =
             machi_cr_client:append_chunk(C1, NSInfo, Prefix, Chunk1, BadCSum),
         {ok, {[{_, Off1, Chunk1, _}], []}} =
-            machi_cr_client:read_chunk(C1, NSInfo, File1, Off1, Size1, []),
+            machi_cr_client:read_chunk(C1, NSInfo, File1, Off1, Size1, undefined),
         {ok, PPP} = machi_flu1_client:read_latest_projection(Host, PortBase+0,
                                                              private),
         %% Verify that the client's CR wrote to all of them.
         [{ok, {[{_, Off1, Chunk1, _}], []}} =
              machi_flu1_client:read_chunk(
-               Host, PortBase+X, NSInfo, EpochID, File1, Off1, Size1, []) ||
+               Host, PortBase+X, NSInfo, EpochID, File1, Off1, Size1, undefined) ||
             X <- [0,1,2] ],
 
         %% Test read repair: Manually write to head, then verify that
@@ -137,18 +137,18 @@ smoke_test2() ->
         FooOff1 = Off1 + (1024*1024),
         [{error, not_written} = machi_flu1_client:read_chunk(
                                   Host, PortBase+X, NSInfo, EpochID,
-                                  File1, FooOff1, Size1, []) || X <- [0,1,2] ],
+                                  File1, FooOff1, Size1, undefined) || X <- [0,1,2] ],
         ok = machi_flu1_client:write_chunk(Host, PortBase+0, NSInfo, EpochID,
                                            File1, FooOff1, Chunk1),
         {ok, {[{_, FooOff1, Chunk1, _}], []}} =
             machi_flu1_client:read_chunk(Host, PortBase+0, NSInfo, EpochID,
-                                         File1, FooOff1, Size1, []),
+                                         File1, FooOff1, Size1, undefined),
         {ok, {[{_, FooOff1, Chunk1, _}], []}} =
-            machi_cr_client:read_chunk(C1, NSInfo, File1, FooOff1, Size1, []),
+            machi_cr_client:read_chunk(C1, NSInfo, File1, FooOff1, Size1, undefined),
         [?assertMatch({X,{ok, {[{_, FooOff1, Chunk1, _}], []}}},
                       {X,machi_flu1_client:read_chunk(
                                  Host, PortBase+X, NSInfo, EpochID,
-                                 File1, FooOff1, Size1, [])})
+                                 File1, FooOff1, Size1, undefined)})
          || X <- [0,1,2] ],
 
         %% Test read repair: Manually write to middle, then same checking.
@@ -158,18 +158,18 @@ smoke_test2() ->
         ok = machi_flu1_client:write_chunk(Host, PortBase+1, NSInfo, EpochID,
                                            File1, FooOff2, Chunk2),
         {ok, {[{_, FooOff2, Chunk2, _}], []}} =
-            machi_cr_client:read_chunk(C1, NSInfo, File1, FooOff2, Size2, []),
+            machi_cr_client:read_chunk(C1, NSInfo, File1, FooOff2, Size2, undefined),
         [{X,{ok, {[{_, FooOff2, Chunk2, _}], []}}} =
              {X,machi_flu1_client:read_chunk(
                   Host, PortBase+X, NSInfo, EpochID,
-                  File1, FooOff2, Size2, [])} || X <- [0,1,2] ],
+                  File1, FooOff2, Size2, undefined)} || X <- [0,1,2] ],
 
         %% Misc API smoke & minor regression checks
         {error, bad_arg} = machi_cr_client:read_chunk(C1, NSInfo, <<"no">>,
-                                                      999999999, 1, []),
+                                                      999999999, 1, undefined),
         {ok, {[{_,Off1,Chunk1,_}, {_,FooOff1,Chunk1,_}, {_,FooOff2,Chunk2,_}],
               []}} =
-            machi_cr_client:read_chunk(C1, NSInfo, File1, Off1, 88888888, []),
+            machi_cr_client:read_chunk(C1, NSInfo, File1, Off1, 88888888, undefined),
         %% Checksum list return value is a primitive binary().
         {ok, KludgeBin} = machi_cr_client:checksum_list(C1, File1),
         true = is_binary(KludgeBin),
@@ -189,7 +189,7 @@ smoke_test2() ->
             machi_cr_client:append_chunk(C1, NSInfo, Prefix, Chunk10,
                                          NoCSum, Opts1),
         {ok, {[{_, Off10, Chunk10, _}], []}} =
-            machi_cr_client:read_chunk(C1, NSInfo, File10, Off10, Size10, []),
+            machi_cr_client:read_chunk(C1, NSInfo, File10, Off10, Size10, undefined),
         [begin
              Offx = Off10 + (Seq * Size10),
              %% TODO: uncomment written/not_written enforcement is available.
@@ -198,7 +198,7 @@ smoke_test2() ->
              {ok, {Offx,Size10,File10}} =
                  machi_cr_client:write_chunk(C1, NSInfo, File10, Offx, Chunk10),
              {ok, {[{_, Offx, Chunk10, _}], []}} =
-                 machi_cr_client:read_chunk(C1, NSInfo, File10, Offx, Size10, [])
+                 machi_cr_client:read_chunk(C1, NSInfo, File10, Offx, Size10, undefined)
          end || Seq <- lists:seq(1, Extra10)],
         {ok, {Off11,Size11,File11}} =
             machi_cr_client:append_chunk(C1, NSInfo, Prefix, Chunk10, NoCSum),
@@ -246,7 +246,7 @@ witness_smoke_test2() ->
         {error, bad_checksum} =
             machi_cr_client:append_chunk(C1, NSInfo, Prefix, Chunk1, BadCSum),
         {ok, {[{_, Off1, Chunk1, _}], []}} =
-            machi_cr_client:read_chunk(C1, NSInfo, File1, Off1, Size1, []),
+            machi_cr_client:read_chunk(C1, NSInfo, File1, Off1, Size1, undefined),
 
         %% Stop 'b' and let the chain reset.
         ok = machi_flu_psup:stop_flu_package(b),
@@ -273,7 +273,7 @@ witness_smoke_test2() ->
 
         %% Chunk1 is still readable: not affected by wedged witness head.
         {ok, {[{_, Off1, Chunk1, _}], []}} =
-            machi_cr_client:read_chunk(C1, NSInfo, File1, Off1, Size1, []),
+            machi_cr_client:read_chunk(C1, NSInfo, File1, Off1, Size1, undefined),
         %% But because the head is wedged, an append will fail.
         {error, partition} =
             machi_cr_client:append_chunk(C1, NSInfo, Prefix, Chunk1, NoCSum,

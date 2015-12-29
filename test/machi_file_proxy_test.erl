@@ -119,7 +119,7 @@ multiple_chunks_read_test_() ->
               ?_assertEqual(ok, machi_file_proxy:trim(Pid, 0, 1, false)),
               ?_assertMatch({ok, {[], [{"test", 0, 1}]}},
                             machi_file_proxy:read(Pid, 0, 1,
-                                                  [{needs_trimmed, true}])),
+                                                  #read_opts{needs_trimmed=true})),
               ?_assertMatch({ok, "test", _}, machi_file_proxy:append(Pid, random_binary(0, 1024))),
               ?_assertEqual(ok, machi_file_proxy:write(Pid, 10000, <<"fail">>)),
               ?_assertEqual(ok, machi_file_proxy:write(Pid, 20000, <<"fail">>)),
@@ -134,7 +134,7 @@ multiple_chunks_read_test_() ->
                             machi_file_proxy:read(Pid, 1024, 530000)),
               ?_assertMatch({ok, {[{"test", 1, _, _}], [{"test", 0, 1}]}},
                             machi_file_proxy:read(Pid, 0, 1024,
-                                                  [{needs_trimmed, true}]))
+                                                  #read_opts{needs_trimmed=true}))
              ]
      end}.
 

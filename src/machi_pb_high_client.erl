@@ -131,21 +131,22 @@ write_chunk(PidSpec, File, Offset, Chunk, CSum, Timeout) ->
 %% {Chunks, TrimmedChunks}}' for live file while it returns `{error,
 %% trimmed}' if all bytes of the file was trimmed.
 -spec read_chunk(pid(), File::string(), machi_dt:file_offset(), machi_dt:chunk_size(),
-                 [{flag_no_checksum | flag_no_chunk | needs_trimmed, boolean()}]) ->
+                 machi_dt:read_opts_x()) ->
                         {ok, {Chunks::[{File::string(), machi_dt:file_offset(), machi_dt:chunk_size(), binary()}],
                               Trimmed::[{File::string(), machi_dt:file_offset(), machi_dt:chunk_size()}]}} |
                         {error, machi_client_error_reason()}.
-read_chunk(PidSpec, File, Offset, Size, Options) ->
-    read_chunk(PidSpec, File, Offset, Size, Options, ?DEFAULT_TIMEOUT).
+read_chunk(PidSpec, File, Offset, Size, Opts) ->
+    read_chunk(PidSpec, File, Offset, Size, Opts, ?DEFAULT_TIMEOUT).
 
 -spec read_chunk(pid(), File::string(), machi_dt:file_offset(), machi_dt:chunk_size(),
-                 [{flag_no_checksum | flag_no_chunk | needs_trimmed, boolean()}],
+                 machi_dt:read_opts_x(),
                  Timeout::non_neg_integer()) ->
                         {ok, {Chunks::[{File::string(), machi_dt:file_offset(), machi_dt:chunk_size(), binary()}],
                               Trimmed::[{File::string(), machi_dt:file_offset(), machi_dt:chunk_size()}]}} |
                         {error, machi_client_error_reason()}.
-read_chunk(PidSpec, File, Offset, Size, Options, Timeout) ->
-    send_sync(PidSpec, {read_chunk, File, Offset, Size, Options}, Timeout).
+read_chunk(PidSpec, File, Offset, Size, Opts0, Timeout) ->
+    Opts = machi_util:read_opts_default(Opts0),
+    send_sync(PidSpec, {read_chunk, File, Offset, Size, Opts}, Timeout).
 
 %% @doc Trims arbitrary binary range of any file. If a specified range
 %% has any byte trimmed, it fails and returns `{error, trimmed}'.
@@ -341,13 +342,13 @@ do_send_sync2({write_chunk, File, Offset, Chunk, CSum},
             Res = {bummer, {X, Y, erlang:get_stacktrace()}},
             {Res, S#state{count=Count+1}}
     end;
-do_send_sync2({read_chunk, File, Offset, Size, Options},
+do_send_sync2({read_chunk, File, Offset, Size, Opts},
              #state{sock=Sock, sock_id=Index, count=Count}=S) ->
     try
         ReqID = <<Index:64/big, Count:64/big>>,
-        FlagNoChecksum = proplists:get_value(no_checksum, Options, false),
-        FlagNoChunk = proplists:get_value(no_chunk, Options, false),
-        NeedsTrimmed = proplists:get_value(needs_trimmed, Options, false),
+        #read_opts{no_checksum=FlagNoChecksum,
+                   no_chunk=FlagNoChunk,
+                   needs_trimmed=NeedsTrimmed} = Opts,
         Req = #mpb_readchunkreq{chunk_pos=#mpb_chunkpos{file_name=File,
                                                         offset=Offset,
                                                         chunk_size=Size},

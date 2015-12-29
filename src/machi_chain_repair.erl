@@ -336,7 +336,7 @@ execute_repair_directive({File, Cmds}, {ProxiesDict, EpochID, Verb, ETS}=Acc) ->
                 io:format(user, "TODO fix broken read_chunk mod ~s line ~w\n", [?MODULE, ?LINE]),
                 {ok, {[{_, Offset, Chunk, _}], _}} =
                     machi_proxy_flu1_client:read_chunk(
-                      SrcP, NSInfo, EpochID, File, Offset, Size, [],
+                      SrcP, NSInfo, EpochID, File, Offset, Size, undefined,
                       ?SHORT_TIMEOUT),
                 _T2 = os:timestamp(),
                 <<_Tag:1/binary, CSum/binary>> = TaggedCSum,

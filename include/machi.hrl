@@ -55,3 +55,9 @@
           preferred_file_name         :: 'undefined' | machi_dt:file_name_s(),
           flag_fail_preferred = false :: boolean()
          }).
+
+-record(read_opts, {
+          no_checksum = false         :: boolean(),
+          no_chunk = false            :: boolean(),
+          needs_trimmed = false       :: boolean()
+         }).

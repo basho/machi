@@ -80,7 +80,7 @@ smoke_test2() ->
             [begin
                  File = binary_to_list(Fl),
                  ?assertMatch({ok, {[{File, Off, Ch, _}], []}},
-                              ?C:read_chunk(Clnt, Fl, Off, Sz, []))
+                              ?C:read_chunk(Clnt, Fl, Off, Sz, undefined))
              end || {Ch, Fl, Off, Sz} <- Reads],
 
             {ok, KludgeBin} = ?C:checksum_list(Clnt, File1),
@@ -104,7 +104,7 @@ smoke_test2() ->
              end || {_Ch, Fl, Off, Sz} <- Reads],
             [begin
                  {ok, {[], Trimmed}} =
-                        ?C:read_chunk(Clnt, Fl, Off, Sz, [{needs_trimmed, true}]),
+                        ?C:read_chunk(Clnt, Fl, Off, Sz, #read_opts{needs_trimmed=true}),
                  Filename = binary_to_list(Fl),
                  ?assertEqual([{Filename, Off, Sz}], Trimmed)
              end || {_Ch, Fl, Off, Sz} <- Reads],
@@ -130,7 +130,7 @@ smoke_test2() ->
 
             [begin
                  {error, trimmed} =
-                        ?C:read_chunk(Clnt, Fl, Off, Sz, [])
+                        ?C:read_chunk(Clnt, Fl, Off, Sz, undefined)
              end || {_Ch, Fl, Off, Sz} <- Reads],
             ok
         after

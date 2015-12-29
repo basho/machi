@@ -91,9 +91,9 @@ from_pb_request(#mpb_ll_request{
                                  flag_no_chunk=PB_GetNoChunk,
                                  flag_needs_trimmed=PB_NeedsTrimmed}}) ->
     EpochID = conv_to_epoch_id(PB_EpochID),
-    Opts = [{no_checksum, conv_to_boolean(PB_GetNoChecksum)},
-            {no_chunk, conv_to_boolean(PB_GetNoChunk)},
-            {needs_trimmed, conv_to_boolean(PB_NeedsTrimmed)}],
+    Opts = #read_opts{no_checksum=conv_to_boolean(PB_GetNoChecksum),
+                      no_chunk=conv_to_boolean(PB_GetNoChunk),
+                      needs_trimmed=conv_to_boolean(PB_NeedsTrimmed)},
     #mpb_chunkpos{file_name=File,
                   offset=Offset,
                   chunk_size=Size} = ChunkPos,
@@ -203,11 +203,10 @@ from_pb_request(#mpb_request{req_id=ReqID,
                      flag_no_checksum=FlagNoChecksum,
                      flag_no_chunk=FlagNoChunk,
                      flag_needs_trimmed=NeedsTrimmed} = IR,
-    %% I want MAPS
-    Options = [{no_checksum, machi_util:int2bool(FlagNoChecksum)},
-               {no_chunk, machi_util:int2bool(FlagNoChunk)},
-               {needs_trimmed, machi_util:int2bool(NeedsTrimmed)}],
-    {ReqID, {high_read_chunk, File, Offset, Size, Options}};
+    Opts = #read_opts{no_checksum=machi_util:int2bool(FlagNoChecksum),
+                      no_chunk=machi_util:int2bool(FlagNoChunk),
+                      needs_trimmed=machi_util:int2bool(NeedsTrimmed)},
+    {ReqID, {high_read_chunk, File, Offset, Size, Opts}};
 from_pb_request(#mpb_request{req_id=ReqID,
                              trim_chunk=IR=#mpb_trimchunkreq{}}) ->
     #mpb_trimchunkreq{chunk_pos=#mpb_chunkpos{file_name=File,
@@ -432,9 +431,9 @@ to_pb_request(ReqID, {low_write_chunk, NSVersion, NS, EpochID, File, Offset, Chu
                                                     csum=PB_CSum}}};
 to_pb_request(ReqID, {low_read_chunk, NSVersion, NS, EpochID, File, Offset, Size, Opts}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
-    FNChecksum = proplists:get_value(no_checksum, Opts, false),
-    FNChunk = proplists:get_value(no_chunk, Opts, false),
-    NeedsTrimmed = proplists:get_value(needs_trimmed, Opts, false),
+    #read_opts{no_checksum=FNChecksum,
+               no_chunk=FNChunk,
+               needs_trimmed=NeedsTrimmed} = Opts,
     #mpb_ll_request{
                req_id=ReqID, do_not_alter=2,
                read_chunk=#mpb_ll_readchunkreq{

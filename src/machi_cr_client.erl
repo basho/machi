@@ -746,7 +746,7 @@ read_repair2(cp_mode=ConsistencyMode,
     %% TODO WTF was I thinking here??....
     Tail = lists:last(readonly_flus(P)),
     case ?FLU_PC:read_chunk(orddict:fetch(Tail, PD), NSInfo, EpochID,
-                            File, Offset, Size, [], ?TIMEOUT) of
+                            File, Offset, Size, undefined, ?TIMEOUT) of
         {ok, Chunks} when is_list(Chunks) ->
             %% TODO: change to {Chunks, Trimmed} and have them repaired
             ToRepair = mutation_flus(P) -- [Tail],
@@ -1039,7 +1039,7 @@ try_to_find_chunk(Eligible, NSInfo, File, Offset, Size,
                    Proxy = orddict:fetch(FLU, PD),
                    case ?FLU_PC:read_chunk(Proxy, NSInfo, EpochID,
                                            %% TODO Trimmed is required here
-                                           File, Offset, Size, []) of
+                                           File, Offset, Size, undefined) of
                        {ok, {_Chunks, _} = ChunksAndTrimmed} ->
                            {FLU, {ok, ChunksAndTrimmed}};
                        Else ->
