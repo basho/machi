@@ -59,7 +59,7 @@
          %% File API
          append_chunk/6, append_chunk/8,
          read_chunk/7, read_chunk/8,
-         checksum_list/3, checksum_list/4,
+         checksum_list/2, checksum_list/3,
          list_files/2, list_files/3,
          wedge_status/1, wedge_status/2,
 
@@ -129,13 +129,13 @@ read_chunk(PidSpec, NSInfo, EpochID, File, Offset, Size, Opts, Timeout) ->
 
 %% @doc Fetch the list of chunk checksums for `File'.
 
-checksum_list(PidSpec, EpochID, File) ->
-    checksum_list(PidSpec, EpochID, File, infinity).
+checksum_list(PidSpec, File) ->
+    checksum_list(PidSpec, File, infinity).
 
 %% @doc Fetch the list of chunk checksums for `File'.
 
-checksum_list(PidSpec, EpochID, File, Timeout) ->
-    gen_server:call(PidSpec, {req, {checksum_list, EpochID, File}},
+checksum_list(PidSpec, File, Timeout) ->
+    gen_server:call(PidSpec, {req, {checksum_list, File}},
                     Timeout).
 
 %% @doc Fetch the list of all files on the remote FLU.
@@ -388,9 +388,9 @@ make_req_fun({write_chunk, NSInfo, EpochID, File, Offset, Chunk},
 make_req_fun({trim_chunk, NSInfo, EpochID, File, Offset, Size},
              #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
     fun() -> Mod:trim_chunk(Sock, NSInfo, EpochID, File, Offset, Size) end;
-make_req_fun({checksum_list, EpochID, File},
+make_req_fun({checksum_list, File},
              #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
-    fun() -> Mod:checksum_list(Sock, EpochID, File) end;
+    fun() -> Mod:checksum_list(Sock, File) end;
 make_req_fun({list_files, EpochID},
              #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
     fun() -> Mod:list_files(Sock, EpochID) end;

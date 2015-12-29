@@ -87,7 +87,7 @@ io:format(user, "\nTODO: fix write_chunk() call below @ ~s LINE ~w\n", [?MODULE,
 
             %% Alright, now for the rest of the API, whee
             BadFile = <<"no-such-file">>,
-            {error, bad_arg} = ?MUT:checksum_list(Prox1, FakeEpoch, BadFile),
+            {error, bad_arg} = ?MUT:checksum_list(Prox1, BadFile),
             {ok, [_|_]} = ?MUT:list_files(Prox1, FakeEpoch),
             {ok, {false, _}} = ?MUT:wedge_status(Prox1),
             {ok, {0, _SomeCSum}} = ?MUT:get_latest_epochid(Prox1, public),
@@ -262,11 +262,11 @@ flu_restart_test2() ->
                                               File1, Off1, Size1, [])
                  end,
                  fun(run) -> {ok, KludgeBin} =
-                                 ?MUT:checksum_list(Prox1, FakeEpoch, File1),
+                                 ?MUT:checksum_list(Prox1, File1),
                              true = is_binary(KludgeBin),
                              ok;
                     (line) -> io:format("line ~p, ", [?LINE]);
-                    (stop) -> ?MUT:checksum_list(Prox1, FakeEpoch, File1)
+                    (stop) -> ?MUT:checksum_list(Prox1, File1)
                  end,
                  fun(run) -> {ok, _} =
                                  ?MUT:list_files(Prox1, FakeEpoch),

@@ -475,8 +475,7 @@ message Mpb_LL_TrimChunkResp {
 // Low level API: checksum_list()
 
 message Mpb_LL_ChecksumListReq {
-    required Mpb_EpochID epoch_id = 1;
-    required string file = 2;
+    required string file = 1;
 }
 
 message Mpb_LL_ChecksumListResp {

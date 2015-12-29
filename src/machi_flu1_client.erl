@@ -58,7 +58,7 @@
          append_chunk/6, append_chunk/7,
          append_chunk/8, append_chunk/9,
          read_chunk/7, read_chunk/8,
-         checksum_list/3, checksum_list/4,
+         checksum_list/2, checksum_list/3,
          list_files/2, list_files/3,
          wedge_status/1, wedge_status/2,
 
@@ -180,12 +180,12 @@ io:format(user, "dbgyo ~s LINE ~p NSInfo0 ~p NSInfo ~p\n", [?MODULE, ?LINE, NSIn
 
 %% @doc Fetch the list of chunk checksums for `File'.
 
--spec checksum_list(port_wrap(), machi_dt:epoch_id(), machi_dt:file_name()) ->
+-spec checksum_list(port_wrap(), machi_dt:file_name()) ->
       {ok, binary()} |
       {error, machi_dt:error_general() | 'no_such_file' | 'partial_read'} |
       {error, term()}.
-checksum_list(Sock, EpochID, File) ->
-    checksum_list2(Sock, EpochID, File).
+checksum_list(Sock, File) ->
+    checksum_list2(Sock, File).
 
 %% @doc Fetch the list of chunk checksums for `File'.
 %%
@@ -209,13 +209,13 @@ checksum_list(Sock, EpochID, File) ->
 %% Details of the encoding used inside the `binary()' blog can be found
 %% in the EDoc comments for {@link machi_flu1:decode_csum_file_entry/1}.
 
--spec checksum_list(machi_dt:inet_host(), machi_dt:inet_port(), machi_dt:epoch_id(), machi_dt:file_name()) ->
+-spec checksum_list(machi_dt:inet_host(), machi_dt:inet_port(), machi_dt:file_name()) ->
       {ok, binary()} |
       {error, machi_dt:error_general() | 'no_such_file'} | {error, term()}.
-checksum_list(Host, TcpPort, EpochID, File) when is_integer(TcpPort) ->
+checksum_list(Host, TcpPort, File) when is_integer(TcpPort) ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
-        checksum_list2(Sock, EpochID, File)
+        checksum_list2(Sock, File)
     after
         disconnect(Sock)
     end.
@@ -567,9 +567,11 @@ append_chunk2(Sock, NSInfo, EpochID,
                                machi_util:unmake_tagged_csum(CSum0)
                        end,
     #ns_info{version=NSVersion, name=NS, locator=NSLocator} = NSInfo,
+    %% NOTE: The tuple position of NSLocator is a bit odd, because EpochID
+    %%       _must_ be in the 4th position (as NSV & NS must be in 2nd & 3rd).
     Req = machi_pb_translate:to_pb_request(
             ReqID,
-            {low_append_chunk, NSVersion, NS, NSLocator, EpochID,
+            {low_append_chunk, NSVersion, NS, EpochID, NSLocator,
              Prefix, Chunk, CSum_tag, CSum, Opts}),
     do_pb_request_common(Sock, ReqID, Req, true, Timeout).
 
@@ -594,37 +596,37 @@ write_chunk2(Sock, NSInfo, EpochID, File0, Offset, Chunk0) ->
 list2(Sock, EpochID) ->
     ReqID = <<"id">>,
     Req = machi_pb_translate:to_pb_request(
-            ReqID, {low_list_files, EpochID}),
+            ReqID, {low_skip_wedge, {low_list_files, EpochID}}),
     do_pb_request_common(Sock, ReqID, Req).
 
 wedge_status2(Sock) ->
     ReqID = <<"id">>,
     Req = machi_pb_translate:to_pb_request(
-            ReqID, {low_wedge_status, undefined}),
+            ReqID, {low_skip_wedge, {low_wedge_status}}),
     do_pb_request_common(Sock, ReqID, Req).
 
 echo2(Sock, Message) ->
     ReqID = <<"id">>,
     Req = machi_pb_translate:to_pb_request(
-            ReqID, {low_echo, undefined, Message}),
+            ReqID, {low_skip_wedge, {low_echo, Message}}),
     do_pb_request_common(Sock, ReqID, Req).
 
-checksum_list2(Sock, EpochID, File) ->
+checksum_list2(Sock, File) ->
     ReqID = <<"id">>,
     Req = machi_pb_translate:to_pb_request(
-            ReqID, {low_checksum_list, EpochID, File}),
+            ReqID, {low_skip_wedge, {low_checksum_list, File}}),
     do_pb_request_common(Sock, ReqID, Req).
 
 delete_migration2(Sock, EpochID, File) ->
     ReqID = <<"id">>,
     Req = machi_pb_translate:to_pb_request(
-            ReqID, {low_delete_migration, EpochID, File}),
+            ReqID, {low_skip_wedge, {low_delete_migration, EpochID, File}}),
     do_pb_request_common(Sock, ReqID, Req).
 
 trunc_hack2(Sock, EpochID, File) ->
     ReqID = <<"id-trunc">>,
     Req = machi_pb_translate:to_pb_request(
-            ReqID, {low_trunc_hack, EpochID, File}),
+            ReqID, {low_skip_wedge, {low_trunc_hack, EpochID, File}}),
     do_pb_request_common(Sock, ReqID, Req).
 
 get_latest_epochid2(Sock, ProjType) ->

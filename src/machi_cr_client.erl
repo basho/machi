@@ -895,9 +895,9 @@ do_checksum_list(File, Depth, STime, TO, #state{proj=P}=S) ->
     end.
 
 do_checksum_list2(File, Depth, STime, TO,
-                  #state{epoch_id=EpochID, proj=P, proxies_dict=PD}=S) ->
+                  #state{proj=P, proxies_dict=PD}=S) ->
     Proxy = orddict:fetch(lists:last(readonly_flus(P)), PD),
-    case ?FLU_PC:checksum_list(Proxy, EpochID, File, ?TIMEOUT) of
+    case ?FLU_PC:checksum_list(Proxy, File, ?TIMEOUT) of
         {ok, _}=OK ->
             {reply, OK, S};
         {error, Retry}

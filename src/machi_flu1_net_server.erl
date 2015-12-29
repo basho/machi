@@ -209,31 +209,31 @@ do_pb_ll_request(#mpb_ll_request{req_id=ReqID}, #state{pb_mode=high}=S) ->
     {machi_pb_translate:to_pb_response(ReqID, unused, Result), S};
 do_pb_ll_request(PB_request, S) ->
     Req = machi_pb_translate:from_pb_request(PB_request),
-    %% io:format(user, "[~w] do_pb_ll_request Req: ~w~n", [S#state.flu_name, Req]),
     {ReqID, Cmd, Result, S2} = 
         case Req of
-            {RqID, {LowCmd, _}=Cmd0}
-              when LowCmd =:= low_proj;
-                   LowCmd =:= low_wedge_status;
-                   LowCmd =:= low_list_files ->
+            {RqID, {low_skip_wedge, LowSubCmd}=Cmd0} ->
                 %% Skip wedge check for these unprivileged commands
+                {Rs, NewS} = do_pb_ll_request3(LowSubCmd, S),
+                {RqID, Cmd0, Rs, NewS};
+            {RqID, {low_proj, _LowSubCmd}=Cmd0} ->
                 {Rs, NewS} = do_pb_ll_request3(Cmd0, S),
                 {RqID, Cmd0, Rs, NewS};
             {RqID, Cmd0} ->
-                io:format(user, "TODO: epoch at pos 2 in tuple is probably broken now, whee: ~p\n", [Cmd0]),
-                EpochID = element(2, Cmd0),      % by common convention
-                {Rs, NewS} = do_pb_ll_request2(EpochID, Cmd0, S),
+                %% All remaining must have NSVersion, NS, & EpochID at next pos
+                NSVersion = element(2, Cmd0),
+                NS = element(3, Cmd0),
+                EpochID = element(4, Cmd0),
+                {Rs, NewS} = do_pb_ll_request2(NSVersion, NS, EpochID, Cmd0, S),
                 {RqID, Cmd0, Rs, NewS}
         end,
     {machi_pb_translate:to_pb_response(ReqID, Cmd, Result), S2}.
 
-do_pb_ll_request2(EpochID, CMD, S) ->
+do_pb_ll_request2(NSVersion, NS, EpochID, CMD, S) ->
     {Wedged_p, CurrentEpochID} = lookup_epoch(S),
-    %% io:format(user, "{Wedged_p, CurrentEpochID}: ~w~n", [{Wedged_p, CurrentEpochID}]),
-    if Wedged_p == true ->
+    if not is_tuple(EpochID) orelse tuple_size(EpochID) /= 2 ->
+            exit({bad_epoch_id, EpochID, for, CMD});
+       Wedged_p == true ->
             {{error, wedged}, S#state{epoch_id=CurrentEpochID}};
-       is_tuple(EpochID)
-       andalso
        EpochID /= CurrentEpochID ->
             {Epoch, _} = EpochID,
             {CurrentEpoch, _} = CurrentEpochID,
@@ -259,30 +259,20 @@ do_pb_ll_request2b(CMD, S) ->
     do_pb_ll_request3(CMD, S).
 
 %% Witness status does not matter below.
-do_pb_ll_request3({low_echo, _BogusEpochID, Msg}, S) ->
+do_pb_ll_request3({low_echo, Msg}, S) ->
     {Msg, S};
-do_pb_ll_request3({low_auth, _BogusEpochID, _User, _Pass}, S) ->
+do_pb_ll_request3({low_auth, _User, _Pass}, S) ->
     {-6, S};
-do_pb_ll_request3({low_wedge_status, _EpochID}, S) ->
+do_pb_ll_request3({low_wedge_status}, S) ->
     {do_server_wedge_status(S), S};
 do_pb_ll_request3({low_proj, PCMD}, S) ->
     {do_server_proj_request(PCMD, S), S};
 
 %% Witness status *matters* below
-do_pb_ll_request3({low_append_chunk, NSVersion, NS, NSLocator, EpochID,
+do_pb_ll_request3({low_append_chunk, NSVersion, NS, EpochID, NSLocator,
                    Prefix, Chunk, CSum_tag,
                    CSum, Opts},
                   #state{witness=false}=S) ->
-    %% io:format(user, "
-    %% append_chunk namespace_version=~p
-    %% namespace=~p
-    %% locator=~p
-    %% epoch_id=~p
-    %% prefix=~p
-    %% chunk=~p
-    %% csum={~p,~p}
-    %% opts=~p\n",
-    %%           [NSVersion, NS, NSLocator, EpochID, Prefix, Chunk, CSum_tag, CSum, Opts]),
     NSInfo = #ns_info{version=NSVersion, name=NS, locator=NSLocator},
     {do_server_append_chunk(NSInfo, EpochID,
                             Prefix, Chunk, CSum_tag, CSum,
@@ -297,7 +287,7 @@ do_pb_ll_request3({low_read_chunk, _NSVersion, _NS, _EpochID, File, Offset, Size
 do_pb_ll_request3({low_trim_chunk, _NSVersion, _NS, _EpochID, File, Offset, Size, TriggerGC},
                   #state{witness=false}=S) ->
     {do_server_trim_chunk(File, Offset, Size, TriggerGC, S), S};
-do_pb_ll_request3({low_checksum_list, _EpochID, File},
+do_pb_ll_request3({low_checksum_list, File},
                   #state{witness=false}=S) ->
     {do_server_checksum_listing(File, S), S};
 do_pb_ll_request3({low_list_files, _EpochID},

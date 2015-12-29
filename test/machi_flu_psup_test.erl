@@ -150,8 +150,8 @@ partial_stop_restart2() ->
         {error, wedged} = machi_flu1_client:read_chunk(
                             Addr_a, TcpPort_a, NSInfo, ?DUMMY_PV1_EPOCH,
                             <<>>, 99999999, 1, []),
-        {error, wedged} = machi_flu1_client:checksum_list(
-                            Addr_a, TcpPort_a, ?DUMMY_PV1_EPOCH, <<>>),
+        {error, bad_arg} = machi_flu1_client:checksum_list(
+                             Addr_a, TcpPort_a, <<>>),
         %% list_files() is permitted despite wedged status
         {ok, _} = machi_flu1_client:list_files(
                             Addr_a, TcpPort_a, ?DUMMY_PV1_EPOCH),

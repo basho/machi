@@ -32,7 +32,7 @@
          append_chunk/4, append_chunk/5,
          append_chunk_extra/5, append_chunk_extra/6,
          read_chunk/5, read_chunk/6,
-         checksum_list/3, checksum_list/4,
+         checksum_list/2, checksum_list/3,
          list_files/2, list_files/3,
          wedge_status/1, wedge_status/2,
 
@@ -175,7 +175,7 @@ read_chunk(_Host, _TcpPort, EpochID, File, Offset, Size)
 
 %% @doc Fetch the list of chunk checksums for `File'.
 
-checksum_list(#yessir{name=Name,chunk_size=ChunkSize}, _EpochID, File) ->
+checksum_list(#yessir{name=Name,chunk_size=ChunkSize}, File) ->
     case get({Name,offset,File}) of
         undefined ->
             {error, no_such_file};
@@ -189,10 +189,10 @@ checksum_list(#yessir{name=Name,chunk_size=ChunkSize}, _EpochID, File) ->
 
 %% @doc Fetch the list of chunk checksums for `File'.
 
-checksum_list(_Host, _TcpPort, EpochID, File) ->
+checksum_list(_Host, _TcpPort, File) ->
     Sock = connect(#p_srvr{proto_mod=?MODULE}),
     try
-        checksum_list(Sock, EpochID, File)
+        checksum_list(Sock, File)
     after
         disconnect(Sock)
     end.

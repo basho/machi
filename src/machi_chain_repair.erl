@@ -207,7 +207,7 @@ make_repair_compare_fun(SrcFLU) ->
             T_a =< T_b
     end.
 
-make_repair_directives(ConsistencyMode, RepairMode, File, Size, EpochID,
+make_repair_directives(ConsistencyMode, RepairMode, File, Size, _EpochID,
                        Verb, Src, FLUs0, ProxiesDict, ETS) ->
     true = (Size < ?MAX_OFFSET),
     FLUs = lists:usort(FLUs0),
@@ -216,7 +216,7 @@ make_repair_directives(ConsistencyMode, RepairMode, File, Size, EpochID,
               Proxy = orddict:fetch(FLU, ProxiesDict),
               OffSzCs =
                   case machi_proxy_flu1_client:checksum_list(
-                         Proxy, EpochID, File, ?LONG_TIMEOUT) of
+                         Proxy, File, ?LONG_TIMEOUT) of
                       {ok, InfoBin} ->
                           machi_csum_table:split_checksum_list_blob_decode(InfoBin);
                       {error, no_such_file} ->

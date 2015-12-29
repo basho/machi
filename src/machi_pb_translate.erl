@@ -45,11 +45,11 @@
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    echo=#mpb_echoreq{message=Msg}}) ->
-    {ReqID, {low_echo, undefined, Msg}};
+    {ReqID, {low_skip_wedge, {low_echo, Msg}}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    auth=#mpb_authreq{user=User, password=Pass}}) ->
-    {ReqID, {low_auth, undefined, User, Pass}};
+    {ReqID, {low_skip_wedge, {low_auth, User, Pass}}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    append_chunk=IR=#mpb_ll_appendchunkreq{
@@ -63,7 +63,9 @@ from_pb_request(#mpb_ll_request{
     EpochID = conv_to_epoch_id(PB_EpochID),
     CSum_tag = conv_to_csum_tag(CSum_type),
     Opts = conv_to_append_opts(IR),
-    {ReqID, {low_append_chunk, NSVersion, NS, NSLocator, EpochID,
+    %% NOTE: The tuple position of NSLocator is a bit odd, because EpochID
+    %%       _must_ be in the 4th position (as NSV & NS must be in 2nd & 3rd).
+    {ReqID, {low_append_chunk, NSVersion, NS, EpochID, NSLocator,
              Prefix, Chunk, CSum_tag, CSum, Opts}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
@@ -112,34 +114,32 @@ from_pb_request(#mpb_ll_request{
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    checksum_list=#mpb_ll_checksumlistreq{
-                     epoch_id=PB_EpochID,
                      file=File}}) ->
-    EpochID = conv_to_epoch_id(PB_EpochID),
-    {ReqID, {low_checksum_list, EpochID, File}};
+    {ReqID, {low_skip_wedge, {low_checksum_list, File}}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    list_files=#mpb_ll_listfilesreq{
                      epoch_id=PB_EpochID}}) ->
     EpochID = conv_to_epoch_id(PB_EpochID),
-    {ReqID, {low_list_files, EpochID}};
+    {ReqID, {low_skip_wedge, {low_list_files, EpochID}}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    wedge_status=#mpb_ll_wedgestatusreq{}}) ->
-    {ReqID, {low_wedge_status, undefined}};
+    {ReqID, {low_skip_wedge, {low_wedge_status}}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    delete_migration=#mpb_ll_deletemigrationreq{
                     epoch_id=PB_EpochID,
                     file=File}}) ->
     EpochID = conv_to_epoch_id(PB_EpochID),
-    {ReqID, {low_delete_migration, EpochID, File}};
+    {ReqID, {low_skip_wedge, {low_delete_migration, EpochID, File}}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    trunc_hack=#mpb_ll_trunchackreq{
                     epoch_id=PB_EpochID,
                     file=File}}) ->
     EpochID = conv_to_epoch_id(PB_EpochID),
-    {ReqID, {low_trunc_hack, EpochID, File}};
+    {ReqID, {low_skip_wedge, {low_trunc_hack, EpochID, File}}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    proj_gl=#mpb_ll_getlatestepochidreq{type=ProjType}}) ->
@@ -390,14 +390,16 @@ from_pb_response(#mpb_ll_response{
 %% TODO: move the #mbp_* record making code from
 %%       machi_pb_high_client:do_send_sync() clauses into to_pb_request().
 
-to_pb_request(ReqID, {low_echo, _BogusEpochID, Msg}) ->
+to_pb_request(ReqID, {low_skip_wedge, {low_echo, Msg}}) ->
     #mpb_ll_request{
                req_id=ReqID, do_not_alter=2,
                echo=#mpb_echoreq{message=Msg}};
-to_pb_request(ReqID, {low_auth, _BogusEpochID, User, Pass}) ->
+to_pb_request(ReqID, {low_skip_wedge, {low_auth, User, Pass}}) ->
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     auth=#mpb_authreq{user=User, password=Pass}};
-to_pb_request(ReqID, {low_append_chunk, NSVersion, NS, NSLocator, EpochID, 
+%% NOTE: The tuple position of NSLocator is a bit odd, because EpochID
+%%       _must_ be in the 4th position (as NSV & NS must be in 2nd & 3rd).
+to_pb_request(ReqID, {low_append_chunk, NSVersion, NS, EpochID, NSLocator,
                       Prefix, Chunk, CSum_tag, CSum, Opts}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     CSum_type = conv_from_csum_tag(CSum_tag),
@@ -457,26 +459,24 @@ to_pb_request(ReqID, {low_trim_chunk, NSVersion, NS, EpochID, File, Offset, Size
                                   offset=Offset,
                                   size=Size,
                                   trigger_gc=TriggerGC}};
-to_pb_request(ReqID, {low_checksum_list, EpochID, File}) ->
-    PB_EpochID = conv_from_epoch_id(EpochID),
+to_pb_request(ReqID, {low_skip_wedge, {low_checksum_list, File}}) ->
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     checksum_list=#mpb_ll_checksumlistreq{
-                      epoch_id=PB_EpochID,
                       file=File}};
-to_pb_request(ReqID, {low_list_files, EpochID}) ->
+to_pb_request(ReqID, {low_skip_wedge, {low_list_files, EpochID}}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     list_files=#mpb_ll_listfilesreq{epoch_id=PB_EpochID}};
-to_pb_request(ReqID, {low_wedge_status, _BogusEpochID}) ->
+to_pb_request(ReqID, {low_skip_wedge, {low_wedge_status}}) ->
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     wedge_status=#mpb_ll_wedgestatusreq{}};
-to_pb_request(ReqID, {low_delete_migration, EpochID, File}) ->
+to_pb_request(ReqID, {low_skip_wedge, {low_delete_migration, EpochID, File}}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     delete_migration=#mpb_ll_deletemigrationreq{
                      epoch_id=PB_EpochID,
                       file=File}};
-to_pb_request(ReqID, {low_trunc_hack, EpochID, File}) ->
+to_pb_request(ReqID, {low_skip_wedge, {low_trunc_hack, EpochID, File}}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     trunc_hack=#mpb_ll_trunchackreq{
@@ -512,15 +512,15 @@ to_pb_response(_ReqID, _, async_no_response=X) ->
     X;
 to_pb_response(ReqID, _, {low_error, ErrCode, ErrMsg}) ->
     make_ll_error_resp(ReqID, ErrCode, ErrMsg);
-to_pb_response(ReqID, {low_echo, _BogusEpochID, _Msg}, Resp) ->
+to_pb_response(ReqID, {low_skip_wedge, {low_echo, _Msg}}, Resp) ->
     #mpb_ll_response{
                 req_id=ReqID,
                 echo=#mpb_echoresp{message=Resp}};
-to_pb_response(ReqID, {low_auth, _, _, _}, __TODO_Resp) ->
+to_pb_response(ReqID, {low_skip_wedige, {low_auth, _, _}}, __TODO_Resp) ->
     #mpb_ll_response{req_id=ReqID,
                      generic=#mpb_errorresp{code=1,
                                             msg="AUTH not implemented"}};
-to_pb_response(ReqID, {low_append_chunk, _NSV, _NS, _NSL, _EID, _Pfx, _Ch, _CST, _CS, _O}, Resp)->
+to_pb_response(ReqID, {low_append_chunk, _NSV, _NS, _EID, _NSL, _Pfx, _Ch, _CST, _CS, _O}, Resp)->
     case Resp of
         {ok, {Offset, Size, File}} ->
             Where = #mpb_chunkpos{offset=Offset,
@@ -579,7 +579,7 @@ to_pb_response(ReqID, {low_trim_chunk, _, _, _, _, _, _, _}, Resp) ->
         _Else ->
             make_ll_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
-to_pb_response(ReqID, {low_checksum_list, _EpochID, _File}, Resp) ->
+to_pb_response(ReqID, {low_skip_wedge, {low_checksum_list, _File}}, Resp) ->
     case Resp of
         {ok, Chunk} ->
             #mpb_ll_response{req_id=ReqID,
@@ -592,7 +592,7 @@ to_pb_response(ReqID, {low_checksum_list, _EpochID, _File}, Resp) ->
         _Else ->
             make_ll_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
-to_pb_response(ReqID, {low_list_files, _EpochID}, Resp) ->
+to_pb_response(ReqID, {low_skip_wedge, {low_list_files, _EpochID}}, Resp) ->
     case Resp of
         {ok, FileInfo} ->
             PB_Files = [#mpb_fileinfo{file_size=Size, file_name=Name} ||
@@ -607,7 +607,7 @@ to_pb_response(ReqID, {low_list_files, _EpochID}, Resp) ->
         _Else ->
             make_ll_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
-to_pb_response(ReqID, {low_wedge_status, _BogusEpochID}, Resp) ->
+to_pb_response(ReqID, {low_skip_wedge, {low_wedge_status}}, Resp) ->
     case Resp of
         {error, _}=Error ->
             Status = conv_from_status(Error),
@@ -622,11 +622,11 @@ to_pb_response(ReqID, {low_wedge_status, _BogusEpochID}, Resp) ->
                                epoch_id=PB_EpochID,
                                wedged_flag=PB_Wedged}}
     end;
-to_pb_response(ReqID, {low_delete_migration, _EID, _Fl}, Resp)->
+to_pb_response(ReqID, {low_skip_wedge, {low_delete_migration, _EID, _Fl}}, Resp)->
     Status = conv_from_status(Resp),
     #mpb_ll_response{req_id=ReqID,
                    delete_migration=#mpb_ll_deletemigrationresp{status=Status}};
-to_pb_response(ReqID, {low_trunc_hack, _EID, _Fl}, Resp)->
+to_pb_response(ReqID, {low_skip_wedge, {low_trunc_hack, _EID, _Fl}}, Resp)->
     Status = conv_from_status(Resp),
     #mpb_ll_response{req_id=ReqID,
                      trunc_hack=#mpb_ll_trunchackresp{status=Status}};
