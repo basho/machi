@@ -91,9 +91,9 @@ from_pb_request(#mpb_ll_request{
                                  flag_no_chunk=PB_GetNoChunk,
                                  flag_needs_trimmed=PB_NeedsTrimmed}}) ->
     EpochID = conv_to_epoch_id(PB_EpochID),
-    Opts = #read_opts{no_checksum=conv_to_boolean(PB_GetNoChecksum),
-                      no_chunk=conv_to_boolean(PB_GetNoChunk),
-                      needs_trimmed=conv_to_boolean(PB_NeedsTrimmed)},
+    Opts = #read_opts{no_checksum=PB_GetNoChecksum,
+                      no_chunk=PB_GetNoChunk,
+                      needs_trimmed=PB_NeedsTrimmed},
     #mpb_chunkpos{file_name=File,
                   offset=Offset,
                   chunk_size=Size} = ChunkPos,
@@ -107,9 +107,8 @@ from_pb_request(#mpb_ll_request{
                      file=File,
                      offset=Offset,
                      size=Size,
-                                 trigger_gc=PB_TriggerGC}}) ->
+                     trigger_gc=TriggerGC}}) ->
     EpochID = conv_to_epoch_id(PB_EpochID),
-    TriggerGC = conv_to_boolean(PB_TriggerGC),
     {ReqID, {low_trim_chunk, NSVersion, NS, EpochID, File, Offset, Size, TriggerGC}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
@@ -203,9 +202,9 @@ from_pb_request(#mpb_request{req_id=ReqID,
                      flag_no_checksum=FlagNoChecksum,
                      flag_no_chunk=FlagNoChunk,
                      flag_needs_trimmed=NeedsTrimmed} = IR,
-    Opts = #read_opts{no_checksum=machi_util:int2bool(FlagNoChecksum),
-                      no_chunk=machi_util:int2bool(FlagNoChunk),
-                      needs_trimmed=machi_util:int2bool(NeedsTrimmed)},
+    Opts = #read_opts{no_checksum=FlagNoChecksum,
+                      no_chunk=FlagNoChunk,
+                      needs_trimmed=NeedsTrimmed},
     {ReqID, {high_read_chunk, File, Offset, Size, Opts}};
 from_pb_request(#mpb_request{req_id=ReqID,
                              trim_chunk=IR=#mpb_trimchunkreq{}}) ->
@@ -311,11 +310,8 @@ from_pb_response(#mpb_ll_response{
 from_pb_response(#mpb_ll_response{
                     req_id=ReqID,
                     wedge_status=#mpb_ll_wedgestatusresp{
-                      epoch_id=PB_EpochID, wedged_flag=PB_Wedged}}) ->
+                      epoch_id=PB_EpochID, wedged_flag=Wedged_p}}) ->
     EpochID = conv_to_epoch_id(PB_EpochID),
-    Wedged_p = if PB_Wedged == 1 -> true;
-                  PB_Wedged == 0 -> false
-               end,
     {ReqID, {ok, {Wedged_p, EpochID}}};
 from_pb_response(#mpb_ll_response{
                     req_id=ReqID,
@@ -444,9 +440,9 @@ to_pb_request(ReqID, {low_read_chunk, NSVersion, NS, EpochID, File, Offset, Size
                                           file_name=File,
                                           offset=Offset,
                                           chunk_size=Size},
-                            flag_no_checksum=machi_util:bool2int(FNChecksum),
-                            flag_no_chunk=machi_util:bool2int(FNChunk),
-                            flag_needs_trimmed=machi_util:bool2int(NeedsTrimmed)}};
+                            flag_no_checksum=FNChecksum,
+                            flag_no_chunk=FNChunk,
+                            flag_needs_trimmed=NeedsTrimmed}};
 to_pb_request(ReqID, {low_trim_chunk, NSVersion, NS, EpochID, File, Offset, Size, TriggerGC}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
@@ -613,13 +609,12 @@ to_pb_response(ReqID, {low_skip_wedge, {low_wedge_status}}, Resp) ->
             #mpb_ll_response{req_id=ReqID,
                            wedge_status=#mpb_ll_wedgestatusresp{status=Status}};
         {Wedged_p, EpochID} ->
-            PB_Wedged = conv_from_boolean(Wedged_p),
             PB_EpochID = conv_from_epoch_id(EpochID),
             #mpb_ll_response{req_id=ReqID,
                              wedge_status=#mpb_ll_wedgestatusresp{
                                status='OK',
                                epoch_id=PB_EpochID,
-                               wedged_flag=PB_Wedged}}
+                               wedged_flag=Wedged_p}}
     end;
 to_pb_response(ReqID, {low_skip_wedge, {low_delete_migration, _EID, _Fl}}, Resp)->
     Status = conv_from_status(Resp),
@@ -992,7 +987,7 @@ conv_from_boolean(true) ->
 conv_from_append_opts(#append_opts{chunk_extra=ChunkExtra,
                                    preferred_file_name=Pref,
                                    flag_fail_preferred=FailPref}) ->
-    {ChunkExtra, Pref, conv_from_boolean(FailPref)}.
+    {ChunkExtra, Pref, FailPref}.
 
 
 conv_to_append_opts(#mpb_appendchunkreq{
@@ -1001,14 +996,14 @@ conv_to_append_opts(#mpb_appendchunkreq{
                        flag_fail_preferred=FailPref}) ->
     #append_opts{chunk_extra=ChunkExtra,
                  preferred_file_name=Pref,
-                 flag_fail_preferred=conv_to_boolean(FailPref)};
+                 flag_fail_preferred=FailPref};
 conv_to_append_opts(#mpb_ll_appendchunkreq{
                        chunk_extra=ChunkExtra,
                        preferred_file_name=Pref,
                        flag_fail_preferred=FailPref}) ->
     #append_opts{chunk_extra=ChunkExtra,
                  preferred_file_name=Pref,
-                 flag_fail_preferred=conv_to_boolean(FailPref)}.
+                 flag_fail_preferred=FailPref}.
 
 conv_from_projection_v1(#projection_v1{epoch_number=Epoch,
                                        epoch_csum=CSum,

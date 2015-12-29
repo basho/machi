@@ -181,7 +181,7 @@ message Mpb_AppendChunkReq {
     optional uint32 chunk_extra = 20;
     optional string preferred_file_name = 21;
     /* Fail the operation if our preferred file name is not available */
-    optional uint32 flag_fail_preferred = 22;
+    optional bool flag_fail_preferred = 22 [default=false];
 }
 
 message Mpb_AppendChunkResp {
@@ -210,15 +210,15 @@ message Mpb_ReadChunkReq {
 
     // Use flag_no_checksum=non-zero to skip returning the chunk's checksum.
     // TODO: not implemented yet.
-    optional uint32 flag_no_checksum = 20 [default=0];
+    optional bool flag_no_checksum = 20 [default=false];
 
     // Use flag_no_chunk=non-zero to skip returning the chunk (which
     // only makes sense if flag_no_checksum is not set).
     // TODO: not implemented yet.
-    optional uint32 flag_no_chunk = 21 [default=0];
+    optional bool flag_no_chunk = 21 [default=false];
 
     // TODO: not implemented yet.
-    optional uint32 flag_needs_trimmed = 22 [default=0];
+    optional bool flag_needs_trimmed = 22 [default=false];
 }
 
 message Mpb_ReadChunkResp {
@@ -401,7 +401,7 @@ message Mpb_LL_AppendChunkReq {
     optional uint32 chunk_extra = 20;
     optional string preferred_file_name = 21;
     /* Fail the operation if our preferred file name is not available */
-    optional uint32 flag_fail_preferred = 22;
+    optional bool flag_fail_preferred = 22 [default=false];
 }
 
 message Mpb_LL_AppendChunkResp {
@@ -437,14 +437,14 @@ message Mpb_LL_ReadChunkReq {
 
     // Use flag_no_checksum=non-zero to skip returning the chunk's checksum.
     // TODO: not implemented yet.
-    optional uint32 flag_no_checksum = 20 [default=0];
+    optional bool flag_no_checksum = 20 [default=false];
 
     // Use flag_no_chunk=non-zero to skip returning the chunk (which
     // only makes sense if flag_checksum is not set).
     // TODO: not implemented yet.
-    optional uint32 flag_no_chunk = 21 [default=0];
+    optional bool flag_no_chunk = 21 [default=false];
 
-    optional uint32 flag_needs_trimmed = 22 [default=0];
+    optional bool flag_needs_trimmed = 22 [default=false];
 }
 
 message Mpb_LL_ReadChunkResp {
@@ -465,7 +465,7 @@ message Mpb_LL_TrimChunkReq {
     required uint64 offset = 12;
     required uint32 size = 13;
 
-    optional uint32 trigger_gc = 20 [default=0];
+    optional bool trigger_gc = 20 [default=false];
 }
 
 message Mpb_LL_TrimChunkResp {
@@ -506,7 +506,7 @@ message Mpb_LL_WedgeStatusReq {
 message Mpb_LL_WedgeStatusResp {
     required Mpb_GeneralStatusCode status = 1;
     optional Mpb_EpochID epoch_id = 2;
-    optional uint32 wedged_flag = 3;
+    optional bool wedged_flag = 3;
 }
 
 // Low level API: delete_migration()

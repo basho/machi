@@ -287,8 +287,6 @@ write_chunk(PidSpec, NSInfo, EpochID, File, Offset, Chunk, Timeout) ->
                          Timeout) of
         {error, written}=Err ->
             Size = byte_size(Chunk),
-            NSInfo = undefined,
-            io:format(user, "TODO fix broken read_chunk mod ~s line ~w\n", [?MODULE, ?LINE]),
             case read_chunk(PidSpec, NSInfo, EpochID, File, Offset, Size, undefined, Timeout) of
                 {ok, {[{File, Offset, Chunk2, _}], []}} when Chunk2 == Chunk ->
                     %% See equivalent comment inside write_projection().

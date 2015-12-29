@@ -559,8 +559,10 @@ wait_until_stable(ExpectedChainState, FLUNames, MgrNames, Retries, Verbose) ->
     FCList = fc_list(),
     wait_until_stable1(ExpectedChainState, TickFun, FCList, Retries, Verbose).
 
-wait_until_stable1(_ExpectedChainState, _TickFun, FCList, 0, _Verbose) ->
+wait_until_stable1(ExpectedChainState, _TickFun, FCList, 0, _Verbose) ->
+    ?V("  [ERROR] _ExpectedChainState ~p\n", [ExpectedChainState]),
     ?V("  [ERROR] wait_until_stable failed.... : ~p~n", [chain_state(FCList)]),
+    ?V("  [ERROR] norm....                     : ~p~n", [normalize_chain_state(chain_state(FCList))]),
     false;
 wait_until_stable1(ExpectedChainState, TickFun, FCList, Reties, Verbose) ->
     [TickFun(3, 0, 100) || _ <- lists:seq(1, 3)],
