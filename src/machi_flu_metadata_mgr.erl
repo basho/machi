@@ -34,6 +34,7 @@
 -module(machi_flu_metadata_mgr).
 -behaviour(gen_server).
 
+-include("machi.hrl").
 
 -define(MAX_MGRS, 10). %% number of managers to start by default.
 -define(HASH(X), erlang:phash2(X)). %% hash algorithm to use
@@ -185,17 +186,16 @@ handle_info({'DOWN', Mref, process, Pid, file_rollover}, State = #state{ fluname
                                                                          tid = Tid }) ->
     lager:info("file proxy ~p shutdown because of file rollover", [Pid]),
     R = get_md_record_by_mref(Tid, Mref),
-    {Prefix, CoC_Namespace, CoC_Locator, _, _} =
+    {Prefix, NS, NSLocator, _, _} =
         machi_util:parse_filename(R#md.filename),
-    %% CoC_Namespace = list_to_binary(CoC_Namespace_str),
-    %% CoC_Locator = list_to_integer(CoC_Locator_str),
 
     %% We only increment the counter here. The filename will be generated on the 
     %% next append request to that prefix and since the filename will have a new
     %% sequence number it probably will be associated with a different metadata
     %% manager. That's why we don't want to generate a new file name immediately
     %% and use it to start a new file proxy.
-    ok = machi_flu_filename_mgr:increment_prefix_sequence(FluName, {coc, CoC_Namespace, CoC_Locator}, {prefix, Prefix}),
+    NSInfo = #ns_info{name=NS, locator=NSLocator},
+    ok = machi_flu_filename_mgr:increment_prefix_sequence(FluName, NSInfo, {prefix, Prefix}),
 
     %% purge our ets table of this entry completely since it is likely the
     %% new filename (whenever it comes) will be in a different manager than

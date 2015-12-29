@@ -254,6 +254,8 @@ message Mpb_ChecksumListResp {
 // High level API: list_files() request & response
 
 message Mpb_ListFilesReq {
+    // TODO: Add flag for file glob/regexp/other filter type
+    // TODO: What else could go wrong?
 }
 
 message Mpb_ListFilesResp {

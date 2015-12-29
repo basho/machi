@@ -220,7 +220,7 @@ do_pb_ll_request(PB_request, S) ->
                 {Rs, NewS} = do_pb_ll_request3(Cmd0, S),
                 {RqID, Cmd0, Rs, NewS};
             {RqID, Cmd0} ->
-                io:format(user, "TODO: epoch at pos 2 in tuple is probably broken now, wheeeeeeeeeeeeeeeeee\n", []),
+                io:format(user, "TODO: epoch at pos 2 in tuple is probably broken now, whee: ~p\n", [Cmd0]),
                 EpochID = element(2, Cmd0),      % by common convention
                 {Rs, NewS} = do_pb_ll_request2(EpochID, Cmd0, S),
                 {RqID, Cmd0, Rs, NewS}

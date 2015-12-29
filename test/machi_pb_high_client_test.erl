@@ -56,8 +56,6 @@ smoke_test2() ->
             %% a separate test module?  Or separate test func?
             {error, _} = ?C:auth(Clnt, "foo", "bar"),
 
-            CoC_n = "",              % CoC_namespace (not implemented)
-            CoC_l = 0,               % CoC_locator (not implemented)
             Prefix = <<"prefix">>,
             Chunk1 = <<"Hello, chunk!">>,
             NS = "",

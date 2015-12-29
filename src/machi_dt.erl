@@ -77,6 +77,7 @@
               file_prefix/0,
               inet_host/0,
               inet_port/0,
+              locator/0,
               namespace/0,
               namespace_version/0,
               ns_info/0,
