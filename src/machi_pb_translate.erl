@@ -575,7 +575,7 @@ to_pb_response(ReqID, {low_trim_chunk, _, _, _, _, _, _, _}, Resp) ->
         {error, _}=Error ->
             Status = conv_from_status(Error),
             #mpb_ll_response{req_id=ReqID,
-                             read_chunk=#mpb_ll_trimchunkresp{status=Status}};
+                             trim_chunk=#mpb_ll_trimchunkresp{status=Status}};
         _Else ->
             make_ll_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
