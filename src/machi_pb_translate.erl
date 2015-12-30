@@ -378,7 +378,7 @@ from_pb_response(#mpb_ll_response{
         'OK' ->
             {ReqID, {ok, Epochs}};
         _ ->
-            {ReqID< machi_pb_high_client:convert_general_status_code(Status)}
+            {ReqID, machi_pb_high_client:convert_general_status_code(Status)}
     end.
 %% No response for proj_kp/kick_projection_reaction
 
