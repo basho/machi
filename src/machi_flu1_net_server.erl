@@ -69,20 +69,22 @@
           %% Clustering: cluster map version number
           namespace_version = 0 :: machi_dt:namespace_version(),
           %% Clustering: my (and my chain's) assignment to a specific namespace
-          namespace = <<"">> :: machi_dt:namespace(),
+          namespace = <<>> :: machi_dt:namespace(),
 
           %% High mode only
           high_clnt   :: pid(),
 
           %% anything you want
-          props = []  :: list()  % proplist
+          props = []  :: proplists:proplist()
          }).
 
 -type socket() :: any().
 -type state()  :: #state{}.
 
 -spec start_link(ranch:ref(), socket(), module(), [term()]) -> {ok, pid()}.
-start_link(Ref, Socket, Transport, [FluName, Witness, DataDir, EpochTab, ProjStore]) ->
+start_link(Ref, Socket, Transport, [FluName, Witness, DataDir, EpochTab, ProjStore, Props]) ->
+    NS = proplists:get_value(namespace, Props, <<>>),
+    true = is_binary(NS),
     proc_lib:start_link(?MODULE, init, [#state{ref=Ref,
                                                socket=Socket,
                                                transport=Transport,
@@ -90,7 +92,9 @@ start_link(Ref, Socket, Transport, [FluName, Witness, DataDir, EpochTab, ProjSto
                                                witness=Witness,
                                                data_dir=DataDir,
                                                epoch_tab=EpochTab,
-                                               proj_store=ProjStore}]).
+                                               proj_store=ProjStore,
+                                               namespace=NS,
+                                               props=Props}]).
 
 -spec init(state()) -> no_return().
 init(#state{ref=Ref, socket=Socket, transport=Transport}=State) ->

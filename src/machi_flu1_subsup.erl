@@ -36,7 +36,7 @@
 -export([start_link/1,
          start_append_server/4,
          stop_append_server/1,
-         start_listener/6,
+         start_listener/7,
          stop_listener/1,
          subsup_name/1,
          listener_name/1]).
@@ -67,11 +67,13 @@ stop_append_server(FluName) ->
     ok = supervisor:delete_child(SubSup, FluName).
 
 -spec start_listener(pv1_server(), inet:port_number(), boolean(),
-                     string(), ets:tab(), atom() | pid()) -> {ok, pid()}.
-start_listener(FluName, TcpPort, Witness, DataDir, EpochTab, ProjStore) ->
+                     string(), ets:tab(), atom() | pid(),
+                     proplists:proplist()) -> {ok, pid()}.
+start_listener(FluName, TcpPort, Witness, DataDir, EpochTab, ProjStore,
+               Props) ->
     supervisor:start_child(subsup_name(FluName),
                            listener_spec(FluName, TcpPort, Witness, DataDir,
-                                         EpochTab, ProjStore)).
+                                         EpochTab, ProjStore, Props)).
 
 -spec stop_listener(pv1_server()) -> ok.
 stop_listener(FluName) ->
@@ -97,12 +99,13 @@ init([]) ->
 %% private
 
 -spec listener_spec(pv1_server(), inet:port_number(), boolean(),
-                    string(), ets:tab(), atom() | pid()) -> supervisor:child_spec().
-listener_spec(FluName, TcpPort, Witness, DataDir, EpochTab, ProjStore) ->
+                    string(), ets:tab(), atom() | pid(),
+                    proplists:proplist()) -> supervisor:child_spec().
+listener_spec(FluName, TcpPort, Witness, DataDir, EpochTab, ProjStore, Props) ->
     ListenerName = listener_name(FluName),
     NbAcceptors = 10,
     TcpOpts = [{port, TcpPort}, {backlog, ?BACKLOG}],
-    NetServerOpts = [FluName, Witness, DataDir, EpochTab, ProjStore],
+    NetServerOpts = [FluName, Witness, DataDir, EpochTab, ProjStore, Props],
     ranch:child_spec(ListenerName, NbAcceptors,
                      ranch_tcp, TcpOpts,
                      machi_flu1_net_server, NetServerOpts).
