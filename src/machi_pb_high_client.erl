@@ -25,6 +25,10 @@
 %% to a single socket connection, and there is no code to deal with
 %% multiple connections/load balancing/error handling to several/all
 %% Machi cluster servers.
+%%
+%% Please see {@link machi_flu1_client} the "Client API implemntation notes"
+%% section for how this module relates to the rest of the client API
+%% implementation.
 
 -module(machi_pb_high_client).
 

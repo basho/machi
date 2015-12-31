@@ -22,6 +22,10 @@
 %% proxy-process style API for hiding messy details such as TCP
 %% connection/disconnection with the remote Machi server.
 %%
+%% Please see {@link machi_flu1_client} the "Client API implemntation notes"
+%% section for how this module relates to the rest of the client API
+%% implementation.
+%%
 %% Machi is intentionally avoiding using distributed Erlang for
 %% Machi's communication.  This design decision makes Erlang-side code
 %% more difficult &amp; complex, but it's the price to pay for some

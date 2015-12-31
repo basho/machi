@@ -21,8 +21,9 @@
 %% @doc Erlang API for the Machi client-implemented Chain Replication
 %% (CORFU-style) protocol.
 %%
-%% See also the docs for {@link machi_flu1_client} for additional
-%% details on data types and operation descriptions.
+%% Please see {@link machi_flu1_client} the "Client API implemntation notes"
+%% section for how this module relates to the rest of the client API
+%% implementation.
 %%
 %% The API here is much simpler than the {@link machi_flu1_client} or
 %% {@link machi_proxy_flu1_client} APIs.  This module's API is a
@@ -43,64 +44,6 @@
 %%
 %% Doc TODO: Once this API stabilizes, add all relevant data type details
 %% to the EDoc here.
-%%
-%%
-%% === Missing API features ===
-%%
-%% So far, there is one missing client API feature that ought to be
-%% added to Machi in the near future: more flexible checksum
-%% management.
-%%
-%% Add a `source' annotation to all checksums to indicate where the
-%% checksum was calculated.  For example,
-%%
-%% <ul>
-%%
-%% <li> Calculated by client that performed the original chunk append,
-%% </li>
-%%
-%% <li> Calculated by the 1st Machi server to receive an
-%%      un-checksummed append request
-%% </li>
-%%
-%% <li> Re-calculated by Machi to manage fewer checksums of blocks of
-%%      data larger than the original client-specified chunks.
-%% </li>
-%% </ul>
-%%
-%% Client-side checksums would be the "strongest" type of
-%% checksum, meaning that any data corruption (of the original
-%% data and/or of the checksum itself) can be detected after the
-%% client-side calculation.  There are too many horror stories on
-%% The Net about IP PDUs that are corrupted but unnoticed due to
-%% weak TCP checksums, buggy hardware, buggy OS drivers, etc.
-%% Checksum versioning is also desirable if/when the current checksum
-%% implementation changes from SHA-1 to something else.
-%%
-%%
-%% === Implementation notes ===
-%%
-%% The major operation processing is implemented in a state machine-like
-%% manner.  Before attempting an operation `X', there's an initial
-%% operation `pre-X' that takes care of updating the epoch id,
-%% restarting client protocol proxies, and if there's any server
-%% instability (e.g. some server is wedged), then insert some sleep
-%% time.  When the chain appears to have stabilized, then we try the `X'
-%% operation again.
-%%
-%% Function name for the `pre-X' stuff is usually `X()', and the
-%% function name for the `X' stuff is usually `X2()'.  (I.e., the `X'
-%% stuff follows after `pre-X' and therefore has a `2' suffix on the
-%% function name.)
-%%
-%% In the case of read repair, there are two stages: find the value to
-%% perform the repair, then perform the repair writes.  In the case of
-%% the repair writes, the `pre-X' function is named `read_repair3()',
-%% and the `X' function is named `read_repair4()'.
-%%
-%% TODO: It would be nifty to lift the very-nearly-but-not-quite-boilerplate
-%% of the `pre-X' functions into a single common function ... but I'm not
-%% sure yet on how to do it without making the code uglier.
 
 -module(machi_cr_client).
 

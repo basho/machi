@@ -38,6 +38,71 @@
 %% TODO This EDoc was written first, and the EDoc and also `-type' and
 %% `-spec' definitions for {@link machi_proxy_flu1_client} and {@link
 %% machi_cr_client} must be improved.
+%%
+%% == Client API implementation notes ==
+%%
+%% At the moment, there are several modules that implement various
+%% subsets of the Machi API. The table below attempts to show how and
+%% why they differ.
+%%
+%% ```
+%% |--------------------------+-------+-----+------+------+-------+----------------|
+%% |                          | PB    |     | #    |      | Conn  | Epoch & NS     |
+%% | Module name              | Level | CR? | FLUS | Impl | Life? | version aware? |
+%% |--------------------------+-------+-----+------+------+-------+----------------|
+%% | machi_pb_high_api_client | high  | yes | many | proc | long  | no             |
+%% | machi_cr_client          | low   | yes | many | proc | long  | no             |
+%% | machi_proxy_flu1_client  | low   | no  | 1    | proc | long  | yes            |
+%% | machi_flu1_client        | low   | no  | 1    | lib  | short | yes            |
+%% |--------------------------+-------+-----+------+------+-------+----------------|
+%% '''
+%%
+%% In terms of use and API layering, the table rows are in highest`->'lowest
+%% order: each level calls the layer immediately below it.
+%%
+%% <dl>
+%% <dt> <b> PB Level</b> </dt>
+%% <dd> The Protocol Buffers API is divided logically into two levels,
+%% "low" and "high".  The low-level protocol is used for intra-chain
+%% communication.  The high-level protocol is used for clients outside
+%% of a Machi chain or Machi cluster of chains.
+%% </dd>
+%% <dt> <b> CR?</b> </dt>
+%% <dd> Does this API support (directly or indirectly) Chain
+%% Replication?  If `no', then the API has no awareness of multiple
+%% replicas of any file or file chunk; unaware clients can only
+%% perform operations at a single Machi FLU's file service or
+%% projection store service.
+%% </dd>
+%% <dt> <b> # FLUs</b> </dt>
+%% <dd> Now many FLUs does this API layer communicate with
+%% simultaneously?  Note that there is a one-to-one correspondence
+%% between this value and the "CR?" column's value.
+%% </dd>
+%% <dt> <b> Impl</b> </dt>
+%% <dd> Implementation: library-only or an Erlang process,
+%%      e.g., `gen_server'.
+%% </dd>
+%% <dt> <b> Conn Life?</b> </dt>
+%% <dd> Expected TCP session connection life: short or long.  At the
+%% lowest level, the {@link machi_flu1_client} API implementation takes
+%% no effort to reconnect to a remote FLU when its single TCP session
+%% is broken.  For long-lived connection life APIs, the server side will
+%% automatically attempt to reconnect to remote FLUs when a TCP session
+%% is broken.
+%% </dd>
+%% <dt> <b> Epoch &amp; NS version aware?</b> </dt>
+%% <dd> Are clients of this API responsible for knowing a chain's EpochID
+%% and namespace version numbers?  If `no', then the server side of the
+%% API will automatically attempt to discover/re-discover the EpochID and
+%% namespace version numbers whenever they change.
+%% </dd>
+%% </dl>
+%%
+%% The only protocol that we expect to be used by entities outside of
+%% a single Machi chain or a multi-chain cluster is the "high"
+%% Protocol Buffers API.  The {@link riak_pb_high_api_client} module
+%% is an Erlang reference implementation of this PB API.
 
 -module(machi_flu1_client).
 
