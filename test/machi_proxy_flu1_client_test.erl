@@ -89,7 +89,7 @@ io:format(user, "\nTODO: fix write_chunk() call below @ ~s LINE ~w\n", [?MODULE,
             BadFile = <<"no-such-file">>,
             {error, bad_arg} = ?MUT:checksum_list(Prox1, BadFile),
             {ok, [_|_]} = ?MUT:list_files(Prox1, FakeEpoch),
-            {ok, {false, _}} = ?MUT:wedge_status(Prox1),
+            {ok, {false, _,_,_}} = ?MUT:wedge_status(Prox1),
             {ok, {0, _SomeCSum}} = ?MUT:get_latest_epochid(Prox1, public),
             {ok, #projection_v1{epoch_number=0}} =
                  ?MUT:read_latest_projection(Prox1, public),

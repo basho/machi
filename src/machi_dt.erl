@@ -44,7 +44,7 @@
 -type inet_host()   :: inet:ip_address() | inet:hostname().
 -type inet_port()   :: inet:port_number().
 -type locator()     :: number().
--type namespace()   :: string().
+-type namespace()   :: binary().
 -type namespace_version() :: non_neg_integer().
 -type ns_info()     :: #ns_info{}.
 -type projection()      :: #projection_v1{}.

@@ -54,12 +54,13 @@ from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    append_chunk=IR=#mpb_ll_appendchunkreq{
                      namespace_version=NSVersion,
-                     namespace=NS,
+                     namespace=NS_str,
                      locator=NSLocator,
                      epoch_id=PB_EpochID,
                      prefix=Prefix,
                      chunk=Chunk,
                      csum=#mpb_chunkcsum{type=CSum_type, csum=CSum}}}) ->
+    NS = list_to_binary(NS_str),
     EpochID = conv_to_epoch_id(PB_EpochID),
     CSum_tag = conv_to_csum_tag(CSum_type),
     Opts = conv_to_append_opts(IR),
@@ -71,12 +72,13 @@ from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    write_chunk=#mpb_ll_writechunkreq{
                      namespace_version=NSVersion,
-                     namespace=NS,
+                     namespace=NS_str,
                      epoch_id=PB_EpochID,
                      chunk=#mpb_chunk{file_name=File,
                                       offset=Offset,
                                       chunk=Chunk,
                                       csum=#mpb_chunkcsum{type=CSum_type, csum=CSum}}}}) ->
+    NS = list_to_binary(NS_str),
     EpochID = conv_to_epoch_id(PB_EpochID),
     CSum_tag = conv_to_csum_tag(CSum_type),
     {ReqID, {low_write_chunk, NSVersion, NS, EpochID, File, Offset, Chunk, CSum_tag, CSum}};
@@ -84,12 +86,13 @@ from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    read_chunk=#mpb_ll_readchunkreq{
                                  namespace_version=NSVersion,
-                                 namespace=NS,
+                                 namespace=NS_str,
                                  epoch_id=PB_EpochID,
                                  chunk_pos=ChunkPos,
                                  flag_no_checksum=PB_GetNoChecksum,
                                  flag_no_chunk=PB_GetNoChunk,
                                  flag_needs_trimmed=PB_NeedsTrimmed}}) ->
+    NS = list_to_binary(NS_str),
     EpochID = conv_to_epoch_id(PB_EpochID),
     Opts = #read_opts{no_checksum=PB_GetNoChecksum,
                       no_chunk=PB_GetNoChunk,
@@ -102,12 +105,13 @@ from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    trim_chunk=#mpb_ll_trimchunkreq{
                      namespace_version=NSVersion,
-                     namespace=NS,
+                     namespace=NS_str,
                      epoch_id=PB_EpochID,
                      file=File,
                      offset=Offset,
                      size=Size,
                      trigger_gc=TriggerGC}}) ->
+    NS = list_to_binary(NS_str),
     EpochID = conv_to_epoch_id(PB_EpochID),
     {ReqID, {low_trim_chunk, NSVersion, NS, EpochID, File, Offset, Size, TriggerGC}};
 from_pb_request(#mpb_ll_request{
@@ -179,10 +183,11 @@ from_pb_request(#mpb_request{req_id=ReqID,
     {ReqID, {high_auth, User, Pass}};
 from_pb_request(#mpb_request{req_id=ReqID,
                              append_chunk=IR=#mpb_appendchunkreq{}}) ->
-    #mpb_appendchunkreq{namespace=NS,
+    #mpb_appendchunkreq{namespace=NS_str,
                         prefix=Prefix,
                         chunk=Chunk,
                         csum=CSum} = IR,
+    NS = list_to_binary(NS_str),
     TaggedCSum = make_tagged_csum(CSum, Chunk),
     Opts = conv_to_append_opts(IR),
     {ReqID, {high_append_chunk, NS, Prefix, Chunk, TaggedCSum, Opts}};
@@ -310,9 +315,16 @@ from_pb_response(#mpb_ll_response{
 from_pb_response(#mpb_ll_response{
                     req_id=ReqID,
                     wedge_status=#mpb_ll_wedgestatusresp{
-                      epoch_id=PB_EpochID, wedged_flag=Wedged_p}}) ->
+                      status=Status,
+                      epoch_id=PB_EpochID, wedged_flag=Wedged_p,
+                      namespace_version=NSVersion, namespace=NS_str}}) ->
+    GeneralStatus = case machi_pb_high_client:convert_general_status_code(Status) of
+                        ok    -> ok;
+                        _Else -> {yukky, _Else}
+                    end,
     EpochID = conv_to_epoch_id(PB_EpochID),
-    {ReqID, {ok, {Wedged_p, EpochID}}};
+    NS = list_to_binary(NS_str),
+    {ReqID, {GeneralStatus, {Wedged_p, EpochID, NSVersion, NS}}};
 from_pb_response(#mpb_ll_response{
                     req_id=ReqID,
                     delete_migration=#mpb_ll_deletemigrationresp{
@@ -511,7 +523,7 @@ to_pb_response(ReqID, {low_skip_wedge, {low_echo, _Msg}}, Resp) ->
     #mpb_ll_response{
                 req_id=ReqID,
                 echo=#mpb_echoresp{message=Resp}};
-to_pb_response(ReqID, {low_skip_wedige, {low_auth, _, _}}, __TODO_Resp) ->
+to_pb_response(ReqID, {low_skip_wedge, {low_auth, _, _}}, __TODO_Resp) ->
     #mpb_ll_response{req_id=ReqID,
                      generic=#mpb_errorresp{code=1,
                                             msg="AUTH not implemented"}};
@@ -608,13 +620,16 @@ to_pb_response(ReqID, {low_skip_wedge, {low_wedge_status}}, Resp) ->
             Status = conv_from_status(Error),
             #mpb_ll_response{req_id=ReqID,
                            wedge_status=#mpb_ll_wedgestatusresp{status=Status}};
-        {Wedged_p, EpochID} ->
+        {Wedged_p, EpochID, NSVersion, NS} ->
             PB_EpochID = conv_from_epoch_id(EpochID),
             #mpb_ll_response{req_id=ReqID,
                              wedge_status=#mpb_ll_wedgestatusresp{
                                status='OK',
                                epoch_id=PB_EpochID,
-                               wedged_flag=Wedged_p}}
+                               wedged_flag=Wedged_p,
+                               namespace_version=NSVersion,
+                               namespace=NS
+                              }}
     end;
 to_pb_response(ReqID, {low_skip_wedge, {low_delete_migration, _EID, _Fl}}, Resp)->
     Status = conv_from_status(Resp),
@@ -807,12 +822,12 @@ make_tagged_csum(#mpb_chunkcsum{type='CSUM_TAG_CLIENT_SHA', csum=CSum}, _CB) ->
 make_ll_error_resp(ReqID, Code, Msg) ->
     #mpb_ll_response{req_id=ReqID,
                      generic=#mpb_errorresp{code=Code,
-                                            msg=Msg}}.    
+                                            msg=Msg}}.
 
 make_error_resp(ReqID, Code, Msg) ->
     #mpb_response{req_id=ReqID,
                   generic=#mpb_errorresp{code=Code,
-                                         msg=Msg}}.    
+                                         msg=Msg}}.
 
 conv_from_epoch_id({Epoch, EpochCSum}) ->
     #mpb_epochid{epoch_number=Epoch,
@@ -971,18 +986,6 @@ conv_from_status({error, bad_epoch}) ->
 conv_from_status(_OOPS) ->
     io:format(user, "HEY, ~s:~w got ~p\n", [?MODULE, ?LINE, _OOPS]),
     'BAD_JOSS'.
-
-conv_to_boolean(undefined) ->
-    false;
-conv_to_boolean(0) ->
-    false;
-conv_to_boolean(N) when is_integer(N) ->
-    true.
-
-conv_from_boolean(false) ->
-    0;
-conv_from_boolean(true) ->
-    1.
 
 conv_from_append_opts(#append_opts{chunk_extra=ChunkExtra,
                                    preferred_file_name=Pref,

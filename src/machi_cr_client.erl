@@ -477,7 +477,7 @@ witnesses_use_our_epoch([FLU|RestFLUs],
     Proxy = orddict:fetch(FLU, PD),
     %% Check both that the EpochID is the same *and* not wedged!
     case ?FLU_PC:wedge_status(Proxy, ?TIMEOUT) of
-        {ok, {false, EID}} when EID == EpochID ->
+        {ok, {false, EID,_,_}} when EID == EpochID ->
             witnesses_use_our_epoch(RestFLUs, S);
         _Else ->
             false

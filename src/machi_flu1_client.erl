@@ -243,7 +243,7 @@ list_files(Host, TcpPort, EpochID) when is_integer(TcpPort) ->
 %% @doc Fetch the wedge status from the remote FLU.
 
 -spec wedge_status(port_wrap()) ->
-      {ok, {boolean(), machi_dt:epoch_id()}} | {error, term()}.
+      {ok, {boolean(), machi_dt:epoch_id(), machi_dt:namespace_version(),machi_dt:namespace()}} | {error, term()}.
 
 wedge_status(Sock) ->
     wedge_status2(Sock).
@@ -251,7 +251,7 @@ wedge_status(Sock) ->
 %% @doc Fetch the wedge status from the remote FLU.
 
 -spec wedge_status(machi_dt:inet_host(), machi_dt:inet_port()) ->
-      {ok, {boolean(), machi_dt:epoch_id()}} | {error, term()}.
+      {ok, {boolean(), machi_dt:epoch_id(), machi_dt:namespace_version(),machi_dt:namespace()}} | {error, term()}.
 wedge_status(Host, TcpPort) when is_integer(TcpPort) ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try

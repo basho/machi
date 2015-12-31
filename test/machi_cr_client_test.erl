@@ -259,15 +259,15 @@ witness_smoke_test2() ->
         %% Let's wedge OurWitness and see what happens: timeout/partition.
         #p_srvr{name=WitName, address=WitA, port=WitP} =
             orddict:fetch(OurWitness, D),
-        {ok, {false, EpochID2}} = machi_flu1_client:wedge_status(WitA, WitP),
+        {ok, {false, EpochID2,_,_}} = machi_flu1_client:wedge_status(WitA, WitP),
         machi_flu1:wedge_myself(WitName, EpochID2),
         case machi_flu1_client:wedge_status(WitA, WitP) of
-            {ok, {true,  EpochID2}} ->
+            {ok, {true,  EpochID2,_,_}} ->
                 ok;
-            {ok, {false,  EpochID2}} ->
+            {ok, {false,  EpochID2,_,_}} ->
                 %% This is racy.  Work around it by sleeping a while.
                 timer:sleep(6*1000),
-                {ok, {true,  EpochID2}} =
+                {ok, {true,  EpochID2,_,_}} =
                     machi_flu1_client:wedge_status(WitA, WitP)
         end,
 

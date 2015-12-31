@@ -66,6 +66,10 @@
           flu_name    :: pv1_server(),
           %% Used in server_wedge_status to lookup the table
           epoch_tab   :: ets:tab(),
+          %% Clustering: cluster map version number
+          namespace_version = 0 :: machi_dt:namespace_version(),
+          %% Clustering: my (and my chain's) assignment to a specific namespace
+          namespace = <<"">> :: machi_dt:namespace(),
 
           %% High mode only
           high_clnt   :: pid(),
@@ -228,6 +232,8 @@ do_pb_ll_request(PB_request, S) ->
         end,
     {machi_pb_translate:to_pb_response(ReqID, Cmd, Result), S2}.
 
+%% do_pb_ll_request2(): Verification of epoch details & namespace details.
+
 do_pb_ll_request2(NSVersion, NS, EpochID, CMD, S) ->
     {Wedged_p, CurrentEpochID} = lookup_epoch(S),
     if not is_tuple(EpochID) orelse tuple_size(EpochID) /= 2 ->
@@ -238,25 +244,25 @@ do_pb_ll_request2(NSVersion, NS, EpochID, CMD, S) ->
             {Epoch, _} = EpochID,
             {CurrentEpoch, _} = CurrentEpochID,
             if Epoch < CurrentEpoch ->
-                    ok;
+                    {{error, bad_epoch}, S};
                true ->
-                    %% We're at same epoch # but different checksum, or
-                    %% we're at a newer/bigger epoch #.
                     _ = machi_flu1:wedge_myself(S#state.flu_name, CurrentEpochID),
-                    ok
-            end,
-            {{error, bad_epoch}, S#state{epoch_id=CurrentEpochID}};
+                    {{error, wedged}, S#state{epoch_id=CurrentEpochID}}
+            end;
        true ->
-            do_pb_ll_request2b(CMD, S#state{epoch_id=CurrentEpochID})
+            #state{namespace_version=MyNSVersion, namespace=MyNS} = S,
+            if NSVersion /= MyNSVersion ->
+                    {{error, bad_epoch}, S};
+               NS /= MyNS ->
+                    {{error, bad_arg}, S};
+               true ->
+                    do_pb_ll_request3(CMD, S)
+            end
     end.
 
 lookup_epoch(#state{epoch_tab=T}) ->
     %% TODO: race in shutdown to access ets table after owner dies
     ets:lookup_element(T, epoch, 2).
-
-do_pb_ll_request2b(CMD, S) ->
-    io:format(user, "TODO: check NSVersion & NS\n", []),
-    do_pb_ll_request3(CMD, S).
 
 %% Witness status does not matter below.
 do_pb_ll_request3({low_echo, Msg}, S) ->
@@ -463,14 +469,14 @@ do_server_list_files(#state{data_dir=DataDir}=_S) ->
               {Size, File}
           end || File <- Files]}.
 
-do_server_wedge_status(S) ->
+do_server_wedge_status(#state{namespace_version=NSVersion, namespace=NS}=S) ->
     {Wedged_p, CurrentEpochID0} = lookup_epoch(S),
     CurrentEpochID = if CurrentEpochID0 == undefined ->
                              ?DUMMY_PV1_EPOCH;
                         true ->
                              CurrentEpochID0
                      end,
-    {Wedged_p, CurrentEpochID}.
+    {Wedged_p, CurrentEpochID, NSVersion, NS}.
 
 do_server_delete_migration(File, #state{data_dir=DataDir}=_S) ->
     case sanitize_file_string(File) of

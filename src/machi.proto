@@ -507,6 +507,8 @@ message Mpb_LL_WedgeStatusResp {
     required Mpb_GeneralStatusCode status = 1;
     optional Mpb_EpochID epoch_id = 2;
     optional bool wedged_flag = 3;
+    optional uint32 namespace_version = 4;
+    optional string namespace = 5;
 }
 
 // Low level API: delete_migration()

@@ -104,7 +104,7 @@ flu_smoke_test() ->
         {error, bad_arg} = ?FLU_C:checksum_list(Host, TcpPort, BadFile),
 
         {ok, []} = ?FLU_C:list_files(Host, TcpPort, ?DUMMY_PV1_EPOCH),
-        {ok, {false, _}} = ?FLU_C:wedge_status(Host, TcpPort),
+        {ok, {false, _,_,_}} = ?FLU_C:wedge_status(Host, TcpPort),
 
         Chunk1 = <<"yo!">>,
         {ok, {Off1,Len1,File1}} = ?FLU_C:append_chunk(Host, TcpPort, NSInfo,
@@ -173,6 +173,28 @@ flu_smoke_test() ->
                                              NSInfo, ?DUMMY_PV1_EPOCH,
                                              BadFile, Off2, Len2, noopt),
 
+        %% Make a connected socket.
+        Sock1 = ?FLU_C:connect(#p_srvr{address=Host, port=TcpPort}),
+
+        %% Let's test some cluster version enforcement.
+        Good_EpochNum = 0,
+        Good_NSVersion = 0,
+        Good_NS = <<>>,
+        {ok, {false, {Good_EpochNum,_}, Good_NSVersion, GoodNS}} =
+            ?FLU_C:wedge_status(Sock1),
+        NS_good = #ns_info{version=Good_NSVersion, name=Good_NS},
+        {ok, {[{_, Off2, Chunk2, _}], _}} =
+            ?FLU_C:read_chunk(Sock1, NS_good, ?DUMMY_PV1_EPOCH,
+                              File2, Off2, Len2, noopt),
+        NS_bad_version = #ns_info{version=1, name=Good_NS},
+        NS_bad_name = #ns_info{version=Good_NSVersion, name= <<"foons">>},
+        {error, bad_epoch} =
+            ?FLU_C:read_chunk(Sock1, NS_bad_version, ?DUMMY_PV1_EPOCH,
+                              File2, Off2, Len2, noopt),
+        {error, bad_arg} =
+            ?FLU_C:read_chunk(Sock1, NS_bad_name, ?DUMMY_PV1_EPOCH,
+                              File2, Off2, Len2, noopt),
+
         %% We know that File1 still exists.  Pretend that we've done a
         %% migration and exercise the delete_migration() API.
         ok = ?FLU_C:delete_migration(Host, TcpPort, ?DUMMY_PV1_EPOCH, File1),
@@ -188,8 +210,7 @@ flu_smoke_test() ->
         {error, bad_arg} = ?FLU_C:trunc_hack(Host, TcpPort,
                                              ?DUMMY_PV1_EPOCH, BadFile),
 
-        ok = ?FLU_C:quit(?FLU_C:connect(#p_srvr{address=Host,
-                                                port=TcpPort}))
+        ok = ?FLU_C:quit(Sock1)
     after
         machi_test_util:stop_flu_package()
     end.
@@ -202,7 +223,7 @@ flu_projection_smoke_test() ->
     try
         [ok = flu_projection_common(Host, TcpPort, T) ||
             T <- [public, private] ]
-%% ,        {ok, {false, EpochID1}} = ?FLU_C:wedge_status(Host, TcpPort),
+%% ,        {ok, {false, EpochID1,_,_}} = ?FLU_C:wedge_status(Host, TcpPort),
 %% io:format(user, "EpochID1 ~p\n", [EpochID1])
     after
         machi_test_util:stop_flu_package()
@@ -278,7 +299,7 @@ witness_test() ->
                                              File, 9999, 9999, noopt),
         {error, bad_arg} = ?FLU_C:checksum_list(Host, TcpPort, File),
         {error, bad_arg} = ?FLU_C:list_files(Host, TcpPort, EpochID1),
-        {ok, {false, EpochID1}} = ?FLU_C:wedge_status(Host, TcpPort),
+        {ok, {false, EpochID1,_,_}} = ?FLU_C:wedge_status(Host, TcpPort),
         {ok, _} = ?FLU_C:get_latest_epochid(Host, TcpPort, public),
         {ok, _} = ?FLU_C:read_latest_projection(Host, TcpPort, public),
         {error, not_written} = ?FLU_C:read_projection(Host, TcpPort,

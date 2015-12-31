@@ -46,7 +46,7 @@
 
 -record(ns_info, {
           version = 0  :: machi_dt:namespace_version(),
-          name = ""    :: machi_dt:namespace(),
+          name = <<>>  :: machi_dt:namespace(),
           locator = 0  :: machi_dt:locator()
          }).
 
