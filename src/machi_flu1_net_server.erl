@@ -39,6 +39,7 @@
 -include("machi.hrl").
 -include("machi_pb.hrl").
 -include("machi_projection.hrl").
+-include("machi_merkle_tree.hrl").
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -294,6 +295,9 @@ do_pb_ll_request3({low_delete_migration, _EpochID, File},
 do_pb_ll_request3({low_trunc_hack, _EpochID, File},
                   #state{witness=false}=S) ->
     {do_server_trunc_hack(File, S), S};
+do_pb_ll_request3({low_file_repair_data, _EpochID, File}, 
+                   #state{witness=false}=S) ->
+    {do_server_get_file_repair_data(File, S), S};
 
 do_pb_ll_request3(_, #state{witness=true}=S) ->
     {{error, bad_arg}, S}.                       % TODO: new status code??
@@ -506,6 +510,32 @@ do_server_trunc_hack(File, #state{data_dir=DataDir}=_S) ->
             {error, bad_arg}
     end.
 
+do_server_get_file_repair_data(File, #state{flu_name=FLU, data_dir=D}) ->
+    %% is it in a cache?
+    case machi_merkle_cache:get(FLU, File) of
+        undefined ->
+            %% does the file exist?
+            {_, Path} = machi_util:make_data_filename(D, File),
+            case filelib:is_regular(Path) of
+                true ->
+                    %% yep, exists
+                    %% XXX: Should this be async??? Probably.
+                    {ok, MT} = machi_merkle_tree:open(File, D),
+                    machi_merkle_cache:put(FLU, MT),
+                    build_file_data_tuple(FLU, MT);
+                false ->
+                    {error, no_such_file}
+            end;
+        {ok, MT0} ->
+                build_file_data_tuple(FLU, MT0)
+    end.
+
+build_file_data_tuple(FLU, MT=#mt{}) ->
+    T = machi_merkle_tree:tree(MT),
+    {ok, {file_repair_data, 
+          FLU, machi_merkle_tree:root(MT), 
+          T#naive.lvl1, T#naive.chunk_size}}.
+
 sanitize_file_string(Str) ->
     case has_no_prohibited_chars(Str) andalso machi_util:is_valid_filename(Str) of
         true -> ok;
@@ -517,6 +547,7 @@ has_no_prohibited_chars(Str) ->
         nomatch ->
             true;
         _ ->
+            %% not sure this is right; unless we're disabling this check.
             true
     end.
 

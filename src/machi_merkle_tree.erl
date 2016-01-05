@@ -45,6 +45,7 @@
     open/3,
     tree/1,
     filename/1,
+    root/1,
     diff/2
 ]).
 -endif.
@@ -71,6 +72,10 @@ tree(#mt{ tree = T, backend = naive }) ->
          true -> build_tree(T);
         false -> T
     end.
+
+root(MT=#mt{backend = naive}) ->
+    T = tree(MT),
+    T#naive.root.
 
 filename(#mt{ filename = F }) -> F.
 

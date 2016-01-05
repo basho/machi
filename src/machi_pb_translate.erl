@@ -134,6 +134,12 @@ from_pb_request(#mpb_ll_request{
     {ReqID, {low_trunc_hack, EpochID, File}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
+                   file_repair_req=#mpb_ll_filerepairdatareq{
+                                      epoch_id=PB_EpochID,
+                                      file=File}})->
+    {ReqID, {low_file_repair_data, conv_to_epoch_id(PB_EpochID), File}};
+from_pb_request(#mpb_ll_request{
+                   req_id=ReqID,
                    proj_gl=#mpb_ll_getlatestepochidreq{type=ProjType}}) ->
     {ReqID, {low_proj, {get_latest_epochid, conv_to_type(ProjType)}}};
 from_pb_request(#mpb_ll_request{
@@ -466,6 +472,11 @@ to_pb_request(ReqID, {low_trunc_hack, EpochID, File}) ->
                     trunc_hack=#mpb_ll_trunchackreq{
                      epoch_id=PB_EpochID,
                       file=File}};
+to_pb_request(ReqID, {low_file_repair_data, EpochID, File}) ->
+    #mpb_ll_request{req_id=ReqID, do_not_alter=2,
+                    file_repair_req=#mpb_ll_filerepairdatareq{
+                                       epoch_id=conv_from_epoch_id(EpochID),
+                                       file=File}};
 to_pb_request(ReqID, {low_proj, {get_latest_epochid, ProjType}}) ->
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     proj_gl=#mpb_ll_getlatestepochidreq{type=conv_from_type(ProjType)}};
@@ -614,6 +625,25 @@ to_pb_response(ReqID, {low_trunc_hack, _EID, _Fl}, Resp)->
     Status = conv_from_status(Resp),
     #mpb_ll_response{req_id=ReqID,
                      trunc_hack=#mpb_ll_trunchackresp{status=Status}};
+to_pb_response(ReqID, {low_file_repair_data, _EID, File}, Resp)->
+    case Resp of
+        {error, _} ->
+            Status = conv_from_status(Resp),
+            #mpb_ll_response{req_id=ReqID,
+                             file_repair_resp=#mpb_ll_filerepairdataresp{
+                                                   status=Status,
+                                                   file=File}};
+        {ok, {file_repair_data, FLU, Root, L1, _ChunkSize}} ->
+            %% TODO: Should we have a status of 'deferred' for
+            %% files that have not been generated yet?
+            #mpb_ll_response{req_id=ReqID,
+                             file_repair_resp=#mpb_ll_filerepairdataresp{
+                                                   status='OK',
+                                                   file=File,
+                                                   fluname=FLU,
+                                                   root_csum=Root,
+                                                   lvl1=L1}}
+    end;
 to_pb_response(ReqID, {low_proj, {get_latest_epochid, _ProjType}}, Resp)->
     case Resp of
         {ok, {Epoch, CSum}} ->

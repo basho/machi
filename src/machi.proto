@@ -363,6 +363,7 @@ message Mpb_ProjectionV1 {
 // wedge_status()
 // delete_migration()
 // trunc_hack()
+// file_repair_data()
 //
 // Projection-related:
 //
@@ -503,6 +504,26 @@ message Mpb_LL_TruncHackResp {
     required Mpb_GeneralStatusCode status = 1;
 }
 
+// Low level API: file_repair_data()
+
+message Mpb_LL_FileRepairDataReq {
+    required Mpb_EpochID epoch_id = 1;
+    required string file = 2;
+}
+
+message Mpb_LL_FileRepairDataResp {
+    required Mpb_GeneralStatusCode status = 1;
+
+    required string file = 2;
+    required string fluname = 3;  // the name of the FLU where this data came from
+                                  // TODO: should this be a better locator? Info
+                                  // intended for humans
+    required bytes root_csum = 4; // root node checksum
+    optional bytes lvl1 = 5;      // level 1 data serialized as Erlang
+                                  // term_to_binary byte stream
+                                  // TODO: should this be required?
+}
+
 // Low level API: get_latest_epochid() request & response
 
 message Mpb_LL_GetLatestEpochIDReq {
@@ -613,6 +634,7 @@ message Mpb_LL_Request {
     optional Mpb_LL_WedgeStatusReq wedge_status = 36;
     optional Mpb_LL_DeleteMigrationReq delete_migration = 37;
     optional Mpb_LL_TruncHackReq trunc_hack = 38;
+    optional Mpb_LL_FileRepairDataReq file_repair_req = 39;
 }
 
 message Mpb_LL_Response {
@@ -648,4 +670,5 @@ message Mpb_LL_Response {
     optional Mpb_LL_WedgeStatusResp wedge_status = 36;
     optional Mpb_LL_DeleteMigrationResp delete_migration = 37;
     optional Mpb_LL_TruncHackResp trunc_hack = 38;
+    optional Mpb_LL_FileRepairDataResp file_repair_resp = 39;
 }
