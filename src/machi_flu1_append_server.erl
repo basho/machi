@@ -94,15 +94,6 @@ handle_call({seq_append, _From2, _NSInfo, _EpochID, _Prefix, _Chunk, _TCSum, _Op
 handle_call({seq_append, _From2, NSInfo, EpochID,
              Prefix, Chunk, TCSum, Opts},
             From, #state{flu_name=FluName, epoch_id=OldEpochId}=S) ->
-    %% io:format(user, "
-    %% HANDLE_CALL append_chunk
-    %% NSInfo=~p
-    %% epoch_id=~p
-    %% prefix=~p
-    %% chunk=~p
-    %% tcsum=~p
-    %% opts=~p\n",
-    %%           [NSInfo, EpochID, Prefix, Chunk, TCSum, Opts]),
     %% Old is the one from our state, plain old 'EpochID' comes
     %% from the client.
     _ = case OldEpochId of
