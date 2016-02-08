@@ -231,10 +231,14 @@ find_or_make_filename(Tid, DataDir, NS, NSLocator, Prefix, N) ->
     end.
 
 generate_filename(DataDir, NS, NSLocator, Prefix, N) ->
+{A,B,C} = erlang:now(),
+TODO = lists:flatten(filename:basename(DataDir) ++ "," ++ io_lib:format("~w,~w,~w", [A,B,C])),
     {F, _} = machi_util:make_data_filename(
               DataDir,
               NS, NSLocator, Prefix,
-              generate_uuid_v4_str(),
+TODO,
+              %% TODO put me back!!
+              %% generate_uuid_v4_str(),
               N),
     binary_to_list(F).
 

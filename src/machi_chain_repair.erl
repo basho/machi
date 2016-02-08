@@ -274,7 +274,19 @@ make_repair_directives3([{Offset, Size, CSum, _FLU}=A|Rest0],
             %%     byte range from all FLUs
             %% 3b. Log big warning about data loss.
             %% 4. Log any other checksum discrepencies as they are found.
-            exit({todo_repair_sanity_check, ?LINE, File, Offset, As})
+            QQ = [begin
+                      Pxy = orddict:fetch(FLU, ProxiesDict),
+                      {ok, EpochID} = machi_proxy_flu1_client:get_epoch_id(
+                                        Pxy, ?SHORT_TIMEOUT),
+                      NSInfo = undefined,
+                      XX = machi_proxy_flu1_client:read_chunk(
+                             Pxy, NSInfo, EpochID, File, Offset, Size, undefined,
+                             ?SHORT_TIMEOUT),
+                      {FLU, XX}
+                  end || {__Offset, __Size, __CSum, FLU} <- As],
+
+            exit({todo_repair_sanity_check, ?LINE, File, Offset, {as,As}, {qq,QQ}})
+            %% exit({todo_repair_sanity_check, ?LINE, File, Offset, As})
     end,
     %% List construction guarantees us that there's at least one ?MAX_OFFSET
     %% item remains.  Sort order + our "taking" of all exact Offset+Size

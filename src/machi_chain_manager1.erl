@@ -2967,7 +2967,8 @@ zerf_find_last_annotated(FLU, MajoritySize, S) ->
     end.
 
 perhaps_verbose_c111(P_latest2, S) ->
-    case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
+    case true of
+    %%TODO put me back: case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
         true ->
             Dbg2X = lists:keydelete(react, 1,
                                     P_latest2#projection_v1.dbg2) ++
@@ -2975,16 +2976,18 @@ perhaps_verbose_c111(P_latest2, S) ->
             P_latest2x = P_latest2#projection_v1{dbg2=Dbg2X}, % limit verbose len.
             Last2 = get(last_verbose),
             Summ2 = machi_projection:make_summary(P_latest2x),
-            if P_latest2#projection_v1.upi == [],
-               (S#ch_mgr.proj)#projection_v1.upi /= [] ->
+            %% if P_latest2#projection_v1.upi == [],
+            %%    (S#ch_mgr.proj)#projection_v1.upi /= [] ->
+            if true ->
                     <<CSumRep:4/binary,_/binary>> =
                                           P_latest2#projection_v1.epoch_csum,
-                    io:format(user, "\n~s CONFIRM epoch ~w ~w upi ~w rep ~w by ~w\n", [machi_util:pretty_time(), (S#ch_mgr.proj)#projection_v1.epoch_number, CSumRep, P_latest2#projection_v1.upi, P_latest2#projection_v1.repairing, S#ch_mgr.name]);
+                    io:format(user, "~s CONFIRM epoch ~w ~w upi ~w rep ~w by ~w\n", [machi_util:pretty_time(), (S#ch_mgr.proj)#projection_v1.epoch_number, CSumRep, P_latest2#projection_v1.upi, P_latest2#projection_v1.repairing, S#ch_mgr.name]);
                true ->
                     ok
             end,
-            case proplists:get_value(private_write_verbose,
-                                     S#ch_mgr.opts) of
+            %% TODO put me back: case proplists:get_value(private_write_verbose,
+            %%                          S#ch_mgr.opts) of
+            case true of
                 true when Summ2 /= Last2 ->
                     put(last_verbose, Summ2),
                     ?V("\n~s ~p uses plain: ~w \n",

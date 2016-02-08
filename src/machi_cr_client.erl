@@ -786,9 +786,9 @@ do_repair_chunk2([], ReturnMode, Chunk, _CSum, _Repaired, _NSInfo, File, Offset,
     %% TODO: add stats for # of repairs, length(_Repaired)-1, etc etc?
     case ReturnMode of
         read ->
-            {ok, Chunk, S};
+            {reply, {ok, {[Chunk], []}}, S};
         {append, Offset, Size, File} ->
-            {ok, {Offset, Size, File}, S}
+            {reply, {ok, {[{Offset, Size, File}], []}}, S}
     end;
 do_repair_chunk2([First|Rest]=ToRepair, ReturnMode, Chunk, CSum, Repaired, NSInfo, File, Offset,
                  Size, Depth, STime, #state{epoch_id=EpochID, proxies_dict=PD}=S) ->
