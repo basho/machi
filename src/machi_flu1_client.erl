@@ -145,7 +145,7 @@
         ]).
 %% For "internal" replication only.
 -export([
-         write_chunk/6, write_chunk/7,
+         write_chunk/7, write_chunk/8,
          trim_chunk/6,
          delete_migration/3, delete_migration/4,
          trunc_hack/3, trunc_hack/4
@@ -216,7 +216,7 @@ append_chunk(Host, TcpPort, NSInfo0, EpochID,
 
 -spec read_chunk(port_wrap(), 'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk_size(),
                  machi_dt:read_opts_x()) ->
-      {ok, machi_dt:chunk_s()} |
+      {ok, {[machi_dt:chunk_summary()], [machi_dt:chunk_pos()]}} |
       {error, machi_dt:error_general() | 'not_written' | 'partial_read'} |
       {error, term()}.
 read_chunk(Sock, NSInfo0, EpochID, File, Offset, Size, Opts0)
@@ -230,7 +230,7 @@ read_chunk(Sock, NSInfo0, EpochID, File, Offset, Size, Opts0)
 -spec read_chunk(machi_dt:inet_host(), machi_dt:inet_port(), 'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(),
                  machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk_size(),
                  machi_dt:read_opts_x()) ->
-      {ok, machi_dt:chunk_s()} |
+      {ok, [machi_dt:chunk_summary()]} |
       {error, machi_dt:error_general() | 'not_written' | 'partial_read'} |
       {error, term()}.
 read_chunk(Host, TcpPort, NSInfo0, EpochID, File, Offset, Size, Opts0)
@@ -527,25 +527,25 @@ disconnect(_) ->
 %% @doc Restricted API: Write a chunk of already-sequenced data to
 %% `File' at `Offset'.
 
--spec write_chunk(port_wrap(), 'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk()) ->
+-spec write_chunk(port_wrap(), 'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk(), machi_dt:chunk_csum()) ->
       ok | {error, machi_dt:error_general()} | {error, term()}.
-write_chunk(Sock, NSInfo0, EpochID, File, Offset, Chunk)
+write_chunk(Sock, NSInfo0, EpochID, File, Offset, Chunk, CSum)
   when Offset >= ?MINIMUM_OFFSET ->
     NSInfo = machi_util:ns_info_default(NSInfo0),
-    write_chunk2(Sock, NSInfo, EpochID, File, Offset, Chunk).
+    write_chunk2(Sock, NSInfo, EpochID, File, Offset, Chunk, CSum).
 
 %% @doc Restricted API: Write a chunk of already-sequenced data to
 %% `File' at `Offset'.
 
 -spec write_chunk(machi_dt:inet_host(), machi_dt:inet_port(),
-                  'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk()) ->
+                  'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk(), machi_dt:chunk_csum()) ->
       ok | {error, machi_dt:error_general()} | {error, term()}.
-write_chunk(Host, TcpPort, NSInfo0, EpochID, File, Offset, Chunk)
+write_chunk(Host, TcpPort, NSInfo0, EpochID, File, Offset, Chunk, CSum)
   when Offset >= ?MINIMUM_OFFSET ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
         NSInfo = machi_util:ns_info_default(NSInfo0),
-        write_chunk2(Sock, NSInfo, EpochID, File, Offset, Chunk)
+        write_chunk2(Sock, NSInfo, EpochID, File, Offset, Chunk, CSum)
     after
         disconnect(Sock)
     end.
@@ -641,19 +641,19 @@ append_chunk2(Sock, NSInfo, EpochID,
              Prefix, Chunk, CSum_tag, CSum, Opts}),
     do_pb_request_common(Sock, ReqID, Req, true, Timeout).
 
-write_chunk2(Sock, NSInfo, EpochID, File0, Offset, Chunk0) ->
+write_chunk2(Sock, NSInfo, EpochID, File0, Offset, Chunk, CSum0) ->
     ReqID = <<"id">>,
     #ns_info{version=NSVersion, name=NS} = NSInfo,
     File = machi_util:make_binary(File0),
     true = (Offset >= ?MINIMUM_OFFSET),
-    {Chunk, CSum_tag, CSum} =
-        case Chunk0 of
-            X when is_binary(X) ->
-                {Chunk0, ?CSUM_TAG_NONE, <<>>};
-            {ChunkCSum, Chk} ->
-                {Tag, CS} = machi_util:unmake_tagged_csum(ChunkCSum),
-                {Chk, Tag, CS}
-        end,
+    {CSum_tag, CSum} = case CSum0 of
+                           <<>> ->
+                               {?CSUM_TAG_NONE, <<>>};
+                           {_Tag, _CS} ->
+                               CSum0;
+                           B when is_binary(B) ->
+                               machi_util:unmake_tagged_csum(CSum0)
+                       end,
     Req = machi_pb_translate:to_pb_request(
             ReqID,
             {low_write_chunk, NSVersion, NS, EpochID, File, Offset, Chunk, CSum_tag, CSum}),

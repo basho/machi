@@ -161,9 +161,9 @@ flu_smoke_test() ->
         Off2 = ?MINIMUM_OFFSET + 77,
         File2 = "smoke-whole-file^^0^1^1",
         ok = ?FLU_C:write_chunk(Host, TcpPort, NSInfo, ?DUMMY_PV1_EPOCH,
-                                File2, Off2, Chunk2),
+                                File2, Off2, Chunk2, NoCSum),
         {error, bad_arg} = ?FLU_C:write_chunk(Host, TcpPort, NSInfo, ?DUMMY_PV1_EPOCH,
-                                              BadFile, Off2, Chunk2),
+                                              BadFile, Off2, Chunk2, NoCSum),
         {ok, {[{_, Off2, Chunk2, _}], _}} =
             ?FLU_C:read_chunk(Host, TcpPort, NSInfo, ?DUMMY_PV1_EPOCH, File2, Off2, Len2, noopt),
         {error, bad_arg} = ?FLU_C:read_chunk(Host, TcpPort,
@@ -262,7 +262,7 @@ bad_checksum_test() ->
     try
         Prefix = <<"some prefix">>,
         Chunk1 = <<"yo yo yo">>,
-        BadCSum = {?CSUM_TAG_CLIENT_SHA, crypto:sha("foo")},
+        BadCSum = {?CSUM_TAG_CLIENT_SHA, crypto:hash(sha, ".................")},
         {error, bad_checksum} = ?FLU_C:append_chunk(Host, TcpPort, NSInfo,
                                                     ?DUMMY_PV1_EPOCH,
                                                     Prefix,

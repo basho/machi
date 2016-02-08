@@ -24,11 +24,12 @@
 -include("machi_projection.hrl").
 
 -type append_opts() :: #append_opts{}.
--type chunk()       :: chunk_bin() | {chunk_csum(), chunk_bin()}.
--type chunk_bin()   :: binary() | iolist().    % client can use either
--type chunk_csum()  :: binary().               % 1 byte tag, N-1 bytes checksum
--type chunk_summary() :: {file_offset(), chunk_size(), binary()}.
--type chunk_s()     :: 'trimmed' | binary().
+-type chunk()       :: chunk_bin() | iolist(). % client can choose either rep.
+-type chunk_bin()   :: binary().               % server returns binary() only.
+-type chunk_csum()  :: <<>> | chunk_csum_bin() | {csum_tag(), binary()}.
+-type chunk_csum_bin() :: binary().            % 1 byte tag, N-1 bytes checksum
+-type chunk_cstrm() :: 'trimmed' | chunk_csum().
+-type chunk_summary() :: {file_offset(), chunk_size(), chunk_bin(), chunk_cstrm()}.
 -type chunk_pos()   :: {file_offset(), chunk_size(), file_name_s()}.
 -type chunk_size()  :: non_neg_integer().
 -type error_general() :: 'bad_arg' | 'wedged' | 'bad_checksum'.
@@ -62,9 +63,9 @@
               chunk/0,
               chunk_bin/0,
               chunk_csum/0,
-              csum_tag/0,
+              chunk_csum_bin/0,
+              chunk_cstrm/0,
               chunk_summary/0,
-              chunk_s/0,
               chunk_pos/0,
               chunk_size/0,
               error_general/0,

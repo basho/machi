@@ -586,12 +586,11 @@ do_pb_hl_request2({high_append_chunk, NS, Prefix, Chunk, TaggedCSum, Opts},
     Res = machi_cr_client:append_chunk(Clnt, NSInfo,
                                        Prefix, Chunk, TaggedCSum, Opts),
     {Res, S};
-do_pb_hl_request2({high_write_chunk, File, Offset, ChunkBin, TaggedCSum},
+do_pb_hl_request2({high_write_chunk, File, Offset, Chunk, CSum},
                   #state{high_clnt=Clnt}=S) ->
     NSInfo = undefined,
     io:format(user, "TODO fix broken write_chunk mod ~s line ~w\n", [?MODULE, ?LINE]),
-    Chunk = {TaggedCSum, ChunkBin},
-    Res = machi_cr_client:write_chunk(Clnt, NSInfo, File, Offset, Chunk),
+    Res = machi_cr_client:write_chunk(Clnt, NSInfo, File, Offset, Chunk, CSum),
     {Res, S};
 do_pb_hl_request2({high_read_chunk, File, Offset, Size, Opts},
                   #state{high_clnt=Clnt}=S) ->

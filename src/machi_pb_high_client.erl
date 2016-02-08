@@ -102,7 +102,7 @@ auth(PidSpec, User, Pass, Timeout) ->
 
 -spec append_chunk(pid(),
                    NS::machi_dt:namespace(), Prefix::machi_dt:file_prefix(),
-                   Chunk::machi_dt:chunk_bin(), CSum::machi_dt:chunk_csum(),
+                   Chunk::machi_dt:chunk(), CSum::machi_dt:chunk_csum(),
                    Opts::machi_dt:append_opts()) ->
                           {ok, Filename::string(), Offset::machi_dt:file_offset()} |
                           {error, machi_client_error_reason()}.
@@ -111,7 +111,7 @@ append_chunk(PidSpec, NS, Prefix, Chunk, CSum, Opts) ->
 
 -spec append_chunk(pid(),
                    NS::machi_dt:namespace(), Prefix::machi_dt:file_prefix(),
-                   Chunk::machi_dt:chunk_bin(), CSum::machi_dt:chunk_csum(),
+                   Chunk::machi_dt:chunk(), CSum::machi_dt:chunk_csum(),
                    Opts::machi_dt:append_opts(),
                    Timeout::non_neg_integer()) ->
                           {ok, Filename::string(), Offset::machi_dt:file_offset()} |
@@ -120,13 +120,13 @@ append_chunk(PidSpec, NS, Prefix, Chunk, CSum, Opts, Timeout) ->
     send_sync(PidSpec, {append_chunk, NS, Prefix, Chunk, CSum, Opts}, Timeout).
 
 -spec write_chunk(pid(), File::string(), machi_dt:file_offset(),
-                  Chunk::machi_dt:chunk_bin(), CSum::machi_dt:chunk_csum()) ->
+                  Chunk::machi_dt:chunk(), CSum::machi_dt:chunk_csum()) ->
                          ok | {error, machi_client_error_reason()}.
 write_chunk(PidSpec, File, Offset, Chunk, CSum) ->
     write_chunk(PidSpec, File, Offset, Chunk, CSum, ?DEFAULT_TIMEOUT).
 
 -spec write_chunk(pid(), File::string(), machi_dt:file_offset(),
-                  Chunk::machi_dt:chunk_bin(), CSum::machi_dt:chunk_csum(), Timeout::non_neg_integer()) ->
+                  Chunk::machi_dt:chunk(), CSum::machi_dt:chunk_csum(), Timeout::non_neg_integer()) ->
                          ok | {error, machi_client_error_reason()}.
 write_chunk(PidSpec, File, Offset, Chunk, CSum, Timeout) ->
     send_sync(PidSpec, {write_chunk, File, Offset, Chunk, CSum}, Timeout).

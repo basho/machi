@@ -35,10 +35,14 @@
 
 %% EUNIT TEST DEFINITION
 eqc_test_() ->
-    {timeout, 60,
+    PropTimeout = case os:getenv("EQC_TIME") of
+                      false -> 30;
+                      V     -> list_to_integer(V)
+                  end,
+    {timeout, PropTimeout*2 + 30,
      {spawn,
       [
-       ?_assertEqual(true, eqc:quickcheck(eqc:testing_time(30, ?QC_OUT(prop_ok()))))
+       ?_assertEqual(true, eqc:quickcheck(eqc:testing_time(PropTimeout, ?QC_OUT(prop_ok()))))
       ]
      }}.
 

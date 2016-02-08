@@ -61,24 +61,26 @@ api_smoke_test() ->
             {ok, {MyOff,MySize,MyFile}} =
                 ?MUT:append_chunk(Prox1, NSInfo, FakeEpoch, Prefix, MyChunk,
                                   NoCSum),
-            {ok, {[{_, MyOff, MyChunk, _}], []}} =
+            {ok, {[{_, MyOff, MyChunk, _MyChunkCSUM}], []}} =
                 ?MUT:read_chunk(Prox1, NSInfo, FakeEpoch, MyFile, MyOff, MySize, undefined),
-            MyChunk2 = <<"my chunk data, yeah, again">>,
+            MyChunk2_parts = [<<"my chunk ">>, "data", <<", yeah, again">>],
+            MyChunk2 = iolist_to_binary(MyChunk2_parts),
             Opts1 = #append_opts{chunk_extra=4242},
             {ok, {MyOff2,MySize2,MyFile2}} =
                 ?MUT:append_chunk(Prox1, NSInfo, FakeEpoch, Prefix,
-                                  MyChunk2, NoCSum, Opts1, infinity),
-            {ok, {[{_, MyOff2, MyChunk2, _}], []}} =
-                ?MUT:read_chunk(Prox1, NSInfo, FakeEpoch, MyFile2, MyOff2, MySize2, undefined),
-            BadCSum = {?CSUM_TAG_CLIENT_SHA, crypto:sha("foo")},
+                                  MyChunk2_parts, NoCSum, Opts1, infinity),
+            [{ok, {[{_, MyOff2, MyChunk2, _}], []}} =
+                ?MUT:read_chunk(Prox1, NSInfo, FakeEpoch, MyFile2, MyOff2, MySize2, DefaultOptions) ||
+                DefaultOptions <- [undefined, noopt, none, any_atom_at_all] ],
+
+            BadCSum = {?CSUM_TAG_CLIENT_SHA, crypto:hash(sha, "...................")},
             {error, bad_checksum} = ?MUT:append_chunk(Prox1, NSInfo, FakeEpoch,
                                                       Prefix, MyChunk, BadCSum),
-            Opts2 = #append_opts{chunk_extra=99832},
-io:format(user, "\nTODO: fix write_chunk() call below @ ~s LINE ~w\n", [?MODULE,?LINE]),
-            %% {error, bad_checksum} = ?MUT:write_chunk(Prox1, NSInfo, FakeEpoch,
-            %%                                          <<"foo-file^^0^1^1">>,
-            %%                                          MyChunk, BadCSum,
-            %%                                          Opts2, infinity),
+            {error, bad_checksum} = ?MUT:write_chunk(Prox1, NSInfo, FakeEpoch,
+                                                     MyFile2,
+                                                     MyOff2 + size(MyChunk2),
+                                                     MyChunk, BadCSum,
+                                                     infinity),
 
             %% Put kick_projection_reaction() in the middle of the test so
             %% that any problems with its async nature will (hopefully)
@@ -283,20 +285,20 @@ flu_restart_test2() ->
                  fun(run) ->
                              ok =
                                  ?MUT:write_chunk(Prox1, NSInfo, FakeEpoch, File1, Off1,
-                                                  Data, infinity),
+                                                  Data, NoCSum, infinity),
                              ok;
                     (line) -> io:format("line ~p, ", [?LINE]);
                     (stop) -> ?MUT:write_chunk(Prox1, NSInfo, FakeEpoch, File1, Off1,
-                                               Data, infinity)
+                                               Data, NoCSum, infinity)
                  end,
                  fun(run) -> 
                          {error, written} =
                                  ?MUT:write_chunk(Prox1, NSInfo, FakeEpoch, File1, Off1,
-                                                  Dataxx, infinity),
+                                                  Dataxx, NoCSum, infinity),
                              ok;
                     (line) -> io:format("line ~p, ", [?LINE]);
                     (stop) -> ?MUT:write_chunk(Prox1, NSInfo, FakeEpoch, File1, Off1,
-                                               Dataxx, infinity)
+                                               Dataxx, NoCSum, infinity)
                  end
                 ],
 

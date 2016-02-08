@@ -448,6 +448,8 @@ int2bool(I) when is_integer(I) -> true.
 
 read_opts_default(#read_opts{}=NSInfo) ->
     NSInfo;
+read_opts_default(A) when A == 'undefined'; A == 'noopt'; A == 'none' ->
+    #read_opts{};
 read_opts_default(A) when is_atom(A) ->
     #read_opts{}.
 

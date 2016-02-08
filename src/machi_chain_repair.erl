@@ -105,6 +105,8 @@ repair(ap_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
     RepairMode = proplists:get_value(repair_mode, Opts, repair),
     Verb = proplists:get_value(verbose, Opts, false),
     RepairId = proplists:get_value(repair_id, Opts, id1),
+erlang:display(wtf),
+                  %% io:format(user, "TODO: ~p\n", [{error, {What, Why, Stack}}]),
     Res = try
               _ = [begin
                        {ok, Proxy} = machi_proxy_flu1_client:start_link(P),
@@ -127,6 +129,7 @@ repair(ap_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
               {ok, EpochID} = machi_proxy_flu1_client:get_epoch_id(
                                 SrcProxy, ?SHORT_TIMEOUT),
               %% ?VERB("Make repair directives: "),
+erlang:display(yo1),
               Ds =
                   [{File, make_repair_directives(
                             ConsistencyMode, RepairMode, File, Size, EpochID,
@@ -146,16 +149,21 @@ repair(ap_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
                end || FLU <- OurFLUs],
 
               %% ?VERB("Execute repair directives: "),
+erlang:display(yo1),
               ok = execute_repair_directives(ConsistencyMode, Ds, Src, EpochID,
                                              Verb, OurFLUs, ProxiesDict, ETS),
+erlang:display(yo2),
               %% ?VERB(" done\n"),
               lager:info("Repair ~w repair directives finished\n", [RepairId]),
               ok
           catch
               What:Why ->
+io:format(user, "yo3 ~p ~p\n", [What,Why]),
                   Stack = erlang:get_stacktrace(),
+io:format(user, "yo3 ~p\n", [Stack]),
                   {error, {What, Why, Stack}}
           after
+erlang:display(yo4),
               [(catch machi_proxy_flu1_client:quit(Pid)) ||
                   Pid <- orddict:to_list(get(proxies_dict))]
           end,
@@ -236,7 +244,7 @@ make_repair_directives(ConsistencyMode, RepairMode, File, Size, _EpochID,
 
 make_repair_directives2(C2, ConsistencyMode, RepairMode,
                        File, Verb, Src, FLUs, ProxiesDict, ETS) ->
-    ?VERB("."),
+    ?VERB(".1"),
     make_repair_directives3(C2, ConsistencyMode, RepairMode,
                             File, Verb, Src, FLUs, ProxiesDict, ETS, []).
 
@@ -327,17 +335,17 @@ execute_repair_directive({File, Cmds}, {ProxiesDict, EpochID, Verb, ETS}=Acc) ->
     F = fun({copy, {Offset, Size, TaggedCSum, MySrc}, MyDsts}, Acc2) ->
                 SrcP = orddict:fetch(MySrc, ProxiesDict),
                 case ets:lookup_element(ETS, in_chunks, 2) rem 100 of
-                    0 -> ?VERB(".", []);
+                    0 -> ?VERB(".2", []);
                     _ -> ok
                 end,
                 _T1 = os:timestamp(),
                 %% TODO: support case multiple written or trimmed chunks returned
                 NSInfo = undefined,
-                io:format(user, "TODO fix broken read_chunk mod ~s line ~w\n", [?MODULE, ?LINE]),
-                {ok, {[{_, Offset, Chunk, _}], _}} =
+                {ok, {[{_, Offset, Chunk, _ReadCSum}|OtherChunks], []=_TrimmedList}} =
                     machi_proxy_flu1_client:read_chunk(
                       SrcP, NSInfo, EpochID, File, Offset, Size, undefined,
                       ?SHORT_TIMEOUT),
+                [] = OtherChunks,
                 _T2 = os:timestamp(),
                 <<_Tag:1/binary, CSum/binary>> = TaggedCSum,
                 case machi_util:checksum_chunk(Chunk) of
@@ -346,7 +354,7 @@ execute_repair_directive({File, Cmds}, {ProxiesDict, EpochID, Verb, ETS}=Acc) ->
                                  DstP = orddict:fetch(DstFLU, ProxiesDict),
                                  _T3 = os:timestamp(),
                                  ok = machi_proxy_flu1_client:write_chunk(
-                                        DstP, NSInfo, EpochID, File, Offset, Chunk,
+                                        DstP, NSInfo, EpochID, File, Offset, Chunk, TaggedCSum,
                                         ?SHORT_TIMEOUT),
                                  _T4 = os:timestamp()
                              end || DstFLU <- MyDsts],
@@ -371,7 +379,9 @@ execute_repair_directive({File, Cmds}, {ProxiesDict, EpochID, Verb, ETS}=Acc) ->
                         Acc2
                 end
         end,
+erlang:display({yo,?LINE}),
     ok = lists:foldl(F, ok, Cmds),
+erlang:display({yo,?LINE}),
     %% Copy this file's stats to the total counts.
     _ = [ets:update_counter(ETS, T_K, ets:lookup_element(ETS, L_K, 2)) ||
             {L_K, T_K} <- EtsKeys],

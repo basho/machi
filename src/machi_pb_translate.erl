@@ -196,9 +196,9 @@ from_pb_request(#mpb_request{req_id=ReqID,
     #mpb_writechunkreq{chunk=#mpb_chunk{file_name=File,
                                         offset=Offset,
                                         chunk=Chunk,
-                                        csum=CSum}} = IR,
-    TaggedCSum = make_tagged_csum(CSum, Chunk),
-    {ReqID, {high_write_chunk, File, Offset, Chunk, TaggedCSum}};
+                                        csum=CSumRec}} = IR,
+    CSum = make_tagged_csum(CSumRec, Chunk),
+    {ReqID, {high_write_chunk, File, Offset, Chunk, CSum}};
 from_pb_request(#mpb_request{req_id=ReqID,
                              read_chunk=IR=#mpb_readchunkreq{}}) ->
     #mpb_readchunkreq{chunk_pos=#mpb_chunkpos{file_name=File,
@@ -732,7 +732,7 @@ to_pb_response(ReqID, {high_append_chunk, _NS, _Prefix, _Chunk, _TSum, _O}, Resp
         _Else ->
             make_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
-to_pb_response(ReqID, {high_write_chunk, _File, _Offset, _Chunk, _TaggedCSum}, Resp) ->
+to_pb_response(ReqID, {high_write_chunk, _File, _Offset, _Chunk, _CSum}, Resp) ->
     case Resp of
         {ok, {_,_,_}} ->
             %% machi_cr_client returns ok 2-tuple, convert to simple ok.

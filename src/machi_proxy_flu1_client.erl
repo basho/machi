@@ -81,7 +81,7 @@
          quit/1,
 
          %% Internal API
-         write_chunk/6, write_chunk/7,
+         write_chunk/7, write_chunk/8,
          trim_chunk/6, trim_chunk/7,
 
          %% Helpers
@@ -280,14 +280,14 @@ quit(PidSpec) ->
 %% @doc Write a chunk (binary- or iolist-style) of data to a file
 %% with `Prefix' at `Offset'.
 
-write_chunk(PidSpec, NSInfo, EpochID, File, Offset, Chunk) ->
-    write_chunk(PidSpec, NSInfo, EpochID, File, Offset, Chunk, infinity).
+write_chunk(PidSpec, NSInfo, EpochID, File, Offset, Chunk, CSum) ->
+    write_chunk(PidSpec, NSInfo, EpochID, File, Offset, Chunk, CSum, infinity).
 
 %% @doc Write a chunk (binary- or iolist-style) of data to a file
 %% with `Prefix' at `Offset'.
 
-write_chunk(PidSpec, NSInfo, EpochID, File, Offset, Chunk, Timeout) ->
-    case gen_server:call(PidSpec, {req, {write_chunk, NSInfo, EpochID, File, Offset, Chunk}},
+write_chunk(PidSpec, NSInfo, EpochID, File, Offset, Chunk, CSum, Timeout) ->
+    case gen_server:call(PidSpec, {req, {write_chunk, NSInfo, EpochID, File, Offset, Chunk, CSum}},
                          Timeout) of
         {error, written}=Err ->
             Size = byte_size(Chunk),
@@ -384,9 +384,9 @@ make_req_fun({append_chunk, NSInfo, EpochID,
 make_req_fun({read_chunk, NSInfo, EpochID, File, Offset, Size, Opts},
              #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
     fun() -> Mod:read_chunk(Sock, NSInfo, EpochID, File, Offset, Size, Opts) end;
-make_req_fun({write_chunk, NSInfo, EpochID, File, Offset, Chunk},
+make_req_fun({write_chunk, NSInfo, EpochID, File, Offset, Chunk, CSum},
              #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
-    fun() -> Mod:write_chunk(Sock, NSInfo, EpochID, File, Offset, Chunk) end;
+    fun() -> Mod:write_chunk(Sock, NSInfo, EpochID, File, Offset, Chunk, CSum) end;
 make_req_fun({trim_chunk, NSInfo, EpochID, File, Offset, Size},
              #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
     fun() -> Mod:trim_chunk(Sock, NSInfo, EpochID, File, Offset, Size) end;

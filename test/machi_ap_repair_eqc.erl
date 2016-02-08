@@ -484,7 +484,7 @@ eqc_verbose() ->
     os:getenv("EQC_VERBOSE") =:= "true".
 
 eqc_timeout(Default) ->
-    PropTimeout = case os:getenv("EQC_TIMEOUT") of
+    PropTimeout = case os:getenv("EQC_TIME") of
                       false -> Default;
                       V -> list_to_integer(V)
                   end,
