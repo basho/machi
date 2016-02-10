@@ -101,7 +101,7 @@ find_or_make_filename_from_prefix(FluName, EpochId,
                                   #ns_info{}=NSInfo)
   when is_atom(FluName) ->
     N = make_filename_mgr_name(FluName),
-    gen_server:call(N, {find_filename, EpochId, NSInfo, Prefix}, ?TIMEOUT);
+    gen_server:call(N, {find_filename, FluName, EpochId, NSInfo, Prefix}, ?TIMEOUT);
 find_or_make_filename_from_prefix(_FluName, _EpochId, Other, Other2) ->
     lager:error("~p is not a valid prefix/locator ~p", [Other, Other2]),
     error(badarg).
@@ -143,18 +143,19 @@ handle_cast(Req, State) ->
 %% the FLU has already validated that the caller's epoch id and the FLU's epoch id
 %% are the same. So we *assume* that remains the case here - that is to say, we
 %% are not wedged.
-handle_call({find_filename, EpochId, NSInfo, Prefix}, _From, S = #state{ datadir = DataDir,
-                                                                 epoch = EpochId, 
-                                                                 tid = Tid }) ->
+handle_call({find_filename, FluName, EpochId, NSInfo, Prefix}, _From,
+            S = #state{ datadir = DataDir, epoch = EpochId, tid = Tid }) ->
     %% Our state and the caller's epoch ids are the same. Business as usual.
-    File = handle_find_file(Tid, NSInfo, Prefix, DataDir),
+io:format(user, "FMGR ~w LINE ~p\n", [FluName, ?LINE]),
+    File = handle_find_file(FluName, Tid, NSInfo, Prefix, DataDir),
     {reply, {file, File}, S};
 
-handle_call({find_filename, EpochId, NSInfo, Prefix}, _From, S = #state{ datadir = DataDir, tid = Tid }) ->
+handle_call({find_filename, FluName, EpochId, NSInfo, Prefix}, _From, S = #state{ datadir = DataDir, tid = Tid }) ->
     %% If the epoch id in our state and the caller's epoch id were the same, it would've
     %% matched the above clause. Since we're here, we know that they are different.
     %% If epoch ids between our state and the caller's are different, we must increment the
     %% sequence number, generate a filename and then cache it.
+io:format(user, "FMGR ~w LINE ~p\n", [FluName, ?LINE]),
     File = increment_and_cache_filename(Tid, DataDir, NSInfo, Prefix),
     {reply, {file, File}, S#state{epoch = EpochId}};
 
@@ -205,13 +206,15 @@ list_files(DataDir, Prefix) ->
 make_filename_mgr_name(FluName) when is_atom(FluName) ->
     list_to_atom(atom_to_list(FluName) ++ "_filename_mgr").
 
-handle_find_file(Tid, #ns_info{name=NS, locator=NSLocator}=NSInfo, Prefix, DataDir) ->
+handle_find_file(FluName, Tid, #ns_info{name=NS, locator=NSLocator}=NSInfo, Prefix, DataDir) ->
     N = machi_util:read_max_filenum(DataDir, NS, NSLocator, Prefix),
     {File, Cleanup} = case find_file(DataDir, NSInfo, Prefix, N) of
         [] ->
+io:format(user, "HFF: 1\n", []),
             {find_or_make_filename(Tid, DataDir, NS, NSLocator, Prefix, N), false};
-        [H] -> {H, true};
+        [H] -> io:format(user, "HFF: 2 ~s\n", [H]),{H, true};
         [Fn | _ ] = L ->
+io:format(user, "HFF: 3 ~p\n", [L]),
             lager:debug(
               "Searching for a matching file to prefix ~p and sequence number ~p gave multiples: ~p",
               [Prefix, N, L]),
@@ -231,8 +234,12 @@ find_or_make_filename(Tid, DataDir, NS, NSLocator, Prefix, N) ->
     end.
 
 generate_filename(DataDir, NS, NSLocator, Prefix, N) ->
-{A,B,C} = erlang:now(),
-TODO = lists:flatten(filename:basename(DataDir) ++ "," ++ io_lib:format("~w,~w,~w", [A,B,C])),
+    {A,B,C} = erlang:now(),
+    RN = case process_info(self(), registered_name) of
+             [] -> [];
+             {_,X} -> re:replace(atom_to_list(X), "_.*", "", [{return, binary}])
+         end,
+    TODO = lists:flatten([RN, ",", io_lib:format("~w,~w,~w", [A,B,C])]),
     {F, _} = machi_util:make_data_filename(
               DataDir,
               NS, NSLocator, Prefix,

@@ -196,12 +196,15 @@ change_partition(Partition,
     %% Don't wait for stable chain, tick will be executed on demand
     %% in append oprations
     _ = tick(S),
+
     ok.
 
 %% Generators
 
 num() ->
-    choose(2, 5).
+    2.
+    %% TODO:put me back
+    %% choose(2, 5).
 
 cr_count(Num) ->
     Num * 3.
