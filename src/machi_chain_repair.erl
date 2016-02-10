@@ -105,8 +105,6 @@ repair(ap_mode=ConsistencyMode, Src, Repairing, UPI, MembersDict, ETS, Opts) ->
     RepairMode = proplists:get_value(repair_mode, Opts, repair),
     Verb = proplists:get_value(verbose, Opts, false),
     RepairId = proplists:get_value(repair_id, Opts, id1),
-erlang:display(wtf),
-                  %% io:format(user, "TODO: ~p\n", [{error, {What, Why, Stack}}]),
     Res = try
               _ = [begin
                        {ok, Proxy} = machi_proxy_flu1_client:start_link(P),
@@ -129,7 +127,6 @@ erlang:display(wtf),
               {ok, EpochID} = machi_proxy_flu1_client:get_epoch_id(
                                 SrcProxy, ?SHORT_TIMEOUT),
               %% ?VERB("Make repair directives: "),
-erlang:display(yo1),
               Ds =
                   [{File, make_repair_directives(
                             ConsistencyMode, RepairMode, File, Size, EpochID,
@@ -149,21 +146,16 @@ erlang:display(yo1),
                end || FLU <- OurFLUs],
 
               %% ?VERB("Execute repair directives: "),
-erlang:display(yo1),
               ok = execute_repair_directives(ConsistencyMode, Ds, Src, EpochID,
                                              Verb, OurFLUs, ProxiesDict, ETS),
-erlang:display(yo2),
               %% ?VERB(" done\n"),
               lager:info("Repair ~w repair directives finished\n", [RepairId]),
               ok
           catch
               What:Why ->
-io:format(user, "yo3 ~p ~p\n", [What,Why]),
                   Stack = erlang:get_stacktrace(),
-io:format(user, "yo3 ~p\n", [Stack]),
                   {error, {What, Why, Stack}}
           after
-erlang:display(yo4),
               [(catch machi_proxy_flu1_client:quit(Pid)) ||
                   Pid <- orddict:to_list(get(proxies_dict))]
           end,
@@ -244,7 +236,6 @@ make_repair_directives(ConsistencyMode, RepairMode, File, Size, _EpochID,
 
 make_repair_directives2(C2, ConsistencyMode, RepairMode,
                        File, Verb, Src, FLUs, ProxiesDict, ETS) ->
-    ?VERB(".1"),
     make_repair_directives3(C2, ConsistencyMode, RepairMode,
                             File, Verb, Src, FLUs, ProxiesDict, ETS, []).
 
@@ -286,7 +277,6 @@ make_repair_directives3([{Offset, Size, CSum, _FLU}=A|Rest0],
                   end || {__Offset, __Size, __CSum, FLU} <- As],
 
             exit({todo_repair_sanity_check, ?LINE, File, Offset, {as,As}, {qq,QQ}})
-            %% exit({todo_repair_sanity_check, ?LINE, File, Offset, As})
     end,
     %% List construction guarantees us that there's at least one ?MAX_OFFSET
     %% item remains.  Sort order + our "taking" of all exact Offset+Size
@@ -339,17 +329,17 @@ execute_repair_directives(ap_mode=_ConsistencyMode, Ds, _Src, EpochID, Verb,
                             {ProxiesDict, EpochID, Verb, ETS}, Ds),
     ok.
 
-execute_repair_directive({File, Cmds}, {ProxiesDict, EpochID, Verb, ETS}=Acc) ->
+execute_repair_directive({File, Cmds}, {ProxiesDict, EpochID, _Verb, ETS}=Acc) ->
     EtsKeys = [{in_files, t_in_files}, {in_chunks, t_in_chunks},
                {in_bytes, t_in_bytes}, {out_files, t_out_files},
                {out_chunks, t_out_chunks}, {out_bytes, t_out_bytes}],
     [ets:insert(ETS, {L_K, 0}) || {L_K, _T_K} <- EtsKeys],
     F = fun({copy, {Offset, Size, TaggedCSum, MySrc}, MyDsts}, Acc2) ->
                 SrcP = orddict:fetch(MySrc, ProxiesDict),
-                case ets:lookup_element(ETS, in_chunks, 2) rem 100 of
-                    0 -> ?VERB(".2", []);
-                    _ -> ok
-                end,
+                %% case ets:lookup_element(ETS, in_chunks, 2) rem 100 of
+                %%     0 -> ?VERB(".2", []);
+                %%     _ -> ok
+                %% end,
                 _T1 = os:timestamp(),
                 %% TODO: support case multiple written or trimmed chunks returned
                 NSInfo = undefined,
@@ -391,9 +381,7 @@ execute_repair_directive({File, Cmds}, {ProxiesDict, EpochID, Verb, ETS}=Acc) ->
                         Acc2
                 end
         end,
-erlang:display({yo,?LINE}),
     ok = lists:foldl(F, ok, Cmds),
-erlang:display({yo,?LINE}),
     %% Copy this file's stats to the total counts.
     _ = [ets:update_counter(ETS, T_K, ets:lookup_element(ETS, L_K, 2)) ||
             {L_K, T_K} <- EtsKeys],

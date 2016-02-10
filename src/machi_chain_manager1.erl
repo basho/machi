@@ -1937,8 +1937,7 @@ react_to_env_C103(#projection_v1{epoch_number=_Epoch_newprop} = _P_newprop,
     ?REACT({c103, ?LINE,
             [{current_epoch, P_current#projection_v1.epoch_number},
              {none_projection_epoch, P_none#projection_v1.epoch_number}]}),
-    io:format(user, "SET add_admin_down(~w) at ~w TODO current_epoch ~w none_proj_epoch ~w =====================================\n", [MyName, time(), P_current#projection_v1.epoch_number, P_none#projection_v1.epoch_number]),
-    %% io:format(user, "SET add_admin_down(~w) at ~w =====================================\n", [MyName, time()]),
+    io:format(user, "SET add_admin_down(~w) at ~w current_epoch ~w none_proj_epoch ~w =====================================\n", [MyName, time(), P_current#projection_v1.epoch_number, P_none#projection_v1.epoch_number]),
     machi_fitness:add_admin_down(S#ch_mgr.fitness_svr, MyName, []),
     timer:sleep(5*1000),
     io:format(user, "SET delete_admin_down(~w) at ~w =====================================\n", [MyName, time()]),
@@ -2968,8 +2967,7 @@ zerf_find_last_annotated(FLU, MajoritySize, S) ->
     end.
 
 perhaps_verbose_c111(P_latest2, S) ->
-    case true of
-    %%TODO put me back: case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
+    case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
         true ->
             Dbg2X = lists:keydelete(react, 1,
                                     P_latest2#projection_v1.dbg2) ++
@@ -2977,9 +2975,8 @@ perhaps_verbose_c111(P_latest2, S) ->
             P_latest2x = P_latest2#projection_v1{dbg2=Dbg2X}, % limit verbose len.
             Last2 = get(last_verbose),
             Summ2 = machi_projection:make_summary(P_latest2x),
-            %% if P_latest2#projection_v1.upi == [],
-            %%    (S#ch_mgr.proj)#projection_v1.upi /= [] ->
-            if true ->
+            if P_latest2#projection_v1.upi == [],
+               (S#ch_mgr.proj)#projection_v1.upi /= [] ->
                     <<CSumRep:4/binary,_/binary>> =
                                           P_latest2#projection_v1.epoch_csum,
                     io:format(user, "~s CONFIRM epoch ~w ~w upi ~w rep ~w by ~w\n", [machi_util:pretty_time(), (S#ch_mgr.proj)#projection_v1.epoch_number, CSumRep, P_latest2#projection_v1.upi, P_latest2#projection_v1.repairing, S#ch_mgr.name]);

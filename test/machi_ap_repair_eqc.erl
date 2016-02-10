@@ -121,9 +121,7 @@ append(CRIndex, Bin, #state{verbose=V}=S) ->
     NSInfo = #ns_info{},
     NoCSum = <<>>,
     Opts1 = #append_opts{},
-io:format(user, "append_chunk ~p ~P ->\n", [Prefix, Bin, 6]),
     Res = (catch machi_cr_client:append_chunk(C, NSInfo, Prefix, Bin, NoCSum, Opts1, sec(1))),
-io:format(user, "append_chunk ~p ~P ->\n    ~p\n", [Prefix, Bin, 6, Res]),
     case Res of
         {ok, {_Off, Len, _FileName}=Key} ->
             case ets:insert_new(?WRITTEN_TAB, {Key, Bin}) of
@@ -190,7 +188,6 @@ change_partition(Partition,
          [] -> ?V("## Turn OFF partition: ~w~n", [Partition]);
          _  -> ?V("## Turn ON  partition: ~w~n", [Partition])
      end || Verbose],
-    io:format(user, "partition ~p\n", [Partition]),
     machi_partition_simulator:always_these_partitions(Partition),
     _ = machi_partition_simulator:get(FLUNames),
     %% Don't wait for stable chain, tick will be executed on demand
@@ -459,15 +456,14 @@ confirm_written(C) ->
 
 assert_chunk(C, {Off, Len, FileName}=Key, Bin) ->
     %% TODO: This probably a bug, read_chunk respnds with filename of `string()' type
-    FileNameStr = binary_to_list(FileName),
     %% TODO : Use CSum instead of binary (after disuccsion about CSum is calmed down?)
     NSInfo = undefined,
     case (catch machi_cr_client:read_chunk(C, NSInfo, FileName, Off, Len, undefined, sec(3))) of
-        {ok, {[{FileNameStr, Off, Bin, _}], []}} ->
+        {ok, {[{FileName, Off, Bin, _}], []}} ->
             ok;
         {ok, Got} ->
             ?V("read_chunk got different binary for Key=~p~n", [Key]),
-            ?V("    Expected: ~p~n", [{[{FileNameStr, Off, Bin, <<"CSum-NYI">>}], []}]),
+            ?V("    Expected: ~p~n", [{[{FileName, Off, Bin, <<"CSum-NYI">>}], []}]),
             ?V("    Got:      ~p~n", [Got]),
             {error, different_binary};
         {error, Reason} ->

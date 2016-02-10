@@ -120,7 +120,6 @@ handle_call(Else, From, S) ->
 handle_cast({wedge_myself, WedgeEpochId},
             #state{flu_name=FluName, wedged=Wedged_p, epoch_id=OldEpochId}=S) ->
     if not Wedged_p andalso WedgeEpochId == OldEpochId ->
-io:format(user, "FLU WEDGE 2: ~w : ~w ~P\n", [S#state.flu_name, true, OldEpochId, 6]),
             true = ets:insert(S#state.etstab,
                               {epoch, {true, OldEpochId}}),
             %% Tell my chain manager that it might want to react to
@@ -139,7 +138,6 @@ handle_cast({wedge_state_change, Boolean, {NewEpoch, _}=NewEpochId},
                    undefined -> -1
                end,
     if NewEpoch >= OldEpoch ->
-io:format(user, "FLU WEDGE 1: ~w : ~w ~P\n", [S#state.flu_name, Boolean, NewEpochId, 6]),
             true = ets:insert(S#state.etstab,
                               {epoch, {Boolean, NewEpochId}}),
             {noreply, S#state{wedged=Boolean, epoch_id=NewEpochId}};
@@ -179,13 +177,8 @@ handle_append(NSInfo,
               Prefix, Chunk, TCSum, Opts, FluName, EpochId) ->
     Res = machi_flu_filename_mgr:find_or_make_filename_from_prefix(
             FluName, EpochId, {prefix, Prefix}, NSInfo),
-io:format(user, "FLU NAME: ~w + ~p got ~p\n", [FluName, Prefix, Res]),
     case Res of
         {file, F} ->
-case re:run(F, atom_to_list(FluName) ++ ",") of
-    nomatch ->
-        io:format(user, "\n\n\t\tBAAAAAAA\n\n", []), timer:sleep(50), erlang:halt(0);
-    _ -> ok end,
             case machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, F}) of
                 {ok, Pid} ->
                     {Tag, CS} = machi_util:unmake_tagged_csum(TCSum),

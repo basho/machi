@@ -274,12 +274,12 @@ from_pb_response(#mpb_ll_response{
                                           chunk=Bytes,
                                           csum=#mpb_chunkcsum{type=T,csum=Ck}}) ->
                                        Csum = <<(conv_to_csum_tag(T)):8, Ck/binary>>,
-                                      {File, Offset, Bytes, Csum}
+                                      {list_to_binary(File), Offset, Bytes, Csum}
                               end, PB_Chunks),
             Trimmed = lists:map(fun(#mpb_chunkpos{file_name=File,
                                                   offset=Offset,
                                                   chunk_size=Size}) ->
-                                        {File, Offset, Size}
+                                        {list_to_binary(File), Offset, Size}
                                 end, PB_Trimmed),
             {ReqID, {ok, {Chunks, Trimmed}}};
         _ ->

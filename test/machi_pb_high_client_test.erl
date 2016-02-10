@@ -78,7 +78,7 @@ smoke_test2() ->
                      {iolist_to_binary(Chunk2), File2, Off2, Size2},
                      {iolist_to_binary(Chunk3), File3, Off3, Size3}],
             [begin
-                 File = binary_to_list(Fl),
+                 File = Fl,
                  ?assertMatch({ok, {[{File, Off, Ch, _}], []}},
                               ?C:read_chunk(Clnt, Fl, Off, Sz, undefined))
              end || {Ch, Fl, Off, Sz} <- Reads],
@@ -105,7 +105,7 @@ smoke_test2() ->
             [begin
                  {ok, {[], Trimmed}} =
                         ?C:read_chunk(Clnt, Fl, Off, Sz, #read_opts{needs_trimmed=true}),
-                 Filename = binary_to_list(Fl),
+                 Filename = Fl,
                  ?assertEqual([{Filename, Off, Sz}], Trimmed)
              end || {_Ch, Fl, Off, Sz} <- Reads],
 

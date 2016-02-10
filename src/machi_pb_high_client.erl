@@ -501,12 +501,12 @@ convert_read_chunk_resp(#mpb_readchunkresp{status='OK', chunks=PB_Chunks, trimme
                                       csum=#mpb_chunkcsum{type=T, csum=Ck}}) ->
                                %% TODO: cleanup export
                                Csum = <<(machi_pb_translate:conv_to_csum_tag(T)):8, Ck/binary>>,
-                               {File, Offset, Chunk, Csum}
+                               {list_to_binary(File), Offset, Chunk, Csum}
                        end, PB_Chunks),
     Trimmed = lists:map(fun(#mpb_chunkpos{file_name=File,
                                           offset=Offset,
                                           chunk_size=Size}) ->
-                                {File, Offset, Size}
+                                {list_to_binary(File), Offset, Size}
                         end, PB_Trimmed),
     {ok, {Chunks, Trimmed}};
 convert_read_chunk_resp(#mpb_readchunkresp{status=Status}) ->

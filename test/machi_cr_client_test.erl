@@ -119,7 +119,7 @@ smoke_test2() ->
         machi_cr_client:append_chunk(C1, NSInfo, Prefix, Chunk1, NoCSum),
         {ok, {Off1,Size1,File1}} =
             machi_cr_client:append_chunk(C1, NSInfo, Prefix, Chunk1, NoCSum),
-        BadCSum = {?CSUM_TAG_CLIENT_SHA, crypto:sha("foo")},
+        BadCSum = {?CSUM_TAG_CLIENT_SHA, crypto:hash(sha, "foo")},
         {error, bad_checksum} =
             machi_cr_client:append_chunk(C1, NSInfo, Prefix, Chunk1, BadCSum),
         {ok, {[{_, Off1, Chunk1, _}], []}} =
@@ -140,10 +140,10 @@ smoke_test2() ->
                                   File1, FooOff1, Size1, undefined) || X <- [0,1,2] ],
         ok = machi_flu1_client:write_chunk(Host, PortBase+0, NSInfo, EpochID,
                                            File1, FooOff1, Chunk1, NoCSum),
-        {ok, {[{_, FooOff1, Chunk1, _}], []}} =
+        {ok, {[{File1, FooOff1, Chunk1, _}=_YY], []}} =
             machi_flu1_client:read_chunk(Host, PortBase+0, NSInfo, EpochID,
                                          File1, FooOff1, Size1, undefined),
-        {ok, {[{_, FooOff1, Chunk1, _}], []}} =
+        {ok, {[{File1, FooOff1, Chunk1, _}], []}} =
             machi_cr_client:read_chunk(C1, NSInfo, File1, FooOff1, Size1, undefined),
         [?assertMatch({X,{ok, {[{_, FooOff1, Chunk1, _}], []}}},
                       {X,machi_flu1_client:read_chunk(
@@ -157,9 +157,9 @@ smoke_test2() ->
         Size2 = size(Chunk2),
         ok = machi_flu1_client:write_chunk(Host, PortBase+1, NSInfo, EpochID,
                                            File1, FooOff2, Chunk2, NoCSum),
-        {ok, {[{_, FooOff2, Chunk2, _}], []}} =
+        {ok, {[{File1, FooOff2, Chunk2, _}], []}} =
             machi_cr_client:read_chunk(C1, NSInfo, File1, FooOff2, Size2, undefined),
-        [{X,{ok, {[{_, FooOff2, Chunk2, _}], []}}} =
+        [{X,{ok, {[{File1, FooOff2, Chunk2, _}], []}}} =
              {X,machi_flu1_client:read_chunk(
                   Host, PortBase+X, NSInfo, EpochID,
                   File1, FooOff2, Size2, undefined)} || X <- [0,1,2] ],
@@ -167,7 +167,7 @@ smoke_test2() ->
         %% Misc API smoke & minor regression checks
         {error, bad_arg} = machi_cr_client:read_chunk(C1, NSInfo, <<"no">>,
                                                       999999999, 1, undefined),
-        {ok, {[{_,Off1,Chunk1,_}, {_,FooOff1,Chunk1,_}, {_,FooOff2,Chunk2,_}],
+        {ok, {[{File1,Off1,Chunk1,_}, {File1,FooOff1,Chunk1,_}, {File1,FooOff2,Chunk2,_}],
               []}} =
             machi_cr_client:read_chunk(C1, NSInfo, File1, Off1, 88888888, undefined),
         %% Checksum list return value is a primitive binary().
@@ -242,7 +242,7 @@ witness_smoke_test2() ->
                                                Chunk1, NoCSum),
         {ok, {Off1,Size1,File1}} =
             machi_cr_client:append_chunk(C1, NSInfo, Prefix, Chunk1, NoCSum),
-        BadCSum = {?CSUM_TAG_CLIENT_SHA, crypto:sha("foo")},
+        BadCSum = {?CSUM_TAG_CLIENT_SHA, crypto:hash(sha, "foo")},
         {error, bad_checksum} =
             machi_cr_client:append_chunk(C1, NSInfo, Prefix, Chunk1, BadCSum),
         {ok, {[{_, Off1, Chunk1, _}], []}} =

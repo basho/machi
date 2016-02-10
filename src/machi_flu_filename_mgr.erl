@@ -146,16 +146,14 @@ handle_cast(Req, State) ->
 handle_call({find_filename, FluName, EpochId, NSInfo, Prefix}, _From,
             S = #state{ datadir = DataDir, epoch = EpochId, tid = Tid }) ->
     %% Our state and the caller's epoch ids are the same. Business as usual.
-io:format(user, "FMGR ~w LINE ~p\n", [FluName, ?LINE]),
     File = handle_find_file(FluName, Tid, NSInfo, Prefix, DataDir),
     {reply, {file, File}, S};
 
-handle_call({find_filename, FluName, EpochId, NSInfo, Prefix}, _From, S = #state{ datadir = DataDir, tid = Tid }) ->
+handle_call({find_filename, _FluName, EpochId, NSInfo, Prefix}, _From, S = #state{ datadir = DataDir, tid = Tid }) ->
     %% If the epoch id in our state and the caller's epoch id were the same, it would've
     %% matched the above clause. Since we're here, we know that they are different.
     %% If epoch ids between our state and the caller's are different, we must increment the
     %% sequence number, generate a filename and then cache it.
-io:format(user, "FMGR ~w LINE ~p\n", [FluName, ?LINE]),
     File = increment_and_cache_filename(Tid, DataDir, NSInfo, Prefix),
     {reply, {file, File}, S#state{epoch = EpochId}};
 
@@ -206,58 +204,31 @@ list_files(DataDir, Prefix) ->
 make_filename_mgr_name(FluName) when is_atom(FluName) ->
     list_to_atom(atom_to_list(FluName) ++ "_filename_mgr").
 
-handle_find_file(FluName, Tid, #ns_info{name=NS, locator=NSLocator}=NSInfo, Prefix, DataDir) ->
-    N = machi_util:read_max_filenum(DataDir, NS, NSLocator, Prefix),
-    {File, Cleanup} = case find_file(DataDir, NSInfo, Prefix, N) of
-        [] ->
-            {find_or_make_filename(Tid, DataDir, NS, NSLocator, Prefix, N), false};
-        [H] -> {H, true};
-        [Fn | _ ] = L ->
-            lager:debug(
-              "Searching for a matching file to prefix ~p and sequence number ~p gave multiples: ~p",
-              [Prefix, N, L]),
-            {Fn, true}
-    end,
-    maybe_cleanup(Tid, {NS, NSLocator, Prefix, N}, Cleanup),
-    filename:basename(File).
-
-find_or_make_filename(Tid, DataDir, NS, NSLocator, Prefix, N) ->
-    case ets:lookup(Tid, {NS, NSLocator, Prefix, N}) of
+handle_find_file(_FluName, Tid, #ns_info{name=NS, locator=NSLocator}, Prefix, DataDir) ->
+    case ets:lookup(Tid, {NS, NSLocator, Prefix}) of
          [] ->
+            N = machi_util:read_max_filenum(DataDir, NS, NSLocator, Prefix),
             F = generate_filename(DataDir, NS, NSLocator, Prefix, N),
-            true = ets:insert_new(Tid, {{NS, NSLocator, Prefix, N}, F}),
+            true = ets:insert(Tid, {{NS, NSLocator, Prefix}, F}),
             F;
         [{_Key, File}] ->
             File
     end.
 
 generate_filename(DataDir, NS, NSLocator, Prefix, N) ->
-    {A,B,C} = erlang:now(),
-    RN = case process_info(self(), registered_name) of
-             [] -> [];
-             {_,X} -> re:replace(atom_to_list(X), "_.*", "", [{return, binary}])
-         end,
-    TODO = lists:flatten([RN, ",", io_lib:format("~w,~w,~w", [A,B,C])]),
-    {F, _} = machi_util:make_data_filename(
+    {F, _Q} = machi_util:make_data_filename(
               DataDir,
               NS, NSLocator, Prefix,
-TODO,
-              %% TODO put me back!!
-              %% generate_uuid_v4_str(),
+              generate_uuid_v4_str(),
               N),
     binary_to_list(F).
-
-maybe_cleanup(_Tid, _Key, false) ->
-    ok;
-maybe_cleanup(Tid, Key, true) ->
-    true = ets:delete(Tid, Key).
 
 increment_and_cache_filename(Tid, DataDir, #ns_info{name=NS,locator=NSLocator}, Prefix) ->
     ok = machi_util:increment_max_filenum(DataDir, NS, NSLocator, Prefix),
     N = machi_util:read_max_filenum(DataDir, NS, NSLocator, Prefix),
     F = generate_filename(DataDir, NS, NSLocator, Prefix, N),
-    true = ets:insert_new(Tid, {{NS, NSLocator, Prefix, N}, F}),
-    filename:basename(F).
+    true = ets:insert(Tid, {{NS, NSLocator, Prefix}, F}),
+    F.
 
 
 

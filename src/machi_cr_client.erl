@@ -299,20 +299,16 @@ do_append_head3(NSInfo, Prefix,
     case ?FLU_PC:append_chunk(Proxy, NSInfo, EpochID,
                               Prefix, Chunk, CSum, Opts, ?TIMEOUT) of
         {ok, {Offset, _Size, File}=_X} ->
-io:format(user, "CLNT append_chunk: head ~w ok\n    ~p\n    hd ~p rest ~p epoch ~P\n", [HeadFLU, _X, HeadFLU, RestFLUs, EpochID, 8]),
             do_wr_app_midtail(RestFLUs, NSInfo, Prefix,
                               File, Offset, Chunk, CSum, Opts,
                               [HeadFLU], 0, STime, TO, append, S);
         {error, bad_checksum}=BadCS ->
-io:format(user, "CLNT append_chunk: head ~w BAD CS\n", [HeadFLU]),
             {reply, BadCS, S};
         {error, Retry}
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
-io:format(user, "CLNT append_chunk: head ~w error ~p\n", [HeadFLU, Retry]),
             do_append_head(NSInfo, Prefix,
                            Chunk, CSum, Opts, Depth, STime, TO, S);
         {error, written} ->
-io:format(user, "CLNT append_chunk: head ~w Written\n", [HeadFLU]),
             %% Implicit sequencing + this error = we don't know where this
             %% written block is.  But we lost a race.  Repeat, with a new
             %% sequencer assignment.
@@ -391,32 +387,26 @@ do_wr_app_midtail2([FLU|RestFLUs]=FLUs, NSInfo,
                    CSum, Opts, Ws, Depth, STime, TO, MyOp, 
                    #state{epoch_id=EpochID, proxies_dict=PD}=S) ->
     Proxy = orddict:fetch(FLU, PD),
-io:format(user, "CLNT append_chunk: mid/tail ~w\n", [FLU]),
     case ?FLU_PC:write_chunk(Proxy, NSInfo, EpochID, File, Offset, Chunk, CSum, ?TIMEOUT) of
         ok ->
-io:format(user, "CLNT append_chunk: mid/tail ~w ok\n", [FLU]),
             do_wr_app_midtail2(RestFLUs, NSInfo, Prefix,
                                File, Offset, Chunk,
                                CSum, Opts, [FLU|Ws], Depth, STime, TO, MyOp, S);
         {error, bad_checksum}=BadCS ->
-io:format(user, "CLNT append_chunk: mid/tail ~w BAD CS\n", [FLU]),
             %% TODO: alternate strategy?
             {reply, BadCS, S};
         {error, Retry}
           when Retry == partition; Retry == bad_epoch; Retry == wedged ->
-io:format(user, "CLNT append_chunk: mid/tail ~w error ~p\n", [FLU, Retry]),
             do_wr_app_midtail(FLUs, NSInfo, Prefix,
                               File, Offset, Chunk,
                               CSum, Opts, Ws, Depth, STime, TO, MyOp, S);
         {error, written} ->
-io:format(user, "CLNT append_chunk: mid/tail ~w WRITTEN\n", [FLU]),
             %% We know what the chunk ought to be, so jump to the
             %% middle of read-repair.
             Resume = {append, Offset, iolist_size(Chunk), File},
             do_repair_chunk(FLUs, Resume, Chunk, CSum, [], NSInfo, File, Offset,
                             iolist_size(Chunk), Depth, STime, S);
         {error, trimmed} = Err ->
-io:format(user, "CLNT append_chunk: mid/tail ~w TRIMMED\n", [FLU]),
             %% TODO: nothing can be done
             {reply, Err, S};
         {error, not_written} ->
@@ -735,10 +725,8 @@ read_repair2(ap_mode=ConsistencyMode,
         {ok, {Chunks, _Trimmed}, GotItFrom} when is_list(Chunks) ->
             %% TODO: Repair trimmed chunks
             ToRepair = mutation_flus(P) -- [GotItFrom],
-            {Reply0, S1} = do_repair_chunks(Chunks, ToRepair, ReturnMode, [GotItFrom],
+            {reply, Reply, S1} = do_repair_chunks(Chunks, ToRepair, ReturnMode, [GotItFrom],
                                             NSInfo, File, Depth, STime, S, {ok, Chunks}),
-            {ok, Chunks} = Reply0,
-            Reply = {ok, {Chunks, _Trimmed}},
             {reply, Reply, S1};
         {error, bad_checksum}=BadCS ->
             %% TODO: alternate strategy?
@@ -761,7 +749,7 @@ do_repair_chunks([], _, _, _, _, _, _, _, S, Reply) ->
     {Reply, S};
 do_repair_chunks([{_, Offset, Chunk, CSum}|T],
                  ToRepair, ReturnMode, [GotItFrom], NSInfo, File, Depth, STime, S, Reply) ->
-    true = _TODO_fixme = not is_atom(CSum),
+    true = not is_atom(CSum),
     Size = iolist_size(Chunk),
     case do_repair_chunk(ToRepair, ReturnMode, Chunk, CSum, [GotItFrom], NSInfo, File, Offset,
                          Size, Depth, STime, S) of
@@ -791,12 +779,12 @@ do_repair_chunk(ToRepair, ReturnMode, Chunk, CSum, Repaired, NSInfo, File, Offse
             end
     end.
 
-do_repair_chunk2([], ReturnMode, Chunk, _CSum, _Repaired, _NSInfo, File, Offset,
+do_repair_chunk2([], ReturnMode, Chunk, CSum, _Repaired, _NSInfo, File, Offset,
                  _IgnoreSize, _Depth, _STime, S) ->
     %% TODO: add stats for # of repairs, length(_Repaired)-1, etc etc?
     case ReturnMode of
         read ->
-            {reply, {ok, {[Chunk], []}}, S};
+            {reply, {ok, {[{File, Offset, Chunk, CSum}], []}}, S};
         {append, Offset, Size, File} ->
             {reply, {ok, {[{Offset, Size, File}], []}}, S}
     end;
@@ -943,7 +931,6 @@ update_proj2(Count, #state{bad_proj=BadProj, proxies_dict=ProxiesDict,
             NewProxiesDict = ?FLU_PC:start_proxies(NewMembersDict),
             %% Make crash reports shorter by getting rid of 'react' history.
             P2 = P#projection_v1{dbg2=lists:keydelete(react, 1, Dbg2)},
-io:format(user, "CLNT PROJ: epoch ~p ~P upi ~w ~w\n", [P2#projection_v1.epoch_number, P2#projection_v1.epoch_csum, 6, P2#projection_v1.upi, P2#projection_v1.repairing]),
             S#state{bad_proj=undefined, proj=P2, epoch_id=EpochID,
                     members_dict=NewMembersDict, proxies_dict=NewProxiesDict};
         _P ->
