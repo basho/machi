@@ -210,11 +210,9 @@ handle_find_file(FluName, Tid, #ns_info{name=NS, locator=NSLocator}=NSInfo, Pref
     N = machi_util:read_max_filenum(DataDir, NS, NSLocator, Prefix),
     {File, Cleanup} = case find_file(DataDir, NSInfo, Prefix, N) of
         [] ->
-io:format(user, "HFF: 1\n", []),
             {find_or_make_filename(Tid, DataDir, NS, NSLocator, Prefix, N), false};
-        [H] -> io:format(user, "HFF: 2 ~s\n", [H]),{H, true};
+        [H] -> {H, true};
         [Fn | _ ] = L ->
-io:format(user, "HFF: 3 ~p\n", [L]),
             lager:debug(
               "Searching for a matching file to prefix ~p and sequence number ~p gave multiples: ~p",
               [Prefix, N, L]),
