@@ -116,11 +116,11 @@ get_written_interval(L) ->
 initial_state() ->
     {_, _, MS} = os:timestamp(),
     Filename = test_server:temp_name("eqc_data") ++ "." ++ integer_to_list(MS),
-    #state{filename=Filename, written=[{0,1024}]}.
+    #state{filename=Filename, written=[]}.
 
 initial_state(I, T) ->
     S=initial_state(),
-    S#state{written=[{0,1024}],
+    S#state{written=[],
             planned_writes=I,
             planned_trims=T}.
 
@@ -230,7 +230,8 @@ start_command(S) ->
     {call, ?MODULE, start, [S]}.
 
 start(#state{filename=File}) ->
-    {ok, Pid} = machi_file_proxy:start_link(some_flu, File, ?TESTDIR),
+    CsumT = get_csum_table(),
+    {ok, Pid} = machi_file_proxy:start_link(File, ?TESTDIR, CsumT),
     unlink(Pid),
     Pid.
 
@@ -432,6 +433,40 @@ stop_post(_, _, _) -> true.
 stop_next(S, _, _) ->
     S#state{pid=undefined, prev_extra=0}.
 
+csum_table_holder() ->
+    Parent = self(),
+    spawn_link(fun() ->
+                       CsumFile = test_server:temp_name("eqc_data-csum"),
+                       filelib:ensure_dir(CsumFile),
+                       {ok, CsumT} = machi_csum_table:open(CsumFile, []),
+                       erlang:register(csum_table_holder, self()),
+                       Parent ! ok,
+                       csum_table_holder_loop(CsumT),
+                       machi_csum_table:close(CsumT),
+                       erlang:unregister(csum_table_holder)
+               end),
+    receive
+        Other -> Other
+    after 1000 ->
+            timeout
+    end.
+
+csum_table_holder_loop(CsumT) ->
+    receive
+        {get, From} ->
+            From ! CsumT;
+        stop ->
+            ok
+    end.
+
+get_csum_table() ->
+    csum_table_holder ! {get, self()},
+    receive CsumT -> CsumT
+    end.
+
+stop_csum_table_holder() ->
+    catch csum_table_holder ! stop.
+
 %% Property
 
 prop_ok() ->
@@ -440,7 +475,9 @@ prop_ok() ->
             {shuffle_interval(), shuffle_interval()},
             ?FORALL(Cmds, parallel_commands(?MODULE, initial_state(I, T)),
                     begin
+                        ok = csum_table_holder(),
                         {H, S, Res} = run_parallel_commands(?MODULE, Cmds),
+                        stop_csum_table_holder(),
                         cleanup(),
                         pretty_commands(?MODULE, Cmds, {H, S, Res},
                                         aggregate(command_names(Cmds), Res == ok))

@@ -122,8 +122,8 @@ flu_smoke_test() ->
         {ok, [{_,File1}]} = ?FLU_C:list_files(Host, TcpPort, ?DUMMY_PV1_EPOCH),
         Len1 = size(Chunk1),
         {error, not_written} = ?FLU_C:read_chunk(Host, TcpPort,
-                                                  ?DUMMY_PV1_EPOCH,
-                                                  File1, Off1*983829323, Len1, []),
+                                                 ?DUMMY_PV1_EPOCH,
+                                                 File1, Off1*983829323, Len1, []),
         %% XXX FIXME
         %%
         %% This is failing because the read extends past the end of the file.

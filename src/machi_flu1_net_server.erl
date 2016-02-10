@@ -392,17 +392,14 @@ do_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum, #state{flu_name=FluNa
 do_server_read_chunk(File, Offset, Size, Opts, #state{flu_name=FluName})->
     case sanitize_file_string(File) of
         ok ->
-            case machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, File}) of
-                {ok, Pid} ->
-                    case machi_file_proxy:read(Pid, Offset, Size, Opts) of
-                        %% XXX FIXME 
-                        %% For now we are omiting the checksum data because it blows up
-                        %% protobufs.
-                        {ok, ChunksAndTrimmed} -> {ok, ChunksAndTrimmed};
-                        Other -> Other
-                    end;
-                {error, trimmed} = Error ->
-                    Error
+            {ok, Pid} = machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, File}),
+            case machi_file_proxy:read(Pid, Offset, Size, Opts) of
+                %% XXX FIXME 
+                %% For now we are omiting the checksum data because it blows up
+                %% protobufs.
+                {ok, ChunksAndTrimmed} -> {ok, ChunksAndTrimmed};
+                Other ->
+                    Other
             end;
         _ ->
             {error, bad_arg}

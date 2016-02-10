@@ -2,68 +2,69 @@
 -compile(export_all).
 
 -include_lib("eunit/include/eunit.hrl").
--define(HDR, {0, 1024, none}).
 
 cleanup(Dir) ->
     os:cmd("rm -rf " ++ Dir).
 
 smoke_test() ->
-    Filename = "./temp-checksum-dumb-file",
-    _ = cleanup(Filename),
-    {ok, MC} = machi_csum_table:open(Filename, []),
-    ?assertEqual([{1024, infinity}],
-                 machi_csum_table:calc_unwritten_bytes(MC)),
+    DBFile = "./temp-checksum-dumb-file",
+    Filename = <<"/some/puppy/and/cats^^^42">>,
+    _ = cleanup(DBFile),
+    {ok, MC} = machi_csum_table:open(DBFile, []),
+    ?assertEqual([{0, infinity}],
+                 machi_csum_table:calc_unwritten_bytes(MC, Filename)),
     Entry = {Offset, Size, Checksum} = {1064, 34, <<"deadbeef">>},
-    [] = machi_csum_table:find(MC, Offset, Size),
-    ok = machi_csum_table:write(MC, Offset, Size, Checksum),
-    [{1024, 40}, {1098, infinity}] = machi_csum_table:calc_unwritten_bytes(MC),
-    ?assertEqual([Entry], machi_csum_table:find(MC, Offset, Size)),
-    ok = machi_csum_table:trim(MC, Offset, Size, undefined, undefined),
+    [] = machi_csum_table:find(MC, Filename, Offset, Size),
+    ok = machi_csum_table:write(MC, Filename, Offset, Size, Checksum),
+    [{0, 1064}, {1098, infinity}] = machi_csum_table:calc_unwritten_bytes(MC, Filename),
+    ?assertEqual([Entry], machi_csum_table:find(MC, Filename, Offset, Size)),
+    ok = machi_csum_table:trim(MC, Filename, Offset, Size, undefined, undefined),
     ?assertEqual([{Offset, Size, trimmed}],
-                 machi_csum_table:find(MC, Offset, Size)),
-    ok = machi_csum_table:close(MC),
-    ok = machi_csum_table:delete(MC).
+                 machi_csum_table:find(MC, Filename, Offset, Size)),
+    ok = machi_csum_table:close(MC).
 
 close_test() ->
-    Filename = "./temp-checksum-dumb-file-2",
-    _ = cleanup(Filename),
-    {ok, MC} = machi_csum_table:open(Filename, []),
+    DBFile = "./temp-checksum-dumb-file-2",
+    Filename = <<"/some/puppy/and/cats^^^43">>,
+    _ = cleanup(DBFile),
+    {ok, MC} = machi_csum_table:open(DBFile, []),
     Entry = {Offset, Size, Checksum} = {1064, 34, <<"deadbeef">>},
-    [] = machi_csum_table:find(MC, Offset, Size),
-    ok = machi_csum_table:write(MC, Offset, Size, Checksum),
-    [Entry] = machi_csum_table:find(MC, Offset, Size),
+    [] = machi_csum_table:find(MC, Filename, Offset, Size),
+    ok = machi_csum_table:write(MC, Filename, Offset, Size, Checksum),
+    [Entry] = machi_csum_table:find(MC, Filename, Offset, Size),
     ok = machi_csum_table:close(MC),
 
-    {ok, MC2} = machi_csum_table:open(Filename, []),
-    [Entry] = machi_csum_table:find(MC2, Offset, Size),
-    ok = machi_csum_table:trim(MC2, Offset, Size, undefined, undefined),
-    [{Offset, Size, trimmed}] = machi_csum_table:find(MC2, Offset, Size),
-    ok = machi_csum_table:delete(MC2).
+    {ok, MC2} = machi_csum_table:open(DBFile, []),
+    [Entry] = machi_csum_table:find(MC2, Filename, Offset, Size),
+    ok = machi_csum_table:trim(MC2, Filename, Offset, Size, undefined, undefined),
+    [{Offset, Size, trimmed}] = machi_csum_table:find(MC2, Filename, Offset, Size),
+    ok = machi_csum_table:close(MC2).
 
 smoke2_test() ->
-    Filename = "./temp-checksum-dumb-file-3",
-    _ = cleanup(Filename),
-    {ok, MC} = machi_csum_table:open(Filename, []),
+    DBFile = "./temp-checksum-dumb-file-3",
+    Filename = <<"/some/puppy/and/cats^^^43">>,
+    _ = cleanup(DBFile),
+    {ok, MC} = machi_csum_table:open(DBFile, []),
     Entry = {Offset, Size, Checksum} = {1025, 10, <<"deadbeef">>},
-    ok = machi_csum_table:write(MC, Offset, Size, Checksum),
-    ?assertEqual([], machi_csum_table:find(MC, 0, 0)),
-    ?assertEqual([?HDR], machi_csum_table:find(MC, 0, 1)),
-    [Entry] = machi_csum_table:find(MC, Offset, Size),
-    [?HDR] = machi_csum_table:find(MC, 1, 1024),
-    ?assertEqual([?HDR, Entry],
-                 machi_csum_table:find(MC, 1023, 1024)),
-    [Entry] = machi_csum_table:find(MC, 1024, 1024),
-    [Entry] = machi_csum_table:find(MC, 1025, 1024),
+    ok = machi_csum_table:write(MC, Filename, Offset, Size, Checksum),
+    ?assertEqual([], machi_csum_table:find(MC, Filename, 0, 0)),
+    ?assertEqual([], machi_csum_table:find(MC, Filename, 0, 1)),
+    [Entry] = machi_csum_table:find(MC, Filename, Offset, Size),
+    [] = machi_csum_table:find(MC, Filename, 1, 1024),
+    ?assertEqual([Entry],
+                 machi_csum_table:find(MC, Filename, 1023, 1024)),
+    [Entry] = machi_csum_table:find(MC, Filename, 1024, 1024),
+    [Entry] = machi_csum_table:find(MC, Filename, 1025, 1024),
 
-    ok = machi_csum_table:trim(MC, Offset, Size, undefined, undefined),
-    [{Offset, Size, trimmed}] = machi_csum_table:find(MC, Offset, Size),
-    ok = machi_csum_table:close(MC),
-    ok = machi_csum_table:delete(MC).
+    ok = machi_csum_table:trim(MC, Filename, Offset, Size, undefined, undefined),
+    [{Offset, Size, trimmed}] = machi_csum_table:find(MC, Filename, Offset, Size),
+    ok = machi_csum_table:close(MC).
 
 smoke3_test() ->
-    Filename = "./temp-checksum-dumb-file-4",
-    _ = cleanup(Filename),
-    {ok, MC} = machi_csum_table:open(Filename, []),
+    DBFile = "./temp-checksum-dumb-file-4",
+    Filename = <<"/some/puppy/and/cats^^^44">>,
+    _ = cleanup(DBFile),
+    {ok, MC} = machi_csum_table:open(DBFile, []),
     Scenario =
         [%% Command, {Offset, Size, Csum}, LeftNeighbor, RightNeibor
          {?LINE, write, {2000, 10, <<"heh">>}, undefined, undefined},
@@ -84,9 +85,9 @@ smoke3_test() ->
           %% ?debugVal({_Line, Chunk}),
           {Offset, Size, Csum} = Chunk,
           ?assertEqual(LeftN0,
-                       machi_csum_table:find_leftneighbor(MC, Offset)),
+                       machi_csum_table:find_leftneighbor(MC, Filename, Offset)),
           ?assertEqual(RightN0,
-                       machi_csum_table:find_rightneighbor(MC, Offset+Size)),
+                       machi_csum_table:find_rightneighbor(MC, Filename, Offset+Size)),
           LeftN = case LeftN0 of
                       {OffsL, SizeL, trimmed} -> {OffsL, SizeL, trimmed};
                       {OffsL, SizeL, _} -> {OffsL, SizeL, <<"boom">>};
@@ -98,19 +99,18 @@ smoke3_test() ->
                    end,
           case Cmd of
               write ->
-                  ok = machi_csum_table:write(MC, Offset, Size, Csum,
+                  ok = machi_csum_table:write(MC, Filename, Offset, Size, Csum,
                                               LeftN, RightN);
               trim ->
-                  ok = machi_csum_table:trim(MC, Offset, Size,
+                  ok = machi_csum_table:trim(MC, Filename, Offset, Size,
                                              LeftN, RightN)
           end
       end || {_Line, Cmd, Chunk, LeftN0, RightN0} <- Scenario ],
-    ?assert(not machi_csum_table:all_trimmed(MC, 10000)),
-    machi_csum_table:trim(MC, 0, 10000, undefined, undefined),
-    ?assert(machi_csum_table:all_trimmed(MC, 10000)),
+    ?assert(not machi_csum_table:all_trimmed(MC, Filename, 0, 10000)),
+    machi_csum_table:trim(MC, Filename, 0, 10000, undefined, undefined),
+    ?assert(machi_csum_table:all_trimmed(MC, Filename, 0, 10000)),
 
-    ok = machi_csum_table:close(MC),
-    ok = machi_csum_table:delete(MC).
+    ok = machi_csum_table:close(MC).
 
 %% TODO: add quickcheck test here
 

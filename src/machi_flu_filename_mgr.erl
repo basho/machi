@@ -48,13 +48,12 @@
 -compile(export_all).
 -endif.
 
--export([
-    child_spec/2,
-    start_link/2,
-    find_or_make_filename_from_prefix/4,
-    increment_prefix_sequence/3,
-    list_files_by_prefix/2
-    ]).
+-export([child_spec/2,
+         start_link/2,
+         find_or_make_filename_from_prefix/4,
+         increment_prefix_sequence/3,
+         list_files_by_prefix/2,
+         get_csum_table/1]).
 
 %% gen_server callbacks
 -export([
@@ -72,7 +71,8 @@
 -record(state, {fluname :: atom(),
                 tid     :: ets:tid(),
                 datadir :: string(),
-                epoch   :: pv1_epoch()
+                epoch   :: pv1_epoch(),
+                csum_table :: machi_csum_table:table()
                }).
 
 %% public API
@@ -126,13 +126,25 @@ list_files_by_prefix(_FluName, Other) ->
     lager:error("~p is not a valid prefix.", [Other]),
     error(badarg).
 
+get_csum_table(FluName) when is_atom(FluName) ->
+    gen_server:call(make_filename_mgr_name(FluName), get_csum_table, ?TIMEOUT).
+
 %% gen_server API
 init([FluName, DataDir]) ->
     Tid = ets:new(make_filename_mgr_name(FluName), [named_table, {read_concurrency, true}]),
+
+    %% metadata includes checksums, offsets and filenames
+    CsumTableDir = filename:join(DataDir, "metadata"),
+    {ok, CsumTable} = machi_csum_table:open(CsumTableDir, []),
+    %% TODO make sure all files non-existent, if any remaining files
+    %% here, just delete it. They're in the list *because* they're all
+    %% trimmed.
+
     {ok, #state{fluname = FluName,
                 epoch = ?DUMMY_PV1_EPOCH,
                 datadir = DataDir,
-                tid = Tid}}.
+                tid = Tid,
+                csum_table = CsumTable}}.
 
 handle_cast(Req, State) ->
     lager:warning("Got unknown cast ~p", [Req]),
@@ -167,6 +179,9 @@ handle_call({list_files, Prefix}, From, S = #state{ datadir = DataDir }) ->
     end),
     {noreply, S};
 
+handle_call(get_csum_table, _From, S = #state{ csum_table = CsumTable }) ->
+    {reply, {ok, CsumTable}, S};
+
 handle_call(Req, From, State) ->
     lager:warning("Got unknown call ~p from ~p", [Req, From]),
     {reply, hoge, State}.
@@ -175,8 +190,9 @@ handle_info(Info, State) ->
     lager:warning("Got unknown info ~p", [Info]),
     {noreply, State}.
 
-terminate(Reason, _State) ->
+terminate(Reason, _State = #state{ csum_table = CsumTable} ) ->
     lager:info("Shutting down because ~p", [Reason]),
+    ok = machi_csum_table:close(CsumTable),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
