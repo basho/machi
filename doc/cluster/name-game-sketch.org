@@ -41,13 +41,14 @@ We wish to provide partitioned/distributed file storage
 across all ~n~ chains.  We call the entire collection of ~n~ Machi
 chains a "cluster".
 
-We may wish to have several types of Machi clusters, e.g.
+We may wish to have several types of Machi clusters.  For example:
 
-+ Chain length of 3 for normal data, longer for
-  cannot-afford-data-loss files,
-+ Chain length of 1 for don't-care-if-it-gets-lost,
-  store-stuff-very-very-cheaply files.
-+ Chain length of 7 for critical, unreplaceable files.
++ Chain length of 1 for "don't care if it gets lost,
+  store stuff very very cheaply" data.
++ Chain length of 2 for normal data.
+  + Equivalent to quorum replication's reliability with 3 copies.
++ Chain length of 7 for critical, unreplaceable data.
+  + Equivalent to quorum replication's reliability with 15 copies.
 
 Each of these types of chains will have a name ~N~ in the
 namespace.  The role of the cluster namespace will be demonstrated in
@@ -60,14 +61,31 @@ inside of a cluster is completely unaware of the cluster layer.
 
 ** The reader is familiar with the random slicing technique
 
-I'd done something very-very-nearly-identical for the Hibari database
+I'd done something very-very-nearly-like-this for the Hibari database
 6 years ago.  But the Hibari technique was based on stuff I did at
-Sendmail, Inc, so it felt old news to me.  {shrug}
+Sendmail, Inc, in 2000, so this technique feels like old news to me.
+{shrug}
 
-The Hibari documentation has a brief photo illustration of how random
-slicing works, see [[http://hibari.github.io/hibari-doc/hibari-sysadmin-guide.en.html#chain-migration][Hibari Sysadmin Guide, chain migration]]
+The following section provides an illustrated example.
+Very quickly, the random slicing algorithm is:
 
-For a comprehensive description, please see these two papers:
+- Hash a string onto the unit interval [0.0, 1.0)
+- Calculate h(unit interval point, Map) -> bin, where ~Map~ divides
+  the unit interval into bins (or partitions or shards).
+
+Machi's adaptation is in step 1: we do not hash any strings.  Instead, we
+simply choose a number on the unit interval.  This number is called
+the "cluster locator number".
+
+As described later in this doc, Machi file names are structured into
+several components.  One component of the file name contains the cluster
+locator number; we use the number as-is for step 2 above.
+
+*** For more information about Random Slicing
+
+For a comprehensive description of random slicing, please see the
+first two papers.  For a quicker summary, please see the third
+reference.
 
 #+BEGIN_QUOTE
 Reliable and Randomized Data Distribution Strategies for Large Scale Storage Systems
@@ -80,21 +98,10 @@ Random Slicing: Efficient and Scalable Data Placement for Large-Scale
 Alberto Miranda et al.
 DOI: http://dx.doi.org/10.1145/2632230 (long version, ACM Transactions
                               on Storage, Vol. 10, No. 3, Article 9, 2014)
+
+[[http://hibari.github.io/hibari-doc/hibari-sysadmin-guide.en.html#chain-migration][Hibari Sysadmin Guide, chain migration section]].
+http://hibari.github.io/hibari-doc/hibari-sysadmin-guide.en.html#chain-migration
 #+END_QUOTE
-
-In general, random slicing says:
-
-- Hash a string onto the unit interval [0.0, 1.0)
-- Calculate h(unit interval point, Map) -> bin, where ~Map~ partitions
-  the unit interval into bins.
-
-Our adaptation is in step 1: we do not hash any strings.  Instead, we
-simply choose a number on the unit interval.  This number is called
-the "cluster locator".
-
-As described later in this doc, Machi file names are structured into
-several components.  One component of the file name contains the "cluster
-locator"; we use the number as-is for step 2 above.
 
 * 3. A simple illustration
 
@@ -127,25 +134,28 @@ Assume that we have a random slicing map called ~Map~.  This particular
 | 0.66 - 0.91 | Chain3   |
 | 0.91 - 1.00 | Chain4   |
 
-Assume that the system chooses a chain locator of 0.05.
+Assume that the system chooses a cluster locator of 0.05.
 According to ~Map~, the value of
 ~rs_hash_with_float(0.05,Map) = Chain1~.
 Similarly, ~rs_hash_with_float(0.26,Map) = Chain4~.
+
+This example should look very similar to Hibari's technique.
+The Hibari documentation has a brief photo illustration of how random
+slicing works, see [[http://hibari.github.io/hibari-doc/hibari-sysadmin-guide.en.html#chain-migration][Hibari Sysadmin Guide, chain migration]].
 
 * 4. Use of the cluster namespace: name separation plus chain type
 
 Let us assume that the cluster framework provides several different types
 of chains:
 
-|              |            | Consistency |                                  |
-| Chain length | Namespace  | Mode        | Comment                          |
-|--------------+------------+-------------+----------------------------------|
-|            3 | normal     | eventual    | Normal storage redundancy & cost |
-|            2 | reduced    | eventual    | Reduced cost storage             |
-|            1 | risky      | eventual    | Really, really cheap storage     |
-|            7 | paranoid   | eventual    | Safety-critical storage          |
-|            3 | sequential | strong      | Strong consistency               |
-|--------------+------------+-------------+----------------------------------|
+| Chain length | Namespace    | Consistency Mode | Comment                          |
+|--------------+--------------+------------------+----------------------------------|
+|            3 | ~normal~     | eventual         | Normal storage redundancy & cost |
+|            2 | ~reduced~    | eventual         | Reduced cost storage             |
+|            1 | ~risky~      | eventual         | Really, really cheap storage     |
+|            7 | ~paranoid~   | eventual         | Safety-critical storage          |
+|            3 | ~sequential~ | strong           | Strong consistency               |
+|--------------+--------------+------------------+----------------------------------|
 
 The client may want to choose the amount of redundancy that its
 application requires: normal, reduced cost, or perhaps even a single
@@ -155,17 +165,17 @@ intention.
 Further, the cluster administrators may wish to use the namespace to
 provide separate storage for different applications.  Jane's
 application may use the namespace "jane-normal" and Bob's app uses
-"bob-reduced".  Administrators may definite separate groups of
+"bob-reduced".  Administrators may definine separate groups of
 chains on separate servers to serve these two applications.
 
 * 5. In its lifetime, a file may be moved to different chains
 
 The cluster management scheme may decide that files need to migrate to
-other chains.  The reason could be for storage load or I/O load
-balancing reasons.  It could be because a chain is being
-decommissioned by its owners.  There are many legitimate reasons why a
-file that is initially created on chain ID X has been moved to
-chain ID Y.
+other chains -- i.e., file that is initially created on chain ID ~X~
+has been moved to chain ID ~Y~.
+
++ For storage load or I/O load balancing reasons.
++ Because a chain is being decommissioned by the sysadmin.
 
 * 6. Floating point is not required ... it is merely convenient for explanation
 
@@ -260,7 +270,7 @@ implementation.  Other protocols, such as HTTP, will be added later.
    such as disk utilization percentage.
 2. Cluster bridge knows the cluster ~Map~ for namespace ~N~.
 3. Cluster bridge choose some cluster locator value ~L~ such that
-   ~rs_hash_with_float(L,Map) = T~ (see below).
+   ~rs_hash_with_float(L,Map) = T~ (see algorithm below).
 4. Cluster bridge sends its request to chain
    ~T~: ~append_chunk(p,L,N,...) -> {ok,p^L^N^u,ByteOffset}~
 5. Cluster bridge forwards the reply tuple to the client.
@@ -278,7 +288,7 @@ implementation.  Other protocols, such as HTTP, will be added later.
    ~read_chunk(F,...) ->~ ... reply
 5. Cluster bridge forwards the reply to the client.
 
-** The details: calculating 'L' (the Cluster locator) to match a desired target chain
+** The details: calculating 'L' (the cluster locator number) to match a desired target chain
 
 1. We know ~Map~, the current cluster mapping for a cluster namespace ~N~.
 2. We look inside of ~Map~, and we find all of the unit interval ranges
@@ -287,20 +297,12 @@ implementation.  Other protocols, such as HTTP, will be added later.
 3. In our example, ~T=Chain2~.  The example ~Map~ contains a single
    unit interval range for ~Chain2~, ~[(0.33,0.58]]~.
 4. Choose a uniformly random number ~r~ on the unit interval.
-5. Calculate locator ~L~ by mapping ~r~ onto the concatenation
+5. Calculate the cluster locator ~L~ by mapping ~r~ onto the concatenation
    of the cluster hash space range intervals in ~MapList~.  For example,
    if ~r=0.5~, then ~L = 0.33 + 0.5*(0.58-0.33) = 0.455~, which is
    exactly in the middle of the ~(0.33,0.58]~ interval.
 
 ** A bit more about the cluster namespaces's meaning and use
-
-- The cluster framework will provide means of creating and managing
-  chains of different types, e.g., chain length, consistency mode.
-- The cluster framework will manage the mapping of cluster namespace
-  names to the chains in the system.
-- The cluster framework will provide query functions to map a cluster
-  namespace name to a cluster map,
-  e.g. ~get_cluster_latest_map("reduced") -> Map{generation=7,...}~.
 
 For use by Riak CS, for example, we'd likely start with the following
 namespaces ... working our way down the list as we add new features
@@ -311,6 +313,16 @@ and/or re-implement existing CS features.
 - "stanchion7" = Chain length = 7, strong consistency mode.  Perhaps
   use this namespace for the metadata required to re-implement the
   operations that are performed by today's Stanchion application.
+
+We want the cluster framework to:
+
+- provide means of creating and managing
+  chains of different types, e.g., chain length, consistency mode.
+- manage the mapping of cluster namespace
+  names to the chains in the system.
+- provide query functions to map a cluster
+  namespace name to a cluster map,
+  e.g. ~get_cluster_latest_map("reduced") -> Map{generation=7,...}~.
 
 * 8. File migration (a.k.a. rebalancing/reparitioning/resharding/redistribution)
 
@@ -332,7 +344,7 @@ get full, hardware will change, read workload will fluctuate,
 etc etc.
 
 This document uses the word "migration" to describe moving data from
-one Machi chain to another within a cluster system.
+one Machi chain to another chain within a cluster system.
 
 A simple variation of the Random Slicing hash algorithm can easily
 accommodate Machi's need to migrate files without interfering with
@@ -433,9 +445,9 @@ The HibariDB system performs data migrations in almost exactly this
 manner.  However, one important
 limitation of HibariDB is not being able to
 perform more than one migration at a time.  HibariDB's data is
-mutable, and mutation causes many problems already when migrating data
+mutable.  Mutation causes many problems when migrating data
 across two submaps; three or more submaps was too complex to implement
-quickly.
+quickly and correctly.
 
 Fortunately for Machi, its file data is immutable and therefore can
 easily manage many migrations in parallel, i.e., its submap list may
@@ -450,15 +462,15 @@ file for any prefix, as long as all prerequisites are also true,
 
 - The epoch has not changed.  (In AP mode, epoch change -> mandatory
   file name suffix change.)
-- The locator number is stable.
+- The cluster locator number is stable.
 - The latest file for prefix ~p~ is smaller than maximum file size for
   a FLU's configuration.
 
-The stability of the locator number is an implementation detail that
+The stability of the cluster locator number is an implementation detail that
 must be managed by the cluster bridge.
 
 Reuse of the same file is not possible if the bridge always chooses a
-different locator number ~L~ or if the client always uses a unique
+different cluster locator number ~L~ or if the client always uses a unique
 file prefix ~p~.  The latter is a sign of a misbehaved client; the
 former is a poorly-implemented bridge.
 
