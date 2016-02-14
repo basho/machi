@@ -199,9 +199,7 @@ change_partition(Partition,
 %% Generators
 
 num() ->
-    2.
-    %% TODO:put me back
-    %% choose(2, 5).
+    choose(2, 5).
 
 cr_count(Num) ->
     Num * 3.
