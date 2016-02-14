@@ -579,29 +579,29 @@ do_pb_hl_request2({high_echo, Msg}, S) ->
     {Msg, S};
 do_pb_hl_request2({high_auth, _User, _Pass}, S) ->
     {-77, S};
-do_pb_hl_request2({high_append_chunk, NS, Prefix, Chunk, TaggedCSum, Opts},
+do_pb_hl_request2({high_append_chunk=Op, NS, Prefix, Chunk, TaggedCSum, Opts},
                   #state{high_clnt=Clnt}=S) ->
     NSInfo = #ns_info{name=NS},                 % TODO populate other fields
-    io:format(user, "TODO fix broken append_chunk mod ~s line ~w\n", [?MODULE, ?LINE]),
+    todo_perhaps_remind_ns_locator_not_chosen(Op),
     Res = machi_cr_client:append_chunk(Clnt, NSInfo,
                                        Prefix, Chunk, TaggedCSum, Opts),
     {Res, S};
-do_pb_hl_request2({high_write_chunk, File, Offset, Chunk, CSum},
+do_pb_hl_request2({high_write_chunk=Op, File, Offset, Chunk, CSum},
                   #state{high_clnt=Clnt}=S) ->
     NSInfo = undefined,
-    io:format(user, "TODO fix broken write_chunk mod ~s line ~w\n", [?MODULE, ?LINE]),
+    todo_perhaps_remind_ns_locator_not_chosen(Op),
     Res = machi_cr_client:write_chunk(Clnt, NSInfo, File, Offset, Chunk, CSum),
     {Res, S};
-do_pb_hl_request2({high_read_chunk, File, Offset, Size, Opts},
+do_pb_hl_request2({high_read_chunk=Op, File, Offset, Size, Opts},
                   #state{high_clnt=Clnt}=S) ->
     NSInfo = undefined,
-    io:format(user, "TODO fix broken read_chunk mod ~s line ~w\n", [?MODULE, ?LINE]),
+    todo_perhaps_remind_ns_locator_not_chosen(Op),
     Res = machi_cr_client:read_chunk(Clnt, NSInfo, File, Offset, Size, Opts),
     {Res, S};
-do_pb_hl_request2({high_trim_chunk, File, Offset, Size},
+do_pb_hl_request2({high_trim_chunk=Op, File, Offset, Size},
                   #state{high_clnt=Clnt}=S) ->
     NSInfo = undefined,
-    io:format(user, "TODO fix broken trim_chunk mod ~s line ~w\n", [?MODULE, ?LINE]),
+    todo_perhaps_remind_ns_locator_not_chosen(Op),
     Res = machi_cr_client:trim_chunk(Clnt, NSInfo, File, Offset, Size),
     {Res, S};
 do_pb_hl_request2({high_checksum_list, File}, #state{high_clnt=Clnt}=S) ->
@@ -620,3 +620,15 @@ make_high_clnt(#state{high_clnt=undefined}=S) ->
     S#state{high_clnt=Clnt};
 make_high_clnt(S) ->
     S.
+
+todo_perhaps_remind_ns_locator_not_chosen(Op) ->
+    Key = {?MODULE, Op},
+    case get(Key) of
+        undefined ->
+            io:format(user, "TODO op ~w is using default locator value\n",
+                      [Op]),
+            put(Key, true);
+        _ ->
+            ok
+    end.
+
