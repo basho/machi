@@ -191,12 +191,6 @@ generate_uuid_v4_str() ->
     io_lib:format("~8.16.0b-~4.16.0b-4~3.16.0b-~4.16.0b-~12.16.0b",
                         [A, B, C band 16#0fff, D band 16#3fff bor 16#8000, E]).
 
-find_file(DataDir, #ns_info{name=NS, locator=NSLocator}=_NSInfo, Prefix, N) ->
-    {_Filename, Path} = machi_util:make_data_filename(DataDir,
-                                                      NS, NSLocator,
-                                                      Prefix, "*", N),
-    filelib:wildcard(Path).
-
 list_files(DataDir, Prefix) ->
     {F_bin, Path} = machi_util:make_data_filename(DataDir, "*^" ++ Prefix ++ "^*"),
     filelib:wildcard(binary_to_list(F_bin), filename:dirname(Path)).

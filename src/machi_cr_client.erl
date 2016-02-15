@@ -725,8 +725,9 @@ read_repair2(ap_mode=ConsistencyMode,
         {ok, {Chunks, _Trimmed}, GotItFrom} when is_list(Chunks) ->
             %% TODO: Repair trimmed chunks
             ToRepair = mutation_flus(P) -- [GotItFrom],
-            {reply, Reply, S1} = do_repair_chunks(Chunks, ToRepair, ReturnMode, [GotItFrom],
-                                            NSInfo, File, Depth, STime, S, {ok, Chunks}),
+            Reply = {ok, {Chunks, []}},
+            {Reply, S1} = do_repair_chunks(Chunks, ToRepair, ReturnMode, [GotItFrom],
+                                            NSInfo, File, Depth, STime, S, Reply),
             {reply, Reply, S1};
         {error, bad_checksum}=BadCS ->
             %% TODO: alternate strategy?
@@ -753,7 +754,7 @@ do_repair_chunks([{_, Offset, Chunk, CSum}|T],
     Size = iolist_size(Chunk),
     case do_repair_chunk(ToRepair, ReturnMode, Chunk, CSum, [GotItFrom], NSInfo, File, Offset,
                          Size, Depth, STime, S) of
-        {ok, Chunk, S1} ->
+        {reply, {ok, _}, S1} ->
             do_repair_chunks(T, ToRepair, ReturnMode, [GotItFrom], NSInfo, File, Depth, STime, S1, Reply);
         Error ->
             Error
