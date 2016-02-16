@@ -44,6 +44,8 @@ verify_file_checksums_test2() ->
     TcpPort = 32958,
     DataDir = "./data",
     W_props = [{initial_wedged, false}],
+    NSInfo = undefined,
+    NoCSum = <<>>,
     try
         machi_test_util:start_flu_package(verify1_flu, TcpPort, DataDir,
                                           W_props),
@@ -51,8 +53,8 @@ verify_file_checksums_test2() ->
         try
             Prefix = <<"verify_prefix">>,
             NumChunks = 10,
-            [{ok, _} = ?FLU_C:append_chunk(Sock1, ?DUMMY_PV1_EPOCH,
-                                           Prefix, <<X:(X*8)/big>>) ||
+            [{ok, _} = ?FLU_C:append_chunk(Sock1, NSInfo, ?DUMMY_PV1_EPOCH,
+                                           Prefix, <<X:(X*8)/big>>, NoCSum) ||
                 X <- lists:seq(1, NumChunks)],
             {ok, [{_FileSize,File}]} = ?FLU_C:list_files(Sock1, ?DUMMY_PV1_EPOCH),
             ?assertEqual({ok, []},

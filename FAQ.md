@@ -11,14 +11,14 @@
 
 + [1 Questions about Machi in general](#n1)
     + [1.1 What is Machi?](#n1.1)
-    + [1.2 What is a Machi "cluster of clusters"?](#n1.2)
-        + [1.2.1 This "cluster of clusters" idea needs a better name, don't you agree?](#n1.2.1)
-    + [1.3 What is Machi like when operating in "eventually consistent" mode?](#n1.3)
-    + [1.4 What is Machi like when operating in "strongly consistent" mode?](#n1.4)
-    + [1.5 What does Machi's API look like?](#n1.5)
-    + [1.6 What licensing terms are used by Machi?](#n1.6)
-    + [1.7 Where can I find the Machi source code and documentation?  Can I contribute?](#n1.7)
-    + [1.8 What is Machi's expected release schedule, packaging, and operating system/OS distribution support?](#n1.8)
+    + [1.2 What is a Machi chain?](#n1.2)
+    + [1.3 What is a Machi cluster?](#n1.3)
+    + [1.4 What is Machi like when operating in "eventually consistent" mode?](#n1.4)
+    + [1.5 What is Machi like when operating in "strongly consistent" mode?](#n1.5)
+    + [1.6 What does Machi's API look like?](#n1.6)
+    + [1.7 What licensing terms are used by Machi?](#n1.7)
+    + [1.8 Where can I find the Machi source code and documentation?  Can I contribute?](#n1.8)
+    + [1.9 What is Machi's expected release schedule, packaging, and operating system/OS distribution support?](#n1.9)
 + [2 Questions about Machi relative to {{something else}}](#n2)
     + [2.1 How is Machi better than Hadoop?](#n2.1)
     + [2.2 How does Machi differ from HadoopFS/HDFS?](#n2.2)
@@ -28,13 +28,15 @@
 + [3 Machi's specifics](#n3)
     + [3.1 What technique is used to replicate Machi's files?  Can other techniques be used?](#n3.1)
     + [3.2 Does Machi have a reliance on a coordination service such as ZooKeeper or etcd?](#n3.2)
-    + [3.3 Is it true that there's an allegory written to describe humming consensus?](#n3.3)
-    + [3.4 How is Machi tested?](#n3.4)
-    + [3.5 Does Machi require shared disk storage? e.g. iSCSI, NBD (Network Block Device), Fibre Channel disks](#n3.5)
-    + [3.6 Does Machi require or assume that servers with large numbers of disks must use RAID-0/1/5/6/10/50/60 to create a single block device?](#n3.6)
-    + [3.7 What language(s) is Machi written in?](#n3.7)
-    + [3.8 Does Machi use the Erlang/OTP network distribution system (aka "disterl")?](#n3.8)
-    + [3.9 Can I use HTTP to write/read stuff into/from Machi?](#n3.9)
+    + [3.3 Are there any presentations available about Humming Consensus](#n3.3)
+    + [3.4 Is it true that there's an allegory written to describe Humming Consensus?](#n3.4)
+    + [3.5 How is Machi tested?](#n3.5)
+    + [3.6 Does Machi require shared disk storage? e.g. iSCSI, NBD (Network Block Device), Fibre Channel disks](#n3.6)
+    + [3.7 Does Machi require or assume that servers with large numbers of disks must use RAID-0/1/5/6/10/50/60 to create a single block device?](#n3.7)
+    + [3.8 What language(s) is Machi written in?](#n3.8)
+    + [3.9 Can Machi run on Windows?  Can Machi run on 32-bit platforms?](#n3.9)
+    + [3.10 Does Machi use the Erlang/OTP network distribution system (aka "disterl")?](#n3.10)
+    + [3.11 Can I use HTTP to write/read stuff into/from Machi?](#n3.11)
 
 <!-- ENDOUTLINE -->
 
@@ -48,7 +50,7 @@ Very briefly, Machi is a very simple append-only file store.
 
 Machi is
 "dumber" than many other file stores (i.e., lacking many features
-found in other file stores) such as HadoopFS or simple NFS or CIFS file
+found in other file stores) such as HadoopFS or a simple NFS or CIFS file
 server.
 However, Machi is a distributed file store, which makes it different
 (and, in some ways, more complicated) than a simple NFS or CIFS file
@@ -82,45 +84,39 @@ For a much longer answer, please see the
 [Machi high level design doc](https://github.com/basho/machi/tree/master/doc/high-level-machi.pdf).
 
 <a name="n1.2">
-### 1.2.  What is a Machi "cluster of clusters"?
+### 1.2.  What is a Machi chain?
 
-Machi's design is based on using small, well-understood and provable
-(mathematically) techniques to maintain multiple file copies without
-data loss or data corruption.  At its lowest level, Machi contains no
-support for distribution/partitioning/sharding of files across many
-servers.  A typical, fully-functional Machi cluster will likely be two
-or three machines.
+A Machi chain is a small number of machines that maintain a common set
+of replicated files.  A typical chain is of length 2 or 3.  For
+critical data that must be available despite several simultaneous
+server failures, a chain length of 6 or 7 might be used.
 
-However, Machi is designed to be an excellent building block for
-building larger systems.  A deployment of Machi "cluster of clusters"
-will use the "random slicing" technique for partitioning files across
-multiple Machi clusters that, as individuals, are unaware of the
-larger cluster-of-clusters scheme.
+<a name="n1.3">
+### 1.3.  What is a Machi cluster?
 
-The cluster-of-clusters management service will be fully decentralized
+A Machi cluster is a collection of Machi chains that
+partitions/shards/distributes files (based on file name) across the
+collection of chains.  Machi uses the "random slicing" algorithm (a
+variation of consistent hashing) to define the mapping of file name to
+chain name.
+
+The cluster management service will be fully decentralized
 and run as a separate software service installed on each Machi
 cluster.  This manager will appear to the local Machi server as simply
-another Machi file client.  The cluster-of-clusters managers will take
+another Machi file client.  The cluster managers will take
 care of file migration as the cluster grows and shrinks in capacity
 and in response to day-to-day changes in workload.
 
-Though the cluster-of-clusters manager has not yet been implemented,
+Though the cluster manager has not yet been implemented,
 its design is fully decentralized and capable of operating despite
-multiple partial failure of its member clusters.  We expect this
+multiple partial failure of its member chains.  We expect this
 design to scale easily to at least one thousand servers.
 
 Please see the
 [Machi source repository's 'doc' directory for more details](https://github.com/basho/machi/tree/master/doc/).
 
-<a name="n1.2.1">
-#### 1.2.1.  This "cluster of clusters" idea needs a better name, don't you agree?
-
-Yes.  Please help us: we are bad at naming things.
-For proof that naming things is hard, see
-[http://martinfowler.com/bliki/TwoHardThings.html](http://martinfowler.com/bliki/TwoHardThings.html)
-
-<a name="n1.3">
-### 1.3.  What is Machi like when operating in "eventually consistent" mode?
+<a name="n1.4">
+### 1.4.  What is Machi like when operating in "eventually consistent" mode?
 
 Machi's operating mode dictates how a Machi cluster will react to
 network partitions.  A network partition may be caused by:
@@ -143,13 +139,13 @@ consistency mode during and after network partitions are:
   together from "all sides" of the partition(s).
     * Unique files are copied in their entirety.
     * Byte ranges within the same file are merged.  This is possible
-      due to Machi's restrictions on file naming (files names are
-      alwoys assigned by Machi servers) and file offset assignments
-      (byte offsets are also always chosen by Machi servers according
-      to rules which guarantee safe mergeability.).
+      due to Machi's restrictions on file naming and file offset
+      assignment.  Both file names and file offsets are always chosen
+      by Machi servers according to rules which guarantee safe
+      mergeability. 
 
-<a name="n1.4">
-### 1.4.  What is Machi like when operating in "strongly consistent" mode?
+<a name="n1.5">
+### 1.5.  What is Machi like when operating in "strongly consistent" mode?
 
 The consistency semantics of file operations while in strongly
 consistency mode during and after network partitions are:
@@ -167,13 +163,13 @@ consistency mode during and after network partitions are:
 
 Machi's design can provide the illusion of quorum minority write
 availability if the cluster is configured to operate with "witness
-servers".  (This feaure is not implemented yet, as of June 2015.)
+servers".  (This feaure partially implemented, as of December 2015.)
 See Section 11 of
 [Machi chain manager high level design doc](https://github.com/basho/machi/tree/master/doc/high-level-chain-mgr.pdf)
 for more details.
 
-<a name="n1.5">
-### 1.5.  What does Machi's API look like?
+<a name="n1.6">
+### 1.6.  What does Machi's API look like?
 
 The Machi API only contains a handful of API operations.  The function
 arguments shown below use Erlang-style type annotations.
@@ -204,15 +200,15 @@ level" internal protocol are in a
 [Protocol Buffers](https://developers.google.com/protocol-buffers/docs/overview)
 definition at [./src/machi.proto](./src/machi.proto).
 
-<a name="n1.6">
-### 1.6.  What licensing terms are used by Machi?
+<a name="n1.7">
+### 1.7.  What licensing terms are used by Machi?
 
 All Machi source code and documentation is licensed by
 [Basho Technologies, Inc.](http://www.basho.com/)
 under the [Apache Public License version 2](https://github.com/basho/machi/tree/master/LICENSE).
 
-<a name="n1.7">
-### 1.7.  Where can I find the Machi source code and documentation?  Can I contribute?
+<a name="n1.8">
+### 1.8.  Where can I find the Machi source code and documentation?  Can I contribute?
 
 All Machi source code and documentation can be found at GitHub:
 [https://github.com/basho/machi](https://github.com/basho/machi).
@@ -226,8 +222,8 @@ ideas for improvement, please see our contributing & collaboration
 guidelines at
 [https://github.com/basho/machi/blob/master/CONTRIBUTING.md](https://github.com/basho/machi/blob/master/CONTRIBUTING.md).
 
-<a name="n1.8">
-### 1.8.  What is Machi's expected release schedule, packaging, and operating system/OS distribution support?
+<a name="n1.9">
+### 1.9.  What is Machi's expected release schedule, packaging, and operating system/OS distribution support?
 
 Basho expects that Machi's first major product release will take place
 during the 2nd quarter of 2016.
@@ -305,15 +301,15 @@ file's writable phase).
 
 <tr>
 <td> Does not have any file distribution/partitioning/sharding across
-Machi clusters: in a single Machi cluster, all files are replicated by
-all servers in the cluster.  The "cluster of clusters" concept is used
+Machi chains: in a single Machi chain, all files are replicated by
+all servers in the chain.  The "random slicing" technique is used
 to distribute/partition/shard files across multiple Machi clusters.
 <td> File distribution/partitioning/sharding is performed
 automatically by the HDFS "name node".
 
 <tr>
-<td> Machi requires no central "name node" for single cluster use.
-Machi requires no central "name node" for "cluster of clusters" use
+<td> Machi requires no central "name node" for single chain use or
+for multi-chain cluster use.
 <td> Requires a single "namenode" server to maintain file system contents
 and file content mapping.  (May be deployed with a "secondary
 namenode" to reduce unavailability when the primary namenode fails.)
@@ -479,8 +475,8 @@ difficult to adapt to Machi's design goals:
 * Both protocols use quorum majority consensus, which requires a
   minimum of *2F + 1* working servers to tolerate *F* failures.  For
   example, to tolerate 2 server failures, quorum majority protocols
-  require a minium of 5 servers.  To tolerate the same number of
-  failures, Chain replication requires only 3 servers.
+  require a minimum of 5 servers.  To tolerate the same number of
+  failures, Chain Replication requires a minimum of only 3 servers.
 * Machi's use of "humming consensus" to manage internal server
   metadata state would also (probably) require conversion to Paxos or
   Raft.  (Or "outsourced" to a service such as ZooKeeper.)
@@ -497,7 +493,17 @@ Humming consensus is described in the
 [Machi chain manager high level design doc](https://github.com/basho/machi/tree/master/doc/high-level-chain-mgr.pdf).
 
 <a name="n3.3">
-### 3.3.  Is it true that there's an allegory written to describe humming consensus?
+### 3.3.  Are there any presentations available about Humming Consensus
+
+Scott recently (November 2015) gave a presentation at the
+[RICON 2015 conference](http://ricon.io) about one of the techniques
+used by Machi; "Managing Chain Replication Metadata with
+Humming Consensus" is available online now.
+* [slides (PDF format)](http://ricon.io/speakers/slides/Scott_Fritchie_Ricon_2015.pdf)
+* [video](https://www.youtube.com/watch?v=yR5kHL1bu1Q)
+
+<a name="n3.4">
+### 3.4.  Is it true that there's an allegory written to describe Humming Consensus?
 
 Yes.  In homage to Leslie Lamport's original paper about the Paxos
 protocol, "The Part-time Parliamant", there is an allegorical story
@@ -508,8 +514,8 @@ The full story, full of wonder and mystery, is called
 There is also a
 [short followup blog posting](http://www.snookles.com/slf-blog/2015/03/20/on-humming-consensus-an-allegory-part-2/).
 
-<a name="n3.4">
-### 3.4.  How is Machi tested?
+<a name="n3.5">
+### 3.5.  How is Machi tested?
 
 While not formally proven yet, Machi's implementation of Chain
 Replication and of humming consensus have been extensively tested with
@@ -538,16 +544,16 @@ All test code is available in the [./test](./test) subdirectory.
 Modules that use QuickCheck will use a file suffix of `_eqc`, for
 example, [./test/machi_ap_repair_eqc.erl](./test/machi_ap_repair_eqc.erl).
 
-<a name="n3.5">
-### 3.5.  Does Machi require shared disk storage? e.g. iSCSI, NBD (Network Block Device), Fibre Channel disks
+<a name="n3.6">
+### 3.6.  Does Machi require shared disk storage? e.g. iSCSI, NBD (Network Block Device), Fibre Channel disks
 
 No, Machi's design assumes that each Machi server is a fully
 independent hardware and assumes only standard local disks (Winchester
 and/or SSD style) with local-only interfaces (e.g. SATA, SCSI, PCI) in
 each machine.
 
-<a name="n3.6">
-### 3.6.  Does Machi require or assume that servers with large numbers of disks must use RAID-0/1/5/6/10/50/60 to create a single block device?
+<a name="n3.7">
+### 3.7.  Does Machi require or assume that servers with large numbers of disks must use RAID-0/1/5/6/10/50/60 to create a single block device?
 
 No.  When used with servers with multiple disks, the intent is to
 deploy multiple Machi servers per machine: one Machi server per disk.
@@ -565,10 +571,10 @@ deploy multiple Machi servers per machine: one Machi server per disk.
   placement relative to 12 servers is smaller than a placement problem
   of managing 264 seprate disks (if each of 12 servers has 22 disks).
 
-<a name="n3.7">
-### 3.7.  What language(s) is Machi written in?
+<a name="n3.8">
+### 3.8.  What language(s) is Machi written in?
 
-So far, Machi is written in 100% Erlang.  Machi uses at least one
+So far, Machi is written in Erlang, mostly.  Machi uses at least one
 library, [ELevelDB](https://github.com/basho/eleveldb), that is
 implemented both in C++ and in Erlang, using Erlang NIFs (Native
 Interface Functions) to allow Erlang code to call C++ functions.
@@ -580,8 +586,16 @@ in C, Java, or other "gotta go fast fast FAST!!"  programming
 language.  We expect that the Chain Replication manager and other
 critical "control plane" software will remain in Erlang.
 
-<a name="n3.8">
-### 3.8.  Does Machi use the Erlang/OTP network distribution system (aka "disterl")?
+<a name="n3.9">
+### 3.9.  Can Machi run on Windows?  Can Machi run on 32-bit platforms?
+
+The ELevelDB NIF does not compile or run correctly on Erlang/OTP
+Windows platforms, nor does it compile correctly on 32-bit platforms.
+Machi should support all 64-bit UNIX-like platforms that are supported
+by Erlang/OTP and ELevelDB.
+
+<a name="n3.10">
+### 3.10.  Does Machi use the Erlang/OTP network distribution system (aka "disterl")?
 
 No, Machi doesn't use Erlang/OTP's built-in distributed message
 passing system.  The code would be *much* simpler if we did use
@@ -596,8 +610,8 @@ All wire protocols used by Machi are defined & implemented using
 [Protocol Buffers](https://developers.google.com/protocol-buffers/docs/overview).
 The definition file can be found at [./src/machi.proto](./src/machi.proto).
 
-<a name="n3.9">
-### 3.9.  Can I use HTTP to write/read stuff into/from Machi?
+<a name="n3.11">
+### 3.11.  Can I use HTTP to write/read stuff into/from Machi?
 
 Short answer: No, not yet.
 

@@ -84,20 +84,23 @@ partial_stop_restart2() ->
     WedgeStatus = fun({_,#p_srvr{address=Addr, port=TcpPort}}) ->
                           machi_flu1_client:wedge_status(Addr, TcpPort)
                   end,
+    NSInfo = undefined,
     Append = fun({_,#p_srvr{address=Addr, port=TcpPort}}, EpochID) ->
+                     NoCSum = <<>>,
                      machi_flu1_client:append_chunk(Addr, TcpPort,
-                                                    EpochID,
-                                                    <<"prefix">>, <<"data">>)
+                                                    NSInfo, EpochID,
+                                                    <<"prefix">>,
+                                                    <<"data">>, NoCSum)
                   end,
     try
         [Start(P) || P <- Ps],
-        [{ok, {true, _}} = WedgeStatus(P) || P <- Ps], % all are wedged
+        [{ok, {true, _,_,_}} = WedgeStatus(P) || P <- Ps], % all are wedged
         [{error,wedged} = Append(P, ?DUMMY_PV1_EPOCH) || P <- Ps], % all are wedged
 
         [machi_chain_manager1:set_chain_members(ChMgr, Dict) ||
             ChMgr <- ChMgrs ],
-        {ok, {false, EpochID1}} = WedgeStatus(hd(Ps)),
-        [{ok, {false, EpochID1}} = WedgeStatus(P) || P <- Ps], % *not* wedged
+        {ok, {false, EpochID1,_,_}} = WedgeStatus(hd(Ps)),
+        [{ok, {false, EpochID1,_,_}} = WedgeStatus(P) || P <- Ps], % *not* wedged
         [{ok,_} = Append(P, EpochID1) || P <- Ps],             % *not* wedged
         {ok, {_,_,File1}} = Append(hd(Ps), EpochID1),
 
@@ -123,9 +126,9 @@ partial_stop_restart2() ->
         Epoch_m = Proj_m#projection_v1.epoch_number,
         %% Confirm that all FLUs are *not* wedged, with correct proj & epoch
         Proj_mCSum = Proj_m#projection_v1.epoch_csum,
-        [{ok, {false, {Epoch_m, Proj_mCSum}}} = WedgeStatus(P) || % *not* wedged
+        [{ok, {false, {Epoch_m, Proj_mCSum},_,_}} = WedgeStatus(P) || % *not* wedged
              P <- Ps], 
-        {ok, {false, EpochID1}} = WedgeStatus(hd(Ps)),
+        {ok, {false, EpochID1,_,_}} = WedgeStatus(hd(Ps)),
         [{ok,_} = Append(P, EpochID1) || P <- Ps],            % *not* wedged
 
         %% Stop all but 'a'.
@@ -145,10 +148,10 @@ partial_stop_restart2() ->
         {error, wedged} = Append(hd(Ps), EpochID1),
         {_, #p_srvr{address=Addr_a, port=TcpPort_a}} = hd(Ps),
         {error, wedged} = machi_flu1_client:read_chunk(
-                            Addr_a, TcpPort_a, ?DUMMY_PV1_EPOCH,
-                            <<>>, 99999999, 1, []),
-        {error, wedged} = machi_flu1_client:checksum_list(
-                            Addr_a, TcpPort_a, ?DUMMY_PV1_EPOCH, <<>>),
+                            Addr_a, TcpPort_a, NSInfo, ?DUMMY_PV1_EPOCH,
+                            <<>>, 99999999, 1, undefined),
+        {error, bad_arg} = machi_flu1_client:checksum_list(
+                             Addr_a, TcpPort_a, <<>>),
         %% list_files() is permitted despite wedged status
         {ok, _} = machi_flu1_client:list_files(
                             Addr_a, TcpPort_a, ?DUMMY_PV1_EPOCH),
@@ -157,7 +160,7 @@ partial_stop_restart2() ->
         {now_using,_,Epoch_n} = machi_chain_manager1:trigger_react_to_env(
                                   hd(ChMgrs)),
         true = (Epoch_n > Epoch_m),
-        {ok, {false, EpochID3}} = WedgeStatus(hd(Ps)),
+        {ok, {false, EpochID3,_,_}} = WedgeStatus(hd(Ps)),
         %% The file we're assigned should be different with the epoch change.
         {ok, {_,_,File3}} = Append(hd(Ps), EpochID3),
         true = (File1 /= File3),

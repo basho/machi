@@ -401,7 +401,7 @@ nonunanimous_setup_and_fix_test2() ->
                Mb, ChainName, TheEpoch_3, ap_mode, MembersDict4, []),
 
         Advance(),
-        {ok, {true, _}} = ?FLU_PC:wedge_status(Proxy_a),
+        {ok, {true, _,_,_}} = ?FLU_PC:wedge_status(Proxy_a),
         {_, _, TheEpoch_4} = ?MGR:trigger_react_to_env(Mb),
         {_, _, TheEpoch_4} = ?MGR:trigger_react_to_env(Mc),
         [{ok, #projection_v1{upi=[b,c], repairing=[]}} =
@@ -451,9 +451,9 @@ nonunanimous_setup_and_fix_test2() ->
         #p_srvr{name=NameA} = hd(Ps),
         {ok,_}=machi_flu_psup:start_flu_package(NameA, TcpPort+1, hd(Dirs), Opts),
         Advance(),
-        {ok, {true, _}} = ?FLU_PC:wedge_status(Proxy_a),
-        {ok, {false, EpochID_8}} = ?FLU_PC:wedge_status(Proxy_b),
-        {ok, {false, EpochID_8}} = ?FLU_PC:wedge_status(Proxy_c),
+        {ok, {true, _,_,_}} = ?FLU_PC:wedge_status(Proxy_a),
+        {ok, {false, EpochID_8,_,_}} = ?FLU_PC:wedge_status(Proxy_b),
+        {ok, {false, EpochID_8,_,_}} = ?FLU_PC:wedge_status(Proxy_c),
         [{ok, #projection_v1{upi=[b,c], repairing=[]}} =
              ?FLU_PC:read_latest_projection(Pxy, private) || Pxy <- tl(Proxies)],
 
@@ -463,8 +463,8 @@ nonunanimous_setup_and_fix_test2() ->
         ok = machi_flu_psup:stop_flu_package(a),
         Advance(),
         machi_flu1_test:clean_up_data_dir(hd(Dirs)),
-        {ok, {false, _}} = ?FLU_PC:wedge_status(Proxy_b),
-        {ok, {false, _}} = ?FLU_PC:wedge_status(Proxy_c),
+        {ok, {false, _,_,_}} = ?FLU_PC:wedge_status(Proxy_b),
+        {ok, {false, _,_,_}} = ?FLU_PC:wedge_status(Proxy_c),
 
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         io:format("STEP: Add a to the chain again (a is stopped).\n", []),
@@ -482,9 +482,9 @@ nonunanimous_setup_and_fix_test2() ->
 
         {ok,_}=machi_flu_psup:start_flu_package(NameA, TcpPort+1, hd(Dirs), Opts),
         Advance(),
-        {ok, {false, {TheEpoch10,_}}} = ?FLU_PC:wedge_status(Proxy_a),
-        {ok, {false, {TheEpoch10,_}}} = ?FLU_PC:wedge_status(Proxy_b),
-        {ok, {false, {TheEpoch10,_}}} = ?FLU_PC:wedge_status(Proxy_c),
+        {ok, {false, {TheEpoch10,_},_,_}} = ?FLU_PC:wedge_status(Proxy_a),
+        {ok, {false, {TheEpoch10,_},_,_}} = ?FLU_PC:wedge_status(Proxy_b),
+        {ok, {false, {TheEpoch10,_},_,_}} = ?FLU_PC:wedge_status(Proxy_c),
         [{ok, #projection_v1{upi=[b,c], repairing=[a]}} =
              ?FLU_PC:read_latest_projection(Pxy, private) || Pxy <- Proxies],
         ok

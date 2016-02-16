@@ -43,3 +43,21 @@
 
 -define(DEFAULT_COC_NAMESPACE, "").
 -define(DEFAULT_COC_LOCATOR,    0).
+
+-record(ns_info, {
+          version = 0  :: machi_dt:namespace_version(),
+          name = <<>>  :: machi_dt:namespace(),
+          locator = 0  :: machi_dt:locator()
+         }).
+
+-record(append_opts, {
+          chunk_extra = 0             :: machi_dt:chunk_size(),
+          preferred_file_name         :: 'undefined' | machi_dt:file_name_s(),
+          flag_fail_preferred = false :: boolean()
+         }).
+
+-record(read_opts, {
+          no_checksum = false         :: boolean(),
+          no_chunk = false            :: boolean(),
+          needs_trimmed = false       :: boolean()
+         }).

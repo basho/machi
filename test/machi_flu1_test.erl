@@ -91,6 +91,8 @@ flu_smoke_test() ->
     Host = "localhost",
     TcpPort = 12957,
     DataDir = "./data",
+    NSInfo = undefined,
+    NoCSum = <<>>,
     Prefix = <<"prefix!">>,
     BadPrefix = BadFile = "no/good",
     W_props = [{initial_wedged, false}],
@@ -98,32 +100,31 @@ flu_smoke_test() ->
     try
         Msg = "Hello, world!",
         Msg = ?FLU_C:echo(Host, TcpPort, Msg),
-        {error, bad_arg} = ?FLU_C:checksum_list(Host, TcpPort,
-                                                     ?DUMMY_PV1_EPOCH,
-                                                     "does-not-exist"),
-        {error, bad_arg} = ?FLU_C:checksum_list(Host, TcpPort,
-                                                ?DUMMY_PV1_EPOCH, BadFile),
+        {error, bad_arg} = ?FLU_C:checksum_list(Host, TcpPort,"does-not-exist"),
+        {error, bad_arg} = ?FLU_C:checksum_list(Host, TcpPort, BadFile),
 
         {ok, []} = ?FLU_C:list_files(Host, TcpPort, ?DUMMY_PV1_EPOCH),
-        {ok, {false, _}} = ?FLU_C:wedge_status(Host, TcpPort),
+        {ok, {false, _,_,_}} = ?FLU_C:wedge_status(Host, TcpPort),
 
         Chunk1 = <<"yo!">>,
-        {ok, {Off1,Len1,File1}} = ?FLU_C:append_chunk(Host, TcpPort,
+        {ok, {Off1,Len1,File1}} = ?FLU_C:append_chunk(Host, TcpPort, NSInfo,
                                                       ?DUMMY_PV1_EPOCH,
-                                                      Prefix, Chunk1),
-        {ok, {[{_, Off1, Chunk1, _}], _}} = ?FLU_C:read_chunk(Host, TcpPort, ?DUMMY_PV1_EPOCH,
-                                                         File1, Off1, Len1, []),
-        {ok, KludgeBin} = ?FLU_C:checksum_list(Host, TcpPort,
-                                               ?DUMMY_PV1_EPOCH, File1),
+                                                      Prefix, Chunk1, NoCSum),
+        {ok, {[{_, Off1, Chunk1, _}], _}} = ?FLU_C:read_chunk(Host, TcpPort,
+                                                       NSInfo, ?DUMMY_PV1_EPOCH,
+                                                       File1, Off1, Len1,
+                                                       noopt),
+        {ok, KludgeBin} = ?FLU_C:checksum_list(Host, TcpPort, File1),
         true = is_binary(KludgeBin),
-        {error, bad_arg} = ?FLU_C:append_chunk(Host, TcpPort,
+        {error, bad_arg} = ?FLU_C:append_chunk(Host, TcpPort, NSInfo,
                                                ?DUMMY_PV1_EPOCH,
-                                               BadPrefix, Chunk1),
+                                               BadPrefix, Chunk1, NoCSum),
         {ok, [{_,File1}]} = ?FLU_C:list_files(Host, TcpPort, ?DUMMY_PV1_EPOCH),
         Len1 = size(Chunk1),
         {error, not_written} = ?FLU_C:read_chunk(Host, TcpPort,
-                                                  ?DUMMY_PV1_EPOCH,
-                                                  File1, Off1*983829323, Len1, []),
+                                                 NSInfo, ?DUMMY_PV1_EPOCH,
+                                                 File1, Off1*983829323, Len1,
+                                                 noopt),
         %% XXX FIXME
         %%
         %% This is failing because the read extends past the end of the file.
@@ -132,19 +133,22 @@ flu_smoke_test() ->
         %% of the read will cause it to fail.
         %%
         %% {error, partial_read} = ?FLU_C:read_chunk(Host, TcpPort,
-        %%                                           ?DUMMY_PV1_EPOCH,
+        %%                                           NSInfo, ?DUMMY_PV1_EPOCH,
         %%                                           File1, Off1, Len1*9999),
 
-        {ok, {Off1b,Len1b,File1b}} = ?FLU_C:append_chunk(Host, TcpPort,
+        {ok, {Off1b,Len1b,File1b}} = ?FLU_C:append_chunk(Host, TcpPort, NSInfo,
                                                          ?DUMMY_PV1_EPOCH,
-                                                         Prefix, Chunk1),
+                                                         Prefix, Chunk1,NoCSum),
         Extra = 42,
-        {ok, {Off1c,Len1c,File1c}} = ?FLU_C:append_chunk_extra(Host, TcpPort,
+        Opts1 = #append_opts{chunk_extra=Extra},
+        {ok, {Off1c,Len1c,File1c}} = ?FLU_C:append_chunk(Host, TcpPort, NSInfo,
                                                          ?DUMMY_PV1_EPOCH,
-                                                         Prefix, Chunk1, Extra),
+                                                         Prefix, Chunk1, NoCSum,
+                                                         Opts1, infinity),
         {ok, {Off1d,Len1d,File1d}} = ?FLU_C:append_chunk(Host, TcpPort,
+                                                         NSInfo,
                                                          ?DUMMY_PV1_EPOCH,
-                                                         Prefix, Chunk1),
+                                                         Prefix, Chunk1,NoCSum),
         if File1b == File1c, File1c == File1d ->
                 true = (Off1c == Off1b + Len1b),
                 true = (Off1d == Off1c + Len1c + Extra);
@@ -152,27 +156,44 @@ flu_smoke_test() ->
                 exit(not_mandatory_but_test_expected_same_file_fixme)
         end,
 
-        Chunk1_cs = {<<?CSUM_TAG_NONE:8, 0:(8*20)>>, Chunk1},
-        {ok, {Off1e,Len1e,File1e}} = ?FLU_C:append_chunk(Host, TcpPort,
-                                                         ?DUMMY_PV1_EPOCH,
-                                                         Prefix, Chunk1_cs),
-
         Chunk2 = <<"yo yo">>,
         Len2 = byte_size(Chunk2),
         Off2 = ?MINIMUM_OFFSET + 77,
         File2 = "smoke-whole-file^^0^1^1",
-        ok = ?FLU_C:write_chunk(Host, TcpPort, ?DUMMY_PV1_EPOCH,
-                                File2, Off2, Chunk2),
-        {error, bad_arg} = ?FLU_C:write_chunk(Host, TcpPort, ?DUMMY_PV1_EPOCH,
-                                              BadFile, Off2, Chunk2),
+        ok = ?FLU_C:write_chunk(Host, TcpPort, NSInfo, ?DUMMY_PV1_EPOCH,
+                                File2, Off2, Chunk2, NoCSum),
+        {error, bad_arg} = ?FLU_C:write_chunk(Host, TcpPort, NSInfo, ?DUMMY_PV1_EPOCH,
+                                              BadFile, Off2, Chunk2, NoCSum),
         {ok, {[{_, Off2, Chunk2, _}], _}} =
-            ?FLU_C:read_chunk(Host, TcpPort, ?DUMMY_PV1_EPOCH, File2, Off2, Len2, []),
+            ?FLU_C:read_chunk(Host, TcpPort, NSInfo, ?DUMMY_PV1_EPOCH, File2, Off2, Len2, noopt),
         {error, bad_arg} = ?FLU_C:read_chunk(Host, TcpPort,
-                                                 ?DUMMY_PV1_EPOCH,
-                                                 "no!!", Off2, Len2, []),
+                                                 NSInfo, ?DUMMY_PV1_EPOCH,
+                                                 "no!!", Off2, Len2, noopt),
         {error, bad_arg} = ?FLU_C:read_chunk(Host, TcpPort,
-                                             ?DUMMY_PV1_EPOCH,
-                                             BadFile, Off2, Len2, []),
+                                             NSInfo, ?DUMMY_PV1_EPOCH,
+                                             BadFile, Off2, Len2, noopt),
+
+        %% Make a connected socket.
+        Sock1 = ?FLU_C:connect(#p_srvr{address=Host, port=TcpPort}),
+
+        %% Let's test some cluster version enforcement.
+        Good_EpochNum = 0,
+        Good_NSVersion = 0,
+        Good_NS = <<>>,
+        {ok, {false, {Good_EpochNum,_}, Good_NSVersion, GoodNS}} =
+            ?FLU_C:wedge_status(Sock1),
+        NS_good = #ns_info{version=Good_NSVersion, name=Good_NS},
+        {ok, {[{_, Off2, Chunk2, _}], _}} =
+            ?FLU_C:read_chunk(Sock1, NS_good, ?DUMMY_PV1_EPOCH,
+                              File2, Off2, Len2, noopt),
+        NS_bad_version = #ns_info{version=1, name=Good_NS},
+        NS_bad_name = #ns_info{version=Good_NSVersion, name= <<"foons">>},
+        {error, bad_epoch} =
+            ?FLU_C:read_chunk(Sock1, NS_bad_version, ?DUMMY_PV1_EPOCH,
+                              File2, Off2, Len2, noopt),
+        {error, bad_arg} =
+            ?FLU_C:read_chunk(Sock1, NS_bad_name, ?DUMMY_PV1_EPOCH,
+                              File2, Off2, Len2, noopt),
 
         %% We know that File1 still exists.  Pretend that we've done a
         %% migration and exercise the delete_migration() API.
@@ -189,8 +210,7 @@ flu_smoke_test() ->
         {error, bad_arg} = ?FLU_C:trunc_hack(Host, TcpPort,
                                              ?DUMMY_PV1_EPOCH, BadFile),
 
-        ok = ?FLU_C:quit(?FLU_C:connect(#p_srvr{address=Host,
-                                                port=TcpPort}))
+        ok = ?FLU_C:quit(Sock1)
     after
         machi_test_util:stop_flu_package()
     end.
@@ -203,7 +223,7 @@ flu_projection_smoke_test() ->
     try
         [ok = flu_projection_common(Host, TcpPort, T) ||
             T <- [public, private] ]
-%% ,        {ok, {false, EpochID1}} = ?FLU_C:wedge_status(Host, TcpPort),
+%% ,        {ok, {false, EpochID1,_,_}} = ?FLU_C:wedge_status(Host, TcpPort),
 %% io:format(user, "EpochID1 ~p\n", [EpochID1])
     after
         machi_test_util:stop_flu_package()
@@ -238,13 +258,15 @@ bad_checksum_test() ->
     DataDir = "./data.bct",
     Opts = [{initial_wedged, false}],
     {_,_,_} = machi_test_util:start_flu_package(projection_test_flu, TcpPort, DataDir, Opts),
+    NSInfo = undefined,
     try
         Prefix = <<"some prefix">>,
         Chunk1 = <<"yo yo yo">>,
-        Chunk1_badcs = {<<?CSUM_TAG_CLIENT_SHA:8, 0:(8*20)>>, Chunk1},
-        {error, bad_checksum} = ?FLU_C:append_chunk(Host, TcpPort,
+        BadCSum = {?CSUM_TAG_CLIENT_SHA, crypto:hash(sha, ".................")},
+        {error, bad_checksum} = ?FLU_C:append_chunk(Host, TcpPort, NSInfo,
                                                     ?DUMMY_PV1_EPOCH,
-                                                    Prefix, Chunk1_badcs),
+                                                    Prefix,
+                                                    Chunk1, BadCSum),
         ok
     after
         machi_test_util:stop_flu_package()
@@ -256,6 +278,8 @@ witness_test() ->
     DataDir = "./data.witness",
     Opts = [{initial_wedged, false}, {witness_mode, true}],
     {_,_,_} = machi_test_util:start_flu_package(projection_test_flu, TcpPort, DataDir, Opts),
+    NSInfo = undefined,
+    NoCSum = <<>>,
     try
         Prefix = <<"some prefix">>,
         Chunk1 = <<"yo yo yo">>,
@@ -268,15 +292,14 @@ witness_test() ->
         {ok, EpochID1} = ?FLU_C:get_latest_epochid(Host, TcpPort, private),
 
         %% Witness-protected ops all fail
-        {error, bad_arg} = ?FLU_C:append_chunk(Host, TcpPort, EpochID1,
-                                               Prefix, Chunk1),
+        {error, bad_arg} = ?FLU_C:append_chunk(Host, TcpPort, NSInfo, EpochID1,
+                                               Prefix, Chunk1, NoCSum),
         File = <<"foofile">>,
-        {error, bad_arg} = ?FLU_C:read_chunk(Host, TcpPort, EpochID1,
-                                             File, 9999, 9999, []),
-        {error, bad_arg} = ?FLU_C:checksum_list(Host, TcpPort, EpochID1,
-                                                File),
+        {error, bad_arg} = ?FLU_C:read_chunk(Host, TcpPort, NSInfo, EpochID1,
+                                             File, 9999, 9999, noopt),
+        {error, bad_arg} = ?FLU_C:checksum_list(Host, TcpPort, File),
         {error, bad_arg} = ?FLU_C:list_files(Host, TcpPort, EpochID1),
-        {ok, {false, EpochID1}} = ?FLU_C:wedge_status(Host, TcpPort),
+        {ok, {false, EpochID1,_,_}} = ?FLU_C:wedge_status(Host, TcpPort),
         {ok, _} = ?FLU_C:get_latest_epochid(Host, TcpPort, public),
         {ok, _} = ?FLU_C:read_latest_projection(Host, TcpPort, public),
         {error, not_written} = ?FLU_C:read_projection(Host, TcpPort,

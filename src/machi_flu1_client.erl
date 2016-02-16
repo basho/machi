@@ -38,6 +38,71 @@
 %% TODO This EDoc was written first, and the EDoc and also `-type' and
 %% `-spec' definitions for {@link machi_proxy_flu1_client} and {@link
 %% machi_cr_client} must be improved.
+%%
+%% == Client API implementation notes ==
+%%
+%% At the moment, there are several modules that implement various
+%% subsets of the Machi API. The table below attempts to show how and
+%% why they differ.
+%%
+%% ```
+%% |--------------------------+-------+-----+------+------+-------+----------------|
+%% |                          | PB    |     | #    |      | Conn  | Epoch & NS     |
+%% | Module name              | Level | CR? | FLUS | Impl | Life? | version aware? |
+%% |--------------------------+-------+-----+------+------+-------+----------------|
+%% | machi_pb_high_api_client | high  | yes | many | proc | long  | no             |
+%% | machi_cr_client          | low   | yes | many | proc | long  | no             |
+%% | machi_proxy_flu1_client  | low   | no  | 1    | proc | long  | yes            |
+%% | machi_flu1_client        | low   | no  | 1    | lib  | short | yes            |
+%% |--------------------------+-------+-----+------+------+-------+----------------|
+%% '''
+%%
+%% In terms of use and API layering, the table rows are in highest`->'lowest
+%% order: each level calls the layer immediately below it.
+%%
+%% <dl>
+%% <dt> <b> PB Level</b> </dt>
+%% <dd> The Protocol Buffers API is divided logically into two levels,
+%% "low" and "high".  The low-level protocol is used for intra-chain
+%% communication.  The high-level protocol is used for clients outside
+%% of a Machi chain or Machi cluster of chains.
+%% </dd>
+%% <dt> <b> CR?</b> </dt>
+%% <dd> Does this API support (directly or indirectly) Chain
+%% Replication?  If `no', then the API has no awareness of multiple
+%% replicas of any file or file chunk; unaware clients can only
+%% perform operations at a single Machi FLU's file service or
+%% projection store service.
+%% </dd>
+%% <dt> <b> # FLUs</b> </dt>
+%% <dd> Now many FLUs does this API layer communicate with
+%% simultaneously?  Note that there is a one-to-one correspondence
+%% between this value and the "CR?" column's value.
+%% </dd>
+%% <dt> <b> Impl</b> </dt>
+%% <dd> Implementation: library-only or an Erlang process,
+%%      e.g., `gen_server'.
+%% </dd>
+%% <dt> <b> Conn Life?</b> </dt>
+%% <dd> Expected TCP session connection life: short or long.  At the
+%% lowest level, the {@link machi_flu1_client} API implementation takes
+%% no effort to reconnect to a remote FLU when its single TCP session
+%% is broken.  For long-lived connection life APIs, the server side will
+%% automatically attempt to reconnect to remote FLUs when a TCP session
+%% is broken.
+%% </dd>
+%% <dt> <b> Epoch &amp; NS version aware?</b> </dt>
+%% <dd> Are clients of this API responsible for knowing a chain's EpochID
+%% and namespace version numbers?  If `no', then the server side of the
+%% API will automatically attempt to discover/re-discover the EpochID and
+%% namespace version numbers whenever they change.
+%% </dd>
+%% </dl>
+%%
+%% The only protocol that we expect to be used by entities outside of
+%% a single Machi chain or a multi-chain cluster is the "high"
+%% Protocol Buffers API.  The {@link riak_pb_high_api_client} module
+%% is an Erlang reference implementation of this PB API.
 
 -module(machi_flu1_client).
 
@@ -50,16 +115,15 @@
 -include_lib("pulse_otp/include/pulse_otp.hrl").
 -endif.
 
--define(HARD_TIMEOUT, 2500).
+-define(SHORT_TIMEOUT, 2500).
+-define(LONG_TIMEOUT, (60*1000)).
 
 -export([
          %% File API
-         append_chunk/4, append_chunk/5,
          append_chunk/6, append_chunk/7,
-         append_chunk_extra/5, append_chunk_extra/6,
-         append_chunk_extra/7, append_chunk_extra/8,
-         read_chunk/6, read_chunk/7,
-         checksum_list/3, checksum_list/4,
+         append_chunk/8, append_chunk/9,
+         read_chunk/7, read_chunk/8,
+         checksum_list/2, checksum_list/3,
          list_files/2, list_files/3,
          wedge_status/1, wedge_status/2,
 
@@ -81,190 +145,113 @@
         ]).
 %% For "internal" replication only.
 -export([
-         write_chunk/5, write_chunk/6,
-         trim_chunk/5,
+         write_chunk/7, write_chunk/8,
+         trim_chunk/6,
          delete_migration/3, delete_migration/4,
          trunc_hack/3, trunc_hack/4
         ]).
 
 -type port_wrap()   :: {w,atom(),term()}.
 
-%% @doc Append a chunk (binary- or iolist-style) of data to a file
-%% with `Prefix'.
-
--spec append_chunk(port_wrap(), machi_dt:epoch_id(), machi_dt:file_prefix(), machi_dt:chunk()) ->
+-spec append_chunk(port_wrap(),
+                   'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(),
+                   machi_dt:file_prefix(), machi_dt:chunk(),
+                   machi_dt:chunk_csum()) ->
       {ok, machi_dt:chunk_pos()} | {error, machi_dt:error_general()} | {error, term()}.
-append_chunk(Sock, EpochID, Prefix, Chunk) ->
-    append_chunk2(Sock, EpochID,
-                  ?DEFAULT_COC_NAMESPACE, ?DEFAULT_COC_LOCATOR,
-                  Prefix, Chunk, 0).
+append_chunk(Sock, NSInfo, EpochID, Prefix, Chunk, CSum) ->
+    append_chunk(Sock, NSInfo, EpochID, Prefix, Chunk, CSum,
+                 #append_opts{}, ?LONG_TIMEOUT).
 
 %% @doc Append a chunk (binary- or iolist-style) of data to a file
-%% with `Prefix'.
+%% with `Prefix' and also request an additional `Extra' bytes.
+%%
+%% For example, if the `Chunk' size is 1 KByte and `Extra' is 4K Bytes, then
+%% the file offsets that follow `Chunk''s position for the following 4K will
+%% be reserved by the file sequencer for later write(s) by the
+%% `write_chunk()' API.
 
 -spec append_chunk(machi_dt:inet_host(), machi_dt:inet_port(),
-                   machi_dt:epoch_id(), machi_dt:file_prefix(), machi_dt:chunk()) ->
+                   'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(),
+                   machi_dt:file_prefix(), machi_dt:chunk(),
+                   machi_dt:chunk_csum()) ->
       {ok, machi_dt:chunk_pos()} | {error, machi_dt:error_general()} | {error, term()}.
-append_chunk(Host, TcpPort, EpochID, Prefix, Chunk) ->
-    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
-    try
-        append_chunk2(Sock, EpochID,
-                      ?DEFAULT_COC_NAMESPACE, ?DEFAULT_COC_LOCATOR,
-                      Prefix, Chunk, 0)
-    after
-        disconnect(Sock)
-    end.
+append_chunk(Host, TcpPort, NSInfo, EpochID, Prefix, Chunk, CSum) ->
+    append_chunk(Host, TcpPort, NSInfo, EpochID, Prefix, Chunk, CSum,
+                 #append_opts{}, ?LONG_TIMEOUT).
+
+-spec append_chunk(port_wrap(),
+                   'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(),
+                   machi_dt:file_prefix(), machi_dt:chunk(),
+                   machi_dt:chunk_csum(), machi_dt:append_opts(), timeout()) ->
+      {ok, machi_dt:chunk_pos()} | {error, machi_dt:error_general()} | {error, term()}.
+append_chunk(Sock, NSInfo0, EpochID, Prefix, Chunk, CSum, Opts, Timeout) ->
+    NSInfo = machi_util:ns_info_default(NSInfo0),
+    append_chunk2(Sock, NSInfo, EpochID, Prefix, Chunk, CSum, Opts, Timeout).
 
 %% @doc Append a chunk (binary- or iolist-style) of data to a file
-%% with `Prefix'.
-
--spec append_chunk(port_wrap(), machi_dt:epoch_id(),
-                   machi_dt:coc_namespace(), machi_dt:coc_locator(),
-                   machi_dt:file_prefix(), machi_dt:chunk()) ->
-      {ok, machi_dt:chunk_pos()} | {error, machi_dt:error_general()} | {error, term()}.
-append_chunk(Sock, EpochID, CoC_Namespace, CoC_Locator, Prefix, Chunk) ->
-    append_chunk2(Sock, EpochID,
-                  CoC_Namespace, CoC_Locator,
-                  Prefix, Chunk, 0).
-
-%% @doc Append a chunk (binary- or iolist-style) of data to a file
-%% with `Prefix'.
+%% with `Prefix' and also request an additional `Extra' bytes.
+%%
+%% For example, if the `Chunk' size is 1 KByte and `Extra' is 4K Bytes, then
+%% the file offsets that follow `Chunk''s position for the following 4K will
+%% be reserved by the file sequencer for later write(s) by the
+%% `write_chunk()' API.
 
 -spec append_chunk(machi_dt:inet_host(), machi_dt:inet_port(),
-                   machi_dt:epoch_id(),
-                   machi_dt:coc_namespace(), machi_dt:coc_locator(),
-                   machi_dt:file_prefix(), machi_dt:chunk()) ->
+                   'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(),
+                   machi_dt:file_prefix(), machi_dt:chunk(),
+                   machi_dt:chunk_csum(), machi_dt:append_opts(), timeout()) ->
       {ok, machi_dt:chunk_pos()} | {error, machi_dt:error_general()} | {error, term()}.
-append_chunk(Host, TcpPort, EpochID, CoC_Namespace, CoC_Locator, Prefix, Chunk) ->
+append_chunk(Host, TcpPort, NSInfo0, EpochID,
+             Prefix, Chunk, CSum, Opts, Timeout) ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
-        append_chunk2(Sock, EpochID,
-                      CoC_Namespace, CoC_Locator,
-                      Prefix, Chunk, 0)
-    after
-        disconnect(Sock)
-    end.
-
-%% @doc Append a chunk (binary- or iolist-style) of data to a file
-%% with `Prefix' and also request an additional `Extra' bytes.
-%%
-%% For example, if the `Chunk' size is 1 KByte and `Extra' is 4K Bytes, then
-%% the file offsets that follow `Chunk''s position for the following 4K will
-%% be reserved by the file sequencer for later write(s) by the
-%% `write_chunk()' API.
-
--spec append_chunk_extra(port_wrap(), machi_dt:epoch_id(),
-                         machi_dt:file_prefix(), machi_dt:chunk(), machi_dt:chunk_size()) ->
-      {ok, machi_dt:chunk_pos()} | {error, machi_dt:error_general()} | {error, term()}.
-append_chunk_extra(Sock, EpochID, Prefix, Chunk, ChunkExtra)
-  when is_integer(ChunkExtra), ChunkExtra >= 0 ->
-    append_chunk2(Sock, EpochID,
-                  ?DEFAULT_COC_NAMESPACE, ?DEFAULT_COC_LOCATOR,
-                  Prefix, Chunk, ChunkExtra).
-
-%% @doc Append a chunk (binary- or iolist-style) of data to a file
-%% with `Prefix' and also request an additional `Extra' bytes.
-%%
-%% For example, if the `Chunk' size is 1 KByte and `Extra' is 4K Bytes, then
-%% the file offsets that follow `Chunk''s position for the following 4K will
-%% be reserved by the file sequencer for later write(s) by the
-%% `write_chunk()' API.
-
--spec append_chunk_extra(machi_dt:inet_host(), machi_dt:inet_port(),
-               machi_dt:epoch_id(), machi_dt:file_prefix(), machi_dt:chunk(), machi_dt:chunk_size()) ->
-      {ok, machi_dt:chunk_pos()} | {error, machi_dt:error_general()} | {error, term()}.
-append_chunk_extra(Host, TcpPort, EpochID, Prefix, Chunk, ChunkExtra)
-  when is_integer(ChunkExtra), ChunkExtra >= 0 ->
-    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
-    try
-        append_chunk2(Sock, EpochID,
-                      ?DEFAULT_COC_NAMESPACE, ?DEFAULT_COC_LOCATOR,
-                      Prefix, Chunk, ChunkExtra)
-    after
-        disconnect(Sock)
-    end.
-
-%% @doc Append a chunk (binary- or iolist-style) of data to a file
-%% with `Prefix' and also request an additional `Extra' bytes.
-%%
-%% For example, if the `Chunk' size is 1 KByte and `Extra' is 4K Bytes, then
-%% the file offsets that follow `Chunk''s position for the following 4K will
-%% be reserved by the file sequencer for later write(s) by the
-%% `write_chunk()' API.
-
--spec append_chunk_extra(port_wrap(), machi_dt:epoch_id(),
-                         machi_dt:coc_namespace(), machi_dt:coc_locator(),
-                         machi_dt:file_prefix(), machi_dt:chunk(), machi_dt:chunk_size()) ->
-      {ok, machi_dt:chunk_pos()} | {error, machi_dt:error_general()} | {error, term()}.
-append_chunk_extra(Sock, EpochID, CoC_Namespace, CoC_Locator,
-                   Prefix, Chunk, ChunkExtra)
-  when is_integer(ChunkExtra), ChunkExtra >= 0 ->
-    append_chunk2(Sock, EpochID,
-                  CoC_Namespace, CoC_Locator,
-                  Prefix, Chunk, ChunkExtra).
-
-%% @doc Append a chunk (binary- or iolist-style) of data to a file
-%% with `Prefix' and also request an additional `Extra' bytes.
-%%
-%% For example, if the `Chunk' size is 1 KByte and `Extra' is 4K Bytes, then
-%% the file offsets that follow `Chunk''s position for the following 4K will
-%% be reserved by the file sequencer for later write(s) by the
-%% `write_chunk()' API.
-
--spec append_chunk_extra(machi_dt:inet_host(), machi_dt:inet_port(),
-                         machi_dt:epoch_id(),
-                         machi_dt:coc_namespace(), machi_dt:coc_locator(),
-                         machi_dt:file_prefix(), machi_dt:chunk(), machi_dt:chunk_size()) ->
-      {ok, machi_dt:chunk_pos()} | {error, machi_dt:error_general()} | {error, term()}.
-append_chunk_extra(Host, TcpPort, EpochID,
-                   CoC_Namespace, CoC_Locator,
-                   Prefix, Chunk, ChunkExtra)
-  when is_integer(ChunkExtra), ChunkExtra >= 0 ->
-    Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
-    try
-        append_chunk2(Sock, EpochID,
-                      CoC_Namespace, CoC_Locator,
-                      Prefix, Chunk, ChunkExtra)
+        NSInfo = machi_util:ns_info_default(NSInfo0),
+        append_chunk2(Sock, NSInfo, EpochID,
+                      Prefix, Chunk, CSum, Opts, Timeout)
     after
         disconnect(Sock)
     end.
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
--spec read_chunk(port_wrap(), machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk_size(),
-                 proplists:proplist()) ->
-      {ok, machi_dt:chunk_s()} |
+-spec read_chunk(port_wrap(), 'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk_size(),
+                 machi_dt:read_opts_x()) ->
+      {ok, {[machi_dt:chunk_summary()], [machi_dt:chunk_pos()]}} |
       {error, machi_dt:error_general() | 'not_written' | 'partial_read'} |
       {error, term()}.
-read_chunk(Sock, EpochID, File, Offset, Size, Opts)
+read_chunk(Sock, NSInfo0, EpochID, File, Offset, Size, Opts0)
   when Offset >= ?MINIMUM_OFFSET, Size >= 0 ->
-    read_chunk2(Sock, EpochID, File, Offset, Size, Opts).
+    NSInfo = machi_util:ns_info_default(NSInfo0),
+    Opts = machi_util:read_opts_default(Opts0),
+    read_chunk2(Sock, NSInfo, EpochID, File, Offset, Size, Opts).
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
--spec read_chunk(machi_dt:inet_host(), machi_dt:inet_port(), machi_dt:epoch_id(),
+-spec read_chunk(machi_dt:inet_host(), machi_dt:inet_port(), 'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(),
                  machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk_size(),
-                 proplists:proplist()) ->
-      {ok, machi_dt:chunk_s()} |
+                 machi_dt:read_opts_x()) ->
+      {ok, [machi_dt:chunk_summary()]} |
       {error, machi_dt:error_general() | 'not_written' | 'partial_read'} |
       {error, term()}.
-read_chunk(Host, TcpPort, EpochID, File, Offset, Size, Opts)
+read_chunk(Host, TcpPort, NSInfo0, EpochID, File, Offset, Size, Opts0)
   when Offset >= ?MINIMUM_OFFSET, Size >= 0 ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
+    NSInfo = machi_util:ns_info_default(NSInfo0),
+    Opts = machi_util:read_opts_default(Opts0),
     try
-        read_chunk2(Sock, EpochID, File, Offset, Size, Opts)
+        read_chunk2(Sock, NSInfo, EpochID, File, Offset, Size, Opts)
     after
         disconnect(Sock)
     end.
 
 %% @doc Fetch the list of chunk checksums for `File'.
 
--spec checksum_list(port_wrap(), machi_dt:epoch_id(), machi_dt:file_name()) ->
+-spec checksum_list(port_wrap(), machi_dt:file_name()) ->
       {ok, binary()} |
       {error, machi_dt:error_general() | 'no_such_file' | 'partial_read'} |
       {error, term()}.
-checksum_list(Sock, EpochID, File) ->
-    checksum_list2(Sock, EpochID, File).
+checksum_list(Sock, File) ->
+    checksum_list2(Sock, File).
 
 %% @doc Fetch the list of chunk checksums for `File'.
 %%
@@ -288,13 +275,13 @@ checksum_list(Sock, EpochID, File) ->
 %% Details of the encoding used inside the `binary()' blog can be found
 %% in the EDoc comments for {@link machi_flu1:decode_csum_file_entry/1}.
 
--spec checksum_list(machi_dt:inet_host(), machi_dt:inet_port(), machi_dt:epoch_id(), machi_dt:file_name()) ->
+-spec checksum_list(machi_dt:inet_host(), machi_dt:inet_port(), machi_dt:file_name()) ->
       {ok, binary()} |
       {error, machi_dt:error_general() | 'no_such_file'} | {error, term()}.
-checksum_list(Host, TcpPort, EpochID, File) when is_integer(TcpPort) ->
+checksum_list(Host, TcpPort, File) when is_integer(TcpPort) ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
-        checksum_list2(Sock, EpochID, File)
+        checksum_list2(Sock, File)
     after
         disconnect(Sock)
     end.
@@ -321,7 +308,7 @@ list_files(Host, TcpPort, EpochID) when is_integer(TcpPort) ->
 %% @doc Fetch the wedge status from the remote FLU.
 
 -spec wedge_status(port_wrap()) ->
-      {ok, {boolean(), machi_dt:epoch_id()}} | {error, term()}.
+      {ok, {boolean(), machi_dt:epoch_id(), machi_dt:namespace_version(),machi_dt:namespace()}} | {error, term()}.
 
 wedge_status(Sock) ->
     wedge_status2(Sock).
@@ -329,7 +316,7 @@ wedge_status(Sock) ->
 %% @doc Fetch the wedge status from the remote FLU.
 
 -spec wedge_status(machi_dt:inet_host(), machi_dt:inet_port()) ->
-      {ok, {boolean(), machi_dt:epoch_id()}} | {error, term()}.
+      {ok, {boolean(), machi_dt:epoch_id(), machi_dt:namespace_version(),machi_dt:namespace()}} | {error, term()}.
 wedge_status(Host, TcpPort) when is_integer(TcpPort) ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
@@ -540,23 +527,25 @@ disconnect(_) ->
 %% @doc Restricted API: Write a chunk of already-sequenced data to
 %% `File' at `Offset'.
 
--spec write_chunk(port_wrap(), machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk()) ->
+-spec write_chunk(port_wrap(), 'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk(), machi_dt:chunk_csum()) ->
       ok | {error, machi_dt:error_general()} | {error, term()}.
-write_chunk(Sock, EpochID, File, Offset, Chunk)
+write_chunk(Sock, NSInfo0, EpochID, File, Offset, Chunk, CSum)
   when Offset >= ?MINIMUM_OFFSET ->
-    write_chunk2(Sock, EpochID, File, Offset, Chunk).
+    NSInfo = machi_util:ns_info_default(NSInfo0),
+    write_chunk2(Sock, NSInfo, EpochID, File, Offset, Chunk, CSum).
 
 %% @doc Restricted API: Write a chunk of already-sequenced data to
 %% `File' at `Offset'.
 
 -spec write_chunk(machi_dt:inet_host(), machi_dt:inet_port(),
-                  machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk()) ->
+                  'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk(), machi_dt:chunk_csum()) ->
       ok | {error, machi_dt:error_general()} | {error, term()}.
-write_chunk(Host, TcpPort, EpochID, File, Offset, Chunk)
+write_chunk(Host, TcpPort, NSInfo0, EpochID, File, Offset, Chunk, CSum)
   when Offset >= ?MINIMUM_OFFSET ->
     Sock = connect(#p_srvr{proto_mod=?MODULE, address=Host, port=TcpPort}),
     try
-        write_chunk2(Sock, EpochID, File, Offset, Chunk)
+        NSInfo = machi_util:ns_info_default(NSInfo0),
+        write_chunk2(Sock, NSInfo, EpochID, File, Offset, Chunk, CSum)
     after
         disconnect(Sock)
     end.
@@ -564,16 +553,18 @@ write_chunk(Host, TcpPort, EpochID, File, Offset, Chunk)
 %% @doc Restricted API: Write a chunk of already-sequenced data to
 %% `File' at `Offset'.
 
--spec trim_chunk(port_wrap(), machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk_size()) ->
+-spec trim_chunk(port_wrap(), 'undefined' | machi_dt:ns_info(), machi_dt:epoch_id(), machi_dt:file_name(), machi_dt:file_offset(), machi_dt:chunk_size()) ->
       ok | {error, machi_dt:error_general()} | {error, term()}.
-trim_chunk(Sock, EpochID, File0, Offset, Size)
+trim_chunk(Sock, NSInfo0, EpochID, File0, Offset, Size)
   when Offset >= ?MINIMUM_OFFSET ->
     ReqID = <<"id">>,
+    NSInfo = machi_util:ns_info_default(NSInfo0),
+    #ns_info{version=NSVersion, name=NS} = NSInfo,
     File = machi_util:make_binary(File0),
     true = (Offset >= ?MINIMUM_OFFSET),
     Req = machi_pb_translate:to_pb_request(
             ReqID,
-            {low_trim_chunk, EpochID, File, Offset, Size, 0}),
+            {low_trim_chunk, NSVersion, NS, EpochID, File, Offset, Size, 0}),
     do_pb_request_common(Sock, ReqID, Req).
 
 %% @doc Restricted API: Delete a file after it has been successfully
@@ -620,83 +611,88 @@ trunc_hack(Host, TcpPort, EpochID, File) when is_integer(TcpPort) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-read_chunk2(Sock, EpochID, File0, Offset, Size, Opts) ->
+read_chunk2(Sock, NSInfo, EpochID, File0, Offset, Size, Opts) ->
     ReqID = <<"id">>,
+    #ns_info{version=NSVersion, name=NS} = NSInfo,
     File = machi_util:make_binary(File0),
     Req = machi_pb_translate:to_pb_request(
             ReqID,
-            {low_read_chunk, EpochID, File, Offset, Size, Opts}),
+            {low_read_chunk, NSVersion, NS, EpochID, File, Offset, Size, Opts}),
     do_pb_request_common(Sock, ReqID, Req).
 
-append_chunk2(Sock, EpochID, CoC_Namespace, CoC_Locator,
-              Prefix0, Chunk0, ChunkExtra) ->
+append_chunk2(Sock, NSInfo, EpochID,
+              Prefix0, Chunk, CSum0, Opts, Timeout) ->
     ReqID = <<"id">>,
-    {Chunk, CSum_tag, CSum} =
-        case Chunk0 of
-            X when is_binary(X) ->
-                {Chunk0, ?CSUM_TAG_NONE, <<>>};
-            {ChunkCSum, Chk} ->
-                {Tag, CS} = machi_util:unmake_tagged_csum(ChunkCSum),
-                {Chk, Tag, CS}
-        end,
     Prefix = machi_util:make_binary(Prefix0),
+    {CSum_tag, CSum} = case CSum0 of
+                           <<>> ->
+                               {?CSUM_TAG_NONE, <<>>};
+                           {_Tag, _CS} ->
+                               CSum0;
+                           B when is_binary(B) ->
+                               machi_util:unmake_tagged_csum(CSum0)
+                       end,
+    #ns_info{version=NSVersion, name=NS, locator=NSLocator} = NSInfo,
+    %% NOTE: The tuple position of NSLocator is a bit odd, because EpochID
+    %%       _must_ be in the 4th position (as NSV & NS must be in 2nd & 3rd).
     Req = machi_pb_translate:to_pb_request(
             ReqID,
-            {low_append_chunk, EpochID, CoC_Namespace, CoC_Locator,
-             Prefix, Chunk, CSum_tag, CSum, ChunkExtra}),
-    do_pb_request_common(Sock, ReqID, Req).
+            {low_append_chunk, NSVersion, NS, EpochID, NSLocator,
+             Prefix, Chunk, CSum_tag, CSum, Opts}),
+    do_pb_request_common(Sock, ReqID, Req, true, Timeout).
 
-write_chunk2(Sock, EpochID, File0, Offset, Chunk0) ->
+write_chunk2(Sock, NSInfo, EpochID, File0, Offset, Chunk, CSum0) ->
     ReqID = <<"id">>,
+    #ns_info{version=NSVersion, name=NS} = NSInfo,
     File = machi_util:make_binary(File0),
     true = (Offset >= ?MINIMUM_OFFSET),
-    {Chunk, CSum_tag, CSum} =
-        case Chunk0 of
-            X when is_binary(X) ->
-                {Chunk0, ?CSUM_TAG_NONE, <<>>};
-            {ChunkCSum, Chk} ->
-                {Tag, CS} = machi_util:unmake_tagged_csum(ChunkCSum),
-                {Chk, Tag, CS}
-        end,
+    {CSum_tag, CSum} = case CSum0 of
+                           <<>> ->
+                               {?CSUM_TAG_NONE, <<>>};
+                           {_Tag, _CS} ->
+                               CSum0;
+                           B when is_binary(B) ->
+                               machi_util:unmake_tagged_csum(CSum0)
+                       end,
     Req = machi_pb_translate:to_pb_request(
             ReqID,
-            {low_write_chunk, EpochID, File, Offset, Chunk, CSum_tag, CSum}),
+            {low_write_chunk, NSVersion, NS, EpochID, File, Offset, Chunk, CSum_tag, CSum}),
     do_pb_request_common(Sock, ReqID, Req).
 
 list2(Sock, EpochID) ->
     ReqID = <<"id">>,
     Req = machi_pb_translate:to_pb_request(
-            ReqID, {low_list_files, EpochID}),
+            ReqID, {low_skip_wedge, {low_list_files, EpochID}}),
     do_pb_request_common(Sock, ReqID, Req).
 
 wedge_status2(Sock) ->
     ReqID = <<"id">>,
     Req = machi_pb_translate:to_pb_request(
-            ReqID, {low_wedge_status, undefined}),
+            ReqID, {low_skip_wedge, {low_wedge_status}}),
     do_pb_request_common(Sock, ReqID, Req).
 
 echo2(Sock, Message) ->
     ReqID = <<"id">>,
     Req = machi_pb_translate:to_pb_request(
-            ReqID, {low_echo, undefined, Message}),
+            ReqID, {low_skip_wedge, {low_echo, Message}}),
     do_pb_request_common(Sock, ReqID, Req).
 
-checksum_list2(Sock, EpochID, File) ->
+checksum_list2(Sock, File) ->
     ReqID = <<"id">>,
     Req = machi_pb_translate:to_pb_request(
-            ReqID, {low_checksum_list, EpochID, File}),
+            ReqID, {low_skip_wedge, {low_checksum_list, File}}),
     do_pb_request_common(Sock, ReqID, Req).
 
 delete_migration2(Sock, EpochID, File) ->
     ReqID = <<"id">>,
     Req = machi_pb_translate:to_pb_request(
-            ReqID, {low_delete_migration, EpochID, File}),
+            ReqID, {low_skip_wedge, {low_delete_migration, EpochID, File}}),
     do_pb_request_common(Sock, ReqID, Req).
 
 trunc_hack2(Sock, EpochID, File) ->
     ReqID = <<"id-trunc">>,
     Req = machi_pb_translate:to_pb_request(
-            ReqID, {low_trunc_hack, EpochID, File}),
+            ReqID, {low_skip_wedge, {low_trunc_hack, EpochID, File}}),
     do_pb_request_common(Sock, ReqID, Req).
 
 get_latest_epochid2(Sock, ProjType) ->
@@ -739,18 +735,18 @@ kick_projection_reaction2(Sock, _Options) ->
     ReqID = <<42>>,
     Req = machi_pb_translate:to_pb_request(
                 ReqID, {low_proj, {kick_projection_reaction}}),
-    do_pb_request_common(Sock, ReqID, Req, false).
+    do_pb_request_common(Sock, ReqID, Req, false, ?LONG_TIMEOUT).
 
 do_pb_request_common(Sock, ReqID, Req) ->
-    do_pb_request_common(Sock, ReqID, Req, true).
+    do_pb_request_common(Sock, ReqID, Req, true, ?LONG_TIMEOUT).
 
-do_pb_request_common(Sock, ReqID, Req, GetReply_p) ->
+do_pb_request_common(Sock, ReqID, Req, GetReply_p, Timeout) ->
     erase(bad_sock),
     try
         ReqBin = list_to_binary(machi_pb:encode_mpb_ll_request(Req)),
         ok = w_send(Sock, ReqBin),
         if GetReply_p ->
-                case w_recv(Sock, 0) of
+                case w_recv(Sock, 0, Timeout) of
                     {ok, RespBin} ->
                         Resp = machi_pb:decode_mpb_ll_response(RespBin),
                         {ReqID2, Reply} = machi_pb_translate:from_pb_response(Resp),
@@ -796,7 +792,7 @@ w_connect(#p_srvr{proto_mod=?MODULE, address=Host, port=Port, props=Props}=_P)->
         case proplists:get_value(session_proto, Props, tcp) of
             tcp ->
 put(xxx, goofus),
-                Sock = machi_util:connect(Host, Port, ?HARD_TIMEOUT),
+                Sock = machi_util:connect(Host, Port, ?SHORT_TIMEOUT),
 put(xxx, Sock),
                 ok = inet:setopts(Sock, ?PB_PACKET_OPTS),
                 {w,tcp,Sock};
@@ -820,8 +816,8 @@ w_close({w,tcp,Sock}) ->
     catch gen_tcp:close(Sock),
     ok.
 
-w_recv({w,tcp,Sock}, Amt) ->
-    gen_tcp:recv(Sock, Amt, ?HARD_TIMEOUT).
+w_recv({w,tcp,Sock}, Amt, Timeout) ->
+    gen_tcp:recv(Sock, Amt, Timeout).
 
 w_send({w,tcp,Sock}, IoData) ->
     gen_tcp:send(Sock, IoData).

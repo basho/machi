@@ -25,6 +25,10 @@
 %% to a single socket connection, and there is no code to deal with
 %% multiple connections/load balancing/error handling to several/all
 %% Machi cluster servers.
+%%
+%% Please see {@link machi_flu1_client} the "Client API implemntation notes"
+%% section for how this module relates to the rest of the client API
+%% implementation.
 
 -module(machi_pb_high_client).
 
@@ -38,7 +42,7 @@
          connected_p/1,
          echo/2, echo/3,
          auth/3, auth/4,
-         append_chunk/7, append_chunk/8,
+         append_chunk/6, append_chunk/7,
          write_chunk/5, write_chunk/6,
          read_chunk/5, read_chunk/6,
          trim_chunk/4, trim_chunk/5,
@@ -96,30 +100,33 @@ auth(PidSpec, User, Pass) ->
 auth(PidSpec, User, Pass, Timeout) ->
     send_sync(PidSpec, {auth, User, Pass}, Timeout).
 
--spec append_chunk(pid(), CoC_namespace::binary(), CoC_locator::integer(), Prefix::binary(), Chunk::binary(),
-                   CSum::binary(), ChunkExtra::non_neg_integer()) ->
+-spec append_chunk(pid(),
+                   NS::machi_dt:namespace(), Prefix::machi_dt:file_prefix(),
+                   Chunk::machi_dt:chunk(), CSum::machi_dt:chunk_csum(),
+                   Opts::machi_dt:append_opts()) ->
                           {ok, Filename::string(), Offset::machi_dt:file_offset()} |
                           {error, machi_client_error_reason()}.
-append_chunk(PidSpec, CoC_namespace, CoC_locator, Prefix, Chunk, CSum, ChunkExtra) ->
-    append_chunk(PidSpec, CoC_namespace, CoC_locator, Prefix, Chunk, CSum, ChunkExtra, ?DEFAULT_TIMEOUT).
+append_chunk(PidSpec, NS, Prefix, Chunk, CSum, Opts) ->
+    append_chunk(PidSpec, NS, Prefix, Chunk, CSum, Opts, ?DEFAULT_TIMEOUT).
 
--spec append_chunk(pid(), CoC_namespace::binary(), CoC_locator::integer(), Prefix::binary(),
-                   Chunk::binary(), CSum::binary(),
-                   ChunkExtra::non_neg_integer(),
+-spec append_chunk(pid(),
+                   NS::machi_dt:namespace(), Prefix::machi_dt:file_prefix(),
+                   Chunk::machi_dt:chunk(), CSum::machi_dt:chunk_csum(),
+                   Opts::machi_dt:append_opts(),
                    Timeout::non_neg_integer()) ->
                           {ok, Filename::string(), Offset::machi_dt:file_offset()} |
                           {error, machi_client_error_reason()}.
-append_chunk(PidSpec, CoC_namespace, CoC_locator, Prefix, Chunk, CSum, ChunkExtra, Timeout) ->
-    send_sync(PidSpec, {append_chunk, CoC_namespace, CoC_locator, Prefix, Chunk, CSum, ChunkExtra}, Timeout).
+append_chunk(PidSpec, NS, Prefix, Chunk, CSum, Opts, Timeout) ->
+    send_sync(PidSpec, {append_chunk, NS, Prefix, Chunk, CSum, Opts}, Timeout).
 
 -spec write_chunk(pid(), File::string(), machi_dt:file_offset(),
-                  Chunk::binary(), CSum::binary()) ->
+                  Chunk::machi_dt:chunk(), CSum::machi_dt:chunk_csum()) ->
                          ok | {error, machi_client_error_reason()}.
 write_chunk(PidSpec, File, Offset, Chunk, CSum) ->
     write_chunk(PidSpec, File, Offset, Chunk, CSum, ?DEFAULT_TIMEOUT).
 
 -spec write_chunk(pid(), File::string(), machi_dt:file_offset(),
-                  Chunk::binary(), CSum::binary(), Timeout::non_neg_integer()) ->
+                  Chunk::machi_dt:chunk(), CSum::machi_dt:chunk_csum(), Timeout::non_neg_integer()) ->
                          ok | {error, machi_client_error_reason()}.
 write_chunk(PidSpec, File, Offset, Chunk, CSum, Timeout) ->
     send_sync(PidSpec, {write_chunk, File, Offset, Chunk, CSum}, Timeout).
@@ -128,21 +135,22 @@ write_chunk(PidSpec, File, Offset, Chunk, CSum, Timeout) ->
 %% {Chunks, TrimmedChunks}}' for live file while it returns `{error,
 %% trimmed}' if all bytes of the file was trimmed.
 -spec read_chunk(pid(), File::string(), machi_dt:file_offset(), machi_dt:chunk_size(),
-                 [{flag_no_checksum | flag_no_chunk | needs_trimmed, boolean()}]) ->
+                 machi_dt:read_opts_x()) ->
                         {ok, {Chunks::[{File::string(), machi_dt:file_offset(), machi_dt:chunk_size(), binary()}],
                               Trimmed::[{File::string(), machi_dt:file_offset(), machi_dt:chunk_size()}]}} |
                         {error, machi_client_error_reason()}.
-read_chunk(PidSpec, File, Offset, Size, Options) ->
-    read_chunk(PidSpec, File, Offset, Size, Options, ?DEFAULT_TIMEOUT).
+read_chunk(PidSpec, File, Offset, Size, Opts) ->
+    read_chunk(PidSpec, File, Offset, Size, Opts, ?DEFAULT_TIMEOUT).
 
 -spec read_chunk(pid(), File::string(), machi_dt:file_offset(), machi_dt:chunk_size(),
-                 [{flag_no_checksum | flag_no_chunk | needs_trimmed, boolean()}],
+                 machi_dt:read_opts_x(),
                  Timeout::non_neg_integer()) ->
                         {ok, {Chunks::[{File::string(), machi_dt:file_offset(), machi_dt:chunk_size(), binary()}],
                               Trimmed::[{File::string(), machi_dt:file_offset(), machi_dt:chunk_size()}]}} |
                         {error, machi_client_error_reason()}.
-read_chunk(PidSpec, File, Offset, Size, Options, Timeout) ->
-    send_sync(PidSpec, {read_chunk, File, Offset, Size, Options}, Timeout).
+read_chunk(PidSpec, File, Offset, Size, Opts0, Timeout) ->
+    Opts = machi_util:read_opts_default(Opts0),
+    send_sync(PidSpec, {read_chunk, File, Offset, Size, Opts}, Timeout).
 
 %% @doc Trims arbitrary binary range of any file. If a specified range
 %% has any byte trimmed, it fails and returns `{error, trimmed}'.
@@ -281,18 +289,19 @@ do_send_sync2({auth, User, Pass}, #state{sock=Sock}=S) ->
             Res = {bummer, {X, Y, erlang:get_stacktrace()}},
             {Res, S}
     end;
-do_send_sync2({append_chunk, CoC_Namespace, CoC_Locator,
-               Prefix, Chunk, CSum, ChunkExtra},
+do_send_sync2({append_chunk, NS, Prefix, Chunk, CSum, Opts},
              #state{sock=Sock, sock_id=Index, count=Count}=S) ->
     try
         ReqID = <<Index:64/big, Count:64/big>>,
         CSumT = convert_csum_req(CSum, Chunk),
-        Req = #mpb_appendchunkreq{coc_namespace=CoC_Namespace,
-                                  coc_locator=CoC_Locator,
+        {ChunkExtra, Pref, FailPref} = machi_pb_translate:conv_from_append_opts(Opts),
+        Req = #mpb_appendchunkreq{namespace=NS,
                                   prefix=Prefix,
                                   chunk=Chunk,
                                   csum=CSumT,
-                                  chunk_extra=ChunkExtra},
+                                  chunk_extra=ChunkExtra,
+                                  preferred_file_name=Pref,
+                                  flag_fail_preferred=FailPref},
         R1a = #mpb_request{req_id=ReqID, do_not_alter=1,
                            append_chunk=Req},
         Bin1a = machi_pb:encode_mpb_request(R1a),
@@ -337,13 +346,13 @@ do_send_sync2({write_chunk, File, Offset, Chunk, CSum},
             Res = {bummer, {X, Y, erlang:get_stacktrace()}},
             {Res, S#state{count=Count+1}}
     end;
-do_send_sync2({read_chunk, File, Offset, Size, Options},
+do_send_sync2({read_chunk, File, Offset, Size, Opts},
              #state{sock=Sock, sock_id=Index, count=Count}=S) ->
     try
         ReqID = <<Index:64/big, Count:64/big>>,
-        FlagNoChecksum = proplists:get_value(no_checksum, Options, false),
-        FlagNoChunk = proplists:get_value(no_chunk, Options, false),
-        NeedsTrimmed = proplists:get_value(needs_trimmed, Options, false),
+        #read_opts{no_checksum=FlagNoChecksum,
+                   no_chunk=FlagNoChunk,
+                   needs_trimmed=NeedsTrimmed} = Opts,
         Req = #mpb_readchunkreq{chunk_pos=#mpb_chunkpos{file_name=File,
                                                         offset=Offset,
                                                         chunk_size=Size},
@@ -436,9 +445,15 @@ do_send_sync2({list_files},
             {Res, S#state{count=Count+1}}
     end.
 
+%% We only convert the checksum types that make sense here:
+%% none or client_sha.  None of the other types should be sent
+%% to us via the PB high protocol.
+
 convert_csum_req(none, Chunk) ->
     #mpb_chunkcsum{type='CSUM_TAG_CLIENT_SHA',
                    csum=machi_util:checksum_chunk(Chunk)};
+convert_csum_req(<<>>, Chunk) ->
+    convert_csum_req(none, Chunk);
 convert_csum_req({client_sha, CSumBin}, _Chunk) ->
     #mpb_chunkcsum{type='CSUM_TAG_CLIENT_SHA',
                    csum=CSumBin}.
@@ -486,12 +501,12 @@ convert_read_chunk_resp(#mpb_readchunkresp{status='OK', chunks=PB_Chunks, trimme
                                       csum=#mpb_chunkcsum{type=T, csum=Ck}}) ->
                                %% TODO: cleanup export
                                Csum = <<(machi_pb_translate:conv_to_csum_tag(T)):8, Ck/binary>>,
-                               {File, Offset, Chunk, Csum}
+                               {list_to_binary(File), Offset, Chunk, Csum}
                        end, PB_Chunks),
     Trimmed = lists:map(fun(#mpb_chunkpos{file_name=File,
                                           offset=Offset,
                                           chunk_size=Size}) ->
-                                {File, Offset, Size}
+                                {list_to_binary(File), Offset, Size}
                         end, PB_Trimmed),
     {ok, {Chunks, Trimmed}};
 convert_read_chunk_resp(#mpb_readchunkresp{status=Status}) ->

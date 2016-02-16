@@ -66,19 +66,25 @@
           flu_name    :: pv1_server(),
           %% Used in server_wedge_status to lookup the table
           epoch_tab   :: ets:tab(),
+          %% Clustering: cluster map version number
+          namespace_version = 0 :: machi_dt:namespace_version(),
+          %% Clustering: my (and my chain's) assignment to a specific namespace
+          namespace = <<>> :: machi_dt:namespace(),
 
           %% High mode only
           high_clnt   :: pid(),
 
           %% anything you want
-          props = []  :: list()  % proplist
+          props = []  :: proplists:proplist()
          }).
 
 -type socket() :: any().
 -type state()  :: #state{}.
 
 -spec start_link(ranch:ref(), socket(), module(), [term()]) -> {ok, pid()}.
-start_link(Ref, Socket, Transport, [FluName, Witness, DataDir, EpochTab, ProjStore]) ->
+start_link(Ref, Socket, Transport, [FluName, Witness, DataDir, EpochTab, ProjStore, Props]) ->
+    NS = proplists:get_value(namespace, Props, <<>>),
+    true = is_binary(NS),
     proc_lib:start_link(?MODULE, init, [#state{ref=Ref,
                                                socket=Socket,
                                                transport=Transport,
@@ -86,7 +92,9 @@ start_link(Ref, Socket, Transport, [FluName, Witness, DataDir, EpochTab, ProjSto
                                                witness=Witness,
                                                data_dir=DataDir,
                                                epoch_tab=EpochTab,
-                                               proj_store=ProjStore}]).
+                                               proj_store=ProjStore,
+                                               namespace=NS,
+                                               props=Props}]).
 
 -spec init(state()) -> no_return().
 init(#state{ref=Ref, socket=Socket, transport=Transport}=State) ->
@@ -209,44 +217,51 @@ do_pb_ll_request(#mpb_ll_request{req_id=ReqID}, #state{pb_mode=high}=S) ->
     {machi_pb_translate:to_pb_response(ReqID, unused, Result), S};
 do_pb_ll_request(PB_request, S) ->
     Req = machi_pb_translate:from_pb_request(PB_request),
-    %% io:format(user, "[~w] do_pb_ll_request Req: ~w~n", [S#state.flu_name, Req]),
     {ReqID, Cmd, Result, S2} = 
         case Req of
-            {RqID, {LowCmd, _}=Cmd0}
-              when LowCmd =:= low_proj;
-                   LowCmd =:= low_wedge_status;
-                   LowCmd =:= low_list_files ->
+            {RqID, {low_skip_wedge, LowSubCmd}=Cmd0} ->
                 %% Skip wedge check for these unprivileged commands
+                {Rs, NewS} = do_pb_ll_request3(LowSubCmd, S),
+                {RqID, Cmd0, Rs, NewS};
+            {RqID, {low_proj, _LowSubCmd}=Cmd0} ->
                 {Rs, NewS} = do_pb_ll_request3(Cmd0, S),
                 {RqID, Cmd0, Rs, NewS};
             {RqID, Cmd0} ->
-                EpochID = element(2, Cmd0),      % by common convention
-                {Rs, NewS} = do_pb_ll_request2(EpochID, Cmd0, S),
+                %% All remaining must have NSVersion, NS, & EpochID at next pos
+                NSVersion = element(2, Cmd0),
+                NS = element(3, Cmd0),
+                EpochID = element(4, Cmd0),
+                {Rs, NewS} = do_pb_ll_request2(NSVersion, NS, EpochID, Cmd0, S),
                 {RqID, Cmd0, Rs, NewS}
         end,
     {machi_pb_translate:to_pb_response(ReqID, Cmd, Result), S2}.
 
-do_pb_ll_request2(EpochID, CMD, S) ->
+%% do_pb_ll_request2(): Verification of epoch details & namespace details.
+
+do_pb_ll_request2(NSVersion, NS, EpochID, CMD, S) ->
     {Wedged_p, CurrentEpochID} = lookup_epoch(S),
-    %% io:format(user, "{Wedged_p, CurrentEpochID}: ~w~n", [{Wedged_p, CurrentEpochID}]),
-    if Wedged_p == true ->
+    if not is_tuple(EpochID) orelse tuple_size(EpochID) /= 2 ->
+            exit({bad_epoch_id, EpochID, for, CMD});
+       Wedged_p == true ->
             {{error, wedged}, S#state{epoch_id=CurrentEpochID}};
-       is_tuple(EpochID)
-       andalso
        EpochID /= CurrentEpochID ->
             {Epoch, _} = EpochID,
             {CurrentEpoch, _} = CurrentEpochID,
             if Epoch < CurrentEpoch ->
-                    ok;
+                    {{error, bad_epoch}, S};
                true ->
-                    %% We're at same epoch # but different checksum, or
-                    %% we're at a newer/bigger epoch #.
                     _ = machi_flu1:wedge_myself(S#state.flu_name, CurrentEpochID),
-                    ok
-            end,
-            {{error, bad_epoch}, S#state{epoch_id=CurrentEpochID}};
+                    {{error, wedged}, S#state{epoch_id=CurrentEpochID}}
+            end;
        true ->
-            do_pb_ll_request3(CMD, S#state{epoch_id=CurrentEpochID})
+            #state{namespace_version=MyNSVersion, namespace=MyNS} = S,
+            if NSVersion /= MyNSVersion ->
+                    {{error, bad_epoch}, S};
+               NS /= MyNS ->
+                    {{error, bad_arg}, S};
+               true ->
+                    do_pb_ll_request3(CMD, S)
+            end
     end.
 
 lookup_epoch(#state{epoch_tab=T}) ->
@@ -254,34 +269,35 @@ lookup_epoch(#state{epoch_tab=T}) ->
     ets:lookup_element(T, epoch, 2).
 
 %% Witness status does not matter below.
-do_pb_ll_request3({low_echo, _BogusEpochID, Msg}, S) ->
+do_pb_ll_request3({low_echo, Msg}, S) ->
     {Msg, S};
-do_pb_ll_request3({low_auth, _BogusEpochID, _User, _Pass}, S) ->
+do_pb_ll_request3({low_auth, _User, _Pass}, S) ->
     {-6, S};
-do_pb_ll_request3({low_wedge_status, _EpochID}, S) ->
+do_pb_ll_request3({low_wedge_status}, S) ->
     {do_server_wedge_status(S), S};
 do_pb_ll_request3({low_proj, PCMD}, S) ->
     {do_server_proj_request(PCMD, S), S};
 
 %% Witness status *matters* below
-do_pb_ll_request3({low_append_chunk, _EpochID, CoC_Namespace, CoC_Locator,
+do_pb_ll_request3({low_append_chunk, NSVersion, NS, EpochID, NSLocator,
                    Prefix, Chunk, CSum_tag,
-                   CSum, ChunkExtra},
+                   CSum, Opts},
                   #state{witness=false}=S) ->
-    {do_server_append_chunk(CoC_Namespace, CoC_Locator,
+    NSInfo = #ns_info{version=NSVersion, name=NS, locator=NSLocator},
+    {do_server_append_chunk(NSInfo, EpochID,
                             Prefix, Chunk, CSum_tag, CSum,
-                            ChunkExtra, S), S};
-do_pb_ll_request3({low_write_chunk, _EpochID, File, Offset, Chunk, CSum_tag,
+                            Opts, S), S};
+do_pb_ll_request3({low_write_chunk, _NSVersion, _NS, _EpochID, File, Offset, Chunk, CSum_tag,
                    CSum},
                   #state{witness=false}=S) ->
     {do_server_write_chunk(File, Offset, Chunk, CSum_tag, CSum, S), S};
-do_pb_ll_request3({low_read_chunk, _EpochID, File, Offset, Size, Opts},
+do_pb_ll_request3({low_read_chunk, _NSVersion, _NS, _EpochID, File, Offset, Size, Opts},
                   #state{witness=false} = S) ->
     {do_server_read_chunk(File, Offset, Size, Opts, S), S};
-do_pb_ll_request3({low_trim_chunk, _EpochID, File, Offset, Size, TriggerGC},
+do_pb_ll_request3({low_trim_chunk, _NSVersion, _NS, _EpochID, File, Offset, Size, TriggerGC},
                   #state{witness=false}=S) ->
     {do_server_trim_chunk(File, Offset, Size, TriggerGC, S), S};
-do_pb_ll_request3({low_checksum_list, _EpochID, File},
+do_pb_ll_request3({low_checksum_list, File},
                   #state{witness=false}=S) ->
     {do_server_checksum_listing(File, S), S};
 do_pb_ll_request3({low_list_files, _EpochID},
@@ -334,27 +350,27 @@ do_server_proj_request({kick_projection_reaction},
           end),
     async_no_response.
 
-do_server_append_chunk(CoC_Namespace, CoC_Locator,
+do_server_append_chunk(NSInfo, EpochID,
                        Prefix, Chunk, CSum_tag, CSum,
-                       ChunkExtra, S) ->
+                       Opts, S) ->
     case sanitize_prefix(Prefix) of
         ok ->
-            do_server_append_chunk2(CoC_Namespace, CoC_Locator,
+            do_server_append_chunk2(NSInfo, EpochID,
                                     Prefix, Chunk, CSum_tag, CSum,
-                                    ChunkExtra, S);
+                                    Opts, S);
         _ ->
             {error, bad_arg}
     end.
 
-do_server_append_chunk2(CoC_Namespace, CoC_Locator,
+do_server_append_chunk2(NSInfo, EpochID,
                         Prefix, Chunk, CSum_tag, Client_CSum,
-                        ChunkExtra, #state{flu_name=FluName,
-                                           epoch_id=EpochID}=_S) ->
+                        Opts, #state{flu_name=FluName,
+                                     epoch_id=EpochID}=_S) ->
     %% TODO: Do anything with PKey?
     try
         TaggedCSum = check_or_make_tagged_checksum(CSum_tag, Client_CSum,Chunk),
-        R = {seq_append, self(), CoC_Namespace, CoC_Locator,
-             Prefix, Chunk, TaggedCSum, ChunkExtra, EpochID},
+        R = {seq_append, self(), NSInfo, EpochID,
+             Prefix, Chunk, TaggedCSum, Opts},
         case gen_server:call(FluName, R, 10*1000) of
             {assignment, Offset, File} ->
                 Size = iolist_size(Chunk),
@@ -457,14 +473,14 @@ do_server_list_files(#state{data_dir=DataDir}=_S) ->
               {Size, File}
           end || File <- Files]}.
 
-do_server_wedge_status(S) ->
+do_server_wedge_status(#state{namespace_version=NSVersion, namespace=NS}=S) ->
     {Wedged_p, CurrentEpochID0} = lookup_epoch(S),
     CurrentEpochID = if CurrentEpochID0 == undefined ->
                              ?DUMMY_PV1_EPOCH;
                         true ->
                              CurrentEpochID0
                      end,
-    {Wedged_p, CurrentEpochID}.
+    {Wedged_p, CurrentEpochID, NSVersion, NS}.
 
 do_server_delete_migration(File, #state{data_dir=DataDir}=_S) ->
     case sanitize_file_string(File) of
@@ -563,26 +579,30 @@ do_pb_hl_request2({high_echo, Msg}, S) ->
     {Msg, S};
 do_pb_hl_request2({high_auth, _User, _Pass}, S) ->
     {-77, S};
-do_pb_hl_request2({high_append_chunk, CoC_Namespace, CoC_Locator,
-                   Prefix, ChunkBin, TaggedCSum,
-                   ChunkExtra}, #state{high_clnt=Clnt}=S) ->
-    Chunk = {TaggedCSum, ChunkBin},
-    Res = machi_cr_client:append_chunk_extra(Clnt, CoC_Namespace, CoC_Locator,
-                                             Prefix, Chunk,
-                                             ChunkExtra),
-    {Res, S};
-do_pb_hl_request2({high_write_chunk, File, Offset, ChunkBin, TaggedCSum},
+do_pb_hl_request2({high_append_chunk=Op, NS, Prefix, Chunk, TaggedCSum, Opts},
                   #state{high_clnt=Clnt}=S) ->
-    Chunk = {TaggedCSum, ChunkBin},
-    Res = machi_cr_client:write_chunk(Clnt, File, Offset, Chunk),
+    NSInfo = #ns_info{name=NS},                 % TODO populate other fields
+    todo_perhaps_remind_ns_locator_not_chosen(Op),
+    Res = machi_cr_client:append_chunk(Clnt, NSInfo,
+                                       Prefix, Chunk, TaggedCSum, Opts),
     {Res, S};
-do_pb_hl_request2({high_read_chunk, File, Offset, Size, Opts},
+do_pb_hl_request2({high_write_chunk=Op, File, Offset, Chunk, CSum},
                   #state{high_clnt=Clnt}=S) ->
-    Res = machi_cr_client:read_chunk(Clnt, File, Offset, Size, Opts),
+    NSInfo = undefined,
+    todo_perhaps_remind_ns_locator_not_chosen(Op),
+    Res = machi_cr_client:write_chunk(Clnt, NSInfo, File, Offset, Chunk, CSum),
     {Res, S};
-do_pb_hl_request2({high_trim_chunk, File, Offset, Size},
+do_pb_hl_request2({high_read_chunk=Op, File, Offset, Size, Opts},
                   #state{high_clnt=Clnt}=S) ->
-    Res = machi_cr_client:trim_chunk(Clnt, File, Offset, Size),
+    NSInfo = undefined,
+    todo_perhaps_remind_ns_locator_not_chosen(Op),
+    Res = machi_cr_client:read_chunk(Clnt, NSInfo, File, Offset, Size, Opts),
+    {Res, S};
+do_pb_hl_request2({high_trim_chunk=Op, File, Offset, Size},
+                  #state{high_clnt=Clnt}=S) ->
+    NSInfo = undefined,
+    todo_perhaps_remind_ns_locator_not_chosen(Op),
+    Res = machi_cr_client:trim_chunk(Clnt, NSInfo, File, Offset, Size),
     {Res, S};
 do_pb_hl_request2({high_checksum_list, File}, #state{high_clnt=Clnt}=S) ->
     Res = machi_cr_client:checksum_list(Clnt, File),
@@ -600,3 +620,15 @@ make_high_clnt(#state{high_clnt=undefined}=S) ->
     S#state{high_clnt=Clnt};
 make_high_clnt(S) ->
     S.
+
+todo_perhaps_remind_ns_locator_not_chosen(Op) ->
+    Key = {?MODULE, Op},
+    case get(Key) of
+        undefined ->
+            io:format(user, "TODO op ~w is using default locator value\n",
+                      [Op]),
+            put(Key, true);
+        _ ->
+            ok
+    end.
+

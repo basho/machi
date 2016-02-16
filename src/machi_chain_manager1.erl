@@ -1909,7 +1909,7 @@ react_to_env_C100_inner(Author_latest, NotSanesDict0, _MyName,
     S2 = S#ch_mgr{not_sanes=NotSanesDict, sane_transitions=0},
     case orddict:fetch(Author_latest, NotSanesDict) of
         N when N > ?TOO_FREQUENT_BREAKER ->
-            %% ?V("\n\nYOYO ~w breaking the cycle of:\n  current: ~w\n  new    : ~w\n", [_MyName, machi_projection:make_summary(S#ch_mgr.proj), machi_projection:make_summary(P_latest)]),
+            ?V("\n\nYOYO ~w breaking the cycle insane-freq=~w by-author=~w of:\n  current: ~w\n  new    : ~w\n", [_MyName, N, Author_latest, machi_projection:make_summary(S#ch_mgr.proj), machi_projection:make_summary(P_latest)]),
             ?REACT({c100, ?LINE, [{not_sanes_author_count, N}]}),
             react_to_env_C103(P_newprop, P_latest, P_current_calc, S2);
         N ->
@@ -1937,7 +1937,7 @@ react_to_env_C103(#projection_v1{epoch_number=_Epoch_newprop} = _P_newprop,
     ?REACT({c103, ?LINE,
             [{current_epoch, P_current#projection_v1.epoch_number},
              {none_projection_epoch, P_none#projection_v1.epoch_number}]}),
-    io:format(user, "SET add_admin_down(~w) at ~w =====================================\n", [MyName, time()]),
+    io:format(user, "SET add_admin_down(~w) at ~w current_epoch ~w none_proj_epoch ~w =====================================\n", [MyName, time(), P_current#projection_v1.epoch_number, P_none#projection_v1.epoch_number]),
     machi_fitness:add_admin_down(S#ch_mgr.fitness_svr, MyName, []),
     timer:sleep(5*1000),
     io:format(user, "SET delete_admin_down(~w) at ~w =====================================\n", [MyName, time()]),
@@ -2979,12 +2979,13 @@ perhaps_verbose_c111(P_latest2, S) ->
                (S#ch_mgr.proj)#projection_v1.upi /= [] ->
                     <<CSumRep:4/binary,_/binary>> =
                                           P_latest2#projection_v1.epoch_csum,
-                    io:format(user, "\n~s CONFIRM epoch ~w ~w upi ~w rep ~w by ~w\n", [machi_util:pretty_time(), (S#ch_mgr.proj)#projection_v1.epoch_number, CSumRep, P_latest2#projection_v1.upi, P_latest2#projection_v1.repairing, S#ch_mgr.name]);
+                    io:format(user, "~s CONFIRM epoch ~w ~w upi ~w rep ~w by ~w\n", [machi_util:pretty_time(), (S#ch_mgr.proj)#projection_v1.epoch_number, CSumRep, P_latest2#projection_v1.upi, P_latest2#projection_v1.repairing, S#ch_mgr.name]);
                true ->
                     ok
             end,
             case proplists:get_value(private_write_verbose,
                                      S#ch_mgr.opts) of
+            %% case true of
                 true when Summ2 /= Last2 ->
                     put(last_verbose, Summ2),
                     ?V("\n~s ~p uses plain: ~w \n",

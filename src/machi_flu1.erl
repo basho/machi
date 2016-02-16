@@ -129,7 +129,8 @@ main2(FluName, TcpPort, DataDir, Props) ->
             ok
     end,
     {ok, ListenerPid} = start_listen_server(FluName, TcpPort, Witness_p, DataDir,
-                                            ets_table_name(FluName), ProjectionPid),
+                                            ets_table_name(FluName), ProjectionPid,
+                                            Props),
     %% io:format(user, "Listener started: ~w~n", [{FluName, ListenerPid}]),
 
     Config_e = machi_util:make_config_filename(DataDir, "unused"),
@@ -154,9 +155,10 @@ main2(FluName, TcpPort, DataDir, Props) ->
 start_append_server(FluName, Witness_p, Wedged_p, EpochId) ->
     machi_flu1_subsup:start_append_server(FluName, Witness_p, Wedged_p, EpochId).
 
-start_listen_server(FluName, TcpPort, Witness_p, DataDir, EtsTab, ProjectionPid) ->
+start_listen_server(FluName, TcpPort, Witness_p, DataDir, EtsTab, ProjectionPid,
+                    Props) ->
     machi_flu1_subsup:start_listener(FluName, TcpPort, Witness_p, DataDir,
-                                     EtsTab, ProjectionPid).
+                                     EtsTab, ProjectionPid, Props).
 
 %% This is the name of the projection store that is spawned by the
 %% *flu*, for use primarily in testing scenarios.  In normal use, we

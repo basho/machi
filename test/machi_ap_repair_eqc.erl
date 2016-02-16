@@ -118,7 +118,10 @@ append(CRIndex, Bin, #state{verbose=V}=S) ->
     {_SimSelfName, C} = lists:nth(CRIndex, CRList),
     Prefix = <<"pre">>,
     Len = byte_size(Bin),
-    Res = (catch machi_cr_client:append_chunk(C, Prefix, Bin, {sec(1), sec(1)})),
+    NSInfo = #ns_info{},
+    NoCSum = <<>>,
+    Opts1 = #append_opts{},
+    Res = (catch machi_cr_client:append_chunk(C, NSInfo, Prefix, Bin, NoCSum, Opts1, sec(1))),
     case Res of
         {ok, {_Off, Len, _FileName}=Key} ->
             case ets:insert_new(?WRITTEN_TAB, {Key, Bin}) of
@@ -190,6 +193,7 @@ change_partition(Partition,
     %% Don't wait for stable chain, tick will be executed on demand
     %% in append oprations
     _ = tick(S),
+
     ok.
 
 %% Generators
@@ -427,7 +431,7 @@ confirm_result(_T) ->
         0 -> ok;
         _ ->
             DumpFailed = filename:join(DirBase, "dump-failed-" ++ Suffix),
-            ?V("Dump failed ETS tab to: ~w~n", [DumpFailed]),
+            ?V("Dump failed ETS tab to: ~s~n", [DumpFailed]),
             ets:tab2file(?FAILED_TAB, DumpFailed)
     end,
     case Critical of
@@ -450,14 +454,14 @@ confirm_written(C) ->
 
 assert_chunk(C, {Off, Len, FileName}=Key, Bin) ->
     %% TODO: This probably a bug, read_chunk respnds with filename of `string()' type
-    FileNameStr = binary_to_list(FileName),
     %% TODO : Use CSum instead of binary (after disuccsion about CSum is calmed down?)
-    case (catch machi_cr_client:read_chunk(C, FileName, Off, Len, [], sec(3))) of
-        {ok, {[{FileNameStr, Off, Bin, _}], []}} ->
+    NSInfo = undefined,
+    case (catch machi_cr_client:read_chunk(C, NSInfo, FileName, Off, Len, undefined, sec(3))) of
+        {ok, {[{FileName, Off, Bin, _}], []}} ->
             ok;
         {ok, Got} ->
             ?V("read_chunk got different binary for Key=~p~n", [Key]),
-            ?V("    Expected: ~p~n", [{[{FileNameStr, Off, Bin, <<"CSum-NYI">>}], []}]),
+            ?V("    Expected: ~p~n", [{[{FileName, Off, Bin, <<"CSum-NYI">>}], []}]),
             ?V("    Got:      ~p~n", [Got]),
             {error, different_binary};
         {error, Reason} ->
@@ -479,7 +483,7 @@ eqc_verbose() ->
     os:getenv("EQC_VERBOSE") =:= "true".
 
 eqc_timeout(Default) ->
-    PropTimeout = case os:getenv("EQC_TIMEOUT") of
+    PropTimeout = case os:getenv("EQC_TIME") of
                       false -> Default;
                       V -> list_to_integer(V)
                   end,
@@ -554,8 +558,10 @@ wait_until_stable(ExpectedChainState, FLUNames, MgrNames, Retries, Verbose) ->
     FCList = fc_list(),
     wait_until_stable1(ExpectedChainState, TickFun, FCList, Retries, Verbose).
 
-wait_until_stable1(_ExpectedChainState, _TickFun, FCList, 0, _Verbose) ->
+wait_until_stable1(ExpectedChainState, _TickFun, FCList, 0, _Verbose) ->
+    ?V("  [ERROR] _ExpectedChainState ~p\n", [ExpectedChainState]),
     ?V("  [ERROR] wait_until_stable failed.... : ~p~n", [chain_state(FCList)]),
+    ?V("  [ERROR] norm....                     : ~p~n", [normalize_chain_state(chain_state(FCList))]),
     false;
 wait_until_stable1(ExpectedChainState, TickFun, FCList, Reties, Verbose) ->
     [TickFun(3, 0, 100) || _ <- lists:seq(1, 3)],

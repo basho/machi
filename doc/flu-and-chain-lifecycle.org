@@ -14,10 +14,10 @@ complete yet, so we are working one small step at a time.
 + FLU and Chain Life Cycle Management
 + Terminology review
   + Terminology: Machi run-time components/services/thingies
-  + Terminology: Machi data structures
-  + Terminology: Cluster-of-cluster (CoC) data structures
+  + Terminology: Machi chain data structures
+  + Terminology: Machi cluster data structures
 + Overview of administrative life cycles
-  + Cluster-of-clusters (CoC) administrative life cycle
+  + Cluster administrative life cycle
   + Chain administrative life cycle
   + FLU server administrative life cycle
 + Quick admin: declarative management of Machi FLU and chain life cycles
@@ -57,10 +57,8 @@ complete yet, so we are working one small step at a time.
     quorum replication technique requires ~2F+1~ members in the
     general case.)
 
-+ Cluster: this word can be used interchangeably with "chain".
-
-+ Cluster-of-clusters: A collection of Machi clusters where files are
-  horizontally partitioned/sharded/distributed across 
++ Cluster: A collection of Machi chains that are used to store files
+  in a horizontally partitioned/sharded/distributed manner.
 
 ** Terminology: Machi data structures
 
@@ -75,13 +73,13 @@ complete yet, so we are working one small step at a time.
   to another, e.g., when the chain is temporarily shortened by the
   failure of a member FLU server.
 
-** Terminology: Cluster-of-cluster (CoC) data structures
+** Terminology: Machi cluster data structures
 
 + Namespace: A collection of human-friendly names that are mapped to
   groups of Machi chains that provide the same type of storage
   service: consistency mode, replication policy, etc.
   + A single namespace name, e.g. ~normal-ec~, is paired with a single
-    CoC chart (see below).
+    cluster map (see below).
   + Example: ~normal-ec~ might be a collection of Machi chains in
     eventually-consistent mode that are of length=3.
   + Example: ~risky-ec~ might be a collection of Machi chains in
@@ -89,32 +87,31 @@ complete yet, so we are working one small step at a time.
   + Example: ~mgmt-critical~ might be a collection of Machi chains in
     strongly-consistent mode that are of length=7.
 
-+ CoC chart: Encodes the rules which partition/shard/distribute a
-  particular namespace across a group of chains that collectively
-  store the namespace's files.
-  + "chart: noun, a geographical map or plan, especially on used for
-    navigation by sea or air."
++ Cluster map: Encodes the rules which partition/shard/distribute
+  the files stored in a particular namespace across a group of chains
+  that collectively store the namespace's files.
 
-+ Chain weight: A value assigned to each chain within a CoC chart
++ Chain weight: A value assigned to each chain within a cluster map
   structure that defines the relative storage capacity of a chain
   within the namespace.  For example, a chain weight=150 has 50% more
   capacity than a chain weight=100.
 
-+ CoC chart epoch: The version number assigned to a CoC chart.
++ Cluster map epoch: The version number assigned to a cluster map.
 
 * Overview of administrative life cycles
 
-** Cluster-of-clusters (CoC) administrative life cycle
+** Cluster administrative life cycle
 
-+ CoC is first created
-+ CoC adds namespaces (e.g. consistency policy + chain length policy)
-+ CoC adds/removes chains to a namespace to increase/decrease the
++ Cluster is first created
++ Adds namespaces (e.g. consistency policy + chain length policy) to
+  the cluster
++ Chains are added to/removed from a namespace to increase/decrease the
   namespace's storage capacity.
-+ CoC adjusts chain weights within a namespace, e.g., to shift files
++ Adjust chain weights within a namespace, e.g., to shift files
   within the namespace to chains with greater storage capacity
   resources and/or runtime I/O resources.
 
-A CoC "file migration" is the process of moving files from one
+A cluster "file migration" is the process of moving files from one
 namespace member chain to another for purposes of shifting &
 re-balancing storage capacity and/or runtime I/O capacity.
 
@@ -155,7 +152,7 @@ described in this section.
 As described at the top of
 http://basho.github.io/machi/edoc/machi_lifecycle_mgr.html, the "rc.d"
 config files do not manage "policy".  "Policy" is doing the right
-thing with a Machi cluster-of-clusters from a systems administrator's
+thing with a Machi cluster from a systems administrator's
 point of view.  The "rc.d" config files can only implement decisions
 made according to policy.
 

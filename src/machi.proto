@@ -170,12 +170,18 @@ message Mpb_AuthResp {
 // High level API: append_chunk() request & response
 
 message Mpb_AppendChunkReq {
-    required string coc_namespace = 1;
-    required uint32 coc_locator = 2;
-    required string prefix = 3;
-    required bytes chunk = 4;
-    required Mpb_ChunkCSum csum = 5;
-    optional uint32 chunk_extra = 6;
+    // General namespace arguments
+    /* In single chain/non-clustered environment, use namespace="" */
+    required string namespace = 1;
+
+    required string prefix = 10;
+    required bytes chunk = 11;
+    required Mpb_ChunkCSum csum = 12;
+
+    optional uint32 chunk_extra = 20;
+    optional string preferred_file_name = 21;
+    /* Fail the operation if our preferred file name is not available */
+    optional bool flag_fail_preferred = 22 [default=false];
 }
 
 message Mpb_AppendChunkResp {
@@ -187,7 +193,7 @@ message Mpb_AppendChunkResp {
 // High level API: write_chunk() request & response
 
 message Mpb_WriteChunkReq {
-    required Mpb_Chunk chunk = 1;
+    required Mpb_Chunk chunk = 10;
 }
 
 message Mpb_WriteChunkResp {
@@ -197,19 +203,22 @@ message Mpb_WriteChunkResp {
 // High level API: read_chunk() request & response
 
 message Mpb_ReadChunkReq {
-    required Mpb_ChunkPos chunk_pos = 1;
+    // No namespace arguments are required because NS is embedded
+    // inside of the file name.
+
+    required Mpb_ChunkPos chunk_pos = 10;
 
     // Use flag_no_checksum=non-zero to skip returning the chunk's checksum.
     // TODO: not implemented yet.
-    optional uint32 flag_no_checksum = 2 [default=0];
+    optional bool flag_no_checksum = 20 [default=false];
 
     // Use flag_no_chunk=non-zero to skip returning the chunk (which
     // only makes sense if flag_no_checksum is not set).
     // TODO: not implemented yet.
-    optional uint32 flag_no_chunk = 3 [default=0];
+    optional bool flag_no_chunk = 21 [default=false];
 
     // TODO: not implemented yet.
-    optional uint32 flag_needs_trimmed = 4 [default=0];
+    optional bool flag_needs_trimmed = 22 [default=false];
 }
 
 message Mpb_ReadChunkResp {
@@ -245,6 +254,8 @@ message Mpb_ChecksumListResp {
 // High level API: list_files() request & response
 
 message Mpb_ListFilesReq {
+    // TODO: Add flag for file glob/regexp/other filter type
+    // TODO: What else could go wrong?
 }
 
 message Mpb_ListFilesResp {
@@ -377,14 +388,20 @@ message Mpb_ProjectionV1 {
 // Low level API: append_chunk()
 
 message Mpb_LL_AppendChunkReq {
-    required Mpb_EpochID epoch_id = 1;
-    /* To avoid CoC use, use coc_namespace="" and coc_locator=0 */
-    required string coc_namespace = 2;
-    required uint32 coc_locator = 3;
-    required string prefix = 4;
-    required bytes chunk = 5;
-    required Mpb_ChunkCSum csum = 6;
-    optional uint32 chunk_extra = 7;
+    // General namespace arguments
+    required uint32 namespace_version = 1;
+    required string namespace = 2;
+    required uint32 locator = 3;
+
+    required Mpb_EpochID epoch_id = 10;
+    required string prefix = 11;
+    required bytes chunk = 12;
+    required Mpb_ChunkCSum csum = 13;
+
+    optional uint32 chunk_extra = 20;
+    optional string preferred_file_name = 21;
+    /* Fail the operation if our preferred file name is not available */
+    optional bool flag_fail_preferred = 22 [default=false];
 }
 
 message Mpb_LL_AppendChunkResp {
@@ -396,8 +413,12 @@ message Mpb_LL_AppendChunkResp {
 // Low level API: write_chunk()
 
 message Mpb_LL_WriteChunkReq {
-    required Mpb_EpochID epoch_id = 1;
-    required Mpb_Chunk chunk = 2;
+    // General namespace arguments
+    required uint32 namespace_version = 1;
+    required string namespace = 2;
+
+    required Mpb_EpochID epoch_id = 10;
+    required Mpb_Chunk chunk = 11;
 }
 
 message Mpb_LL_WriteChunkResp {
@@ -407,19 +428,23 @@ message Mpb_LL_WriteChunkResp {
 // Low level API: read_chunk()
 
 message Mpb_LL_ReadChunkReq {
-    required Mpb_EpochID epoch_id = 1;
-    required Mpb_ChunkPos chunk_pos = 2;
+    // General namespace arguments
+    required uint32 namespace_version = 1;
+    required string namespace = 2;
+
+    required Mpb_EpochID epoch_id = 10;
+    required Mpb_ChunkPos chunk_pos = 11;
 
     // Use flag_no_checksum=non-zero to skip returning the chunk's checksum.
     // TODO: not implemented yet.
-    optional uint32 flag_no_checksum = 3 [default=0];
+    optional bool flag_no_checksum = 20 [default=false];
 
     // Use flag_no_chunk=non-zero to skip returning the chunk (which
     // only makes sense if flag_checksum is not set).
     // TODO: not implemented yet.
-    optional uint32 flag_no_chunk = 4 [default=0];
+    optional bool flag_no_chunk = 21 [default=false];
 
-    optional uint32 flag_needs_trimmed = 5 [default=0];
+    optional bool flag_needs_trimmed = 22 [default=false];
 }
 
 message Mpb_LL_ReadChunkResp {
@@ -431,11 +456,16 @@ message Mpb_LL_ReadChunkResp {
 // Low level API: trim_chunk()
 
 message Mpb_LL_TrimChunkReq {
-    required Mpb_EpochID epoch_id = 1;
-    required string file = 2;
-    required uint64 offset = 3;
-    required uint32 size = 4;
-    optional uint32 trigger_gc = 5 [default=0];
+    // General namespace arguments
+    required uint32 namespace_version = 1;
+    required string namespace = 2;
+
+    required Mpb_EpochID epoch_id = 10;
+    required string file = 11;
+    required uint64 offset = 12;
+    required uint32 size = 13;
+
+    optional bool trigger_gc = 20 [default=false];
 }
 
 message Mpb_LL_TrimChunkResp {
@@ -445,8 +475,7 @@ message Mpb_LL_TrimChunkResp {
 // Low level API: checksum_list()
 
 message Mpb_LL_ChecksumListReq {
-    required Mpb_EpochID epoch_id = 1;
-    required string file = 2;
+    required string file = 1;
 }
 
 message Mpb_LL_ChecksumListResp {
@@ -477,7 +506,9 @@ message Mpb_LL_WedgeStatusReq {
 message Mpb_LL_WedgeStatusResp {
     required Mpb_GeneralStatusCode status = 1;
     optional Mpb_EpochID epoch_id = 2;
-    optional uint32 wedged_flag = 3;
+    optional bool wedged_flag = 3;
+    optional uint32 namespace_version = 4;
+    optional string namespace = 5;
 }
 
 // Low level API: delete_migration()

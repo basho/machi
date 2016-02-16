@@ -24,6 +24,7 @@
 -ifdef(TEST).
 -ifndef(PULSE).
 
+-include("machi.hrl").
 -include("machi_pb.hrl").
 -include("machi_projection.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -55,17 +56,18 @@ smoke_test2() ->
             %% a separate test module?  Or separate test func?
             {error, _} = ?C:auth(Clnt, "foo", "bar"),
 
-            CoC_n = "",              % CoC_namespace (not implemented)
-            CoC_l = 0,               % CoC_locator (not implemented)
             Prefix = <<"prefix">>,
             Chunk1 = <<"Hello, chunk!">>,
+            NS = "",
+            NoCSum = <<>>,
+            Opts1 = #append_opts{},
             {ok, {Off1, Size1, File1}} =
-                ?C:append_chunk(Clnt, CoC_n, CoC_l, Prefix, Chunk1, none, 0),
+                ?C:append_chunk(Clnt, NS, Prefix, Chunk1, NoCSum, Opts1),
             true = is_binary(File1),
             Chunk2 = "It's another chunk",
             CSum2 = {client_sha, machi_util:checksum_chunk(Chunk2)},
             {ok, {Off2, Size2, File2}} =
-                ?C:append_chunk(Clnt, CoC_n, CoC_l, Prefix, Chunk2, CSum2, 1024),
+                ?C:append_chunk(Clnt, NS, Prefix, Chunk2, CSum2, Opts1),
             Chunk3 = ["This is a ", <<"test,">>, 32, [["Hello, world!"]]],
             File3 = File2,
             Off3 = Off2 + iolist_size(Chunk2),
@@ -76,9 +78,9 @@ smoke_test2() ->
                      {iolist_to_binary(Chunk2), File2, Off2, Size2},
                      {iolist_to_binary(Chunk3), File3, Off3, Size3}],
             [begin
-                 File = binary_to_list(Fl),
+                 File = Fl,
                  ?assertMatch({ok, {[{File, Off, Ch, _}], []}},
-                              ?C:read_chunk(Clnt, Fl, Off, Sz, []))
+                              ?C:read_chunk(Clnt, Fl, Off, Sz, undefined))
              end || {Ch, Fl, Off, Sz} <- Reads],
 
             {ok, KludgeBin} = ?C:checksum_list(Clnt, File1),
@@ -102,16 +104,16 @@ smoke_test2() ->
              end || {_Ch, Fl, Off, Sz} <- Reads],
             [begin
                  {ok, {[], Trimmed}} =
-                        ?C:read_chunk(Clnt, Fl, Off, Sz, [{needs_trimmed, true}]),
-                 Filename = binary_to_list(Fl),
+                        ?C:read_chunk(Clnt, Fl, Off, Sz, #read_opts{needs_trimmed=true}),
+                 Filename = Fl,
                  ?assertEqual([{Filename, Off, Sz}], Trimmed)
              end || {_Ch, Fl, Off, Sz} <- Reads],
 
             LargeBytes = binary:copy(<<"x">>, 1024*1024),
             LBCsum = {client_sha, machi_util:checksum_chunk(LargeBytes)},
             {ok, {Offx, Sizex, Filex}} =
-                ?C:append_chunk(Clnt, CoC_n, CoC_l,
-                                Prefix, LargeBytes, LBCsum, 0),
+                ?C:append_chunk(Clnt, NS,
+                                Prefix, LargeBytes, LBCsum, Opts1),
             ok = ?C:trim_chunk(Clnt, Filex, Offx, Sizex),
 
             %% Make sure everything was trimmed
@@ -128,7 +130,7 @@ smoke_test2() ->
 
             [begin
                  {error, trimmed} =
-                        ?C:read_chunk(Clnt, Fl, Off, Sz, [])
+                        ?C:read_chunk(Clnt, Fl, Off, Sz, undefined)
              end || {_Ch, Fl, Off, Sz} <- Reads],
             ok
         after

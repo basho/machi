@@ -90,15 +90,16 @@ verify_file_checksums_local2(Sock1, EpochID, Path0) ->
     end.
 
 verify_file_checksums_remote2(Sock1, EpochID, File) ->
+    NSInfo = undefined,
     ReadChunk = fun(File_name, Offset, Size) ->
-                        ?FLU_C:read_chunk(Sock1, EpochID,
-                                          File_name, Offset, Size, [])
+                        ?FLU_C:read_chunk(Sock1, NSInfo, EpochID,
+                                          File_name, Offset, Size, undefined)
                 end,
     verify_file_checksums_common(Sock1, EpochID, File, ReadChunk).
 
-verify_file_checksums_common(Sock1, EpochID, File, ReadChunk) ->
+verify_file_checksums_common(Sock1, _EpochID, File, ReadChunk) ->
     try
-        case ?FLU_C:checksum_list(Sock1, EpochID, File) of
+        case ?FLU_C:checksum_list(Sock1, File) of
             {ok, InfoBin} ->
                 Info = machi_csum_table:split_checksum_list_blob_decode(InfoBin),
                 Res = lists:foldl(verify_chunk_checksum(File, ReadChunk),

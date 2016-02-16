@@ -36,7 +36,7 @@ while (<I>) {
             $indent = " " x ($count * 4);
             s/^#*\s*[0-9. ]*//;
             $anchor = "n$label";
-            printf T1 "%s+ [%s %s](#%s)\n", $indent, $label, $_, $anchor;
+            printf T1 "%s+ [%s. %s](#%s)\n", $indent, $label, $_, $anchor;
             printf T2 "<a name=\"%s\">\n", $anchor;
             $line =~ s/(#+)\s*[0-9. ]*/$1 $label.  /;
             print T2 $line;

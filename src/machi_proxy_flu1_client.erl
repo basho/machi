@@ -22,6 +22,10 @@
 %% proxy-process style API for hiding messy details such as TCP
 %% connection/disconnection with the remote Machi server.
 %%
+%% Please see {@link machi_flu1_client} the "Client API implemntation notes"
+%% section for how this module relates to the rest of the client API
+%% implementation.
+%%
 %% Machi is intentionally avoiding using distributed Erlang for
 %% Machi's communication.  This design decision makes Erlang-side code
 %% more difficult &amp; complex, but it's the price to pay for some
@@ -57,12 +61,9 @@
 %% FLU1 API
 -export([
          %% File API
-         append_chunk/4, append_chunk/5,
-         append_chunk/6, append_chunk/7,
-         append_chunk_extra/5, append_chunk_extra/6,
-         append_chunk_extra/7, append_chunk_extra/8,
-         read_chunk/6, read_chunk/7,
-         checksum_list/3, checksum_list/4,
+         append_chunk/6, append_chunk/8,
+         read_chunk/7, read_chunk/8,
+         checksum_list/2, checksum_list/3,
          list_files/2, list_files/3,
          wedge_status/1, wedge_status/2,
 
@@ -80,8 +81,8 @@
          quit/1,
 
          %% Internal API
-         write_chunk/5, write_chunk/6,
-         trim_chunk/5, trim_chunk/6,
+         write_chunk/7, write_chunk/8,
+         trim_chunk/6, trim_chunk/7,
 
          %% Helpers
          stop_proxies/1, start_proxies/1
@@ -106,80 +107,39 @@ start_link(#p_srvr{}=I) ->
 %% @doc Append a chunk (binary- or iolist-style) of data to a file
 %% with `Prefix'.
 
-append_chunk(PidSpec, EpochID, Prefix, Chunk) ->
-    append_chunk(PidSpec, EpochID, Prefix, Chunk, infinity).
+append_chunk(PidSpec, NSInfo, EpochID, Prefix, Chunk, CSum) ->
+    append_chunk(PidSpec, NSInfo, EpochID, Prefix, Chunk, CSum,
+                 #append_opts{}, infinity).
 
 %% @doc Append a chunk (binary- or iolist-style) of data to a file
 %% with `Prefix'.
 
-append_chunk(PidSpec, EpochID, Prefix, Chunk, Timeout) ->
-    append_chunk_extra(PidSpec, EpochID,
-                       ?DEFAULT_COC_NAMESPACE, ?DEFAULT_COC_LOCATOR,
-                       Prefix, Chunk, 0, Timeout).
-
-%% @doc Append a chunk (binary- or iolist-style) of data to a file
-%% with `Prefix'.
-
-append_chunk(PidSpec, EpochID, CoC_Namespace, CoC_Locator, Prefix, Chunk) ->
-    append_chunk(PidSpec, EpochID, CoC_Namespace, CoC_Locator, Prefix, Chunk, infinity).
-
-%% @doc Append a chunk (binary- or iolist-style) of data to a file
-%% with `Prefix'.
-
-append_chunk(PidSpec, EpochID, CoC_Namespace, CoC_Locator, Prefix, Chunk, Timeout) ->
-    append_chunk_extra(PidSpec, EpochID,
-                       CoC_Namespace, CoC_Locator,
-                       Prefix, Chunk, 0, Timeout).
-
-%% @doc Append a chunk (binary- or iolist-style) of data to a file
-%% with `Prefix'.
-
-append_chunk_extra(PidSpec, EpochID, Prefix, Chunk, ChunkExtra)
-  when is_integer(ChunkExtra), ChunkExtra >= 0 ->
-    append_chunk_extra(PidSpec, EpochID,
-                       ?DEFAULT_COC_NAMESPACE, ?DEFAULT_COC_LOCATOR,
-                       Prefix, Chunk, ChunkExtra, infinity).
-
-%% @doc Append a chunk (binary- or iolist-style) of data to a file
-%% with `Prefix'.
-
-append_chunk_extra(PidSpec, EpochID, Prefix, Chunk, ChunkExtra, Timeout) ->
-    append_chunk_extra(PidSpec, EpochID,
-                       ?DEFAULT_COC_NAMESPACE, ?DEFAULT_COC_LOCATOR,
-                       Prefix, Chunk, ChunkExtra, Timeout).
-
-append_chunk_extra(PidSpec, EpochID, CoC_Namespace, CoC_Locator,
-                   Prefix, Chunk, ChunkExtra) ->
-    append_chunk_extra(PidSpec, EpochID, CoC_Namespace, CoC_Locator,
-                       Prefix, Chunk, ChunkExtra, infinity).
-
-append_chunk_extra(PidSpec, EpochID, CoC_Namespace, CoC_Locator,
-                   Prefix, Chunk, ChunkExtra, Timeout) ->
-    gen_server:call(PidSpec, {req, {append_chunk_extra, EpochID,
-                                    CoC_Namespace, CoC_Locator,
-                                    Prefix, Chunk, ChunkExtra}},
+append_chunk(PidSpec, NSInfo, EpochID, Prefix, Chunk, CSum, Opts,
+             Timeout) ->
+    gen_server:call(PidSpec, {req, {append_chunk, NSInfo, EpochID,
+                                    Prefix, Chunk, CSum, Opts, Timeout}},
                     Timeout).
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
-read_chunk(PidSpec, EpochID, File, Offset, Size, Opts) ->
-    read_chunk(PidSpec, EpochID, File, Offset, Size, Opts, infinity).
+read_chunk(PidSpec, NSInfo, EpochID, File, Offset, Size, Opts) ->
+    read_chunk(PidSpec, NSInfo, EpochID, File, Offset, Size, Opts, infinity).
 
 %% @doc Read a chunk of data of size `Size' from `File' at `Offset'.
 
-read_chunk(PidSpec, EpochID, File, Offset, Size, Opts, Timeout) ->
-    gen_server:call(PidSpec, {req, {read_chunk, EpochID, File, Offset, Size, Opts}},
+read_chunk(PidSpec, NSInfo, EpochID, File, Offset, Size, Opts, Timeout) ->
+    gen_server:call(PidSpec, {req, {read_chunk, NSInfo, EpochID, File, Offset, Size, Opts}},
                     Timeout).
 
 %% @doc Fetch the list of chunk checksums for `File'.
 
-checksum_list(PidSpec, EpochID, File) ->
-    checksum_list(PidSpec, EpochID, File, infinity).
+checksum_list(PidSpec, File) ->
+    checksum_list(PidSpec, File, infinity).
 
 %% @doc Fetch the list of chunk checksums for `File'.
 
-checksum_list(PidSpec, EpochID, File, Timeout) ->
-    gen_server:call(PidSpec, {req, {checksum_list, EpochID, File}},
+checksum_list(PidSpec, File, Timeout) ->
+    gen_server:call(PidSpec, {req, {checksum_list, File}},
                     Timeout).
 
 %% @doc Fetch the list of all files on the remote FLU.
@@ -320,18 +280,18 @@ quit(PidSpec) ->
 %% @doc Write a chunk (binary- or iolist-style) of data to a file
 %% with `Prefix' at `Offset'.
 
-write_chunk(PidSpec, EpochID, File, Offset, Chunk) ->
-    write_chunk(PidSpec, EpochID, File, Offset, Chunk, infinity).
+write_chunk(PidSpec, NSInfo, EpochID, File, Offset, Chunk, CSum) ->
+    write_chunk(PidSpec, NSInfo, EpochID, File, Offset, Chunk, CSum, infinity).
 
 %% @doc Write a chunk (binary- or iolist-style) of data to a file
 %% with `Prefix' at `Offset'.
 
-write_chunk(PidSpec, EpochID, File, Offset, Chunk, Timeout) ->
-    case gen_server:call(PidSpec, {req, {write_chunk, EpochID, File, Offset, Chunk}},
+write_chunk(PidSpec, NSInfo, EpochID, File, Offset, Chunk, CSum, Timeout) ->
+    case gen_server:call(PidSpec, {req, {write_chunk, NSInfo, EpochID, File, Offset, Chunk, CSum}},
                          Timeout) of
         {error, written}=Err ->
             Size = byte_size(Chunk),
-            case read_chunk(PidSpec, EpochID, File, Offset, Size, [], Timeout) of
+            case read_chunk(PidSpec, NSInfo, EpochID, File, Offset, Size, undefined, Timeout) of
                 {ok, {[{File, Offset, Chunk2, _}], []}} when Chunk2 == Chunk ->
                     %% See equivalent comment inside write_projection().
                     ok;
@@ -343,15 +303,15 @@ write_chunk(PidSpec, EpochID, File, Offset, Chunk, Timeout) ->
     end.
 
 
-trim_chunk(PidSpec, EpochID, File, Offset, Size) ->
-    trim_chunk(PidSpec, EpochID, File, Offset, Size, infinity).
+trim_chunk(PidSpec, NSInfo, EpochID, File, Offset, Size) ->
+    trim_chunk(PidSpec, NSInfo, EpochID, File, Offset, Size, infinity).
 
 %% @doc Write a chunk (binary- or iolist-style) of data to a file
 %% with `Prefix' at `Offset'.
 
-trim_chunk(PidSpec, EpochID, File, Offset, Chunk, Timeout) ->
+trim_chunk(PidSpec, NSInfo, EpochID, File, Offset, Chunk, Timeout) ->
     gen_server:call(PidSpec,
-                    {req, {trim_chunk, EpochID, File, Offset, Chunk}},
+                    {req, {trim_chunk, NSInfo, EpochID, File, Offset, Chunk}},
                     Timeout).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -415,24 +375,24 @@ do_req_retry(_Req, 2, Err, S) ->
 do_req_retry(Req, Depth, _Err, S) ->
     do_req(Req, Depth + 1, try_connect(disconnect(S))).
 
-make_req_fun({append_chunk_extra, EpochID, CoC_Namespace, CoC_Locator,
-              Prefix, Chunk, ChunkExtra},
+make_req_fun({append_chunk, NSInfo, EpochID,
+              Prefix, Chunk, CSum, Opts, Timeout},
              #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
-    fun() -> Mod:append_chunk_extra(Sock, EpochID, CoC_Namespace, CoC_Locator,
-                                    Prefix, Chunk, ChunkExtra)
+    fun() -> Mod:append_chunk(Sock, NSInfo, EpochID,
+                              Prefix, Chunk, CSum, Opts, Timeout)
     end;
-make_req_fun({read_chunk, EpochID, File, Offset, Size, Opts},
+make_req_fun({read_chunk, NSInfo, EpochID, File, Offset, Size, Opts},
              #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
-    fun() -> Mod:read_chunk(Sock, EpochID, File, Offset, Size, Opts) end;
-make_req_fun({write_chunk, EpochID, File, Offset, Chunk},
+    fun() -> Mod:read_chunk(Sock, NSInfo, EpochID, File, Offset, Size, Opts) end;
+make_req_fun({write_chunk, NSInfo, EpochID, File, Offset, Chunk, CSum},
              #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
-    fun() -> Mod:write_chunk(Sock, EpochID, File, Offset, Chunk) end;
-make_req_fun({trim_chunk, EpochID, File, Offset, Size},
+    fun() -> Mod:write_chunk(Sock, NSInfo, EpochID, File, Offset, Chunk, CSum) end;
+make_req_fun({trim_chunk, NSInfo, EpochID, File, Offset, Size},
              #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
-    fun() -> Mod:trim_chunk(Sock, EpochID, File, Offset, Size) end;
-make_req_fun({checksum_list, EpochID, File},
+    fun() -> Mod:trim_chunk(Sock, NSInfo, EpochID, File, Offset, Size) end;
+make_req_fun({checksum_list, File},
              #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
-    fun() -> Mod:checksum_list(Sock, EpochID, File) end;
+    fun() -> Mod:checksum_list(Sock, File) end;
 make_req_fun({list_files, EpochID},
              #state{sock=Sock,i=#p_srvr{proto_mod=Mod}}) ->
     fun() -> Mod:list_files(Sock, EpochID) end;

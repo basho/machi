@@ -141,18 +141,18 @@ sync(_Pid, Type) ->
                          Data :: binary(), Checksum :: binary()}]} |
                   {error, Reason :: term()}.
 read(Pid, Offset, Length) ->
-    read(Pid, Offset, Length, []).
+    read(Pid, Offset, Length, #read_opts{}).
 
 -spec read(Pid :: pid(),
            Offset :: non_neg_integer(),
            Length :: non_neg_integer(),
-           [{no_checksum|no_chunk|needs_trimmed, boolean()}]) ->
+           machi_dt:read_opts_x()) ->
                   {ok, [{Filename::string(), Offset :: non_neg_integer(),
                          Data :: binary(), Checksum :: binary()}]} |
                   {error, Reason :: term()}.
-read(Pid, Offset, Length, Opts) when is_pid(Pid) andalso is_integer(Offset) andalso Offset >= 0
-                                     andalso is_integer(Length) andalso Length > 0
-                                     andalso is_list(Opts) ->
+read(Pid, Offset, Length, #read_opts{}=Opts)
+  when is_pid(Pid) andalso is_integer(Offset) andalso Offset >= 0
+       andalso is_integer(Length) andalso Length > 0 ->
     gen_server:call(Pid, {read, Offset, Length, Opts}, ?TIMEOUT);
 read(_Pid, Offset, Length, Opts) ->
     lager:warning("Bad args to read: Offset ~p, Length ~p, Options ~p", [Offset, Length, Opts]),
@@ -298,15 +298,15 @@ handle_call({read, Offset, Length, Opts}, _From,
                           }) ->
     %% TODO: use these options - NoChunk prevents reading from disks
     %% NoChecksum doesn't check checksums
-    NoChecksum = proplists:get_value(no_checksum, Opts, false),
-    NoChunk = proplists:get_value(no_chunk, Opts, false),
+    #read_opts{no_checksum=NoChecksum, no_chunk=NoChunk,
+               needs_trimmed=NeedsTrimmed} = Opts,
     {Resp, NewErr} =
         case do_read(FH, F, CsumTable, Offset, Length, NoChunk, NoChecksum) of
             {ok, {[], []}} ->
                 {{error, not_written}, Err + 1};
             {ok, {Chunks0, Trimmed0}} ->
                 Chunks = slice_both_side(Chunks0, Offset, Offset+Length),
-                Trimmed = case proplists:get_value(needs_trimmed, Opts, false) of
+                Trimmed = case NeedsTrimmed of
                               true -> Trimmed0;
                               false -> []
                           end,

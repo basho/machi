@@ -83,7 +83,7 @@ stop_machi_sup() ->
         undefined -> ok;
         Pid ->
             catch exit(whereis(machi_sup), normal),
-            machi_util:wait_for_death(Pid, 30)
+            machi_util:wait_for_death(Pid, 100)
     end.
 
 clean_up(FluInfo) ->

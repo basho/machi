@@ -34,7 +34,9 @@
 -export([from_pb_request/1,
          from_pb_response/1,
          to_pb_request/2,
-         to_pb_response/3
+         to_pb_response/3,
+         conv_from_append_opts/1,
+         conv_to_append_opts/1
         ]).
 
 %% TODO: fixme cleanup
@@ -43,95 +45,104 @@
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    echo=#mpb_echoreq{message=Msg}}) ->
-    {ReqID, {low_echo, undefined, Msg}};
+    {ReqID, {low_skip_wedge, {low_echo, Msg}}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    auth=#mpb_authreq{user=User, password=Pass}}) ->
-    {ReqID, {low_auth, undefined, User, Pass}};
+    {ReqID, {low_skip_wedge, {low_auth, User, Pass}}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
-                   append_chunk=#mpb_ll_appendchunkreq{
+                   append_chunk=IR=#mpb_ll_appendchunkreq{
+                     namespace_version=NSVersion,
+                     namespace=NS_str,
+                     locator=NSLocator,
                      epoch_id=PB_EpochID,
-                     coc_namespace=CoC_Namespace,
-                     coc_locator=CoC_Locator,
                      prefix=Prefix,
                      chunk=Chunk,
-                     csum=#mpb_chunkcsum{type=CSum_type, csum=CSum},
-                     chunk_extra=ChunkExtra}}) ->
+                     csum=#mpb_chunkcsum{type=CSum_type, csum=CSum}}}) ->
+    NS = list_to_binary(NS_str),
     EpochID = conv_to_epoch_id(PB_EpochID),
     CSum_tag = conv_to_csum_tag(CSum_type),
-    {ReqID, {low_append_chunk, EpochID, CoC_Namespace, CoC_Locator,
-             Prefix, Chunk, CSum_tag, CSum,
-             ChunkExtra}};
+    Opts = conv_to_append_opts(IR),
+    %% NOTE: The tuple position of NSLocator is a bit odd, because EpochID
+    %%       _must_ be in the 4th position (as NSV & NS must be in 2nd & 3rd).
+    {ReqID, {low_append_chunk, NSVersion, NS, EpochID, NSLocator,
+             Prefix, Chunk, CSum_tag, CSum, Opts}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    write_chunk=#mpb_ll_writechunkreq{
+                     namespace_version=NSVersion,
+                     namespace=NS_str,
                      epoch_id=PB_EpochID,
                      chunk=#mpb_chunk{file_name=File,
                                       offset=Offset,
                                       chunk=Chunk,
                                       csum=#mpb_chunkcsum{type=CSum_type, csum=CSum}}}}) ->
+    NS = list_to_binary(NS_str),
     EpochID = conv_to_epoch_id(PB_EpochID),
     CSum_tag = conv_to_csum_tag(CSum_type),
-    {ReqID, {low_write_chunk, EpochID, File, Offset, Chunk, CSum_tag, CSum}};
+    {ReqID, {low_write_chunk, NSVersion, NS, EpochID, File, Offset, Chunk, CSum_tag, CSum}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    read_chunk=#mpb_ll_readchunkreq{
+                                 namespace_version=NSVersion,
+                                 namespace=NS_str,
                                  epoch_id=PB_EpochID,
                                  chunk_pos=ChunkPos,
                                  flag_no_checksum=PB_GetNoChecksum,
                                  flag_no_chunk=PB_GetNoChunk,
                                  flag_needs_trimmed=PB_NeedsTrimmed}}) ->
+    NS = list_to_binary(NS_str),
     EpochID = conv_to_epoch_id(PB_EpochID),
-    Opts = [{no_checksum, conv_to_boolean(PB_GetNoChecksum)},
-            {no_chunk, conv_to_boolean(PB_GetNoChunk)},
-            {needs_trimmed, conv_to_boolean(PB_NeedsTrimmed)}],
+    Opts = #read_opts{no_checksum=PB_GetNoChecksum,
+                      no_chunk=PB_GetNoChunk,
+                      needs_trimmed=PB_NeedsTrimmed},
     #mpb_chunkpos{file_name=File,
                   offset=Offset,
                   chunk_size=Size} = ChunkPos,
-    {ReqID, {low_read_chunk, EpochID, File, Offset, Size, Opts}};
+    {ReqID, {low_read_chunk, NSVersion, NS, EpochID, File, Offset, Size, Opts}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    trim_chunk=#mpb_ll_trimchunkreq{
+                     namespace_version=NSVersion,
+                     namespace=NS_str,
                      epoch_id=PB_EpochID,
                      file=File,
                      offset=Offset,
                      size=Size,
-                                 trigger_gc=PB_TriggerGC}}) ->
+                     trigger_gc=TriggerGC}}) ->
+    NS = list_to_binary(NS_str),
     EpochID = conv_to_epoch_id(PB_EpochID),
-    TriggerGC = conv_to_boolean(PB_TriggerGC),
-    {ReqID, {low_trim_chunk, EpochID, File, Offset, Size, TriggerGC}};
+    {ReqID, {low_trim_chunk, NSVersion, NS, EpochID, File, Offset, Size, TriggerGC}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    checksum_list=#mpb_ll_checksumlistreq{
-                     epoch_id=PB_EpochID,
                      file=File}}) ->
-    EpochID = conv_to_epoch_id(PB_EpochID),
-    {ReqID, {low_checksum_list, EpochID, File}};
+    {ReqID, {low_skip_wedge, {low_checksum_list, File}}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    list_files=#mpb_ll_listfilesreq{
                      epoch_id=PB_EpochID}}) ->
     EpochID = conv_to_epoch_id(PB_EpochID),
-    {ReqID, {low_list_files, EpochID}};
+    {ReqID, {low_skip_wedge, {low_list_files, EpochID}}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    wedge_status=#mpb_ll_wedgestatusreq{}}) ->
-    {ReqID, {low_wedge_status, undefined}};
+    {ReqID, {low_skip_wedge, {low_wedge_status}}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    delete_migration=#mpb_ll_deletemigrationreq{
                     epoch_id=PB_EpochID,
                     file=File}}) ->
     EpochID = conv_to_epoch_id(PB_EpochID),
-    {ReqID, {low_delete_migration, EpochID, File}};
+    {ReqID, {low_skip_wedge, {low_delete_migration, EpochID, File}}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    trunc_hack=#mpb_ll_trunchackreq{
                     epoch_id=PB_EpochID,
                     file=File}}) ->
     EpochID = conv_to_epoch_id(PB_EpochID),
-    {ReqID, {low_trunc_hack, EpochID, File}};
+    {ReqID, {low_skip_wedge, {low_trunc_hack, EpochID, File}}};
 from_pb_request(#mpb_ll_request{
                    req_id=ReqID,
                    proj_gl=#mpb_ll_getlatestepochidreq{type=ProjType}}) ->
@@ -172,23 +183,22 @@ from_pb_request(#mpb_request{req_id=ReqID,
     {ReqID, {high_auth, User, Pass}};
 from_pb_request(#mpb_request{req_id=ReqID,
                              append_chunk=IR=#mpb_appendchunkreq{}}) ->
-    #mpb_appendchunkreq{coc_namespace=CoC_namespace,
-                        coc_locator=CoC_locator,
+    #mpb_appendchunkreq{namespace=NS_str,
                         prefix=Prefix,
                         chunk=Chunk,
-                        csum=CSum,
-                        chunk_extra=ChunkExtra} = IR,
+                        csum=CSum} = IR,
+    NS = list_to_binary(NS_str),
     TaggedCSum = make_tagged_csum(CSum, Chunk),
-    {ReqID, {high_append_chunk, CoC_namespace, CoC_locator, Prefix, Chunk,
-             TaggedCSum, ChunkExtra}};
+    Opts = conv_to_append_opts(IR),
+    {ReqID, {high_append_chunk, NS, Prefix, Chunk, TaggedCSum, Opts}};
 from_pb_request(#mpb_request{req_id=ReqID,
                              write_chunk=IR=#mpb_writechunkreq{}}) ->
     #mpb_writechunkreq{chunk=#mpb_chunk{file_name=File,
                                         offset=Offset,
                                         chunk=Chunk,
-                                        csum=CSum}} = IR,
-    TaggedCSum = make_tagged_csum(CSum, Chunk),
-    {ReqID, {high_write_chunk, File, Offset, Chunk, TaggedCSum}};
+                                        csum=CSumRec}} = IR,
+    CSum = make_tagged_csum(CSumRec, Chunk),
+    {ReqID, {high_write_chunk, File, Offset, Chunk, CSum}};
 from_pb_request(#mpb_request{req_id=ReqID,
                              read_chunk=IR=#mpb_readchunkreq{}}) ->
     #mpb_readchunkreq{chunk_pos=#mpb_chunkpos{file_name=File,
@@ -197,11 +207,10 @@ from_pb_request(#mpb_request{req_id=ReqID,
                      flag_no_checksum=FlagNoChecksum,
                      flag_no_chunk=FlagNoChunk,
                      flag_needs_trimmed=NeedsTrimmed} = IR,
-    %% I want MAPS
-    Options = [{no_checksum, machi_util:int2bool(FlagNoChecksum)},
-               {no_chunk, machi_util:int2bool(FlagNoChunk)},
-               {needs_trimmed, machi_util:int2bool(NeedsTrimmed)}],
-    {ReqID, {high_read_chunk, File, Offset, Size, Options}};
+    Opts = #read_opts{no_checksum=FlagNoChecksum,
+                      no_chunk=FlagNoChunk,
+                      needs_trimmed=NeedsTrimmed},
+    {ReqID, {high_read_chunk, File, Offset, Size, Opts}};
 from_pb_request(#mpb_request{req_id=ReqID,
                              trim_chunk=IR=#mpb_trimchunkreq{}}) ->
     #mpb_trimchunkreq{chunk_pos=#mpb_chunkpos{file_name=File,
@@ -265,12 +274,12 @@ from_pb_response(#mpb_ll_response{
                                           chunk=Bytes,
                                           csum=#mpb_chunkcsum{type=T,csum=Ck}}) ->
                                        Csum = <<(conv_to_csum_tag(T)):8, Ck/binary>>,
-                                      {File, Offset, Bytes, Csum}
+                                      {list_to_binary(File), Offset, Bytes, Csum}
                               end, PB_Chunks),
             Trimmed = lists:map(fun(#mpb_chunkpos{file_name=File,
                                                   offset=Offset,
                                                   chunk_size=Size}) ->
-                                        {File, Offset, Size}
+                                        {list_to_binary(File), Offset, Size}
                                 end, PB_Trimmed),
             {ReqID, {ok, {Chunks, Trimmed}}};
         _ ->
@@ -306,12 +315,16 @@ from_pb_response(#mpb_ll_response{
 from_pb_response(#mpb_ll_response{
                     req_id=ReqID,
                     wedge_status=#mpb_ll_wedgestatusresp{
-                      epoch_id=PB_EpochID, wedged_flag=PB_Wedged}}) ->
+                      status=Status,
+                      epoch_id=PB_EpochID, wedged_flag=Wedged_p,
+                      namespace_version=NSVersion, namespace=NS_str}}) ->
+    GeneralStatus = case machi_pb_high_client:convert_general_status_code(Status) of
+                        ok    -> ok;
+                        _Else -> {yukky, _Else}
+                    end,
     EpochID = conv_to_epoch_id(PB_EpochID),
-    Wedged_p = if PB_Wedged == 1 -> true;
-                  PB_Wedged == 0 -> false
-               end,
-    {ReqID, {ok, {Wedged_p, EpochID}}};
+    NS = list_to_binary(NS_str),
+    {ReqID, {GeneralStatus, {Wedged_p, EpochID, NSVersion, NS}}};
 from_pb_response(#mpb_ll_response{
                     req_id=ReqID,
                     delete_migration=#mpb_ll_deletemigrationresp{
@@ -377,90 +390,100 @@ from_pb_response(#mpb_ll_response{
         'OK' ->
             {ReqID, {ok, Epochs}};
         _ ->
-            {ReqID< machi_pb_high_client:convert_general_status_code(Status)}
+            {ReqID, machi_pb_high_client:convert_general_status_code(Status)}
     end.
 %% No response for proj_kp/kick_projection_reaction
 
 %% TODO: move the #mbp_* record making code from
 %%       machi_pb_high_client:do_send_sync() clauses into to_pb_request().
 
-to_pb_request(ReqID, {low_echo, _BogusEpochID, Msg}) ->
+to_pb_request(ReqID, {low_skip_wedge, {low_echo, Msg}}) ->
     #mpb_ll_request{
                req_id=ReqID, do_not_alter=2,
                echo=#mpb_echoreq{message=Msg}};
-to_pb_request(ReqID, {low_auth, _BogusEpochID, User, Pass}) ->
+to_pb_request(ReqID, {low_skip_wedge, {low_auth, User, Pass}}) ->
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     auth=#mpb_authreq{user=User, password=Pass}};
-to_pb_request(ReqID, {low_append_chunk, EpochID, CoC_Namespace, CoC_Locator,
-                      Prefix, Chunk, CSum_tag, CSum, ChunkExtra}) ->
+%% NOTE: The tuple position of NSLocator is a bit odd, because EpochID
+%%       _must_ be in the 4th position (as NSV & NS must be in 2nd & 3rd).
+to_pb_request(ReqID, {low_append_chunk, NSVersion, NS, EpochID, NSLocator,
+                      Prefix, Chunk, CSum_tag, CSum, Opts}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     CSum_type = conv_from_csum_tag(CSum_tag),
     PB_CSum = #mpb_chunkcsum{type=CSum_type, csum=CSum},
+    {ChunkExtra, Pref, FailPref} = conv_from_append_opts(Opts),
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     append_chunk=#mpb_ll_appendchunkreq{
+                      namespace_version=NSVersion,
+                      namespace=NS,
+                      locator=NSLocator,
                       epoch_id=PB_EpochID,
-                      coc_namespace=CoC_Namespace,
-                      coc_locator=CoC_Locator,
                       prefix=Prefix,
                       chunk=Chunk,
                       csum=PB_CSum,
-                      chunk_extra=ChunkExtra}};
-to_pb_request(ReqID, {low_write_chunk, EpochID, File, Offset, Chunk, CSum_tag, CSum}) ->
+                      chunk_extra=ChunkExtra,
+                      preferred_file_name=Pref,
+                      flag_fail_preferred=FailPref}};
+to_pb_request(ReqID, {low_write_chunk, NSVersion, NS, EpochID, File, Offset, Chunk, CSum_tag, CSum}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     CSum_type = conv_from_csum_tag(CSum_tag),
     PB_CSum = #mpb_chunkcsum{type=CSum_type, csum=CSum},
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     write_chunk=#mpb_ll_writechunkreq{
+                      namespace_version=NSVersion,
+                      namespace=NS,
                       epoch_id=PB_EpochID,
                                    chunk=#mpb_chunk{file_name=File,
                                                     offset=Offset,
                                                     chunk=Chunk,
                                                     csum=PB_CSum}}};
-to_pb_request(ReqID, {low_read_chunk, EpochID, File, Offset, Size, Opts}) ->
+to_pb_request(ReqID, {low_read_chunk, NSVersion, NS, EpochID, File, Offset, Size, Opts}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
-    FNChecksum = proplists:get_value(no_checksum, Opts, false),
-    FNChunk = proplists:get_value(no_chunk, Opts, false),
-    NeedsTrimmed = proplists:get_value(needs_trimmed, Opts, false),
+    #read_opts{no_checksum=FNChecksum,
+               no_chunk=FNChunk,
+               needs_trimmed=NeedsTrimmed} = Opts,
     #mpb_ll_request{
                req_id=ReqID, do_not_alter=2,
                read_chunk=#mpb_ll_readchunkreq{
-                             epoch_id=PB_EpochID,
-                             chunk_pos=#mpb_chunkpos{
+                            namespace_version=NSVersion,
+                            namespace=NS,
+                            epoch_id=PB_EpochID,
+                            chunk_pos=#mpb_chunkpos{
                                           file_name=File,
                                           offset=Offset,
                                           chunk_size=Size},
-                            flag_no_checksum=machi_util:bool2int(FNChecksum),
-                            flag_no_chunk=machi_util:bool2int(FNChunk),
-                            flag_needs_trimmed=machi_util:bool2int(NeedsTrimmed)}};
-to_pb_request(ReqID, {low_trim_chunk, EpochID, File, Offset, Size, TriggerGC}) ->
+                            flag_no_checksum=FNChecksum,
+                            flag_no_chunk=FNChunk,
+                            flag_needs_trimmed=NeedsTrimmed}};
+to_pb_request(ReqID, {low_trim_chunk, NSVersion, NS, EpochID, File, Offset, Size, TriggerGC}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     trim_chunk=#mpb_ll_trimchunkreq{
+                                  namespace_version=NSVersion,
+                                  namespace=NS,
                                   epoch_id=PB_EpochID,
                                   file=File,
                                   offset=Offset,
                                   size=Size,
                                   trigger_gc=TriggerGC}};
-to_pb_request(ReqID, {low_checksum_list, EpochID, File}) ->
-    PB_EpochID = conv_from_epoch_id(EpochID),
+to_pb_request(ReqID, {low_skip_wedge, {low_checksum_list, File}}) ->
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     checksum_list=#mpb_ll_checksumlistreq{
-                      epoch_id=PB_EpochID,
                       file=File}};
-to_pb_request(ReqID, {low_list_files, EpochID}) ->
+to_pb_request(ReqID, {low_skip_wedge, {low_list_files, EpochID}}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     list_files=#mpb_ll_listfilesreq{epoch_id=PB_EpochID}};
-to_pb_request(ReqID, {low_wedge_status, _BogusEpochID}) ->
+to_pb_request(ReqID, {low_skip_wedge, {low_wedge_status}}) ->
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     wedge_status=#mpb_ll_wedgestatusreq{}};
-to_pb_request(ReqID, {low_delete_migration, EpochID, File}) ->
+to_pb_request(ReqID, {low_skip_wedge, {low_delete_migration, EpochID, File}}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     delete_migration=#mpb_ll_deletemigrationreq{
                      epoch_id=PB_EpochID,
                       file=File}};
-to_pb_request(ReqID, {low_trunc_hack, EpochID, File}) ->
+to_pb_request(ReqID, {low_skip_wedge, {low_trunc_hack, EpochID, File}}) ->
     PB_EpochID = conv_from_epoch_id(EpochID),
     #mpb_ll_request{req_id=ReqID, do_not_alter=2,
                     trunc_hack=#mpb_ll_trunchackreq{
@@ -496,15 +519,15 @@ to_pb_response(_ReqID, _, async_no_response=X) ->
     X;
 to_pb_response(ReqID, _, {low_error, ErrCode, ErrMsg}) ->
     make_ll_error_resp(ReqID, ErrCode, ErrMsg);
-to_pb_response(ReqID, {low_echo, _BogusEpochID, _Msg}, Resp) ->
+to_pb_response(ReqID, {low_skip_wedge, {low_echo, _Msg}}, Resp) ->
     #mpb_ll_response{
                 req_id=ReqID,
                 echo=#mpb_echoresp{message=Resp}};
-to_pb_response(ReqID, {low_auth, _, _, _}, __TODO_Resp) ->
+to_pb_response(ReqID, {low_skip_wedge, {low_auth, _, _}}, __TODO_Resp) ->
     #mpb_ll_response{req_id=ReqID,
                      generic=#mpb_errorresp{code=1,
                                             msg="AUTH not implemented"}};
-to_pb_response(ReqID, {low_append_chunk, _EID, _N, _L, _Pfx, _Ch, _CST, _CS, _CE}, Resp)->
+to_pb_response(ReqID, {low_append_chunk, _NSV, _NS, _EID, _NSL, _Pfx, _Ch, _CST, _CS, _O}, Resp)->
     case Resp of
         {ok, {Offset, Size, File}} ->
             Where = #mpb_chunkpos{offset=Offset,
@@ -520,11 +543,11 @@ to_pb_response(ReqID, {low_append_chunk, _EID, _N, _L, _Pfx, _Ch, _CST, _CS, _CE
         _Else ->
             make_ll_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
-to_pb_response(ReqID, {low_write_chunk, _EID, _Fl, _Off, _Ch, _CST, _CS},Resp)->
+to_pb_response(ReqID, {low_write_chunk, _NSV, _NS, _EID, _Fl, _Off, _Ch, _CST, _CS},Resp)->
     Status = conv_from_status(Resp),
     #mpb_ll_response{req_id=ReqID,
                      write_chunk=#mpb_ll_writechunkresp{status=Status}};
-to_pb_response(ReqID, {low_read_chunk, _EID, _Fl, _Off, _Sz, _Opts}, Resp)->
+to_pb_response(ReqID, {low_read_chunk, _NSV, _NS, _EID, _Fl, _Off, _Sz, _Opts}, Resp)->
     case Resp of
         {ok, {Chunks, Trimmed}} ->
             PB_Chunks = lists:map(fun({File, Offset, Bytes, Csum}) ->
@@ -551,7 +574,7 @@ to_pb_response(ReqID, {low_read_chunk, _EID, _Fl, _Off, _Sz, _Opts}, Resp)->
         _Else ->
             make_ll_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
-to_pb_response(ReqID, {low_trim_chunk, _, _, _, _, _}, Resp) ->
+to_pb_response(ReqID, {low_trim_chunk, _, _, _, _, _, _, _}, Resp) ->
     case Resp of
         ok ->
             #mpb_ll_response{req_id=ReqID,
@@ -559,11 +582,11 @@ to_pb_response(ReqID, {low_trim_chunk, _, _, _, _, _}, Resp) ->
         {error, _}=Error ->
             Status = conv_from_status(Error),
             #mpb_ll_response{req_id=ReqID,
-                             read_chunk=#mpb_ll_trimchunkresp{status=Status}};
+                             trim_chunk=#mpb_ll_trimchunkresp{status=Status}};
         _Else ->
             make_ll_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
-to_pb_response(ReqID, {low_checksum_list, _EpochID, _File}, Resp) ->
+to_pb_response(ReqID, {low_skip_wedge, {low_checksum_list, _File}}, Resp) ->
     case Resp of
         {ok, Chunk} ->
             #mpb_ll_response{req_id=ReqID,
@@ -576,7 +599,7 @@ to_pb_response(ReqID, {low_checksum_list, _EpochID, _File}, Resp) ->
         _Else ->
             make_ll_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
-to_pb_response(ReqID, {low_list_files, _EpochID}, Resp) ->
+to_pb_response(ReqID, {low_skip_wedge, {low_list_files, _EpochID}}, Resp) ->
     case Resp of
         {ok, FileInfo} ->
             PB_Files = [#mpb_fileinfo{file_size=Size, file_name=Name} ||
@@ -591,26 +614,28 @@ to_pb_response(ReqID, {low_list_files, _EpochID}, Resp) ->
         _Else ->
             make_ll_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
-to_pb_response(ReqID, {low_wedge_status, _BogusEpochID}, Resp) ->
+to_pb_response(ReqID, {low_skip_wedge, {low_wedge_status}}, Resp) ->
     case Resp of
         {error, _}=Error ->
             Status = conv_from_status(Error),
             #mpb_ll_response{req_id=ReqID,
                            wedge_status=#mpb_ll_wedgestatusresp{status=Status}};
-        {Wedged_p, EpochID} ->
-            PB_Wedged = conv_from_boolean(Wedged_p),
+        {Wedged_p, EpochID, NSVersion, NS} ->
             PB_EpochID = conv_from_epoch_id(EpochID),
             #mpb_ll_response{req_id=ReqID,
                              wedge_status=#mpb_ll_wedgestatusresp{
                                status='OK',
                                epoch_id=PB_EpochID,
-                               wedged_flag=PB_Wedged}}
+                               wedged_flag=Wedged_p,
+                               namespace_version=NSVersion,
+                               namespace=NS
+                              }}
     end;
-to_pb_response(ReqID, {low_delete_migration, _EID, _Fl}, Resp)->
+to_pb_response(ReqID, {low_skip_wedge, {low_delete_migration, _EID, _Fl}}, Resp)->
     Status = conv_from_status(Resp),
     #mpb_ll_response{req_id=ReqID,
                    delete_migration=#mpb_ll_deletemigrationresp{status=Status}};
-to_pb_response(ReqID, {low_trunc_hack, _EID, _Fl}, Resp)->
+to_pb_response(ReqID, {low_skip_wedge, {low_trunc_hack, _EID, _Fl}}, Resp)->
     Status = conv_from_status(Resp),
     #mpb_ll_response{req_id=ReqID,
                      trunc_hack=#mpb_ll_trunchackresp{status=Status}};
@@ -691,7 +716,7 @@ to_pb_response(ReqID, {high_auth, _User, _Pass}, _Resp) ->
     #mpb_response{req_id=ReqID,
                   generic=#mpb_errorresp{code=1,
                                          msg="AUTH not implemented"}};
-to_pb_response(ReqID, {high_append_chunk, _CoC_n, _CoC_l, _Prefix, _Chunk, _TSum, _CE}, Resp)->
+to_pb_response(ReqID, {high_append_chunk, _NS, _Prefix, _Chunk, _TSum, _O}, Resp)->
     case Resp of
         {ok, {Offset, Size, File}} ->
             Where = #mpb_chunkpos{offset=Offset,
@@ -707,7 +732,7 @@ to_pb_response(ReqID, {high_append_chunk, _CoC_n, _CoC_l, _Prefix, _Chunk, _TSum
         _Else ->
             make_error_resp(ReqID, 66, io_lib:format("err ~p", [_Else]))
     end;
-to_pb_response(ReqID, {high_write_chunk, _File, _Offset, _Chunk, _TaggedCSum}, Resp) ->
+to_pb_response(ReqID, {high_write_chunk, _File, _Offset, _Chunk, _CSum}, Resp) ->
     case Resp of
         {ok, {_,_,_}} ->
             %% machi_cr_client returns ok 2-tuple, convert to simple ok.
@@ -797,12 +822,12 @@ make_tagged_csum(#mpb_chunkcsum{type='CSUM_TAG_CLIENT_SHA', csum=CSum}, _CB) ->
 make_ll_error_resp(ReqID, Code, Msg) ->
     #mpb_ll_response{req_id=ReqID,
                      generic=#mpb_errorresp{code=Code,
-                                            msg=Msg}}.    
+                                            msg=Msg}}.
 
 make_error_resp(ReqID, Code, Msg) ->
     #mpb_response{req_id=ReqID,
                   generic=#mpb_errorresp{code=Code,
-                                         msg=Msg}}.    
+                                         msg=Msg}}.
 
 conv_from_epoch_id({Epoch, EpochCSum}) ->
     #mpb_epochid{epoch_number=Epoch,
@@ -962,17 +987,26 @@ conv_from_status(_OOPS) ->
     io:format(user, "HEY, ~s:~w got ~p\n", [?MODULE, ?LINE, _OOPS]),
     'BAD_JOSS'.
 
-conv_to_boolean(undefined) ->
-    false;
-conv_to_boolean(0) ->
-    false;
-conv_to_boolean(N) when is_integer(N) ->
-    true.
+conv_from_append_opts(#append_opts{chunk_extra=ChunkExtra,
+                                   preferred_file_name=Pref,
+                                   flag_fail_preferred=FailPref}) ->
+    {ChunkExtra, Pref, FailPref}.
 
-conv_from_boolean(false) ->
-    0;
-conv_from_boolean(true) ->
-    1.
+
+conv_to_append_opts(#mpb_appendchunkreq{
+                       chunk_extra=ChunkExtra,
+                       preferred_file_name=Pref,
+                       flag_fail_preferred=FailPref}) ->
+    #append_opts{chunk_extra=ChunkExtra,
+                 preferred_file_name=Pref,
+                 flag_fail_preferred=FailPref};
+conv_to_append_opts(#mpb_ll_appendchunkreq{
+                       chunk_extra=ChunkExtra,
+                       preferred_file_name=Pref,
+                       flag_fail_preferred=FailPref}) ->
+    #append_opts{chunk_extra=ChunkExtra,
+                 preferred_file_name=Pref,
+                 flag_fail_preferred=FailPref}.
 
 conv_from_projection_v1(#projection_v1{epoch_number=Epoch,
                                        epoch_csum=CSum,
