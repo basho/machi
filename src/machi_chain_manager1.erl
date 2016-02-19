@@ -2485,12 +2485,13 @@ poll_private_proj_is_upi_unanimous3(#ch_mgr{name=MyName, proj=P_current} = S) ->
                     ProjStore = get_projection_store_pid_or_regname(S),
                     #projection_v1{epoch_number=_EpochRep,
                                    epoch_csum= <<_CSumRep:4/binary,_/binary>>,
+                                   author_server=AuthRep,
                                    upi=_UPIRep,
                                    repairing=_RepairingRep} = NewProj,
                     ok = machi_projection_store:write(ProjStore, private, NewProj),
                     case proplists:get_value(private_write_verbose_confirm, S#ch_mgr.opts) of
                         true ->
-                            error_logger:info_msg("CONFIRM epoch ~w ~w upi ~w rep ~w by ~w\n", [_EpochRep, _CSumRep, _UPIRep, _RepairingRep, MyName]);
+                            error_logger:info_msg("CONFIRM epoch ~w ~w upi ~w rep ~w auth ~w by ~w\n", [_EpochRep, _CSumRep, _UPIRep, _RepairingRep, AuthRep, MyName]);
                         _ ->
                             ok
                     end,
@@ -2988,7 +2989,7 @@ perhaps_verbose_c111(P_latest2, #ch_mgr{name=MyName, opts=Opts}=S) ->
                (S#ch_mgr.proj)#projection_v1.upi /= [] ->
                     <<CSumRep:4/binary,_/binary>> =
                                           P_latest2#projection_v1.epoch_csum,
-                    error_logger:info_msg("CONFIRM epoch ~w ~w upi ~w rep ~w by ~w\n", [(S#ch_mgr.proj)#projection_v1.epoch_number, CSumRep, P_latest2#projection_v1.upi, P_latest2#projection_v1.repairing, S#ch_mgr.name]);
+                    error_logger:info_msg("CONFIRM epoch ~w ~w upi ~w rep ~w auth ~w by ~w\n", [(S#ch_mgr.proj)#projection_v1.epoch_number, CSumRep, P_latest2#projection_v1.upi, P_latest2#projection_v1.repairing, P_latest2#projection_v1.author_server, S#ch_mgr.name]);
                true ->
                     ok
             end;
