@@ -2094,11 +2094,10 @@ react_to_env_C200(Retries, P_latest, S) ->
     ?REACT(c200),
     try
         AuthorProxyPid = proxy_pid(P_latest#projection_v1.author_server, S),
-        ?FLU_PC:kick_projection_reaction(AuthorProxyPid, [])
+        %% This is just advisory, we don't need a sync reply.
+        ?FLU_PC:kick_projection_reaction(AuthorProxyPid, [], 100)
     catch _Type:_Err ->
-            %% ?V("TODO: tell_author_yo is broken: ~p ~p\n",
-            %%           [_Type, _Err]),
-            ok
+        ok
     end,
     react_to_env_C210(Retries, S).
 
