@@ -234,11 +234,13 @@ test_read_latest_public_projection(Pid, ReadRepairP) ->
 %% manager's pid in MgrOpts and use direct gen_server calls to the
 %% local projection store.
 
-init({MyName, InitMembersDict, MgrOpts}) ->
+init({MyName, InitMembersDict, MgrOpts0}) ->
     put(ttt, [?LINE]),
     _ = random:seed(now()),
     init_remember_down_list(),
+    MgrOpts = MgrOpts0 ++ application:get_env(machi, chain_manager_opts, []),
     Opt = fun(Key, Default) -> proplists:get_value(Key, MgrOpts, Default) end,
+
     InitWitness_list = Opt(witnesses, []),
     ZeroAll_list = [P#p_srvr.name || {_,P} <- orddict:to_list(InitMembersDict)],
     ZeroProj = make_none_projection(0, MyName, ZeroAll_list,
@@ -2060,7 +2062,6 @@ react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H,
     ?REACT(c120),
     H2   = add_and_trunc_history(P_latest, H, ?MAX_HISTORY_LENGTH),
 
-    %% diversion_c120_verbose_goop(P_latest, S),
     ?REACT({c120, [{latest, machi_projection:make_summary(P_latest)}]}),
     S2 = set_proj(S#ch_mgr{proj_history=H2,
                            sane_transitions=Xtns + 1}, P_latest),
@@ -2487,9 +2488,9 @@ poll_private_proj_is_upi_unanimous3(#ch_mgr{name=MyName, proj=P_current} = S) ->
                                    upi=_UPIRep,
                                    repairing=_RepairingRep} = NewProj,
                     ok = machi_projection_store:write(ProjStore, private, NewProj),
-                    case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
+                    case proplists:get_value(private_write_verbose_confirm, S#ch_mgr.opts) of
                         true ->
-                            io:format(user, "\n~s CONFIRM epoch ~w ~w upi ~w rep ~w by ~w\n", [machi_util:pretty_time(), _EpochRep, _CSumRep, _UPIRep, _RepairingRep, MyName]);
+                            error_logger:info_msg("CONFIRM epoch ~w ~w upi ~w rep ~w by ~w\n", [_EpochRep, _CSumRep, _UPIRep, _RepairingRep, MyName]);
                         _ ->
                             ok
                     end,
@@ -2965,34 +2966,33 @@ zerf_find_last_annotated(FLU, MajoritySize, S) ->
             []                                  % lists:flatten() will destroy
     end.
 
-perhaps_verbose_c111(P_latest2, S) ->
-    case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
-        true ->
+perhaps_verbose_c111(P_latest2, #ch_mgr{name=MyName, opts=Opts}=S) ->
+    PrivWriteVerb = proplists:get_value(private_write_verbose, Opts, false),
+    PrivWriteVerbCONFIRM = proplists:get_value(private_write_verbose_confirm, Opts, false),
+    if PrivWriteVerb orelse PrivWriteVerbCONFIRM ->
             Dbg2X = lists:keydelete(react, 1,
                                     P_latest2#projection_v1.dbg2) ++
                 [{is_annotated,is_annotated(P_latest2)}],
             P_latest2x = P_latest2#projection_v1{dbg2=Dbg2X}, % limit verbose len.
             Last2 = get(last_verbose),
             Summ2 = machi_projection:make_summary(P_latest2x),
-            if P_latest2#projection_v1.upi == [],
-               (S#ch_mgr.proj)#projection_v1.upi /= [] ->
-                    <<CSumRep:4/binary,_/binary>> =
-                                          P_latest2#projection_v1.epoch_csum,
-                    io:format(user, "~s CONFIRM epoch ~w ~w upi ~w rep ~w by ~w\n", [machi_util:pretty_time(), (S#ch_mgr.proj)#projection_v1.epoch_number, CSumRep, P_latest2#projection_v1.upi, P_latest2#projection_v1.repairing, S#ch_mgr.name]);
+            if PrivWriteVerb, Summ2 /= Last2 ->
+                    put(last_verbose, Summ2),
+                    ?V("\n~s ~p uses plain: ~w \n",
+                       [machi_util:pretty_time(), MyName, Summ2]);
                true ->
                     ok
             end,
-            case proplists:get_value(private_write_verbose,
-                                     S#ch_mgr.opts) of
-            %% case true of
-                true when Summ2 /= Last2 ->
-                    put(last_verbose, Summ2),
-                    ?V("\n~s ~p uses plain: ~w \n",
-                       [machi_util:pretty_time(), S#ch_mgr.name, Summ2]);
-                _ ->
+            if PrivWriteVerbCONFIRM,
+               P_latest2#projection_v1.upi == [],
+               (S#ch_mgr.proj)#projection_v1.upi /= [] ->
+                    <<CSumRep:4/binary,_/binary>> =
+                                          P_latest2#projection_v1.epoch_csum,
+                    error_logger:info_msg("CONFIRM epoch ~w ~w upi ~w rep ~w by ~w\n", [(S#ch_mgr.proj)#projection_v1.epoch_number, CSumRep, P_latest2#projection_v1.upi, P_latest2#projection_v1.repairing, S#ch_mgr.name]);
+               true ->
                     ok
             end;
-        _ ->
+       true ->
             ok
     end.
 

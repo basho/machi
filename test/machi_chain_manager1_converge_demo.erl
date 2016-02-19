@@ -134,6 +134,7 @@ Press control-c to interrupt the test....".
 %%     convergence_demo_testfun(3).
 
 -define(DEFAULT_MGR_OPTS, [{private_write_verbose, false},
+                           {private_write_verbose_confirm, true},
                            {active_mode,false},
                            {use_partition_simulator, true}]).
 
