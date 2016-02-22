@@ -2988,8 +2988,8 @@ perhaps_verbose_c111(P_latest2, #ch_mgr{name=MyName, opts=Opts}=S) ->
             Summ2 = machi_projection:make_summary(P_latest2x),
             if PrivWriteVerb, Summ2 /= Last2 ->
                     put(last_verbose, Summ2),
-                    ?V("\n~s ~p uses plain: ~w \n",
-                       [machi_util:pretty_time(), MyName, Summ2]);
+                    error_logger:info_msg("~p uses plain: ~w \n",
+                       [MyName, Summ2]);
                true ->
                     ok
             end,
