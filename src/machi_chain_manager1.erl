@@ -390,6 +390,7 @@ handle_cast(_Cast, S) ->
 handle_info(tick_check_environment, #ch_mgr{ignore_timer=true}=S) ->
     {noreply, S};
 handle_info(tick_check_environment, S) ->
+    gobble_ticks(),
     {{_Delta, Props, _Epoch}, S1} = do_react_to_env(S),
     S2 = sanitize_repair_state(S1),
     S3 = perhaps_start_repair(S2),
@@ -2535,6 +2536,14 @@ gobble_calls(StaticCall) ->
             gen_server:reply(From, todo_overload),
             gobble_calls(StaticCall)
     after 1 ->                                  % after 0 angers pulse.
+            ok
+    end.
+
+gobble_ticks() ->
+    receive
+        tick_check_environment ->
+            gobble_ticks()
+    after 0 ->
             ok
     end.
 
