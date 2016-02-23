@@ -92,8 +92,11 @@
 -define(REPAIR_START_STABILITY_TIME, 10).
 -endif. % TEST
 
-%% Magic constant for looping "too frequently" breaker.  TODO revisit & revise.
--define(TOO_FREQUENT_BREAKER, 10).
+%% Maximum length of the history of adopted projections (via C120).
+-define(MAX_HISTORY_LENGTH, 8).
+
+%% Magic constant for looping "too frequently" breaker.
+-define(TOO_FREQUENT_BREAKER, (?MAX_HISTORY_LENGTH+5)).
 
 -define(RETURN2(X), begin (catch put(why2, [?LINE|get(why2)])), X end).
 
@@ -102,9 +105,6 @@
 
 %% Amount of epoch number skip-ahead for set_chain_members call
 -define(SET_CHAIN_MEMBERS_EPOCH_SKIP, 1111).
-
-%% Maximum length of the history of adopted projections (via C120).
--define(MAX_HISTORY_LENGTH, 30).
 
 %% API
 -export([start_link/2, start_link/3, stop/1, ping/1,
@@ -463,7 +463,7 @@ get_my_proj_boot_info(MgrOpts, DefaultDict, DefaultProj, ProjType) ->
             {DefaultDict, DefaultProj};
         Store ->
             {ok, P} = machi_projection_store:read_latest_projection(Store,
-                                                                    ProjType),
+                                                                    ProjType, 7789),
             {P#projection_v1.members_dict, P}
     end.
 
@@ -840,7 +840,10 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                         D_foo=[{repair_done, {repair_final_status, ok, (S#ch_mgr.proj)#projection_v1.epoch_number}}],
                         {NewUPI_list ++ Repairing_list2, [], RunEnv2};
                    true ->
-                        D_foo=[d_foo2],
+                        D_foo=[d_foo2, {sim_p,Simulator_p},
+                               {simr_p,SimRepair_p}, {same_epoch,SameEpoch_p},
+                               {rel_to,RelativeToServer},
+                               {repch,RepChk_LastInUPI}, {repair_fs,RepairFS}],
                         {NewUPI_list, OldRepairing_list, RunEnv2}
                 end;
             {_ABC, _XYZ} ->
@@ -1977,7 +1980,7 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     %% In contrast to the public projection store writes, Humming Consensus
     %% doesn't care about the status of writes to the public store: it's
     %% always relying only on successful reads of the public store.
-    case {?FLU_PC:write_projection(MyStorePid, private, P_latest2,?TO*30),Goo} of
+    case {?FLU_PC:write_projection(MyStorePid, private, P_latest2,?TO*30+66),Goo} of
         {ok, Goo} ->
             ?REACT({c110, [{write, ok}]}),
             react_to_env_C111(P_latest, P_latest2, Extra1, MyStorePid, S);
@@ -2070,20 +2073,21 @@ react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H,
              false ->
                  S2;
              {{_ConfEpoch, _ConfCSum}, ConfTime} ->
-                 io:format(user, "\nCONFIRM debug C120 ~w was annotated ~w\n", [S#ch_mgr.name, P_latest#projection_v1.epoch_number]),
+                 P_latestEpoch = P_latest#projection_v1.epoch_number,
+                 io:format(user, "\nCONFIRM debug C120 ~w was annotated ~w\n", [S#ch_mgr.name, P_latestEpoch]),
                  S2#ch_mgr{proj_unanimous=ConfTime}
          end,
     V = case file:read_file("/tmp/moomoo."++atom_to_list(S#ch_mgr.name)) of {ok,_} -> true; _ -> false end,
     if V -> io:format("C120: ~w: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
     {{now_using, FinalProps, P_latest#projection_v1.epoch_number}, S3}.
 
-add_and_trunc_history(P_latest, H, MaxLength) ->
+add_and_trunc_history(#projection_v1{epoch_number=0}, H, _MaxLength) ->
+    H;
+add_and_trunc_history(#projection_v1{} = P_latest, H, MaxLength) ->
     Latest_U_R = {P_latest#projection_v1.upi, P_latest#projection_v1.repairing},
-    H2 = if P_latest#projection_v1.epoch_number > 0 ->
-                 queue:in(Latest_U_R, H);
-            true ->
-                 H
-         end,
+    add_and_trunc_history(Latest_U_R, H, MaxLength);
+add_and_trunc_history(Item, H, MaxLength) ->
+    H2 = queue:in(Item, H),
     case queue:len(H2) of
         X when X > MaxLength ->
             {_V, Hxx} = queue:out(H2),
@@ -2499,7 +2503,10 @@ poll_private_proj_is_upi_unanimous3(#ch_mgr{name=MyName, proj=P_current} = S) ->
                     %% Unwedge our FLU.
                     {ok, NotifyPid} = machi_projection_store:get_wedge_notify_pid(ProjStore),
                     _ = machi_flu1:update_wedge_state(NotifyPid, false, EpochID),
-                    S2#ch_mgr{proj_unanimous=Now};
+                    #ch_mgr{proj_history=H} = S2,
+                    H2 = add_and_trunc_history({confirm, Epoch}, H,
+                                               ?MAX_HISTORY_LENGTH),
+                    S2#ch_mgr{proj_unanimous=Now, proj_history=H2};
                 _ ->
                     S2
             end;
