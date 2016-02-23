@@ -2,6 +2,7 @@ prototype/chain-manager/patch.*
 .eqc-info
 .eunit
 deps
+dev
 erl_crash.dump
 .concrete/DEV_MODE
 .rebar

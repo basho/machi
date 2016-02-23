@@ -1,0 +1,16 @@
+#! /bin/sh
+#
+# Example usage: gen_dev dev4 vars.src vars
+#
+# Generate an overlay config for devNNN from vars.src and write to vars
+#
+
+NAME=$1
+TEMPLATE=$2
+VARFILE=$3
+
+NODE="$NAME@127.0.0.1"
+
+echo "Generating $NAME - node='$NODE'"
+sed -e "s/@NODE@/$NODE/" \
+    < $TEMPLATE > $VARFILE

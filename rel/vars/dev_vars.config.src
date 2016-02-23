@@ -23,7 +23,7 @@
 %%
 %% etc/vm.args
 %%
-{node,         "machi@127.0.0.1"}.
+{node,         "@NODE@"}.
 {crash_dump,   "{{platform_log_dir}}/erl_crash.dump"}.
 
 %%

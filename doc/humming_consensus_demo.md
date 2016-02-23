@@ -1,5 +1,74 @@
 
+# Table of contents
+
+* [Hand-on experiments with Machi and Humming Consensus](#hands-on)
+* [Using the network partition simulator and convergence demo test code](#partition-simulator)
+
+<a name="hands-on">
+# Hand-on experiments with Machi and Humming Consensus
+
+<a name="prerequisites">
+## Prerequisites
+
+1. Machi requires a OS X, FreeBSD, Linux, or Solaris machine.
+2. You'll need the `git` source management utility.
+3. You'll need the Erlang/OTP 17 runtime environment.  Please don't
+   use earlier or later versions until we have a chance to fix the
+   compilation warnings that versions R16B and 18 will trigger.
+
+For `git` and the Erlang runtime, please use your OS-specific
+package manager to install these.  If your package manager doesn't
+have Erlang/OTP version 17 available, then we recommend using the
+[precompiled packages available at Erlang Solutions](https://www.erlang-solutions.com/resources/download.html).
+
+All of the commands that should be run at your login shell (e.g. Bash,
+c-shell) can be cut-and-pasted from this document directly to your
+login shell prompt.
+
+<a name="clone-compile">
+## Clone and compile the code
+
+Clone the Machi source repo and compile the source and test code.  Run
+the following commands at your login shell:
+
+    cd /tmp
+    git clone https://github.com/basho/machi.git
+    cd machi
+    git checkout master
+    make
+
+Then run the unit test suite.  This may take up to two minutes or so
+to finish.
+
+    make test
+
+At the end, the test suite should report that all tests passed.
+
+If you had a test failure, a likely cause may be a limit on the number
+of file descriptors available to your user process.  (Recent releases
+of OS X have a limit of 1024 file descriptors, which may be too slow.)
+The output of the `limit -n` will tell you your file descriptor limit.
+
+## Running three Machi instances on a single machine
+
+Run the following command:
+
+    make stagedevrel
+
+This will create a directory structure like this:
+          
+          |-dev1-|... stand-alone Machi app directories
+    |-dev-|-dev2-|... stand-alone Machi app directories
+          |-dev3-|... stand-alone Machi app directories
+    
+<a name="partition-simulator">
 # Using the network partition simulator and convergence demo test code
+
+This is the demo code mentioned in the presentation that Scott Lystig
+Fritchie gave at the
+[RICON 2015 conference](http://ricon.io).
+* [slides (PDF format)](http://ricon.io/speakers/slides/Scott_Fritchie_Ricon_2015.pdf)
+* [video](https://www.youtube.com/watch?v=yR5kHL1bu1Q)
 
 ## A complete example of all input and output
 
@@ -15,31 +84,15 @@ To help interpret the output of the test, please skip ahead to the
 
 ## Prerequisites
 
-1. You'll need the `git` source management 
-2. You'll need the Erlang/OTP 17 runtime environment.  Please don't
-   use earlier or later versions until we have a chance to fix the
-   compilation warnings that versions R16B and 18 will trigger.
-
-All of the commands that should be run at your login shell (e.g. Bash,
-c-shell) can be cut-and-pasted from this document directly to your
-login shell prompt.
+If you don't have `git` and/or the Erlang 17 runtime system available
+on your OS X, FreeBSD, Linux, or Solaris machine, please take a look
+at the [Prerequistes section](#prerequisites) first.  When you have
+installed the prerequisite software, please return back here.
 
 ## Clone and compile the code
 
-Clone the Machi source repo and compile the source and test code.  Run
-the following commands at your login shell:
-
-    cd /tmp
-    git clone https://github.com/basho/machi.git
-    cd machi
-    git checkout master
-    make
-
-Then run the unit test suite.  This may take up to two minutes or so
-to finish.  Most of the tests will be silent; please be patient until
-the tests finish.
-
-    make test
+Please briefly visit the [Clone and compile the code](#clone-compile)
+section.  When finished, please return back here.
 
 ## Run an interactive Erlang CLI shell
 
