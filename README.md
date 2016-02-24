@@ -137,10 +137,13 @@ X.  The only known limitations for using R16 are minor type
 specification difference between R16 and 17, but we strongly suggest
 continuing development using version 17.
 
-We also assume that you have the standard UNIX/Linux developers
-tool chain for C and C++ applications.  Specifically, we assume `make`
-is available.  The utility used to compile the Machi source code,
+We also assume that you have the standard UNIX/Linux developer
+tool chain for C and C++ applications.  Also, we assume
+that Git and GNU Make are available.
+The utility used to compile the Machi source code,
 `rebar`, is pre-compiled and included in the repo.
+For more details, please see the
+[Machi development environment prerequisites doc](./doc/dev-prerequisites.md).
 
 Machi has a dependency on the
 [ELevelDB](https://github.com/basho/eleveldb) library.  ELevelDB only
