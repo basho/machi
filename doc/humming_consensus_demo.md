@@ -10,14 +10,14 @@
 ## Prerequisites
 
 Please refer to the
-[Machi development environment prerequisites doc](./doc/dev-prerequisites.md)
+[Machi development environment prerequisites doc](./dev-prerequisites.md)
 for Machi developer environment prerequisites.
 
 <a name="clone-compile">
 ## Clone and compile the code
 
 Please see the
-[Machi 'clone and compile' doc](./doc/dev-clone-compile.md)
+[Machi 'clone and compile' doc](./dev-clone-compile.md)
 for the short list of steps required to fetch the Machi source code
 from GitHub and to compile &amp; test Machi.
 

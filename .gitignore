@@ -4,6 +4,7 @@ prototype/chain-manager/patch.*
 deps
 dev
 erl_crash.dump
+eqc
 .concrete/DEV_MODE
 .rebar
 edoc

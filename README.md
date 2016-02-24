@@ -1,4 +1,4 @@
-# Machi: a robust & reliable, distributed, highly available, large file store
+# Machi: a distributed, decentralized blob/large file store
 
   [Travis-CI](http://travis-ci.org/basho/machi) :: ![Travis-CI](https://secure.travis-ci.org/basho/machi.png)
 
