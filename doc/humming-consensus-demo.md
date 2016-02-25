@@ -52,36 +52,20 @@ Please add the following line to `/etc/hosts`, using this command:
 
     sudo sh -c 'echo "127.0.0.1 machi1 machi2 machi3" >> /etc/hosts'
 
-Then please verify that all three new hostnames for the localhost
-network interface are working correctly:
+Next, we will use a shell script to finish setting up our cluster.  It
+will do the following for us:
 
-    ping -c 1 machi1 ; ping -c 1 machi2 ; ping -c 1 machi3
+* Verify that the new line that was added to `/etc/hosts` is correct.
+* Modify the `etc/app.config` files to configure the Humming Consensus
+  chain manager's actions logged to the `log/console.log` file.
+* Start the three application instances.
+* Verify that the three instances are running correctly.
+* Configure a single chain, with one FLU server per application
+  instance.
 
-If that worked, then we're ready for the next step: starting our three
-Machi app instances on this machine, then configure a single chain to
-to experiment with.
+Please run this script using this command:
 
-Run the following commands to start the three Machi app instances and
-use the `machi ping` command to verify that all three are running.
-
-    sh -c 'for i in 1 2 3; do ./dev/dev$i/bin/machi start; done
-    sh -c 'for i in 1 2 3; do ./dev/dev$i/bin/machi ping; done
-
-The output from the `ping` commands should be:
-
-    pong
-    pong
-    pong
-
-Next, use the following to configure a single chain:
-
-    sh -c 'for i in 1 2 3; do ./dev/dev$i/bin/machi-admin
-
-The results should be:
-
-    Result: ok
-    Result: ok
-    Result: ok
+    ./priv/humming-consensus-demo.setup.sh
 
 We have now created a single replica chain, called `c1`, that has
 three file servers participating in the chain.  Thanks to the
