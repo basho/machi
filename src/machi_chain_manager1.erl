@@ -2569,12 +2569,13 @@ perhaps_start_repair(#ch_mgr{name=MyName,
             %% RepairOpts = [{repair_mode, check}, verbose],
             RepairFun = fun() -> do_repair(S, RepairOpts, CMode) end,
             LastUPI = lists:last(UPI),
+            StabilityTime = application:get_env(machi, stability_time, ?REPAIR_START_STABILITY_TIME),
             IgnoreStabilityTime_p = proplists:get_value(ignore_stability_time,
                                                         S#ch_mgr.opts, false),
             case timer:now_diff(os:timestamp(), Start) div 1000000 of
                 N when MyName == LastUPI andalso
                        (IgnoreStabilityTime_p orelse
-                        N >= ?REPAIR_START_STABILITY_TIME) ->
+                        N >= StabilityTime) ->
                     {WorkerPid, _Ref} = spawn_monitor(RepairFun),
                     S#ch_mgr{repair_worker=WorkerPid,
                              repair_start=os:timestamp(),
