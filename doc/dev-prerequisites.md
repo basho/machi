@@ -1,15 +1,18 @@
 ## Machi developer environment prerequisites
 
-1. Machi requires an OS X, FreeBSD, Linux, or Solaris machine is a
-   standard developer environment for C and C++ applications.
+1. Machi requires an 64-bit variant of UNIX: OS X, FreeBSD, Linux, or
+   Solaris machine is a standard developer environment for C and C++
+   applications (64-bit versions).
 2. You'll need the `git` source management utility.
-3. You'll need the Erlang/OTP 17 runtime environment.  Please don't
-   use earlier or later versions until we have a chance to fix the
-   compilation warnings that versions R16B and 18 will trigger.
+3. You'll need the 64-bit Erlang/OTP 17 runtime environment.  Please
+   don't use earlier or later versions until we have a chance to fix
+   the compilation warnings that versions R16B and 18 will trigger.
+   Also, please verify that you are not using a 32-bit Erlang/OTP
+   runtime package.
 
 For `git` and the Erlang runtime, please use your OS-specific
 package manager to install these.  If your package manager doesn't
-have Erlang/OTP version 17 available, then we recommend using the
+have 64-bit Erlang/OTP version 17 available, then we recommend using the
 [precompiled packages available at Erlang Solutions](https://www.erlang-solutions.com/resources/download.html).
 
 Also, please verify that you have enough file descriptors available to

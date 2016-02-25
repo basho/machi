@@ -14,7 +14,9 @@ to finish.
 
     make test
 
-At the end, the test suite should report that all tests passed.
+At the end, the test suite should report that all tests passed.  The
+actual number of tests shown in the "All `X` tests passed" line may be
+different than the example below.
 
     [... many lines omitted ...]
     module 'event_logger'

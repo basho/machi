@@ -33,10 +33,70 @@ Run the following command:
 
 This will create a directory structure like this:
           
-          |-dev1-|... stand-alone Machi app directories
-    |-dev-|-dev2-|... stand-alone Machi app directories
-          |-dev3-|... stand-alone Machi app directories
+          |-dev1-|... stand-alone Machi app + subdirectories
+    |-dev-|-dev2-|... stand-alone Machi app + directories
+          |-dev3-|... stand-alone Machi app + directories
     
+Each of the `dev/dev1`, `dev/dev2`, and `dev/dev3` are stand-alone
+application instances of Machi and can be run independently of each
+other on the same machine.  This demo will use all three.
+
+The lifecycle management utilities for Machi are a bit immature,
+currently.  They assume that each Machi server runs on a host with a
+unique hostname -- there is no flexibility built-in yet to easily run
+multiple Machi instances on the same machine.  To continue with the
+demo, we need to use `sudo` or `su` to obtain superuser privileges to
+edit the `/etc/hosts` file.
+
+Please add the following line to `/etc/hosts`, using this command:
+
+    sudo sh -c 'echo "127.0.0.1 machi1 machi2 machi3" >> /etc/hosts'
+
+Then please verify that all three new hostnames for the localhost
+network interface are working correctly:
+
+    ping -c 1 machi1 ; ping -c 1 machi2 ; ping -c 1 machi3
+
+If that worked, then we're ready for the next step: starting our three
+Machi app instances on this machine, then configure a single chain to
+to experiment with.
+
+Run the following commands to start the three Machi app instances and
+use the `machi ping` command to verify that all three are running.
+
+    sh -c 'for i in 1 2 3; do ./dev/dev$i/bin/machi start; done
+    sh -c 'for i in 1 2 3; do ./dev/dev$i/bin/machi ping; done
+
+The output from the `ping` commands should be:
+
+    pong
+    pong
+    pong
+
+Next, use the following to configure a single chain:
+
+    sh -c 'for i in 1 2 3; do ./dev/dev$i/bin/machi-admin
+
+The results should be:
+
+    Result: ok
+    Result: ok
+    Result: ok
+
+We have now created a single replica chain, called `c1`, that has
+three file servers participating in the chain.  Thanks to the
+hostnames that we added to `/etc/hosts`, all are using the localhost
+network interface.
+
+    | App instance | Hostname | FLU name | TCP port |
+    | directory    |          |          |   number |
+    |--------------+----------+----------+----------|
+    | dev1         | machi1   | flu1     |    20401 |
+    | dev2         | machi2   | flu2     |    20402 |
+    | dev3         | machi3   | flu3     |    20403 |
+
+The log files for each application instance can be found 
+
 <a name="partition-simulator">
 # Using the network partition simulator and convergence demo test code
 

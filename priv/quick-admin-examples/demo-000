@@ -1,0 +1,7 @@
+{host, "machi1", []}.
+{host, "machi2", []}.
+{host, "machi3", []}.
+{flu,f1,"machi1",20401,[]}.
+{flu,f2,"machi2",20402,[]}.
+{flu,f3,"machi3",20403,[]}.
+{chain,c1,[f1,f2,f3],[]}.
