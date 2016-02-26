@@ -87,7 +87,7 @@ Vagrant.configure(2) do |config|
     ## setenv PATH /usr/local/erlang/17.5/bin:$PATH
 
     git clone https://github.com/basho/machi.git
-    (cd machi ; git checkout master ; make test )
+    (cd machi ; git checkout master ; make && make test )
     chown -R vagrant ./machi
   SHELL
 end
