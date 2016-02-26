@@ -19,3 +19,20 @@ Also, please verify that you have enough file descriptors available to
 your user processes.  The output of `ulimit -n` should report at least
 4,000 file descriptors available.  If your limit is lower (a frequent
 problem for OS X users), please increase it to at least 4,000.
+
+# Using Vagrant to set up a developer environment for Machi
+
+The Machi source directory contains a `Vagrantfile` for creating an
+Ubuntu Linux-based virtual machine for compiling and running Machi.
+This file is in the
+[$SRC_TOP/priv/humming-consensus-demo.vagrant](../priv/humming-consensus-demo.vagrant)
+directory.
+
+If used as-is, the virtual machine specification is modest.
+
+* 1 virtual CPU
+* 512MB virtual memory
+* 768MB swap space
+* 79GB sparse virtual disk image.  After installing prerequisites and
+  compiling Machi, the root file system uses approximately 2.7 GBytes.
+

@@ -13,6 +13,11 @@ Please refer to the
 [Machi development environment prerequisites doc](./dev-prerequisites.md)
 for Machi developer environment prerequisites.
 
+If you do not have an Erlang/OTP runtime system available, but you do
+have [the Vagrant virtual machine](https://www.vagrantup.com/) manager
+available, then please refer to the instructions in the prerequisites
+doc for using Vagrant.
+
 <a name="clone-compile">
 ## Clone and compile the code
 
@@ -72,8 +77,8 @@ three file servers participating in the chain.  Thanks to the
 hostnames that we added to `/etc/hosts`, all are using the localhost
 network interface.
 
-    | App instance | Hostname | FLU name | TCP port |
-    | directory    |          |          |   number |
+    | App instance | Pseudo   | FLU name | TCP port |
+    | directory    | Hostname |          |   number |
     |--------------+----------+----------+----------|
     | dev1         | machi1   | flu1     |    20401 |
     | dev2         | machi2   | flu2     |    20402 |
