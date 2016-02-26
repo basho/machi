@@ -84,7 +84,9 @@ network interface.
     | dev2         | machi2   | flu2     |    20402 |
     | dev3         | machi3   | flu3     |    20403 |
 
-The log files for each application instance can be found 
+The log files for each application instance can be found in the
+`./dev/devN/log/console.log` file, where the `N` is the instance
+number: 1, 2, or 3.
 
 <a name="partition-simulator">
 # Using the network partition simulator and convergence demo test code

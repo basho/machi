@@ -15,6 +15,11 @@ Vagrant.configure(2) do |config|
   # If this Vagrant box has not been downloaded before (e.g. using "vagrant box add"),
   # then Vagrant will automatically download the VM image from HashiCorp.
   config.vm.box = "hashicorp/precise64"
+  # If using a FreeBSD box, Bash may not be installed.
+  # Use the config.ssh.shell setting to specify an alternate shell.
+  # Note, however, that any code in the 'config.vm.provision' section
+  # would then have to use this shell's syntax!
+  #   config.ssh.shell = "/bin/csh -l"
 
   # Disable automatic box update checking. If you disable this, then
   # boxes will only be checked for updates when the user runs
@@ -67,15 +72,22 @@ Vagrant.configure(2) do |config|
   # Puppet, Chef, Ansible, Salt, and Docker are also available. Please see the
   # documentation for more information about their specific syntax and use.
   config.vm.provision "shell", inline: <<-SHELL
-    sudo apt-get install -y git
+    # Install prerequsites
+    # Support here for FreeBSD is experimental
+    apt-get update ; sudo apt-get install -y git sudo rsync ; # Ubuntu Linux
+    env ASSUME_ALWAYS_YES=yes pkg install -f git sudo rsync ; # FreeBSD 10
+
+    # Install dependent packages, using slf-configurator
     git clone https://github.com/slfritchie/slf-configurator.git
     chown -R vagrant ./slf-configurator
     (cd slf-configurator ; sudo sh -x ./ALL.sh)
     echo 'export PATH=${PATH}:/usr/local/erlang/17.5/bin' >> ~vagrant/.bashrc
     export PATH=${PATH}:/usr/local/erlang/17.5/bin
+    ## echo 'set path = ( $path  /usr/local/erlang/17.5/bin )' >> ~vagrant/.cshrc
+    ## setenv PATH /usr/local/erlang/17.5/bin:$PATH
 
     git clone https://github.com/basho/machi.git
-    (cd machi ; git checkout master ; make test 2>&1 | tee RUNLOG.0)
+    (cd machi ; git checkout master ; make test )
     chown -R vagrant ./machi
   SHELL
 end
