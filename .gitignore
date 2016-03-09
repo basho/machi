@@ -22,6 +22,7 @@ include/machi_pb.hrl
 
 # Release packaging
 rel/machi
+rel/vars/dev*vars.config
 
 # Misc Scott cruft
 *.patch
