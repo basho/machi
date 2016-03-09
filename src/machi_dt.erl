@@ -32,6 +32,12 @@
 -type chunk_summary() :: {file_offset(), chunk_size(), chunk_bin(), chunk_cstrm()}.
 -type chunk_pos()   :: {file_offset(), chunk_size(), file_name_s()}.
 -type chunk_size()  :: non_neg_integer().
+
+%% Tags that stand for how that checksum was generated. See
+%% machi_util:make_tagged_csum/{1,2} for further documentation and
+%% implementation.
+-type csum_tag()    :: none | client_sha | server_sha | server_regen_sha.
+
 -type error_general() :: 'bad_arg' | 'wedged' | 'bad_checksum'.
 -type epoch_csum()  :: binary().
 -type epoch_num()   :: -1 | non_neg_integer().
@@ -53,11 +59,6 @@
 -type read_opts()   :: #read_opts{}.
 -type read_opts_x() :: 'undefined' | 'noopt' | 'none' | #read_opts{}.
 
-%% Tags that stand for how that checksum was generated. See
-%% machi_util:make_tagged_csum/{1,2} for further documentation and
-%% implementation.
--type csum_tag()    :: none | client_sha | server_sha | server_regen_sha.
-
 -export_type([
               append_opts/0,
               chunk/0,
@@ -68,6 +69,7 @@
               chunk_summary/0,
               chunk_pos/0,
               chunk_size/0,
+              csum_tag/0,
               error_general/0,
               epoch_csum/0,
               epoch_num/0,

@@ -1,4 +1,4 @@
-# Machi: a robust & reliable, distributed, highly available, large file store
+# Machi: a distributed, decentralized blob/large file store
 
   [Travis-CI](http://travis-ci.org/basho/machi) :: ![Travis-CI](https://secure.travis-ci.org/basho/machi.png)
 
@@ -64,6 +64,9 @@ Humming Consensus" is available online now.
 * [slides (PDF format)](http://ricon.io/speakers/slides/Scott_Fritchie_Ricon_2015.pdf)
 * [video](https://www.youtube.com/watch?v=yR5kHL1bu1Q)
 
+See later in this document for how to run the Humming Consensus demos,
+including the network partition simulator.
+
 <a name="sec3">
 ## 3. Development status summary
 
@@ -99,10 +102,10 @@ Mid-December 2015: work is underway.
         * The Erlang language client implementation of the high-level
           protocol flavor is brittle (e.g., little error handling yet).
 
-If you would like to run the network partition simulator
-mentioned in the Ricon 2015 presentation about Humming Consensus,
-please see the
-[partition simulator convergence test doc.](./doc/machi_chain_manager1_converge_demo.md)
+If you would like to run the Humming Consensus code (with or without
+the network partition simulator) as described in the RICON 2015
+presentation, please see the
+[Humming Consensus demo doc.](./doc/humming_consensus_demo.md).
 
 If you'd like to work on a protocol such as Thrift, UBF,
 msgpack over UDP, or some other protocol, let us know by
@@ -134,10 +137,13 @@ X.  The only known limitations for using R16 are minor type
 specification difference between R16 and 17, but we strongly suggest
 continuing development using version 17.
 
-We also assume that you have the standard UNIX/Linux developers
-tool chain for C and C++ applications.  Specifically, we assume `make`
-is available.  The utility used to compile the Machi source code,
+We also assume that you have the standard UNIX/Linux developer
+tool chain for C and C++ applications.  Also, we assume
+that Git and GNU Make are available.
+The utility used to compile the Machi source code,
 `rebar`, is pre-compiled and included in the repo.
+For more details, please see the
+[Machi development environment prerequisites doc](./doc/dev-prerequisites.md).
 
 Machi has a dependency on the
 [ELevelDB](https://github.com/basho/eleveldb) library.  ELevelDB only

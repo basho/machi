@@ -108,6 +108,7 @@ handle_call({update_local_down_list, Down, MembersDict}, _From,
             #state{my_flu_name=MyFluName, pending_map=OldMap,
                    local_down=OldDown, members_dict=OldMembersDict,
                    admin_down=AdminDown}=S) ->
+    verbose("FITNESS: ~w has down suspect ~w\n", [MyFluName, Down]),
     NewMap = store_in_map(OldMap, MyFluName, erlang:now(), Down,
                           AdminDown, [props_yo]),
     S2 = if Down == OldDown, MembersDict == OldMembersDict ->
@@ -119,13 +120,17 @@ handle_call({update_local_down_list, Down, MembersDict}, _From,
          end,
     {reply, ok, S2#state{local_down=Down}};
 handle_call({add_admin_down, DownFLU, DownProps}, _From,
-            #state{local_down=OldDown, admin_down=AdminDown}=S) ->
+            #state{my_flu_name=MyFluName,
+                   local_down=OldDown, admin_down=AdminDown}=S) ->
+    verbose("FITNESS: ~w add admin down ~w\n", [MyFluName, DownFLU]),
     NewAdminDown = [{DownFLU,DownProps}|lists:keydelete(DownFLU, 1, AdminDown)],
     S3 = finish_admin_down(erlang:now(), OldDown, NewAdminDown,
                            [props_yo], S),
     {reply, ok, S3};
 handle_call({delete_admin_down, DownFLU}, _From,
-            #state{local_down=OldDown, admin_down=AdminDown}=S) ->
+            #state{my_flu_name=MyFluName,
+                   local_down=OldDown, admin_down=AdminDown}=S) ->
+    verbose("FITNESS: ~w delete admin down ~w\n", [MyFluName, DownFLU]),
     NewAdminDown = lists:keydelete(DownFLU, 1, AdminDown),
     S3 = finish_admin_down(erlang:now(), OldDown, NewAdminDown,
                            [props_yo], S),
@@ -143,7 +148,8 @@ handle_call(_Request, _From, S) ->
 handle_cast(_Msg, S) ->
     {noreply, S}.
 
-handle_info({adjust_down_list, FLU}, #state{active_unfit=ActiveUnfit}=S) ->
+handle_info({adjust_down_list, FLU}, #state{my_flu_name=MyFluName,
+                                            active_unfit=ActiveUnfit}=S) ->
     NewUnfit = make_unfit_list(S),
     Added_to_new     = NewUnfit -- ActiveUnfit,
     Dropped_from_new = ActiveUnfit -- NewUnfit,
@@ -184,9 +190,11 @@ handle_info({adjust_down_list, FLU}, #state{active_unfit=ActiveUnfit}=S) ->
         {true, true} ->
             error({bad, ?MODULE, ?LINE, FLU, ActiveUnfit, NewUnfit});
         {true, false} ->
-            {noreply, S#state{active_unfit=lists:usort(ActiveUnfit ++ [FLU])}};
+            NewActive = wrap_active(MyFluName,lists:usort(ActiveUnfit++[FLU])),
+            {noreply, S#state{active_unfit=NewActive}};
         {false, true} ->
-            {noreply, S#state{active_unfit=ActiveUnfit -- [FLU]}};
+            NewActive = wrap_active(MyFluName,ActiveUnfit--[FLU]),
+            {noreply, S#state{active_unfit=NewActive}};
         {false, false} ->
             {noreply, S}
     end;
@@ -423,6 +431,18 @@ map_value(Map) ->
 
 map_merge(Map1, Map2) ->
     ?MAP:merge(Map1, Map2).
+
+wrap_active(MyFluName, L) ->
+    verbose("FITNESS: ~w has new down list ~w\n", [MyFluName, L]),
+    L.
+
+verbose(Fmt, Args) ->
+    case application:get_env(machi, fitness_verbose) of
+        {ok, true} ->
+            error_logger:info_msg(Fmt, Args);
+        _ ->
+            ok
+    end.
 
 -ifdef(TEST).
 

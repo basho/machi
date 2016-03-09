@@ -10,7 +10,7 @@ endif
 OVERLAY_VARS    ?=
 EUNIT_OPTS       = -v
 
-.PHONY: rel deps package pkgclean edoc
+.PHONY: rel stagedevrel deps package pkgclean edoc
 
 all: deps compile
 
@@ -56,6 +56,37 @@ relclean:
 
 stage : rel
 	$(foreach dep,$(wildcard deps/*), rm -rf rel/$(REPO)/lib/$(shell basename $(dep))* && ln -sf $(abspath $(dep)) rel/$(REPO)/lib;)
+
+##
+## Developer targets
+##
+##  devN - Make a dev build for node N
+##  stagedevN - Make a stage dev build for node N (symlink libraries)
+##  devrel - Make a dev build for 1..$DEVNODES
+##  stagedevrel Make a stagedev build for 1..$DEVNODES
+##
+##  Example, make a 68 node devrel cluster
+##    make stagedevrel DEVNODES=68
+
+.PHONY : stagedevrel devrel
+DEVNODES ?= 3
+
+# 'seq' is not available on all *BSD, so using an alternate in awk
+SEQ = $(shell awk 'BEGIN { for (i = 1; i < '$(DEVNODES)'; i++) printf("%i ", i); print i ;exit(0);}')
+
+$(eval stagedevrel : $(foreach n,$(SEQ),stagedev$(n)))
+$(eval devrel : $(foreach n,$(SEQ),dev$(n)))
+
+dev% : all
+	mkdir -p dev
+	rel/gen_dev $@ rel/vars/dev_vars.config.src rel/vars/$@_vars.config
+	(cd rel && ../rebar generate target_dir=../dev/$@ overlay_vars=vars/$@_vars.config)
+
+stagedev% : dev%
+	  $(foreach dep,$(wildcard deps/*), rm -rf dev/$^/lib/$(shell basename $(dep))* && ln -sf $(abspath $(dep)) dev/$^/lib;)
+
+devclean: clean
+	rm -rf dev
 
 DIALYZER_APPS = kernel stdlib sasl erts ssl compiler eunit crypto public_key syntax_tools
 PLT = $(HOME)/.machi_dialyzer_plt

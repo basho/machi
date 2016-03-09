@@ -38,7 +38,7 @@ clean_up_data_dir(DataDir) ->
 -ifndef(PULSE).
 
 -define(TESTDIR, "./t").
--define(HYOOGE, 1 * 1024 * 1024 * 1024). % 1 long GB
+-define(HYOOGE, 75 * 1024 * 1024). % 75 MBytes
 
 random_binary_single() ->
     %% OK, I guess it's not that random...

@@ -92,8 +92,11 @@
 -define(REPAIR_START_STABILITY_TIME, 10).
 -endif. % TEST
 
-%% Magic constant for looping "too frequently" breaker.  TODO revisit & revise.
--define(TOO_FREQUENT_BREAKER, 10).
+%% Maximum length of the history of adopted projections (via C120).
+-define(MAX_HISTORY_LENGTH, 8).
+
+%% Magic constant for looping "too frequently" breaker.
+-define(TOO_FREQUENT_BREAKER, (?MAX_HISTORY_LENGTH+5)).
 
 -define(RETURN2(X), begin (catch put(why2, [?LINE|get(why2)])), X end).
 
@@ -102,9 +105,6 @@
 
 %% Amount of epoch number skip-ahead for set_chain_members call
 -define(SET_CHAIN_MEMBERS_EPOCH_SKIP, 1111).
-
-%% Maximum length of the history of adopted projections (via C120).
--define(MAX_HISTORY_LENGTH, 30).
 
 %% API
 -export([start_link/2, start_link/3, stop/1, ping/1,
@@ -234,11 +234,13 @@ test_read_latest_public_projection(Pid, ReadRepairP) ->
 %% manager's pid in MgrOpts and use direct gen_server calls to the
 %% local projection store.
 
-init({MyName, InitMembersDict, MgrOpts}) ->
+init({MyName, InitMembersDict, MgrOpts0}) ->
     put(ttt, [?LINE]),
     _ = random:seed(now()),
     init_remember_down_list(),
+    MgrOpts = MgrOpts0 ++ application:get_env(machi, chain_manager_opts, []),
     Opt = fun(Key, Default) -> proplists:get_value(Key, MgrOpts, Default) end,
+
     InitWitness_list = Opt(witnesses, []),
     ZeroAll_list = [P#p_srvr.name || {_,P} <- orddict:to_list(InitMembersDict)],
     ZeroProj = make_none_projection(0, MyName, ZeroAll_list,
@@ -388,6 +390,7 @@ handle_cast(_Cast, S) ->
 handle_info(tick_check_environment, #ch_mgr{ignore_timer=true}=S) ->
     {noreply, S};
 handle_info(tick_check_environment, S) ->
+    gobble_ticks(),
     {{_Delta, Props, _Epoch}, S1} = do_react_to_env(S),
     S2 = sanitize_repair_state(S1),
     S3 = perhaps_start_repair(S2),
@@ -460,7 +463,7 @@ get_my_proj_boot_info(MgrOpts, DefaultDict, DefaultProj, ProjType) ->
             {DefaultDict, DefaultProj};
         Store ->
             {ok, P} = machi_projection_store:read_latest_projection(Store,
-                                                                    ProjType),
+                                                                    ProjType, 7789),
             {P#projection_v1.members_dict, P}
     end.
 
@@ -837,7 +840,10 @@ calc_projection2(LastProj, RelativeToServer, AllHosed, Dbg,
                         D_foo=[{repair_done, {repair_final_status, ok, (S#ch_mgr.proj)#projection_v1.epoch_number}}],
                         {NewUPI_list ++ Repairing_list2, [], RunEnv2};
                    true ->
-                        D_foo=[d_foo2],
+                        D_foo=[d_foo2, {sim_p,Simulator_p},
+                               {simr_p,SimRepair_p}, {same_epoch,SameEpoch_p},
+                               {rel_to,RelativeToServer},
+                               {repch,RepChk_LastInUPI}, {repair_fs,RepairFS}],
                         {NewUPI_list, OldRepairing_list, RunEnv2}
                 end;
             {_ABC, _XYZ} ->
@@ -1974,7 +1980,7 @@ react_to_env_C110(P_latest, #ch_mgr{name=MyName} = S) ->
     %% In contrast to the public projection store writes, Humming Consensus
     %% doesn't care about the status of writes to the public store: it's
     %% always relying only on successful reads of the public store.
-    case {?FLU_PC:write_projection(MyStorePid, private, P_latest2,?TO*30),Goo} of
+    case {?FLU_PC:write_projection(MyStorePid, private, P_latest2,?TO*30+66),Goo} of
         {ok, Goo} ->
             ?REACT({c110, [{write, ok}]}),
             react_to_env_C111(P_latest, P_latest2, Extra1, MyStorePid, S);
@@ -2060,7 +2066,6 @@ react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H,
     ?REACT(c120),
     H2   = add_and_trunc_history(P_latest, H, ?MAX_HISTORY_LENGTH),
 
-    %% diversion_c120_verbose_goop(P_latest, S),
     ?REACT({c120, [{latest, machi_projection:make_summary(P_latest)}]}),
     S2 = set_proj(S#ch_mgr{proj_history=H2,
                            sane_transitions=Xtns + 1}, P_latest),
@@ -2068,20 +2073,21 @@ react_to_env_C120(P_latest, FinalProps, #ch_mgr{proj_history=H,
              false ->
                  S2;
              {{_ConfEpoch, _ConfCSum}, ConfTime} ->
-                 io:format(user, "\nCONFIRM debug C120 ~w was annotated ~w\n", [S#ch_mgr.name, P_latest#projection_v1.epoch_number]),
+                 P_latestEpoch = P_latest#projection_v1.epoch_number,
+                 io:format(user, "\nCONFIRM debug C120 ~w was annotated ~w\n", [S#ch_mgr.name, P_latestEpoch]),
                  S2#ch_mgr{proj_unanimous=ConfTime}
          end,
     V = case file:read_file("/tmp/moomoo."++atom_to_list(S#ch_mgr.name)) of {ok,_} -> true; _ -> false end,
     if V -> io:format("C120: ~w: ~p\n", [S#ch_mgr.name, get(react)]); true -> ok end,
     {{now_using, FinalProps, P_latest#projection_v1.epoch_number}, S3}.
 
-add_and_trunc_history(P_latest, H, MaxLength) ->
+add_and_trunc_history(#projection_v1{epoch_number=0}, H, _MaxLength) ->
+    H;
+add_and_trunc_history(#projection_v1{} = P_latest, H, MaxLength) ->
     Latest_U_R = {P_latest#projection_v1.upi, P_latest#projection_v1.repairing},
-    H2 = if P_latest#projection_v1.epoch_number > 0 ->
-                 queue:in(Latest_U_R, H);
-            true ->
-                 H
-         end,
+    add_and_trunc_history(Latest_U_R, H, MaxLength);
+add_and_trunc_history(Item, H, MaxLength) ->
+    H2 = queue:in(Item, H),
     case queue:len(H2) of
         X when X > MaxLength ->
             {_V, Hxx} = queue:out(H2),
@@ -2094,11 +2100,10 @@ react_to_env_C200(Retries, P_latest, S) ->
     ?REACT(c200),
     try
         AuthorProxyPid = proxy_pid(P_latest#projection_v1.author_server, S),
-        ?FLU_PC:kick_projection_reaction(AuthorProxyPid, [])
+        %% This is just advisory, we don't need a sync reply.
+        ?FLU_PC:kick_projection_reaction(AuthorProxyPid, [], 100)
     catch _Type:_Err ->
-            %% ?V("TODO: tell_author_yo is broken: ~p ~p\n",
-            %%           [_Type, _Err]),
-            ok
+        ok
     end,
     react_to_env_C210(Retries, S).
 
@@ -2485,19 +2490,23 @@ poll_private_proj_is_upi_unanimous3(#ch_mgr{name=MyName, proj=P_current} = S) ->
                     ProjStore = get_projection_store_pid_or_regname(S),
                     #projection_v1{epoch_number=_EpochRep,
                                    epoch_csum= <<_CSumRep:4/binary,_/binary>>,
+                                   author_server=AuthRep,
                                    upi=_UPIRep,
                                    repairing=_RepairingRep} = NewProj,
                     ok = machi_projection_store:write(ProjStore, private, NewProj),
-                    case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
+                    case proplists:get_value(private_write_verbose_confirm, S#ch_mgr.opts) of
                         true ->
-                            io:format(user, "\n~s CONFIRM epoch ~w ~w upi ~w rep ~w by ~w\n", [machi_util:pretty_time(), _EpochRep, _CSumRep, _UPIRep, _RepairingRep, MyName]);
+                            error_logger:info_msg("CONFIRM epoch ~w ~w upi ~w rep ~w auth ~w by ~w\n", [_EpochRep, _CSumRep, _UPIRep, _RepairingRep, AuthRep, MyName]);
                         _ ->
                             ok
                     end,
                     %% Unwedge our FLU.
                     {ok, NotifyPid} = machi_projection_store:get_wedge_notify_pid(ProjStore),
                     _ = machi_flu1:update_wedge_state(NotifyPid, false, EpochID),
-                    S2#ch_mgr{proj_unanimous=Now};
+                    #ch_mgr{proj_history=H} = S2,
+                    H2 = add_and_trunc_history({confirm, Epoch}, H,
+                                               ?MAX_HISTORY_LENGTH),
+                    S2#ch_mgr{proj_unanimous=Now, proj_history=H2};
                 _ ->
                     S2
             end;
@@ -2537,6 +2546,14 @@ gobble_calls(StaticCall) ->
             ok
     end.
 
+gobble_ticks() ->
+    receive
+        tick_check_environment ->
+            gobble_ticks()
+    after 0 ->
+            ok
+    end.
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 perhaps_start_repair(#ch_mgr{name=MyName,
@@ -2552,12 +2569,13 @@ perhaps_start_repair(#ch_mgr{name=MyName,
             %% RepairOpts = [{repair_mode, check}, verbose],
             RepairFun = fun() -> do_repair(S, RepairOpts, CMode) end,
             LastUPI = lists:last(UPI),
+            StabilityTime = application:get_env(machi, stability_time, ?REPAIR_START_STABILITY_TIME),
             IgnoreStabilityTime_p = proplists:get_value(ignore_stability_time,
                                                         S#ch_mgr.opts, false),
             case timer:now_diff(os:timestamp(), Start) div 1000000 of
                 N when MyName == LastUPI andalso
                        (IgnoreStabilityTime_p orelse
-                        N >= ?REPAIR_START_STABILITY_TIME) ->
+                        N >= StabilityTime) ->
                     {WorkerPid, _Ref} = spawn_monitor(RepairFun),
                     S#ch_mgr{repair_worker=WorkerPid,
                              repair_start=os:timestamp(),
@@ -2966,34 +2984,33 @@ zerf_find_last_annotated(FLU, MajoritySize, S) ->
             []                                  % lists:flatten() will destroy
     end.
 
-perhaps_verbose_c111(P_latest2, S) ->
-    case proplists:get_value(private_write_verbose, S#ch_mgr.opts) of
-        true ->
+perhaps_verbose_c111(P_latest2, #ch_mgr{name=MyName, opts=Opts}=S) ->
+    PrivWriteVerb = proplists:get_value(private_write_verbose, Opts, false),
+    PrivWriteVerbCONFIRM = proplists:get_value(private_write_verbose_confirm, Opts, false),
+    if PrivWriteVerb orelse PrivWriteVerbCONFIRM ->
             Dbg2X = lists:keydelete(react, 1,
                                     P_latest2#projection_v1.dbg2) ++
                 [{is_annotated,is_annotated(P_latest2)}],
             P_latest2x = P_latest2#projection_v1{dbg2=Dbg2X}, % limit verbose len.
             Last2 = get(last_verbose),
             Summ2 = machi_projection:make_summary(P_latest2x),
-            if P_latest2#projection_v1.upi == [],
-               (S#ch_mgr.proj)#projection_v1.upi /= [] ->
-                    <<CSumRep:4/binary,_/binary>> =
-                                          P_latest2#projection_v1.epoch_csum,
-                    io:format(user, "~s CONFIRM epoch ~w ~w upi ~w rep ~w by ~w\n", [machi_util:pretty_time(), (S#ch_mgr.proj)#projection_v1.epoch_number, CSumRep, P_latest2#projection_v1.upi, P_latest2#projection_v1.repairing, S#ch_mgr.name]);
+            if PrivWriteVerb, Summ2 /= Last2 ->
+                    put(last_verbose, Summ2),
+                    error_logger:info_msg("~p uses plain: ~w \n",
+                       [MyName, Summ2]);
                true ->
                     ok
             end,
-            case proplists:get_value(private_write_verbose,
-                                     S#ch_mgr.opts) of
-            %% case true of
-                true when Summ2 /= Last2 ->
-                    put(last_verbose, Summ2),
-                    ?V("\n~s ~p uses plain: ~w \n",
-                       [machi_util:pretty_time(), S#ch_mgr.name, Summ2]);
-                _ ->
+            if PrivWriteVerbCONFIRM,
+               P_latest2#projection_v1.upi == [],
+               (S#ch_mgr.proj)#projection_v1.upi /= [] ->
+                    <<CSumRep:4/binary,_/binary>> =
+                                          P_latest2#projection_v1.epoch_csum,
+                    error_logger:info_msg("CONFIRM epoch ~w ~w upi ~w rep ~w auth ~w by ~w\n", [(S#ch_mgr.proj)#projection_v1.epoch_number, CSumRep, P_latest2#projection_v1.upi, P_latest2#projection_v1.repairing, P_latest2#projection_v1.author_server, S#ch_mgr.name]);
+               true ->
                     ok
             end;
-        _ ->
+       true ->
             ok
     end.
 

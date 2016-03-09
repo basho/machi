@@ -134,6 +134,7 @@ Press control-c to interrupt the test....".
 %%     convergence_demo_testfun(3).
 
 -define(DEFAULT_MGR_OPTS, [{private_write_verbose, false},
+                           {private_write_verbose_confirm, true},
                            {active_mode,false},
                            {use_partition_simulator, true}]).
 
@@ -150,7 +151,8 @@ convergence_demo_testfun(NumFLUs, MgrOpts0) ->
     %% Faster test startup, commented: io:format(user, short_doc(), []),
     %% Faster test startup, commented: timer:sleep(3000),
 
-    application:start(sasl),
+    Apps = [sasl, ranch],
+    [application:start(App) || App <- Apps],
 
     MgrOpts = MgrOpts0 ++ ?DEFAULT_MGR_OPTS,
     TcpPort = proplists:get_value(port_base, MgrOpts, 62877),
@@ -393,7 +395,8 @@ timer:sleep(1234),
         exit(SupPid, normal),
         ok = machi_partition_simulator:stop(),
         [ok = ?FLU_PC:quit(PPid) || {_, PPid} <- Namez],
-        machi_util:wait_for_death(SupPid, 100)
+        machi_util:wait_for_death(SupPid, 100),
+        [application:start(App) || App <- lists:reverse(Apps)]
     end.
 
 %% Many of the static partition lists below have been problematic at one

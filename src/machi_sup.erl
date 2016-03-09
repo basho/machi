@@ -65,5 +65,11 @@ init([]) ->
     LifecycleMgr =
         {machi_lifecycle_mgr, {machi_lifecycle_mgr, start_link, []},
          Restart, Shutdown, worker, []},
-
-    {ok, {SupFlags, [ServerSup, RanchSup, LifecycleMgr]}}.
+    RunningApps = [A || {A,_D,_V} <- application:which_applications()],
+    Specs = case lists:member(ranch, RunningApps) of
+                true ->
+                    [ServerSup, LifecycleMgr];
+                false ->
+                    [ServerSup, RanchSup, LifecycleMgr]
+            end,
+    {ok, {SupFlags, Specs}}.
