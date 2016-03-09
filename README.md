@@ -77,7 +77,7 @@ summary of the status of Machi's major components.
 * Humming Consensus and the chain manager
   * No new safety bugs have been found by model-checking tests.
   * A new document,
-    [Hand-on experiments with Machi and Humming Consensus](doc/humming-consensus-demo.md)
+    [Hands-on experiments with Machi and Humming Consensus](doc/humming-consensus-demo.md)
     is now available.  It is a tutorial for setting up a 3 virtual
     machine Machi cluster and how to demonstrate the chain manager's
     reactions to server stops & starts, crashes & restarts, and pauses

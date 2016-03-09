@@ -1,11 +1,11 @@
 
 # Table of contents
 
-* [Hand-on experiments with Machi and Humming Consensus](#hands-on)
+* [Hands-on experiments with Machi and Humming Consensus](#hands-on)
 * [Using the network partition simulator and convergence demo test code](#partition-simulator)
 
 <a name="hands-on">
-# Hand-on experiments with Machi and Humming Consensus
+# Hands-on experiments with Machi and Humming Consensus
 
 ## Prerequisites
 
