@@ -77,7 +77,7 @@ summary of the status of Machi's major components.
 * Humming Consensus and the chain manager
   * No new safety bugs have been found by model-checking tests.
   * A new document,
-    (Hand-on experiments with Machi and Humming Consensus)[doc/humming-consensus-demo.md]
+    [Hand-on experiments with Machi and Humming Consensus](doc/humming-consensus-demo.md)
     is now available.  It is a tutorial for setting up a 3 virtual
     machine Machi cluster and how to demonstrate the chain manager's
     reactions to server stops & starts, crashes & restarts, and pauses
@@ -115,12 +115,12 @@ summary of the status of Machi's major components.
 
 * Recent conference talks about Machi
   * Erlang Factory San Francisco 2016
-    (the slides and video recording)[http://www.erlang-factory.com/sfbay2016/scott-lystig-fritchie]
+    [the slides and video recording](http://www.erlang-factory.com/sfbay2016/scott-lystig-fritchie)
     will be available a few weeks after the conference ends on March
     11, 2016.
   * Ricon 2015
-    * (The slides)[http://ricon.io/archive/2015/slides/Scott_Fritchie_Ricon_2015.pdf]
-    * and the (video recording)[https://www.youtube.com/watch?v=yR5kHL1bu1Q&index=13&list=PL9Jh2HsAWHxIc7Tt2M6xez_TOP21GBH6M]
+    * [The slides](http://ricon.io/archive/2015/slides/Scott_Fritchie_Ricon_2015.pdf)
+    * and the [video recording](https://www.youtube.com/watch?v=yR5kHL1bu1Q&index=13&list=PL9Jh2HsAWHxIc7Tt2M6xez_TOP21GBH6M)
     are now available.
     * If you would like to run the Humming Consensus code (with or without
     the network partition simulator) as described in the RICON 2015
