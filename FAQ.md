@@ -46,13 +46,13 @@
 <a name="n1.1">
 ### 1.1.  What is Machi?
 
-Very briefly, Machi is a very simple append-only file store.
+Very briefly, Machi is a very simple append-only blob/file store.
 
 Machi is
 "dumber" than many other file stores (i.e., lacking many features
 found in other file stores) such as HadoopFS or a simple NFS or CIFS file
 server.
-However, Machi is a distributed file store, which makes it different
+However, Machi is a distributed blob/file store, which makes it different
 (and, in some ways, more complicated) than a simple NFS or CIFS file
 server.
 
@@ -142,7 +142,8 @@ consistency mode during and after network partitions are:
       due to Machi's restrictions on file naming and file offset
       assignment.  Both file names and file offsets are always chosen
       by Machi servers according to rules which guarantee safe
-      mergeability. 
+      mergeability.  Server-assigned names are a characteristic of a
+      "blob store".
 
 <a name="n1.5">
 ### 1.5.  What is Machi like when operating in "strongly consistent" mode?
@@ -172,10 +173,10 @@ for more details.
 ### 1.6.  What does Machi's API look like?
 
 The Machi API only contains a handful of API operations.  The function
-arguments shown below use Erlang-style type annotations.
+arguments shown below (in simplifed form) use Erlang-style type annotations.
 
-    append_chunk(Prefix:binary(), Chunk:binary()).
-    append_chunk_extra(Prefix:binary(), Chunk:binary(), ExtraSpace:non_neg_integer()).
+    append_chunk(Prefix:binary(), Chunk:binary(), CheckSum:binary()).
+    append_chunk_extra(Prefix:binary(), Chunk:binary(), CheckSum:binary(), ExtraSpace:non_neg_integer()).
     read_chunk(File:binary(), Offset:non_neg_integer(), Size:non_neg_integer()).
     
     checksum_list(File:binary()).

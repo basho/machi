@@ -220,7 +220,7 @@ To help interpret the output of the test, please skip ahead to the
 
 If you don't have `git` and/or the Erlang 17 runtime system available
 on your OS X, FreeBSD, Linux, or Solaris machine, please take a look
-at the [Prerequistes section](#prerequisites) first.  When you have
+at the [Prerequisites section](#prerequisites) first.  When you have
 installed the prerequisite software, please return back here.
 
 ## Clone and compile the code
