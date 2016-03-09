@@ -160,12 +160,15 @@ few seconds.
   * The previous configuration used by `f2` was `upi [f2]`, i.e., `f2`
     was running in a chain of one.  `f2` noticed that `f1` and `f3`
     were now available and has started adding them to the chain.
-  * All new servers are always added to the tail of the chain.
+  * All new servers are always added to the tail of the chain in the
+    repair list.
   * In eventual consistency mode, a UPI change like this is OK.
     * When performing a read, a client must read from both tail of the
       UPI list and also from all repairing servers.
     * When performing a write, the client writes to both the UPI
       server list and also the repairing list, in that order.
+      * I.e., the client concatenates both lists,
+      `UPI ++ Repairing`, for its chain configuration for the write.
   * Server `f2` will trigger file repair/re-sync shortly.
     * The waiting time for starting repair has been configured to be
       extremely short, 1 second.  The default waiting time is 10
@@ -180,7 +183,7 @@ few seconds.
 
 Here are some suggestions for creating failures.
 
-* Use the `./dev/devN/bin/machi stop` and ``./dev/devN/bin/machi start`
+* Use the `./dev/devN/bin/machi stop` and `./dev/devN/bin/machi start`
   commands to stop & start VM #`N`.
 * Stop a VM abnormally by using `kill`.  The OS process name to look
   for is `beam.smp`.
