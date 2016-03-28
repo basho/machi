@@ -97,7 +97,7 @@ run(append, KeyGen, ValueGen, #m{conn=Conn}=S) ->
     Prefix = KeyGen(),
     Value = ValueGen(),
     CSum = machi_util:make_client_csum(Value),
-    AppendOpts = {append_opts,0,undefined,false},
+    AppendOpts = {append_opts,0,undefined,false}, % HACK FIXME
     case machi_cr_client:append_chunk(Conn, undefined, Prefix, Value, CSum, AppendOpts, ?THE_TIMEOUT) of
         {ok, Pos} ->
             EtsKey = ets:update_counter(?ETS_TAB, max_key, 1),
@@ -115,7 +115,8 @@ run(read, KeyGen, _ValueGen, #m{conn=Conn, max_key=MaxKey}=S) ->
     Idx = KeyGen() rem MaxKey,
     %% {File, Offset, Size, _CSum} = ets:lookup_element(?ETS_TAB, Idx, 2),
     {File, Offset, Size} = ets:lookup_element(?ETS_TAB, Idx, 2),
-    case machi_cr_client:read_chunk(Conn, undefined, File, Offset, Size, undefined, ?THE_TIMEOUT) of
+    ReadOpts = {read_opts,false,false,false}, % HACK FIXME
+    case machi_cr_client:read_chunk(Conn, undefined, File, Offset, Size, ReadOpts, ?THE_TIMEOUT) of
         {ok, _Chunk} ->
             {ok, S};
         {error, _}=Err ->
@@ -138,19 +139,22 @@ find_server_info(_Id) ->
 load_ets_table(Conn, ETS) ->
     {ok, Fs} = machi_cr_client:list_files(Conn),
     [begin
-         {ok, InfoBin} = machi_cr_client:checksum_list(Conn, File),
+         {ok, InfoBin} = machi_cr_client:checksum_list(Conn, File, ?THE_TIMEOUT),
          PosList = machi_csum_table:split_checksum_list_blob_decode(InfoBin),
          ?INFO("File ~s len PosList ~p\n", [File, length(PosList)]),
          StartKey = ets:update_counter(ETS, max_key, 0),
          {_, C, Bytes} = lists:foldl(fun({_Off,0,_CSum}, {_K, _C, _Bs}=Acc) ->
+                                             Acc;
+                                        ({0,_Sz,_CSum}, {_K, _C, _Bs}=Acc) ->
                                              Acc;
                                         ({Off,Sz,_CSum}, {K, C, Bs}) ->
                                              V = {File, Off, Sz},
                                              ets:insert(ETS, {K, V}),
                                              {K + 1, C + 1, Bs + Sz}
                                      end, {StartKey, 0, 0}, PosList),
-         ets:update_counter(ETS, max_key, C),
-         ets:update_counter(ETS, total_bytes, Bytes)
+         _ = ets:update_counter(ETS, max_key, C),
+         _ = ets:update_counter(ETS, total_bytes, Bytes),
+         ok
      end || {_Size, File} <- Fs],
     ets:update_counter(?ETS_TAB, max_key, 0).
 

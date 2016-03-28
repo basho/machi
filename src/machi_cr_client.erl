@@ -78,8 +78,8 @@
          terminate/2, code_change/3]).
 
 -define(FLU_PC, machi_proxy_flu1_client).
--define(TIMEOUT, 2*1000).
--define(DEFAULT_TIMEOUT, 10*1000).
+-define(TIMEOUT, 10*1000).
+-define(DEFAULT_TIMEOUT, ?TIMEOUT*5).
 -define(MAX_RUNTIME, 8*1000).
 -define(WORST_PROJ, #projection_v1{epoch_number=0,epoch_csum= <<>>,
                                    members_dict=[]}).
@@ -506,7 +506,7 @@ do_read_chunk2(NSInfo, File, Offset, Size, Opts, Depth, STime, TO,
     Tail = lists:last(UPI),
     ConsistencyMode = P#projection_v1.mode,
     case ?FLU_PC:read_chunk(orddict:fetch(Tail, PD), NSInfo, EpochID,
-                            File, Offset, Size, Opts, ?TIMEOUT) of
+                            File, Offset, Size, Opts, TO) of
         {ok, {Chunks, Trimmed}} when is_list(Chunks), is_list(Trimmed) ->
             %% After partition heal, there could happen that heads may
             %% have chunk trimmed but tails may have chunk written -
@@ -690,7 +690,7 @@ read_repair2(cp_mode=ConsistencyMode,
     %% TODO WTF was I thinking here??....
     Tail = lists:last(readonly_flus(P)),
     case ?FLU_PC:read_chunk(orddict:fetch(Tail, PD), NSInfo, EpochID,
-                            File, Offset, Size, undefined, ?TIMEOUT) of
+                            File, Offset, Size, undefined, ?DEFAULT_TIMEOUT) of
         {ok, Chunks} when is_list(Chunks) ->
             %% TODO: change to {Chunks, Trimmed} and have them repaired
             ToRepair = mutation_flus(P) -- [Tail],
@@ -840,7 +840,7 @@ do_checksum_list(File, Depth, STime, TO, #state{proj=P}=S) ->
 do_checksum_list2(File, Depth, STime, TO,
                   #state{proj=P, proxies_dict=PD}=S) ->
     Proxy = orddict:fetch(lists:last(readonly_flus(P)), PD),
-    case ?FLU_PC:checksum_list(Proxy, File, ?TIMEOUT) of
+    case ?FLU_PC:checksum_list(Proxy, File, TO) of
         {ok, _}=OK ->
             {reply, OK, S};
         {error, Retry}
@@ -875,7 +875,7 @@ do_list_files(Depth, STime, TO, #state{proj=P}=S) ->
 do_list_files2(Depth, STime, TO,
                   #state{epoch_id=EpochID, proj=P, proxies_dict=PD}=S) ->
     Proxy = orddict:fetch(lists:last(readonly_flus(P)), PD),
-    case ?FLU_PC:list_files(Proxy, EpochID, ?TIMEOUT) of
+    case ?FLU_PC:list_files(Proxy, EpochID, ?DEFAULT_TIMEOUT) of
         {ok, _}=OK ->
             {reply, OK, S};
         {error, Retry}
