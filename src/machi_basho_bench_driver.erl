@@ -1,6 +1,6 @@
 %% -------------------------------------------------------------------
 %%
-%% Copyright (c) 2007-2015 Basho Technologies, Inc.  All Rights Reserved.
+%% Copyright (c) 2007-2016 Basho Technologies, Inc.  All Rights Reserved.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -95,7 +95,9 @@ new(Id) ->
 run(append, KeyGen, ValueGen, #m{conn=Conn}=S) ->
     Prefix = KeyGen(),
     Value = ValueGen(),
-    case machi_cr_client:append_chunk(Conn, Prefix, Value, ?THE_TIMEOUT) of
+    CSum = machi_util:make_client_csum(Value),
+    AppendOpts = {append_opts,0,undefined,false},
+    case machi_cr_client:append_chunk(Conn, undefined, Prefix, Value, CSum, AppendOpts, ?THE_TIMEOUT) of
         {ok, Pos} ->
             EtsKey = ets:update_counter(?ETS_TAB, max_key, 1),
             true = ets:insert(?ETS_TAB, {EtsKey, Pos}),
@@ -137,9 +139,8 @@ load_ets_table(Conn, ETS) ->
     [begin
          {ok, InfoBin} = machi_cr_client:checksum_list(Conn, File),
          PosList = machi_csum_table:split_checksum_list_blob_decode(InfoBin),
+         ?INFO("File ~s len PosList ~p\n", [File, length(PosList)]),
          StartKey = ets:update_counter(ETS, max_key, 0),
-         %% _EndKey = lists:foldl(fun({Off,Sz,CSum}, K) ->
-         %%                               V = {File, Off, Sz, CSum},
          {_, Bytes} = lists:foldl(fun({Off,Sz,_CSum}, {K, Bs}) ->
                                           V = {File, Off, Sz},
                                           ets:insert(ETS, {K, V}),
