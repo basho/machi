@@ -239,7 +239,7 @@ init({FluName, Filename, DataDir}) ->
         data_filehandle = FHd,
         csum_table      = CsumTable,
         tref            = Tref,
-        eof_position    = Eof,
+        eof_position    = erlang:max(Eof, ?MINIMUM_OFFSET),
         max_file_size   = machi_config:max_file_size()},
     lager:debug("Starting file proxy ~p for filename ~p, state = ~p, Eof = ~p",
                 [self(), Filename, St, Eof]),
