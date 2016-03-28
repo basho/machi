@@ -467,7 +467,7 @@ handle_info(tick, State = #state{
                              writes = {WT, WE},
                              appends = {AT, AE}
                             }) when Ops > 100 andalso
-                               trunc(((RE+WE+AE) / RT+WT+AT) * 100) > ?TOO_MANY_ERRORS_RATIO ->
+                               trunc(((RE+WE+AE) / (RT+WT+AT)) * 100) > ?TOO_MANY_ERRORS_RATIO ->
     Errors = RE + WE + AE,
     lager:notice("Got ~p errors. Shutting down.", [Errors]),
     {stop, too_many_errors, State};
