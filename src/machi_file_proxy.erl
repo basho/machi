@@ -71,7 +71,7 @@
     code_change/3
 ]).
 
--define(TICK, 30*1000). %% XXX FIXME Should be something like 5 seconds
+-define(TICK, 5*1000).
 -define(TICK_THRESHOLD, 5). %% After this + 1 more quiescent ticks, shutdown
 -define(TIMEOUT, 10*1000).
 -define(TOO_MANY_ERRORS_RATIO, 50).
@@ -91,6 +91,7 @@
     csum_table            :: machi_csum_table:table(),
     eof_position = 0      :: non_neg_integer(),
     max_file_size = ?DEFAULT_MAX_FILE_SIZE :: pos_integer(),
+    rollover = false      :: boolean(),
     tref                  :: reference(), %% timer ref
     ticks = 0             :: non_neg_integer(), %% ticks elapsed with no new operations
     ops = 0               :: non_neg_integer(), %% sum of all ops
@@ -449,11 +450,23 @@ handle_cast(Cast, State) ->
     {noreply, State}.
 
 % @private
-handle_info(tick, State = #state{eof_position = Eof,
+handle_info(tick, State = #state{fluname = FluName,
+                                 filename = F,
+                                 eof_position = Eof,
                                  max_file_size = MaxFileSize}) when Eof >= MaxFileSize ->
-    lager:notice("Eof position ~p >= max file size ~p. Shutting down.",
-                 [Eof, MaxFileSize]),
-    {stop, file_rollover, State};
+    %% Older code halted here with {stop, file_rollover, State}.
+    %% However, there may be other requests in our mailbox already
+    %% and/or not yet delivered but in a race with the
+    %% machi_flu_metadata_mgr.  So we close our eleveldb instance (to
+    %% avoid double-open attempt by a new file proxy proc), tell
+    %% machi_flu_metadata_mgr that we request a rollover, then stop.
+    %% terminate() will take care of forwarding messages that are
+    %% caught in the race.
+    lager:notice("Eof ~s position ~p >= max file size ~p. Shutting down.",
+                 [F, Eof, MaxFileSize]),
+    State2 = close_files(State),
+    machi_flu_metadata_mgr:stop_proxy_pid_rollover(FluName, {file, F}),
+    {stop, normal, State2#state{rollover = true}};
 
 %% XXX Is this a good idea? Need to think this through a bit.
 handle_info(tick, State = #state{wedged = true}) ->
@@ -526,30 +539,23 @@ handle_info(Req, State) ->
     {noreply, State}.
 
 % @private
-terminate(Reason, #state{filename = F,
-                         data_filehandle = FHd,
-                         csum_table = T,
-                         reads = {RT, RE},
-                         writes = {WT, WE},
-                         appends = {AT, AE}
-                        }) ->
+terminate(Reason, State = #state{fluname = FluName,
+                                 filename = F,
+                                 rollover = Rollover_p,
+                                 reads = {RT, RE},
+                                 writes = {WT, WE},
+                                 appends = {AT, AE}
+                                }) ->
     lager:info("Shutting down proxy for file ~p because ~p", [F, Reason]),
     lager:info("   Op    Tot/Error", []),
     lager:info("  Reads:  ~p/~p", [RT, RE]),
     lager:info(" Writes:  ~p/~p", [WT, WE]),
     lager:info("Appends:  ~p/~p", [AT, AE]),
-    case FHd of
-        undefined ->
-            noop; %% file deleted
-        _ ->
-            ok = file:sync(FHd),
-            ok = file:close(FHd)
-    end,
-    case T of
-        undefined ->
-            noop; %% file deleted
-        _ ->
-            ok = machi_csum_table:close(T)
+    close_files(State),
+    if Rollover_p ->
+            forward_late_messages(FluName, F, 500);
+       true ->
+            ok
     end,
     ok.
 
@@ -866,4 +872,37 @@ maybe_gc(Reply, S = #state{fluname=FluName,
                      csum_table=undefined}};
         false ->
             {reply, Reply, S}
+    end.
+
+close_files(State = #state{data_filehandle = FHd,
+                           csum_table = T}) ->
+    case FHd of
+        undefined ->
+            noop; %% file deleted
+        _ ->
+            ok = file:sync(FHd),
+            ok = file:close(FHd)
+    end,
+    case T of
+        undefined ->
+            noop; %% file deleted
+        _ ->
+            ok = machi_csum_table:close(T)
+    end,
+    State#state{data_filehandle = undefined, csum_table = undefined}.
+
+forward_late_messages(FluName, F, Timeout) ->
+    receive
+        M ->
+            case machi_flu_metadata_mgr:start_proxy_pid(FluName, {file, F}) of
+                {ok, Pid} ->
+                    Pid ! M;
+                {error, trimmed} ->
+                    lager:error("TODO: FLU ~p file ~p reports trimmed status "
+                                "when forwarding ~P\n",
+                                [FluName, F, M, 20])
+            end,
+            forward_late_messages(FluName, F, Timeout)
+    after Timeout ->
+            ok
     end.

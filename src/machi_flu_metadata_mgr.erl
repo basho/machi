@@ -63,6 +63,7 @@
          lookup_proxy_pid/2,
          start_proxy_pid/2,
          stop_proxy_pid/2,
+         stop_proxy_pid_rollover/2,
          build_metadata_mgr_name/2,
          trim_file/2
         ]).
@@ -100,7 +101,10 @@ start_proxy_pid(FluName, {file, Filename}) ->
     gen_server:call(get_manager_atom(FluName, Filename), {start_proxy_pid, Filename}, ?TIMEOUT).
 
 stop_proxy_pid(FluName, {file, Filename}) ->
-    gen_server:call(get_manager_atom(FluName, Filename), {stop_proxy_pid, Filename}, ?TIMEOUT).
+    gen_server:call(get_manager_atom(FluName, Filename), {stop_proxy_pid, false, Filename}, ?TIMEOUT).
+
+stop_proxy_pid_rollover(FluName, {file, Filename}) ->
+    gen_server:call(get_manager_atom(FluName, Filename), {stop_proxy_pid, true, Filename}, ?TIMEOUT).
 
 trim_file(FluName, {file, Filename}) ->
     gen_server:call(get_manager_atom(FluName, Filename), {trim_file, Filename}, ?TIMEOUT).
@@ -151,7 +155,7 @@ handle_call({start_proxy_pid, Filename}, _From,
             {reply, {error, trimmed}, State}
     end;
 
-handle_call({stop_proxy_pid, Filename}, _From, State = #state{ tid = Tid }) ->
+handle_call({stop_proxy_pid, Rollover_p, Filename}, _From, State = #state{ tid = Tid }) ->
     case lookup_md(Tid, Filename) of
         not_found ->
             ok;
@@ -159,8 +163,13 @@ handle_call({stop_proxy_pid, Filename}, _From, State = #state{ tid = Tid }) ->
             ok;
         #md{ proxy_pid = Pid, mref = M } = R ->
             demonitor(M, [flush]),
-            machi_file_proxy:stop(Pid),
-            update_ets(Tid, R#md{ proxy_pid = undefined, mref = undefined })
+            if Rollover_p ->
+                    do_rollover(Filename, State);
+               true ->
+                    machi_file_proxy:stop(Pid),
+                    update_ets(Tid, R#md{ proxy_pid = undefined,
+                                          mref = undefined })
+            end
     end,
     {reply, ok, State};
 
@@ -180,27 +189,6 @@ handle_call(Req, From, State) ->
 handle_info({'DOWN', Mref, process, Pid, normal}, State = #state{ tid = Tid }) ->
     lager:debug("file proxy ~p shutdown normally", [Pid]),
     clear_ets(Tid, Mref),
-    {noreply, State};
-
-handle_info({'DOWN', Mref, process, Pid, file_rollover}, State = #state{ fluname = FluName, 
-                                                                         tid = Tid }) ->
-    lager:info("file proxy ~p shutdown because of file rollover", [Pid]),
-    R = get_md_record_by_mref(Tid, Mref),
-    {Prefix, NS, NSLocator, _, _} =
-        machi_util:parse_filename(R#md.filename),
-
-    %% We only increment the counter here. The filename will be generated on the 
-    %% next append request to that prefix and since the filename will have a new
-    %% sequence number it probably will be associated with a different metadata
-    %% manager. That's why we don't want to generate a new file name immediately
-    %% and use it to start a new file proxy.
-    NSInfo = #ns_info{name=NS, locator=NSLocator},
-    ok = machi_flu_filename_mgr:increment_prefix_sequence(FluName, NSInfo, {prefix, Prefix}),
-
-    %% purge our ets table of this entry completely since it is likely the
-    %% new filename (whenever it comes) will be in a different manager than
-    %% us.
-    purge_ets(Tid, R),
     {noreply, State};
 
 handle_info({'DOWN', Mref, process, Pid, wedged}, State = #state{ tid = Tid }) ->
@@ -275,8 +263,35 @@ get_md_record_by_mref(Tid, Mref) ->
     [R] = ets:match_object(Tid, {md, '_', '_', Mref}),
     R.
 
+get_md_record_by_filename(Tid, Filename) ->
+    [R] = ets:lookup(Tid, Filename),
+    R.
+
 get_env(Setting, Default) ->
     case application:get_env(machi, Setting) of
         undefined -> Default;
         {ok, V} -> V
     end.
+
+do_rollover(Filename, _State = #state{ fluname = FluName,
+                                       tid = Tid }) ->
+    R = get_md_record_by_filename(Tid, Filename),
+    lager:info("file ~p proxy ~p shutdown because of file rollover",
+               [Filename, R#md.proxy_pid]),
+    {Prefix, NS, NSLocator, _, _} =
+        machi_util:parse_filename(R#md.filename),
+
+    %% We only increment the counter here. The filename will be generated on the
+    %% next append request to that prefix and since the filename will have a new
+    %% sequence number it probably will be associated with a different metadata
+    %% manager. That's why we don't want to generate a new file name immediately
+    %% and use it to start a new file proxy.
+    NSInfo = #ns_info{name=NS, locator=NSLocator},
+lager:warning("INCR: ~p ~p\n", [FluName, Prefix]),
+    ok = machi_flu_filename_mgr:increment_prefix_sequence(FluName, NSInfo, {prefix, Prefix}),
+
+    %% purge our ets table of this entry completely since it is likely the
+    %% new filename (whenever it comes) will be in a different manager than
+    %% us.
+    purge_ets(Tid, R),
+    ok.

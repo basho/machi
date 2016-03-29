@@ -157,8 +157,9 @@ handle_call({find_filename, _FluName, EpochId, NSInfo, Prefix}, _From, S = #stat
     File = increment_and_cache_filename(Tid, DataDir, NSInfo, Prefix),
     {reply, {file, File}, S#state{epoch = EpochId}};
 
-handle_call({increment_sequence, #ns_info{name=NS, locator=NSLocator}, Prefix}, _From, S = #state{ datadir = DataDir }) ->
-    ok = machi_util:increment_max_filenum(DataDir, NS, NSLocator, Prefix),
+handle_call({increment_sequence, #ns_info{name=NS, locator=NSLocator}, Prefix}, _From, S = #state{ datadir = DataDir, tid=Tid }) ->
+    NSInfo = #ns_info{name=NS, locator=NSLocator},
+    _File = increment_and_cache_filename(Tid, DataDir, NSInfo, Prefix),
     {reply, ok, S};
 handle_call({list_files, Prefix}, From, S = #state{ datadir = DataDir }) ->
     spawn(fun() ->
