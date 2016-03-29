@@ -82,7 +82,7 @@ new(Id) ->
                                      {read_concurrency, true}]),
             ets:insert(ETS, {max_key, 0}),
             ets:insert(ETS, {total_bytes, 0}),
-            MaxKeys = load_ets_table(Conn, ETS),
+            MaxKeys = load_ets_table_maybe(Conn, ETS),
             ?INFO("Key preload: finished, ~w keys loaded", [MaxKeys]),
             Bytes = ets:lookup_element(ETS, total_bytes, 2),
             ?INFO("Key preload: finished, chunk list specifies ~s MBytes of chunks",
@@ -134,6 +134,21 @@ find_server_info(_Id) ->
             exit(bad_config);
         Ps ->
             Ps
+    end.
+
+load_ets_table_maybe(Conn, ETS) ->
+    case basho_bench_config:get(operations, undefined) of
+        undefined ->
+            ?ERROR("The 'operations' key is missing from the config file, aborting", []),
+            exit(bad_config);
+        Ops when is_list(Ops) ->
+            case lists:keyfind(read, 1, Ops) of
+                {read,_} ->
+                    load_ets_table(Conn, ETS);
+                false ->
+                    ?INFO("No 'read' op in the 'operations' list ~p, skipping ETS table load.", [Ops]),
+                    0
+            end
     end.
 
 load_ets_table(Conn, ETS) ->
