@@ -25,6 +25,7 @@
 -export([
          checksum_chunk/1,
          make_tagged_csum/1, make_tagged_csum/2,
+         make_client_csum/1,
          unmake_tagged_csum/1,
          hexstr_to_bin/1, bin_to_hexstr/1,
          hexstr_to_int/1, int_to_hexstr/2, int_to_hexbin/2,
@@ -326,6 +327,9 @@ make_tagged_csum(?CSUM_TAG_SERVER_SHA_ATOM, SHA) ->
     <<?CSUM_TAG_SERVER_SHA:8, SHA/binary>>;
 make_tagged_csum(?CSUM_TAG_SERVER_REGEN_SHA_ATOM, SHA) ->
     <<?CSUM_TAG_SERVER_REGEN_SHA:8, SHA/binary>>.
+
+make_client_csum(BinOrList) ->
+    make_tagged_csum(?CSUM_TAG_CLIENT_SHA_ATOM, checksum_chunk(BinOrList)).
 
 unmake_tagged_csum(<<Tag:8, Rest/binary>>) ->
     {Tag, Rest}.

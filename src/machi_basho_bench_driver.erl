@@ -1,6 +1,6 @@
 %% -------------------------------------------------------------------
 %%
-%% Copyright (c) 2007-2015 Basho Technologies, Inc.  All Rights Reserved.
+%% Copyright (c) 2007-2016 Basho Technologies, Inc.  All Rights Reserved.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -43,23 +43,25 @@
 %% could add new entries to this ETS table.
 %%
 %% Now we can use various integer-centric key generators that are
-%% already bundled with basho_bench.
+%% already bundled with basho_bench.  NOTE: this scheme does not allow
+%% mixing of 'append' and 'read' operations in the same config.  Basho
+%% Bench does not support different key generators for different
+%% operations, unfortunately.  The work-around is to run two different
+%% Basho Bench instances: on for 'append' ops with a key generator for
+%% the desired prefix(es), and the other for 'read' ops with an
+%% integer key generator.
 %%
-%% TODO: Add CRC checking, when feasible and when supported on the
-%% server side.
-%%
-%% TODO: As an alternate idea, if we know that the chunks written are
-%% always the same size, and if we don't care about CRC checking, then
-%% all we need to know are the file names &amp; file sizes on the server:
-%% we can then pick any valid offset within that file.  That would
-%% certainly be more scalable than the zillion-row-ETS-table, which is
-%% definitely RAM-hungry.
+%% TODO: The 'read' operator will always read chunks at exactly the
+%% byte offset & size as the original append/write ops.  If reads are
+%% desired at any arbitrary offset & size, then a new strategy is
+%% required.
 
 -module(machi_basho_bench_driver).
 
 -export([new/1, run/4]).
 
 -record(m, {
+          id,
           conn,
           max_key
          }).
@@ -81,7 +83,7 @@ new(Id) ->
                                      {read_concurrency, true}]),
             ets:insert(ETS, {max_key, 0}),
             ets:insert(ETS, {total_bytes, 0}),
-            MaxKeys = load_ets_table(Conn, ETS),
+            MaxKeys = load_ets_table_maybe(Conn, ETS),
             ?INFO("Key preload: finished, ~w keys loaded", [MaxKeys]),
             Bytes = ets:lookup_element(ETS, total_bytes, 2),
             ?INFO("Key preload: finished, chunk list specifies ~s MBytes of chunks",
@@ -90,12 +92,14 @@ new(Id) ->
        true ->
             ok
     end,
-    {ok, #m{conn=Conn}}.
+    {ok, #m{id=Id, conn=Conn}}.
 
 run(append, KeyGen, ValueGen, #m{conn=Conn}=S) ->
     Prefix = KeyGen(),
     Value = ValueGen(),
-    case machi_cr_client:append_chunk(Conn, Prefix, Value, ?THE_TIMEOUT) of
+    CSum = machi_util:make_client_csum(Value),
+    AppendOpts = {append_opts,0,undefined,false}, % HACK FIXME
+    case machi_cr_client:append_chunk(Conn, undefined, Prefix, Value, CSum, AppendOpts, ?THE_TIMEOUT) of
         {ok, Pos} ->
             EtsKey = ets:update_counter(?ETS_TAB, max_key, 1),
             true = ets:insert(?ETS_TAB, {EtsKey, Pos}),
@@ -112,9 +116,26 @@ run(read, KeyGen, _ValueGen, #m{conn=Conn, max_key=MaxKey}=S) ->
     Idx = KeyGen() rem MaxKey,
     %% {File, Offset, Size, _CSum} = ets:lookup_element(?ETS_TAB, Idx, 2),
     {File, Offset, Size} = ets:lookup_element(?ETS_TAB, Idx, 2),
-    case machi_cr_client:read_chunk(Conn, File, Offset, Size, undefined, ?THE_TIMEOUT) of
-        {ok, _Chunk} ->
-            {ok, S};
+    ReadOpts = {read_opts,false,false,false}, % HACK FIXME
+    case machi_cr_client:read_chunk(Conn, undefined, File, Offset, Size, ReadOpts, ?THE_TIMEOUT) of
+        {ok, {Chunks, _Trimmed}} ->
+            %% io:format(user, "Chunks ~P\n", [Chunks, 15]),
+            %% {ok, S};
+            case lists:all(fun({File2, Offset2, Chunk, CSum}) ->
+                                   {_Tag, CS} = machi_util:unmake_tagged_csum(CSum),
+                                   CS2 = machi_util:checksum_chunk(Chunk),
+                                   if CS == CS2 ->
+                                           true;
+                                      CS /= CS2 ->
+                                           ?ERROR("Client-side checksum error for file ~p offset ~p expected ~p got ~p\n", [File2, Offset2, CS, CS2]),
+                                           false
+                                   end
+                           end, Chunks) of
+                true ->
+                    {ok, S};
+                false ->
+                    {error, bad_checksum, S}
+            end;
         {error, _}=Err ->
             ?ERROR("read file ~p offset ~w size ~w: ~w\n",
                    [File, Offset, Size, Err]),
@@ -132,21 +153,40 @@ find_server_info(_Id) ->
             Ps
     end.
 
+load_ets_table_maybe(Conn, ETS) ->
+    case basho_bench_config:get(operations, undefined) of
+        undefined ->
+            ?ERROR("The 'operations' key is missing from the config file, aborting", []),
+            exit(bad_config);
+        Ops when is_list(Ops) ->
+            case lists:keyfind(read, 1, Ops) of
+                {read,_} ->
+                    load_ets_table(Conn, ETS);
+                false ->
+                    ?INFO("No 'read' op in the 'operations' list ~p, skipping ETS table load.", [Ops]),
+                    0
+            end
+    end.
+
 load_ets_table(Conn, ETS) ->
     {ok, Fs} = machi_cr_client:list_files(Conn),
     [begin
-         {ok, InfoBin} = machi_cr_client:checksum_list(Conn, File),
+         {ok, InfoBin} = machi_cr_client:checksum_list(Conn, File, ?THE_TIMEOUT),
          PosList = machi_csum_table:split_checksum_list_blob_decode(InfoBin),
+         ?INFO("File ~s len PosList ~p\n", [File, length(PosList)]),
          StartKey = ets:update_counter(ETS, max_key, 0),
-         %% _EndKey = lists:foldl(fun({Off,Sz,CSum}, K) ->
-         %%                               V = {File, Off, Sz, CSum},
-         {_, Bytes} = lists:foldl(fun({Off,Sz,_CSum}, {K, Bs}) ->
-                                          V = {File, Off, Sz},
-                                          ets:insert(ETS, {K, V}),
-                                          {K + 1, Bs + Sz}
-                                  end, {StartKey, 0}, PosList),
-         ets:update_counter(ETS, max_key, length(PosList)),
-         ets:update_counter(ETS, total_bytes, Bytes)
+         {_, C, Bytes} = lists:foldl(fun({_Off,0,_CSum}, {_K, _C, _Bs}=Acc) ->
+                                             Acc;
+                                        ({0,_Sz,_CSum}, {_K, _C, _Bs}=Acc) ->
+                                             Acc;
+                                        ({Off,Sz,_CSum}, {K, C, Bs}) ->
+                                             V = {File, Off, Sz},
+                                             ets:insert(ETS, {K, V}),
+                                             {K + 1, C + 1, Bs + Sz}
+                                     end, {StartKey, 0, 0}, PosList),
+         _ = ets:update_counter(ETS, max_key, C),
+         _ = ets:update_counter(ETS, total_bytes, Bytes),
+         ok
      end || {_Size, File} <- Fs],
     ets:update_counter(?ETS_TAB, max_key, 0).
 

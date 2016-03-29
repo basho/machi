@@ -1,3 +1,23 @@
+%% -------------------------------------------------------------------
+%%
+%% Copyright (c) 2007-2016 Basho Technologies, Inc.  All Rights Reserved.
+%%
+%% This file is provided to you under the Apache License,
+%% Version 2.0 (the "License"); you may not use this file
+%% except in compliance with the License.  You may obtain
+%% a copy of the License at
+%%
+%%   http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing,
+%% software distributed under the License is distributed on an
+%% "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+%% KIND, either express or implied.  See the License for the
+%% specific language governing permissions and limitations
+%% under the License.
+%%
+%% -------------------------------------------------------------------
+
 -module(machi_csum_table).
 
 -export([open/2,
@@ -65,10 +85,18 @@ find(#machi_csum_table{table=T}, Offset, Size) ->
     {ok, I} = eleveldb:iterator(T, [], keys_only),
     EndKey = sext:encode({Offset+Size, 0}),
     StartKey = sext:encode({Offset, Size}),
-
     {ok, FirstKey} = case eleveldb:iterator_move(I, StartKey) of
                          {error, invalid_iterator} ->
-                             eleveldb:iterator_move(I, first);
+                             try
+                                 %% Assume that the invalid_iterator is because
+                                 %% we tried to move to the end via StartKey.
+                                 %% Instead, move there directly.
+                                 {ok, _} = eleveldb:iterator_move(I, last),
+                                 {ok, _} = eleveldb:iterator_move(I, prev)
+                             catch
+                                 _:_ ->
+                                     {ok, _} = eleveldb:iterator_move(I, first)
+                             end;
                          {ok, _} = R0 ->
                              case eleveldb:iterator_move(I, prev) of
                                  {error, invalid_iterator} ->
@@ -91,7 +119,6 @@ find(#machi_csum_table{table=T}, Offset, Size) ->
                       Acc
               end,
     lists:reverse(eleveldb_fold(T, FirstKey, EndKey, FoldFun, [])).
-
 
 %% @doc Updates all chunk info, by deleting existing entries if exists
 %% and putting new chunk info
@@ -126,6 +153,8 @@ write(#machi_csum_table{table=T} = CsumT, Offset, Size, CSum,
     DeleteOps = lists:map(fun({O, L, _}) ->
                                   {delete, sext:encode({O, L})}
                           end, Chunks),
+%% io:format(user, "PutOps: ~P\n", [PutOps, 20]),
+%% io:format(user, "DelOps: ~P\n", [DeleteOps, 20]),
     eleveldb:write(T, DeleteOps ++ PutOps, [{sync, true}]).
 
 -spec find_leftneighbor(table(), non_neg_integer()) ->
