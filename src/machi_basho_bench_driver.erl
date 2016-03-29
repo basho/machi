@@ -117,8 +117,24 @@ run(read, KeyGen, _ValueGen, #m{conn=Conn, max_key=MaxKey}=S) ->
     {File, Offset, Size} = ets:lookup_element(?ETS_TAB, Idx, 2),
     ReadOpts = {read_opts,false,false,false}, % HACK FIXME
     case machi_cr_client:read_chunk(Conn, undefined, File, Offset, Size, ReadOpts, ?THE_TIMEOUT) of
-        {ok, _Chunk} ->
-            {ok, S};
+        {ok, {Chunks, _Trimmed}} ->
+            %% io:format(user, "Chunks ~P\n", [Chunks, 15]),
+            %% {ok, S};
+            case lists:all(fun({File2, Offset2, Chunk, CSum}) ->
+                                   {_Tag, CS} = machi_util:unmake_tagged_csum(CSum),
+                                   CS2 = machi_util:checksum_chunk(Chunk),
+                                   if CS == CS2 ->
+                                           true;
+                                      CS /= CS2 ->
+                                           ?ERROR("Client-side checksum error for file ~p offset ~p expected ~p got ~p\n", [File2, Offset2, CS, CS2]),
+                                           false
+                                   end
+                           end, Chunks) of
+                true ->
+                    {ok, S};
+                false ->
+                    {error, bad_checksum, S}
+            end;
         {error, _}=Err ->
             ?ERROR("read file ~p offset ~w size ~w: ~w\n",
                    [File, Offset, Size, Err]),
