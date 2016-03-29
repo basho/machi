@@ -43,17 +43,18 @@
 %% could add new entries to this ETS table.
 %%
 %% Now we can use various integer-centric key generators that are
-%% already bundled with basho_bench.
+%% already bundled with basho_bench.  NOTE: this scheme does not allow
+%% mixing of 'append' and 'read' operations in the same config.  Basho
+%% Bench does not support different key generators for different
+%% operations, unfortunately.  The work-around is to run two different
+%% Basho Bench instances: on for 'append' ops with a key generator for
+%% the desired prefix(es), and the other for 'read' ops with an
+%% integer key generator.
 %%
-%% TODO: Add CRC checking, when feasible and when supported on the
-%% server side.
-%%
-%% TODO: As an alternate idea, if we know that the chunks written are
-%% always the same size, and if we don't care about CRC checking, then
-%% all we need to know are the file names &amp; file sizes on the server:
-%% we can then pick any valid offset within that file.  That would
-%% certainly be more scalable than the zillion-row-ETS-table, which is
-%% definitely RAM-hungry.
+%% TODO: The 'read' operator will always read chunks at exactly the
+%% byte offset & size as the original append/write ops.  If reads are
+%% desired at any arbitrary offset & size, then a new strategy is
+%% required.
 
 -module(machi_basho_bench_driver).
 
