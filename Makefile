@@ -33,7 +33,7 @@ deps:
 	$(REBAR) get-deps
 
 clean:
-	$(REBAR) -r clean
+	$(REBAR) clean
 
 edoc: edoc-clean
 	$(REBAR) skip_deps=true doc
