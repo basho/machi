@@ -766,6 +766,8 @@ handle_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Data) ->
               ) -> ok | {error, Reason :: term()}.
 do_write(FHd, CsumTable, Filename, TaggedCsum, Offset, Size, Data) ->
     case file:pwrite(FHd, Offset, Data) of
+        yoyo ->
+            {error, yoyo};
         ok ->
             lager:debug("Successful write in file ~p at offset ~p, length ~p",
                         [Filename, Offset, Size]),
